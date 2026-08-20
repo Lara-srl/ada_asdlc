@@ -52,7 +52,10 @@ CSV_TEMPI = LOG_DIR / "tempi.csv"
 BUILDER = ["claude", "-p", "--dangerously-skip-permissions"]
 # Model routing (patterns/model-routing.md): il giudizio costa più della generazione,
 # e il Critic non scrive niente — solo lettura e `git diff`.
-CRITIC = ["claude", "-p", "--model", "opus", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)"]
+# ⚠️ `--allowedTools <tools...>` è **variadico**: se resta in coda si mangia il prompt,
+# che viene concatenato subito dopo, e `-p` parte senza input. Il flag variadico non
+# deve mai essere l'ultimo. Il Builder non ne soffre perché i suoi flag sono booleani.
+CRITIC = ["claude", "-p", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)", "--model", "opus"]
 
 MAX_TENTATIVI = 3   # gate rossi: oltre, il problema non è che l'agente non ci ha provato
 MAX_REVISIONI = 2   # giri di Critic: oltre, il PBI non era pronto
@@ -236,6 +239,12 @@ def revisione_critica(pbi_path: Path) -> tuple[bool, str]:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
     print("    critic … ", end="", flush=True)
     _, out = esegui(CRITIC + [PROMPT_CRITIC.format(pbi_path=pbi_path.relative_to(REPO))], REPO)
+    # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
+    # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
+    # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio.
+    if "VERDETTO: PASS" not in out and "VERDETTO: NON PRONTO" not in out:
+        print("GUASTO")
+        raise RuntimeError(f"il Critic non ha emesso un verdetto — output:\n{out[-2000:]}")
     passa = "VERDETTO: PASS" in out
     print("PASS" if passa else "NON PRONTO")
     return passa, out
