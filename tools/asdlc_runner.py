@@ -58,7 +58,15 @@ BUILDER = ["claude", "-p", "--dangerously-skip-permissions"]
 CRITIC = ["claude", "-p", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)", "--model", "opus"]
 
 MAX_TENTATIVI = 3   # gate rossi: oltre, il problema non è che l'agente non ci ha provato
-MAX_REVISIONI = 2   # giri di Critic: oltre, il PBI non era pronto
+# Backstop, non criterio. Il criterio giusto è «smetti quando un giro non produce più
+# niente di bloccante», e il Critic quel segnale lo emette già da sé — distingue una
+# violazione da un «non è una violazione, ma va detto». È il runner a non leggerlo
+# (PBI-102). Finché non lo legge, serve un numero, e questo è tarato su una misura:
+# PBI-201 ha richiesto sei revisioni, e i due difetti peggiori — il criterio centrale
+# che si skippava su ogni runner, una decisione autocertificata da chi ne beneficiava —
+# sono usciti al quarto e al quinto giro. Con 2 il runner avrebbe chiuso prima di
+# vederli, dichiarando «il PBI non era pronto»: vero e fuorviante insieme.
+MAX_REVISIONI = 4
 
 COLONNE_CSV = [
     "run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
@@ -178,7 +186,7 @@ Termina con FATTO: oppure STOP: come prima.
 @dataclass
 class Esito:
     pbi: str
-    stato: str  # fatto | rosso | respinto | fermato | saltato
+    stato: str  # fatto | rosso | respinto | non convergente | fermato | saltato
     tentativi: int = 0
     revisioni: int = 0
     commit: int = 0
@@ -349,8 +357,14 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
         if passa:
             break
         if revisione == MAX_REVISIONI:
-            return chiudi("respinto",
-                          f"il Critic ha respinto {MAX_REVISIONI + 1} volte: il PBI non era pronto")
+            # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
+            # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
+            # male, `non convergente` che il lavoro non si è chiuso e serve una persona.
+            # Chi legge runs/tempi.csv deve poter distinguere un PBI difficile da uno mal
+            # posto, altrimenti il registro misura la fatica e non la causa.
+            return chiudi("non convergente",
+                          f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
+                          f"del Critic nel rapporto JSON. Serve una lettura umana.")
         prompt = PROMPT_RIMEDIO.format(rapporto=rapporto[-6000:])
 
     print(f"    commit sul branch: {e.commit} · file: {git('diff', '--name-only', 'main...HEAD')}")
@@ -461,7 +475,7 @@ def main() -> int:
         print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
         # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
         # superare: i PBI successivi molto spesso poggiano su questo.
-        if e.stato in ("rosso", "respinto", "fermato") and not a.continua_sui_rossi:
+        if e.stato in ("rosso", "respinto", "non convergente", "fermato") and not a.continua_sui_rossi:
             print("\nInterrotto. La catena dei PBI ha dipendenze dichiarate: proseguire su "
                   "una base rossa costa più di quanto risparmia.")
             break
