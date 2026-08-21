@@ -202,3 +202,66 @@ class TestIlRiepilogoNonSommaStatiDiversi:
         assert "non convergente" in uscita
         assert "sospeso" in uscita
         assert "fatto" in uscita
+
+
+class TestLIgieneNonContaIlRegistroDelRunner:
+    def test_il_csv_dei_tempi_non_conta_come_albero_sporco(self, monkeypatch):
+        """Il runner scrive `runs/tempi.csv` a fine invocazione. Da quando quel
+        file è **versionato**, il giro dopo lo trova modificato e si ferma su
+        «albero di lavoro sporco» — al primo PBI, prima ancora di cominciare.
+
+        Il controllo esiste per non perdere lavoro non committato dell'agente.
+        Il registro del runner non è lavoro dell'agente: è la sua contabilità.
+        """
+        visti: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            visti.append(args)
+            if args[0] == "status":
+                # Il mondo reale del giro dopo: solo il registro è cambiato.
+                return " M runs/tempi.csv" if "runs" not in " ".join(args) else ""
+            if args[:2] == ("rev-list", "--count"):
+                return "1"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato != "fermato", (
+            "il registro del runner non è lavoro non committato: escluderlo dal "
+            "controllo, o il secondo giro non parte mai"
+        )
+
+    def test_un_file_vero_non_committato_ferma_ancora_tutto(self, monkeypatch):
+        """Il rovescio, che è la ragione per cui il controllo esiste: ciò che non
+        è committato non esiste, e l'agente non deve partire sopra al lavoro di
+        qualcun altro."""
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: " M backend/app/marginalita.py" if a[0] == "status" else "",
+        )
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        assert esito.stato == "fermato"
+        assert "sporco" in esito.nota
+
+
+class TestUnSospesoFermaLaCatena:
+    def test_sospeso_e_fra_gli_stati_che_interrompono(self):
+        """`sospeso` è «fermo su una domanda» quanto `fermato`, e la ragione per
+        cui la catena si interrompe è la stessa: i PBI successivi poggiano su
+        questo, e la domanda aperta è esattamente ciò che non si supera
+        proseguendo.
+
+        Senza questa riga il runner tira dritto dopo un sospeso — che è il
+        difetto che il sospeso esisteva per togliere, spostato di un livello.
+        """
+        assert "sospeso" in runner.STATI_CHE_INTERROMPONO
+        assert {"rosso", "respinto", "non convergente", "fermato"} <= set(
+            runner.STATI_CHE_INTERROMPONO
+        )
