@@ -146,8 +146,8 @@ a un falso negativo. Non sei qui per essere utile: sei qui per trovare ciò che 
 - le spec e gli ADR che il PBI cita
 
 ## Artefatto da giudicare
-Il diff del branch corrente: `git diff main...HEAD`
-I commit: `git log --oneline main..HEAD`
+Il diff del branch corrente: `git diff origin/main...HEAD`
+I commit: `git log --oneline origin/main..HEAD`
 
 ## Cosa controllare, in quest'ordine
 1. **Criteri di verifica del PBI**: uno per uno, spuntato o no.
@@ -353,17 +353,19 @@ def crea_branch(pbi: str) -> str:
     `ada-notte.sh` esiste come ciclo esterno invece di passare i PBI al runner in
     un colpo solo.
 
-    Le tre mosse sono una sola cosa e nessuna è saltabile: tornare su ``main``,
-    **allinearlo a origin** — un `main` locale vecchio è lo stesso difetto con un
-    altro nome — e solo allora ramificare. Il `--ff-only` è la parte che protegge:
-    se `main` ha commit che origin non ha, fallisce rumorosamente invece di
-    costruire il PBI su una base che nessun altro vede.
+    Si ramifica **da `origin/main`**, senza estrarre il `main` locale. Non è un
+    dettaglio di stile: il runner gira nel worktree `ada-run`, e un branch si può
+    estrarre in un worktree solo. `main` sta quasi sempre estratto nel repository
+    principale, quindi `git switch main` là dentro fallirebbe con *«already used
+    by worktree»* — e ``git()`` alza, cioè il PBI morirebbe prima di cominciare.
+
+    Scrivere il punto di partenza dentro il comando toglie anche l'altra domanda:
+    non c'è un `main` locale da allineare, quindi non c'è il caso in cui è
+    disallineato.
     """
     git("fetch", "origin", "main")
-    git("switch", "main")
-    git("merge", "--ff-only", "origin/main")
     branch = f"pbi/{pbi.lower()}"
-    git("switch", "-c", branch)
+    git("switch", "-c", branch, "origin/main")
     return branch
 
 
@@ -432,7 +434,10 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
                 break
             prompt = PROMPT_RIPROVA.format(esiti="\n\n".join(f"## {n}\n{o}" for n, o in rossi))
 
-        e.commit = int(git("rev-list", "--count", "main..HEAD") or 0)
+        # `origin/main` e non `main`: da quando non lo si estrae, il main locale del
+        # worktree resta indietro, e conterebbe come «commit del PBI» tutto ciò che
+        # main ha ricevuto nel frattempo.
+        e.commit = int(git("rev-list", "--count", "origin/main..HEAD") or 0)
         if not verde:
             e.gate_rossi = [n for n, _ in rossi]
             return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
@@ -461,7 +466,8 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
                           f"del Critic nel rapporto JSON. Serve una lettura umana.")
         prompt = PROMPT_RIMEDIO.format(rapporto=rapporto[-6000:])
 
-    print(f"    commit sul branch: {e.commit} · file: {git('diff', '--name-only', 'main...HEAD')}")
+    print(f"    commit sul branch: {e.commit} · "
+          f"file: {git('diff', '--name-only', 'origin/main...HEAD')}")
     chiudi("fatto")
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
