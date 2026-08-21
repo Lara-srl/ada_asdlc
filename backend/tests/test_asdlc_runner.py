@@ -149,12 +149,19 @@ class TestIlSospesoChiudeAlPrimoGiro:
 
 
 class TestIlBranchNasceDaOriginMain:
-    def test_passa_da_main_aggiornato_prima_di_creare_il_branch(self, monkeypatch, git_finto):
+    def test_ramifica_da_origin_main_senza_passare_dal_main_locale(self, monkeypatch, git_finto):
         """Due PBI nella stessa invocazione devono produrre branch **fratelli**.
 
         Senza questo, il secondo nasce dal branch del primo: le PR si impilano e
         il diff del secondo contiene il lavoro del primo. È la ragione per cui
         `ada-notte.sh` esiste come ciclo esterno.
+
+        E ci si arriva **senza fare `switch main`**: il runner gira nel worktree
+        `ada-run`, e un branch può essere estratto in un solo worktree alla volta.
+        Con `main` estratto nel repository principale — che è dove sta di solito —
+        `git switch main` là dentro fallisce con «already used by worktree», e
+        `git()` alza: il PBI muore prima di cominciare. Ramificare direttamente da
+        `origin/main` non tocca nessun branch locale e non può collidere.
         """
         monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
@@ -166,18 +173,33 @@ class TestIlBranchNasceDaOriginMain:
 
         comandi = [" ".join(c) for c in git_finto]
         crea = next(i for i, c in enumerate(comandi) if c.startswith("switch -c pbi/pbi-102"))
-        prima = comandi[:crea]
 
-        assert any(c.startswith("switch main") for c in prima), (
-            "il branch va creato da main, non da dove il PBI precedente ha lasciato HEAD"
+        assert comandi[crea] == "switch -c pbi/pbi-102 origin/main", (
+            "il punto di partenza va scritto nel comando, non lasciato a «dove mi trovo»"
         )
-        assert any(c.startswith("fetch") for c in prima), (
-            "main dev'essere quello di origin: un main locale vecchio è lo stesso difetto "
-            "con un nome diverso"
+        assert any(c.startswith("fetch") for c in comandi[:crea]), (
+            "un origin/main vecchio è lo stesso difetto con un nome diverso"
         )
-        assert any("origin/main" in c for c in prima), (
-            "l'allineamento a origin/main dev'essere esplicito e fallire se non è possibile"
+        assert not any(c.startswith("switch main") or c.startswith("checkout main")
+                       for c in comandi), (
+            "estrarre `main` fallisce nel worktree: è già estratto nel repository principale"
         )
+
+    def test_i_commit_si_contano_da_origin_main(self, monkeypatch, git_finto):
+        """Il `main` locale del worktree può essere indietro di giorni: da quando
+        non lo si estrae più, nessuno lo aggiorna. Contare `main..HEAD` gonfierebbe
+        i commit del PBI con quelli che main ha ricevuto nel frattempo."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        conteggi = [c for c in git_finto if c[:2] == ("rev-list", "--count")]
+        assert conteggi, "il conteggio dei commit non è stato fatto"
+        assert all("origin/main..HEAD" in c for c in conteggi)
 
 
 class TestIlRiepilogoNonSommaStatiDiversi:
