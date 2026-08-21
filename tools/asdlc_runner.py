@@ -37,7 +37,7 @@ import json
 import subprocess
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -161,6 +161,18 @@ Se non ci sono violazioni, termina con la riga esatta:
 
     VERDETTO: PASS
 
+Se invece trovi un rilievo che **nessuna correzione può chiudere** — perché la risposta è
+di una persona: una decisione di dominio, un `CHIEDI` di AGENTS.md saltato, una violazione
+*ex ante* che chi l'ha commessa non può annullare — non mandare il Builder a girare a
+vuoto. Scrivi la domanda e termina con le due righe esatte:
+
+    STOP: <la domanda per la persona>
+    VERDETTO: SOSPESO
+
+È la stessa diagnosi che il Builder produce quando incontra un'ambiguità, raggiunta
+dall'altro lato. Un sospeso senza la riga `STOP:` non è una diagnosi: lascia una persona
+davanti a un muro, e vale come guasto.
+
 Altrimenti elenca ogni violazione come
 
     **N. [categoria]: descrizione breve**
@@ -184,9 +196,30 @@ Termina con FATTO: oppure STOP: come prima.
 
 
 @dataclass
+class Verdetto:
+    """Cosa ha detto il Critic. Tre esiti, non due.
+
+    ``non pronto`` e ``sospeso`` sembrano vicini e sono opposti: il primo dice
+    «c'è del lavoro da fare», il secondo «il lavoro non può proseguire finché
+    qualcuno non risponde». Confonderli manda il Builder a correggere ciò che
+    nessuna correzione chiude — su PBI-203 sono stati quattro giri buttati.
+    """
+
+    esito: str  # pass | non pronto | sospeso
+    domanda: str  # valorizzata solo su `sospeso`
+    rapporto: str
+
+
+@dataclass
 class Esito:
     pbi: str
-    stato: str  # fatto | rosso | respinto | non convergente | fermato | saltato
+    # fatto | rosso | respinto | non convergente | fermato | sospeso | saltato
+    #
+    # `fermato` e `sospeso` sono tutti e due «aspetta una persona», e restano
+    # distinti perché il rimedio è diverso: `fermato` arriva dal Builder e si
+    # chiude riscrivendo il PBI che era ambiguo; `sospeso` arriva dal Critic e si
+    # chiude rispondendo alla domanda.
+    stato: str
     tentativi: int = 0
     revisioni: int = 0
     commit: int = 0
@@ -243,19 +276,42 @@ def gira_gate(attivi: set[str]) -> list[tuple[str, str]]:
     return rossi
 
 
-def revisione_critica(pbi_path: Path) -> tuple[bool, str]:
+VERDETTI = {"VERDETTO: PASS": "pass",
+            "VERDETTO: NON PRONTO": "non pronto",
+            "VERDETTO: SOSPESO": "sospeso"}
+
+
+def revisione_critica(pbi_path: Path) -> Verdetto:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
     print("    critic … ", end="", flush=True)
-    _, out = esegui(CRITIC + [PROMPT_CRITIC.format(pbi_path=pbi_path.relative_to(REPO))], REPO)
+    try:
+        percorso = pbi_path.relative_to(REPO)
+    except ValueError:
+        percorso = pbi_path
+    _, out = esegui(CRITIC + [PROMPT_CRITIC.format(pbi_path=percorso)], REPO)
+
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
     # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio.
-    if "VERDETTO: PASS" not in out and "VERDETTO: NON PRONTO" not in out:
+    esito = next((v for riga, v in VERDETTI.items() if riga in out), None)
+    if esito is None:
         print("GUASTO")
         raise RuntimeError(f"il Critic non ha emesso un verdetto — output:\n{out[-2000:]}")
-    passa = "VERDETTO: PASS" in out
-    print("PASS" if passa else "NON PRONTO")
-    return passa, out
+
+    domanda = ""
+    if esito == "sospeso":
+        if "STOP:" not in out:
+            # Stessa regola del verdetto mancante, per la stessa ragione: sospendere
+            # senza dire cosa si aspetta lascia una persona davanti a un muro, e un
+            # muro non è una diagnosi.
+            print("GUASTO")
+            raise RuntimeError(
+                f"il Critic ha sospeso senza scrivere la domanda — output:\n{out[-2000:]}"
+            )
+        domanda = out.split("STOP:")[-1].strip().splitlines()[0]
+
+    print({"pass": "PASS", "non pronto": "NON PRONTO", "sospeso": "SOSPESO"}[esito])
+    return Verdetto(esito, domanda, out)
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
@@ -283,6 +339,29 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     return out.strip().splitlines()[-1]
 
 
+def crea_branch(pbi: str) -> str:
+    """Il branch del PBI, sempre da `origin/main` fresco.
+
+    ``git switch -c`` parte da dove si trova, e dove si trova è il branch del PBI
+    precedente: due PBI nella stessa invocazione producevano branch **impilati**,
+    col diff del secondo che conteneva il lavoro del primo. È il motivo per cui
+    `ada-notte.sh` esiste come ciclo esterno invece di passare i PBI al runner in
+    un colpo solo.
+
+    Le tre mosse sono una sola cosa e nessuna è saltabile: tornare su ``main``,
+    **allinearlo a origin** — un `main` locale vecchio è lo stesso difetto con un
+    altro nome — e solo allora ramificare. Il `--ff-only` è la parte che protegge:
+    se `main` ha commit che origin non ha, fallisce rumorosamente invece di
+    costruire il PBI su una base che nessun altro vede.
+    """
+    git("fetch", "origin", "main")
+    git("switch", "main")
+    git("merge", "--ff-only", "origin/main")
+    branch = f"pbi/{pbi.lower()}"
+    git("switch", "-c", branch)
+    return branch
+
+
 def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
     pbi_path = next(REPO.glob(f"backlog/{pbi}-*.md"), None)
     if pbi_path is None:
@@ -299,8 +378,7 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
 
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
-    branch = f"pbi/{pbi.lower()}"
-    git("switch", "-c", branch)
+    branch = crea_branch(pbi)
 
     def chiudi(stato: str, nota: str = "") -> Esito:
         e.stato, e.durata_s = stato, time.monotonic() - t0
@@ -352,10 +430,17 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
 
         # --- Review Gate (probabilistico, sessione separata) ---
         with misura(e, "critic"):
-            passa, rapporto = revisione_critica(pbi_path)
+            verdetto = revisione_critica(pbi_path)
+        rapporto = verdetto.rapporto
         e.rapporto_critic = rapporto[-6000:]
-        if passa:
+        if verdetto.esito == "pass":
             break
+        if verdetto.esito == "sospeso":
+            # Non si consuma una revisione e non si richiama il Critic: la sua
+            # diagnosi non cambia riprovando, perché ciò che manca non è nel
+            # repository. Riprovare qui è esattamente ciò che è costato a PBI-203
+            # cinque giri e 1h26m per tornare al punto di partenza.
+            return chiudi("sospeso", f"domanda del critic: {verdetto.domanda}")
         if revisione == MAX_REVISIONI:
             # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
             # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
@@ -409,15 +494,24 @@ def riepilogo(tariffa: float | None) -> int:
 
     righe = list(csv.DictReader(CSV_TEMPI.open(encoding="utf-8")))
     per_pbi: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    # Gli stati non si sommano: un `fatto` e un `non convergente` con lo stesso
+    # tempo di parete misurano la stessa fatica e raccontano due storie opposte.
+    # La colonna «esiti» è ciò che quel tempo ha comprato.
+    esiti_per_pbi: dict[str, Counter] = defaultdict(Counter)
     for r in righe:
         p = per_pbi[r["pbi"]]
         p["durata"] += float(r["durata_s"])
         p["agente"] += float(r["builder_s"]) + float(r["critic_s"])
         p["gate"] += float(r["gate_s"])
         p["esecuzioni"] += 1
+        esiti_per_pbi[r["pbi"]][r.get("stato") or "?"] += 1
+
+    def esiti(pbi: str) -> str:
+        """`fatto·1 non convergente·1` — l'ordine è quello del conteggio."""
+        return "  ".join(f"{stato}·{q}" for stato, q in esiti_per_pbi[pbi].most_common())
 
     print(f"\n{'PBI':<10} {'esec':>4} {'totale':>9} {'agente':>9} {'gate':>9}"
-          + (f" {'costo':>10}" if tariffa else ""))
+          + (f" {'costo':>10}" if tariffa else "") + "  esiti")
     print("-" * (44 + (11 if tariffa else 0)))
     tot = tot_agente = tot_gate = 0.0
     for pbi in sorted(per_pbi):
@@ -427,7 +521,7 @@ def riepilogo(tariffa: float | None) -> int:
                 f"{hms(d['agente']):>9} {hms(d['gate']):>9}")
         if tariffa:
             riga += f" {d['durata'] / 3600 * tariffa:>9.2f}€"
-        print(riga)
+        print(f"{riga}  {esiti(pbi)}")
     print("-" * (44 + (11 if tariffa else 0)))
     riga = f"{'TOTALE':<10} {len(righe):>4} {hms(tot):>9} {hms(tot_agente):>9} {hms(tot_gate):>9}"
     if tariffa:
@@ -436,6 +530,11 @@ def riepilogo(tariffa: float | None) -> int:
 
     # Il tempo di parete include i tentativi falliti e le attese: è il tempo davvero
     # occupato dalla macchina. Dirlo qui evita che la colonna venga letta per un'altra.
+    tutti = Counter()
+    for conteggi in esiti_per_pbi.values():
+        tutti.update(conteggi)
+    print("esiti: " + "  ".join(f"{stato}·{q}" for stato, q in tutti.most_common()))
+
     print(f"\nTotale = tempo di parete, tentativi falliti compresi. "
           f"«agente» = builder + critic, «gate» = test e build.")
     if tariffa:
