@@ -68,6 +68,11 @@ MAX_TENTATIVI = 3   # gate rossi: oltre, il problema non è che l'agente non ci 
 # vederli, dichiarando «il PBI non era pronto»: vero e fuorviante insieme.
 MAX_REVISIONI = 4
 
+# Gli stati dopo i quali non si prosegue. `sospeso` sta qui insieme a `fermato`
+# per la stessa ragione — sono tutti e due «fermo su una domanda» — e la domanda
+# aperta è precisamente ciò che non si supera andando avanti.
+STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso")
+
 COLONNE_CSV = [
     "run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
     "builder_s", "gate_s", "critic_s", "tentativi", "revisioni", "commit", "pr", "nota",
@@ -373,9 +378,13 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
         print(prompt)
         return Esito(pbi, "saltato", nota="dry-run")
 
-    if git("status", "--porcelain"):
+    if git("status", "--porcelain", "--", ":(exclude)runs"):
         return Esito(pbi, "fermato", nota="albero di lavoro sporco: committa o pulisci prima")
 
+    # `runs/` è escluso e non per comodità: il controllo esiste per non far partire
+    # l'agente sopra al lavoro non committato di qualcun altro, e `runs/tempi.csv` è
+    # la contabilità del runner, che il runner stesso scrive a fine invocazione.
+    # Contarla renderebbe ogni giro il giro sporco del successivo.
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
     branch = crea_branch(pbi)
@@ -574,7 +583,7 @@ def main() -> int:
         print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
         # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
         # superare: i PBI successivi molto spesso poggiano su questo.
-        if e.stato in ("rosso", "respinto", "non convergente", "fermato") and not a.continua_sui_rossi:
+        if e.stato in STATI_CHE_INTERROMPONO and not a.continua_sui_rossi:
             print("\nInterrotto. La catena dei PBI ha dipendenze dichiarate: proseguire su "
                   "una base rossa costa più di quanto risparmia.")
             break
