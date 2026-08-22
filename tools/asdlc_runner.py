@@ -109,7 +109,17 @@ Esegui il PBI con queste regole non negoziabili:
   una funzione che compila, un modulo che passa il lint. Un PBI produce tipicamente 3-5
   commit. Non accumulare tutto in un commit finale: i commit sono i punti di ripristino,
   e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa la PR.
-- Formato: `tipo(scope): descrizione imperativa` in italiano, corpo con i dettagli.
+- **Il messaggio di commit si legge senza il diff sotto gli occhi.** Formato
+  `tipo(scope): descrizione imperativa` in italiano, corpo con i dettagli. Il soggetto dice
+  **cosa cambia**, con un verbo e un oggetto concreti; il corpo dice **perché**, e cosa
+  succedeva prima. Chi legge `git log` fra sei mesi non ha il contesto che hai adesso.
+  - sì:  `feat(officina): aggiungi la casella netto/lordo alla riga di ricambio`
+  - no:  `test(officina): il «no» che il default ripropone è fissato, e la spec lo dice`
+  Vietate le frasi allusive, le metafore, le personificazioni («la riga sa», «il default
+  cede») e i messaggi che si capiscono solo avendo già letto il codice. Se il soggetto non
+  regge la prova «un estraneo capisce cosa è cambiato?», riscrivilo.
+- **Un commit RED lo dichiara**, e dice quale comportamento sta fissando:
+  `test(marginalita): il ricambio lordo entra nel costo maggiorato dell'IVA (RED)`.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
 - Se il PBI cambia un contratto, aggiorna la spec NELLO STESSO commit del codice.
 - Non lasciare modifiche non committate: ciò che non è committato non esiste.
@@ -159,7 +169,10 @@ I commit: `git log --oneline origin/main..HEAD`
 5. **Qualità dei test**: un test che passerebbe anche con il codice rotto è un test rosso
    travestito. Verifica che ci sia stato un RED prima del GREEN (guarda i commit).
 6. **Igiene dei commit**: micro-commit veri o un unico commit finale? La spec è stata
-   aggiornata nello stesso commit del codice che ne cambia il comportamento?
+   aggiornata nello stesso commit del codice che ne cambia il comportamento? E i
+   **messaggi**: leggi `git log --oneline` come se il diff non ce l'avessi. Un soggetto
+   che allude invece di dire cosa è cambiato è un rilievo da chiudere con un rebase dei
+   messaggi, non una questione di gusto.
 
 ## Formato di uscita
 Se non ci sono violazioni, termina con la riga esatta:
