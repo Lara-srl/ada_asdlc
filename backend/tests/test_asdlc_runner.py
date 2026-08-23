@@ -287,3 +287,93 @@ class TestUnSospesoFermaLaCatena:
         assert {"rosso", "respinto", "non convergente", "fermato"} <= set(
             runner.STATI_CHE_INTERROMPONO
         )
+
+
+class TestLaSessioneRuotaFraLeRevisioni:
+    """Il contesto pulito vale per revisione, non una volta per PBI.
+
+    `decisions/ADR-0015`, *Dove entra*. `-c` è giusto **dentro** un giro — dove
+    serve a non rileggere tutto il repository per un gate rosso — e sbagliato
+    **fra** i giri: dopo un NON PRONTO il Builder porta con sé la finestra in cui
+    ha già discusso, e su PBI-309 quella finestra gli aveva insegnato che lo Scope
+    è negoziabile. Con `MAX_REVISIONI = 4` sono fino a quindici turni nella stessa
+    sessione, ed è il punto in cui PBI-201 ha misurato che escono i difetti peggiori.
+    """
+
+    def scenario(self, monkeypatch, comandi):
+        """Un gate rosso nella prima revisione, poi un NON PRONTO, poi verde.
+
+        Serve a produrre i tre giri che distinguono i due casi: il ritentativo
+        dentro la revisione e il primo giro della revisione dopo.
+        """
+        gate = {"chiamate": 0}
+        critic = {"chiamate": 0}
+
+        def esegui_finto(cmd, cwd):
+            comandi.append(cmd)
+            return 0, "FATTO: fatto\n"
+
+        def gira_gate_finto(attivi):
+            gate["chiamate"] += 1
+            return [("pytest", "1 failed")] if gate["chiamate"] == 1 else []
+
+        def critic_finto(_pbi_path):
+            critic["chiamate"] += 1
+            if critic["chiamate"] == 1:
+                return runner.Verdetto("non pronto", "", "manca una deroga")
+            return runner.Verdetto("pass", "", "")
+
+        monkeypatch.setattr(runner, "esegui", esegui_finto)
+        monkeypatch.setattr(runner, "gira_gate", gira_gate_finto)
+        monkeypatch.setattr(runner, "revisione_critica", critic_finto)
+
+    def test_il_ritentativo_su_un_gate_rosso_continua_la_sessione(self, monkeypatch, git_finto):
+        comandi: list[list[str]] = []
+        self.scenario(monkeypatch, comandi)
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert "-c" not in comandi[0], "il primo giro in assoluto apre la sessione"
+        assert "-c" in comandi[1], "un gate rosso non vale una rilettura di tutto il repository"
+
+    def test_la_revisione_dopo_un_non_pronto_riparte_pulita(self, monkeypatch, git_finto):
+        comandi: list[list[str]] = []
+        self.scenario(monkeypatch, comandi)
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert len(comandi) == 3, "un rosso, il suo rimedio, e il giro dopo il NON PRONTO"
+        assert "-c" not in comandi[2], (
+            "dopo un NON PRONTO la sessione riparte: il Builder non deve portarsi dietro "
+            "la finestra in cui ha già argomentato"
+        )
+
+
+class TestIlPromptDiRimedioSiReggeDaSolo:
+    """Una sessione nuova riceve solo ciò che il prompt le porta.
+
+    Finché il rimedio continuava la sessione del Builder, `PROMPT_RIMEDIO` poteva
+    contenere il solo rapporto del Critic: il resto era già nella finestra. Con la
+    rotazione non lo è più, e un Builder che riceve «chiudi queste violazioni»
+    senza sapere su quale PBI sta lavorando né quali sono i confini di giudizio
+    farebbe danni con le migliori intenzioni. È l'avvertenza ⚠️ di ADR-0015.
+    """
+
+    def test_porta_con_se_la_costituzione_e_il_PBI(self):
+        prompt = runner.PROMPT_RIMEDIO.format(
+            rapporto="1. [scope]: due file fuori perimetro",
+            pbi_path="backlog/PBI-102-soglia-di-revisione-del-runner.md",
+        )
+        assert "AGENTS.md" in prompt, "i confini di giudizio non sono più nella finestra"
+        assert "backlog/PBI-102-soglia-di-revisione-del-runner.md" in prompt, (
+            "senza il PBI il Builder non sa cosa stava costruendo"
+        )
+        assert "1. [scope]" in prompt, "il rapporto del Critic resta il cuore del prompt"
+
+    def test_ripete_le_regole_che_il_rimedio_puo_violare(self):
+        """Il rimedio è codice come il resto: stesse regole, non un'eccezione.
+
+        Un commit di rimedio che accorpa tre correzioni, o che chiude un rilievo
+        cancellando un test, passa i gate e disfa quello che il Critic difendeva.
+        """
+        prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+        assert "test" in prompt.lower(), "il rimedio non si chiude spegnendo un test"
+        assert "commit" in prompt.lower(), "un commit per rimedio, come nel resto del PBI"

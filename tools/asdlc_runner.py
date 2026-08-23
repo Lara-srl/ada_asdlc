@@ -71,6 +71,13 @@ MAX_REVISIONI = 4
 # Gli stati dopo i quali non si prosegue. `sospeso` sta qui insieme a `fermato`
 # per la stessa ragione — sono tutti e due «fermo su una domanda» — e la domanda
 # aperta è precisamente ciò che non si supera andando avanti.
+# ⚠️ `respinto` non è assegnato da nessuna parte: PBI-102 lo ha sostituito con
+# `non convergente` sul caso «revisioni esaurite», e la diagnosi che gli resterebbe —
+# *il PBI non era pronto a partire*, riconosciuta al primo giro invece che all'ultimo —
+# è il segnale che quel PBI ha proposto e rinviato (`BLOCCANTI: n`). Sta qui e non si
+# toglie perché è un'intenzione, non codice morto: cancellarlo perderebbe la distinzione
+# che PBI-102 ha introdotto, e chi legge `runs/tempi.csv` deve sapere che quello stato
+# esiste e che nessuna run lo porta ancora.
 STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso")
 
 COLONNE_CSV = [
@@ -203,13 +210,33 @@ e termina con la riga esatta:
     VERDETTO: NON PRONTO
 """
 
-PROMPT_RIMEDIO = """Il Critic ha respinto il lavoro. Rapporto:
+PROMPT_RIMEDIO = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
+
+Un giro precedente ha scritto del codice e il Critic lo ha respinto. **La sessione è
+nuova: quello che sai è solo ciò che leggi qui sotto.** Rileggi, in quest'ordine:
+
+1. AGENTS.md — confini di giudizio e toolchain
+2. {pbi_path} — il PBI: direttiva, scope, verifica, protocollo di rifinitura
+3. `git log --oneline origin/main..HEAD` e `git diff origin/main...HEAD` — il lavoro già
+   fatto, che è tuo anche se non lo ricordi: non rifarlo e non disfarlo
+4. le spec e gli ADR che il PBI e il rapporto citano
+
+Rapporto del Critic:
 
 {rapporto}
 
-Chiudi ogni violazione, una alla volta, con un commit per rimedio. Se ritieni che una
-violazione sia infondata, NON ignorarla: spiega perché nella risposta e lasciala aperta.
-Termina con FATTO: oppure STOP: come prima.
+Chiudi ogni violazione, una alla volta, con **un commit per rimedio** e lo stesso formato
+del resto del PBI (`tipo(scope): descrizione imperativa`, in italiano). Valgono tutte le
+regole di prima: test-first, la spec nello stesso commit del codice che ne cambia il
+comportamento, niente modifiche non committate.
+
+**Un rilievo non si chiude spegnendo ciò che lo ha trovato.** Cancellare un test, allargare
+una tolleranza o aggiungere uno `skip` fa passare il gate e disfa la cosa che il gate
+proteggeva: se una violazione si chiude solo così, non è una violazione da chiudere ed è il
+caso qui sotto.
+
+Se ritieni che una violazione sia infondata, NON ignorarla: spiega perché nella risposta e
+lasciala aperta. Termina con FATTO: oppure STOP: come prima.
 """
 
 
@@ -420,13 +447,20 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
         # --- Builder + Quality Gate (deterministico) ---
         verde = False
         rossi: list[tuple[str, str]] = []  # se l'agente non arriva mai ai gate, resta vuoto
+        # Ogni revisione apre una sessione nuova; i ritentativi **dentro** la revisione la
+        # continuano. Sono due situazioni opposte servite dallo stesso flag: un gate rosso
+        # è "hai sbagliato una riga", e rileggere tutto il repository per quello è il modo
+        # più costoso di dirlo; un NON PRONTO è "il giudice ha respinto il lavoro", e lì la
+        # finestra vecchia è il problema — dopo quattro giri di discussione sullo Scope
+        # contiene le ragioni per cui l'agente si era convinto di poterlo allargare
+        # (`decisions/ADR-0015`, *Dove entra*). Prima `e.tentativi`, che non si azzera mai,
+        # faceva valere la regola del gate rosso anche fra le revisioni.
+        primo_del_giro = True
         for _ in range(MAX_TENTATIVI):
             e.tentativi += 1
             print(f"  builder — giro {e.tentativi}")
-            # Il primo giro apre una sessione nuova (contesto pulito, è il punto); i giri
-            # di correzione la continuano: rileggere tutto da capo per un gate rosso è il
-            # modo più costoso di dire "hai sbagliato una riga".
-            cmd = BUILDER + ([] if e.tentativi == 1 else ["-c"]) + [prompt]
+            cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [prompt]
+            primo_del_giro = False
             with misura(e, "builder"):
                 _, out = esegui(cmd, REPO)
 
@@ -477,7 +511,11 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
             return chiudi("non convergente",
                           f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
                           f"del Critic nel rapporto JSON. Serve una lettura umana.")
-        prompt = PROMPT_RIMEDIO.format(rapporto=rapporto[-6000:])
+        # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
+        # letto, e un assoluto qui lo farebbe sembrare un altro file.
+        prompt = PROMPT_RIMEDIO.format(
+            rapporto=rapporto[-6000:], pbi_path=pbi_path.relative_to(REPO)
+        )
 
     print(f"    commit sul branch: {e.commit} · "
           f"file: {git('diff', '--name-only', 'origin/main...HEAD')}")
