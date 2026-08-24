@@ -377,3 +377,129 @@ class TestIlPromptDiRimedioSiReggeDaSolo:
         prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
         assert "test" in prompt.lower(), "il rimedio non si chiude spegnendo un test"
         assert "commit" in prompt.lower(), "un commit per rimedio, come nel resto del PBI"
+
+
+class TestUnGiroSpesoACommittareNonEUnGateRosso:
+    """PBI-208, notte del 24/08: `rosso` in dieci minuti **senza un gate eseguito**.
+
+    Il Builder aveva committato il test e un refactor lasciando fuori il file
+    nuovo — `AnalisiPage.tsx`, la pagina intera, 840 righe — perché `git commit
+    -am` i file non tracciati non li prende. L'albero è rimasto sporco a ogni
+    giro, e i tre tentativi si sono consumati tutti sul controllo d'igiene: il
+    rapporto diceva *«gate ancora rossi dopo i tentativi previsti»* con
+    `gate_rossi` vuoto, cioè una diagnosi falsa che manda a cercare il guasto
+    dove non è.
+
+    `MAX_TENTATIVI` conta i **gate rossi** — «hai sbagliato una riga, riprova» —
+    e un giro speso a chiedere un commit non è quella cosa lì: contarlo insieme
+    toglie al lavoro vero i tentativi che gli servivano.
+    """
+
+    def _mondo(self, monkeypatch, stati: list[str], gate: list[list]):
+        """Un runner senza mondo: git risponde da una lista, i gate da un'altra."""
+        rimasti_stati, rimasti_gate = list(stati), list(gate)
+        eseguiti: list[str] = []
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return rimasti_stati.pop(0) if rimasti_stati else ""
+            if args[:2] == ("rev-list", "--count"):
+                return "2"
+            return ""
+
+        def _gate(attivi):
+            eseguiti.append("gate")
+            return rimasti_gate.pop(0) if rimasti_gate else []
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "gira_gate", _gate)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+        return eseguiti
+
+    def test_i_giri_di_igiene_non_mangiano_i_tentativi_di_gate(self, monkeypatch):
+        """Due giri persi a far committare, poi il lavoro vero: i tre tentativi
+        di gate devono esserci ancora tutti."""
+        # Il primo `status` è quello d'ingresso, prima che il PBI cominci.
+        eseguiti = self._mondo(
+            monkeypatch,
+            stati=["", "?? nuovo.tsx", "?? nuovo.tsx", "", "", ""],
+            gate=[[("pytest", "rosso")], [("pytest", "rosso")], []],
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto", (
+            f"chiuso {esito.stato}: i giri d'igiene hanno consumato i tentativi "
+            "che servivano ai gate"
+        )
+        assert len(eseguiti) == 3, "i gate devono avere avuto i loro tre tentativi"
+
+    def test_un_albero_che_resta_sporco_chiude_dicendo_la_verita(self, monkeypatch):
+        """Il rovescio: un Builder che non committa mai deve fermarsi — e la nota
+        deve dire *questo*, non «gate rossi» che sarebbe falso.
+
+        Il tetto separato esiste perché il giro d'igiene non è gratis: senza,
+        basta un file che l'agente non riesce a committare e il runner gira
+        finché non finisce la notte.
+        """
+        self._mondo(
+            monkeypatch,
+            stati=[""] + ["?? nuovo.tsx"] * 20,
+            gate=[],
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato != "fatto"
+        assert "committ" in esito.nota or "sporco" in esito.nota, (
+            f"nota fuorviante: «{esito.nota}» — l'albero è rimasto sporco, i gate "
+            "non hanno mai girato"
+        )
+        assert "gate" not in esito.nota.lower(), (
+            "dire «gate rossi» dove i gate non sono mai partiti manda a cercare "
+            "il guasto dove non è: è successo su PBI-208"
+        )
+
+    def test_il_registro_del_runner_non_e_lavoro_da_far_committare(self, monkeypatch):
+        """`runs/tempi.csv` è escluso all'ingresso ma non dentro il giro: nella
+        catena, il secondo PBI trova la riga del primo e il Builder si sente
+        chiedere di committare la contabilità del runner dentro il suo branch."""
+        viste: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            viste.append(args)
+            if args[:2] == ("status", "--porcelain"):
+                return "" if "runs" in " ".join(args) else " M runs/tempi.csv"
+            if args[:2] == ("rev-list", "--count"):
+                return "2"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto", (
+            "il registro del runner ha fatto sembrare sporco l'albero dentro il giro"
+        )
+        assert all(
+            "runs" in " ".join(a) for a in viste if a[:2] == ("status", "--porcelain")
+        ), "ogni controllo d'igiene esclude `runs/`, dentro il giro come all'ingresso"
+
+    def test_il_prompt_dice_di_prendere_anche_i_file_nuovi(self):
+        """La causa prima: `git commit -am` non prende i file non tracciati.
+
+        Il prompt che chiede il commit deve dirlo, perché è esattamente lì che
+        il Builder di PBI-208 si è perso — e la pagina che aveva scritto è
+        rimasta a un `git add` dal non esistere.
+        """
+        prompt = runner.PROMPT_IGIENE.format(sporco="?? frontend/src/pages/AnalisiPage.tsx")
+        assert "add" in prompt, "senza `git add` i file nuovi non entrano nel commit"
+        assert "AnalisiPage" in prompt, "il Builder deve vedere *cosa* è rimasto fuori"
