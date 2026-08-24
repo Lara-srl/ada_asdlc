@@ -503,3 +503,41 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         prompt = runner.PROMPT_IGIENE.format(sporco="?? frontend/src/pages/AnalisiPage.tsx")
         assert "add" in prompt, "senza `git add` i file nuovi non entrano nel commit"
         assert "AnalisiPage" in prompt, "il Builder deve vedere *cosa* è rimasto fuori"
+
+
+    def test_ogni_revisione_ritrova_i_suoi_tentativi(self, monkeypatch):
+        """La pazienza sui gate è **per revisione**, non per PBI.
+
+        `e.tentativi` non si azzera mai: è la fatica totale, ed è il numero che
+        finisce in `runs/tempi.csv`. Farne anche il criterio d'uscita
+        significherebbe che alla terza revisione il Builder non ha più un giro —
+        chiuderebbe `rosso` senza aver eseguito niente, che è esattamente la
+        diagnosi falsa da cui parte questa classe, spostata di un livello.
+        """
+        giri = {"critic": 0}
+
+        def _critic(_p):
+            giri["critic"] += 1
+            # Quattro NON PRONTO: `e.tentativi` supera MAX_TENTATIVI ben prima
+            # che il Critic si dichiari soddisfatto.
+            if giri["critic"] <= 4:
+                return runner.Verdetto("non pronto", "", "manca una deroga")
+            return runner.Verdetto("pass", "", "")
+
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "revisione_critica", _critic)
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: "2" if a[:2] == ("rev-list", "--count") else "",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto", (
+            f"chiuso {esito.stato} dopo {esito.tentativi} tentativi: il tetto dei gate "
+            "ha smesso di valere per revisione e ha cominciato a valere per PBI"
+        )
+        assert esito.tentativi > runner.MAX_TENTATIVI, (
+            "il registro deve continuare a contare la fatica totale"
+        )

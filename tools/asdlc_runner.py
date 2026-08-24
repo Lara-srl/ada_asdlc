@@ -58,6 +58,13 @@ BUILDER = ["claude", "-p", "--dangerously-skip-permissions"]
 CRITIC = ["claude", "-p", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)", "--model", "opus"]
 
 MAX_TENTATIVI = 3   # gate rossi: oltre, il problema non è che l'agente non ci ha provato
+# Giri spesi a **chiedere un commit**, contati a parte. Non sono la stessa cosa di un gate
+# rosso — quello è «hai sbagliato una riga», questo è «il lavoro c'è ma non è durevole» —
+# e sommarli è costato a PBI-208 tutti e tre i tentativi senza che un gate girasse mai:
+# `git commit -am` non prende i file non tracciati, e la pagina che l'agente aveva scritto
+# è rimasta fuori da ogni commit. Un tetto ci vuole lo stesso: un Builder che non riesce a
+# committare non migliora girando, e senza numero girerebbe finché non finisce la notte.
+MAX_IGIENE = 3
 # Backstop, non criterio. Il criterio giusto è «smetti quando un giro non produce più
 # niente di bloccante», e il Critic quel segnale lo emette già da sé — distingue una
 # violazione da un «non è una violazione, ma va detto». È il runner a non leggerlo
@@ -140,6 +147,16 @@ silenzio: fermati, scrivi la domanda, e termina con la riga esatta
 Quando hai finito, termina con la riga esatta
 
     FATTO: <riepilogo in una riga>
+"""
+
+PROMPT_IGIENE = """Ci sono modifiche non committate:
+
+{sporco}
+
+Committale con micro-commit coerenti. **`git add` esplicito**, o `git add -A`: i file nuovi
+non sono tracciati, e `git commit -am` li lascia fuori senza dire niente — è così che una
+pagina intera è rimasta a un `git add` dal non esistere. Finché l'albero è sporco il lavoro
+non è giudicabile e i gate non partono. Termina con FATTO: oppure STOP: come prima.
 """
 
 PROMPT_RIPROVA = """I gate sono rossi. Output (troncato):
@@ -456,9 +473,14 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
         # (`decisions/ADR-0015`, *Dove entra*). Prima `e.tentativi`, che non si azzera mai,
         # faceva valere la regola del gate rosso anche fra le revisioni.
         primo_del_giro = True
-        for _ in range(MAX_TENTATIVI):
-            e.tentativi += 1
-            print(f"  builder — giro {e.tentativi}")
+        # Due contatori locali alla revisione, e uno cumulativo che va nel registro.
+        # `e.tentativi` non si azzera mai — è la fatica totale, ed è ciò che si legge in
+        # `runs/tempi.csv` — quindi non può essere lui a decidere quando smettere: farebbe
+        # valere il tetto dei gate **fra** le revisioni, e alla terza il Builder non avrebbe
+        # più un giro. È lo stesso equivoco che ADR-0015 ha già tolto una volta.
+        gate_falliti = igiene = 0
+        while gate_falliti < MAX_TENTATIVI:
+            print(f"  builder — giro {e.tentativi + igiene + 1}")
             cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [prompt]
             primo_del_giro = False
             with misura(e, "builder"):
@@ -468,11 +490,26 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
                 domanda = out.split("STOP:")[-1].strip().splitlines()[0]
                 return chiudi("fermato", f"domanda dell'agente: {domanda}")
 
-            if sporco := git("status", "--porcelain"):
+            # `runs/` escluso qui come all'ingresso, e per la stessa ragione: nella catena
+            # il secondo PBI troverebbe la riga di registro del primo e si sentirebbe
+            # chiedere di committare la contabilità del runner dentro il suo branch.
+            if sporco := git("status", "--porcelain", "--", ":(exclude)runs"):
                 # Non committato = non esiste: niente da giudicare, niente da ripristinare.
-                prompt = (f"Ci sono modifiche non committate:\n{sporco[:1500]}\n"
-                          f"Committale con micro-commit coerenti.")
+                # Il giro si conta fra quelli d'igiene: `e.tentativi` è la pazienza sui
+                # **gate**, e spenderla qui vorrebbe dire togliere al lavoro vero i giri
+                # che gli servivano (PBI-208, notte del 24/08).
+                igiene += 1
+                if igiene >= MAX_IGIENE:
+                    return chiudi(
+                        "fermato",
+                        f"l'albero resta sporco dopo {MAX_IGIENE} giri del Builder: "
+                        f"il lavoro c'è ma non è committato ({sporco.splitlines()[0][:120]})",
+                    )
+                prompt = PROMPT_IGIENE.format(sporco=sporco[:1500])
                 continue
+
+            e.tentativi += 1
+            gate_falliti += 1
 
             with misura(e, "gate"):
                 rossi = gira_gate(attivi)
