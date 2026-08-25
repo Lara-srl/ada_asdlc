@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import json
+import os
 import subprocess
 import sys
 import time
@@ -46,6 +48,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 LOG_DIR = REPO / "runs"
 CSV_TEMPI = LOG_DIR / "tempi.csv"
+# Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`.
+LUCCHETTO = LOG_DIR / ".runner.lock"
+
+# Chi, girando in questo albero, ci **scrive**. Un `tail -f` sul log o un `git log`
+# aperto non sono un pericolo, e un controllo che grida sempre si impara a spegnere.
+AGENTI = ("claude", "asdlc_runner")
 
 # I flag di autonomia e di routing stanno qui, in un posto solo, così si vedono e si
 # cambiano. ⚠️ Verifica i nomi con `claude --help`: cambiano fra versioni della CLI.
@@ -294,6 +302,78 @@ class Esito:
     finito: str = ""
     durata_s: float = 0.0
     tempi: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+
+
+class AlberoOccupato(RuntimeError):
+    """Qualcun altro sta già lavorando in questo worktree."""
+
+
+@contextmanager
+def lucchetto():
+    """Un runner per volta in questo albero.
+
+    La notte del 24→25/08 il builder del runner e un agente avviato a mano un
+    minuto prima sono finiti sullo stesso `ada-run` sullo stesso branch: il
+    secondo ha committato due modifiche non committate del primo, e il runner si
+    è fermato accorgendosene dai file. Se n'è accorto — non gliel'ha impedito
+    niente. Difetto n°9 di PBI-102.
+
+    `flock` e non un file con dentro il PID: il lucchetto è dell'**open file
+    description**, quindi il kernel lo rilascia quando il processo muore, comunque
+    muoia. Un PID scritto su disco dopo un `kill -9` resta lì a bloccare il lancio
+    successivo, e il rimedio — cancellarlo a mano — è esattamente il gesto che
+    finisce per diventare automatico e disinnescare il controllo.
+    """
+    LUCCHETTO.parent.mkdir(exist_ok=True)
+    fd = LUCCHETTO.open("w")
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AlberoOccupato(
+                f"un altro runner sta già lavorando in {REPO} ({LUCCHETTO})"
+            ) from exc
+        yield
+    finally:
+        fd.close()
+
+
+def agenti_estranei(radice: Path, proc: Path = Path("/proc")) -> list[tuple[int, str]]:
+    """Gli agenti che stanno già lavorando in `radice`, oltre a noi.
+
+    Il lucchetto tiene fuori un secondo runner; questo tiene fuori il caso che è
+    successo davvero, che è l'altro — una sessione avviata a mano, che un
+    lucchetto del runner non lo prende e nemmeno lo guarda. L'unico segnale
+    comune ai due è **dove lavorano**: `/proc/<pid>/cwd`.
+
+    È un controllo Linux e non si scusa di esserlo: il runner gira sul PC di
+    sviluppo, non è codice che va in produzione. Dove `/proc` non c'è la
+    cartella non si legge e la lista esce vuota — il lucchetto resta.
+    """
+    radice = radice.resolve()
+    nostri = {os.getpid(), os.getppid()}
+    trovati: list[tuple[int, str]] = []
+    try:
+        cartelle = list(proc.iterdir())
+    except OSError:
+        return trovati
+
+    for d in cartelle:
+        if not d.name.isdigit() or int(d.name) in nostri:
+            continue
+        try:
+            cwd = (d / "cwd").resolve()
+            riga = (d / "cmdline").read_bytes()
+        except OSError:
+            # Un processo che finisce mentre lo leggiamo, o di un altro utente.
+            continue
+        if cwd != radice and radice not in cwd.parents:
+            continue
+        cmd = " ".join(riga.decode(errors="replace").split("\x00")).strip()
+        if not any(nome in cmd for nome in AGENTI):
+            continue
+        trovati.append((int(d.name), cmd))
+    return sorted(trovati)
 
 
 def hms(secondi: float) -> str:
