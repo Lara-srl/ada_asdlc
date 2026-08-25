@@ -28,6 +28,9 @@ alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 
 ⚠️ Da usare in un clone o in un worktree dedicato, mai sull'albero che stai guardando:
    l'agente gira in modalità non interattiva e scrive senza chiedere conferma.
+   **Un albero, un agente.** Dal 25/08 il runner lo verifica invece di sperarlo: prende
+   un lucchetto sul worktree e censisce chi altro ci sta lavorando (`lucchetto()`,
+   `agenti_estranei()`). Serve un secondo giro in parallelo? Un altro worktree.
 """
 from __future__ import annotations
 
@@ -40,7 +43,7 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -751,27 +754,49 @@ def main() -> int:
     LOG_DIR.mkdir(exist_ok=True)
     esiti: list[Esito] = []
 
-    for pbi in a.pbi:
-        e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr)
-        esiti.append(e)
-        print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
-        # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
-        # superare: i PBI successivi molto spesso poggiano su questo.
-        if e.stato in STATI_CHE_INTERROMPONO and not a.continua_sui_rossi:
-            print("\nInterrotto. La catena dei PBI ha dipendenze dichiarate: proseguire su "
-                  "una base rossa costa più di quanto risparmia.")
-            break
+    # I due controlli stanno **qui**, prima del primo PBI: presi a metà giro non
+    # servono a niente, perché a quel punto l'albero è già scritto da due mani.
+    with ExitStack() as albero:
+        try:
+            albero.enter_context(lucchetto())
+        except AlberoOccupato as exc:
+            print(f"Non parto: {exc}.\n"
+                  "Il lucchetto è di un runner vivo — `ps aux | grep asdlc_runner` dice "
+                  "quale.\nPer un secondo giro in parallelo serve un altro worktree, non "
+                  "un altro processo.")
+            return 2
 
-    scrivi_tempi(run, esiti)
-    (LOG_DIR / f"{run}.json").write_text(
-        json.dumps([{k: v for k, v in e.__dict__.items() if k != "tempi"} | {"tempi": dict(e.tempi)}
-                    for e in esiti], indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    totale = sum(e.durata_s for e in esiti)
-    print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"
-          + (f" · {totale / 3600 * a.tariffa:.2f} €" if a.tariffa else ""))
-    print(f"Rapporto: runs/{run}.json · tempi: runs/tempi.csv")
-    return 0 if all(e.stato in ("fatto", "saltato") for e in esiti) else 1
+        estranei = agenti_estranei(REPO)
+        if estranei:
+            print(f"Non parto: qualcun altro sta già lavorando in {REPO}.")
+            for pid, cmd in estranei:
+                print(f"  PID {pid} — {cmd[:100]}")
+            print("Due agenti sullo stesso albero si sovrascrivono i file a vicenda e i "
+                  "commit escono mescolati.\nChiudi quello di troppo, o dai a questo un "
+                  "worktree suo.")
+            return 2
+
+        for pbi in a.pbi:
+            e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr)
+            esiti.append(e)
+            print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
+            # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
+            # superare: i PBI successivi molto spesso poggiano su questo.
+            if e.stato in STATI_CHE_INTERROMPONO and not a.continua_sui_rossi:
+                print("\nInterrotto. La catena dei PBI ha dipendenze dichiarate: proseguire su "
+                      "una base rossa costa più di quanto risparmia.")
+                break
+
+        scrivi_tempi(run, esiti)
+        (LOG_DIR / f"{run}.json").write_text(
+            json.dumps([{k: v for k, v in e.__dict__.items() if k != "tempi"} | {"tempi": dict(e.tempi)}
+                        for e in esiti], indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        totale = sum(e.durata_s for e in esiti)
+        print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"
+              + (f" · {totale / 3600 * a.tariffa:.2f} €" if a.tariffa else ""))
+        print(f"Rapporto: runs/{run}.json · tempi: runs/tempi.csv")
+        return 0 if all(e.stato in ("fatto", "saltato") for e in esiti) else 1
 
 
 if __name__ == "__main__":
