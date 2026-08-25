@@ -617,3 +617,30 @@ class TestUnAgenteNelWorktreeFermaIlLancio:
         albero.mkdir()
         self._finto(proc, 42, albero, b"tail\x00-f\x00runs/tempi.csv\x00")
         assert runner.agenti_estranei(albero, proc=proc) == []
+
+
+class TestIlLancioSiFermaPrimaDiScrivere:
+    """I due controlli servono se stanno **prima** del primo PBI: dopo, l'albero
+    è già stato scritto da due mani."""
+
+    @pytest.fixture(autouse=True)
+    def albero(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI deve partire con l'albero occupato"),
+        )
+
+    def test_un_agente_estraneo_ferma_tutto(self, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [(797078, "claude -p")])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        assert runner.main() == 2
+        assert "797078" in capsys.readouterr().out
+
+    def test_un_altro_runner_ferma_tutto(self, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        with runner.lucchetto():
+            assert runner.main() == 2
+        assert "lucchetto" in capsys.readouterr().out.lower()
