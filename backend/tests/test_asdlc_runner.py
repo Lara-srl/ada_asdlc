@@ -644,3 +644,61 @@ class TestIlLancioSiFermaPrimaDiScrivere:
         with runner.lucchetto():
             assert runner.main() == 2
         assert "lucchetto" in capsys.readouterr().out.lower()
+
+
+class TestSiPuoSaltareIlCritic:
+    """Il Review Gate si può togliere, ma non di nascosto.
+
+    Deciso da Francesco il 25/08/2026: su una modifica locale e puntuale, che lui
+    guarda dal frontend prima di mergiare, il Critic costa più di quanto rende —
+    dal registro dei tempi è il **39%** del giro (PBI-210: builder 52:53 · gate
+    5:18 · critic 36:26). Il Quality Gate resta: è deterministico, costa 5 minuti
+    su 90, e non è un giudizio.
+
+    La condizione è che il registro non menta. `critic_s = 0` da solo non basta —
+    è la lezione di `gate_s = 0` su PBI-208, dove uno zero è stato letto come «un
+    gate rosso» invece che «i gate non sono mai girati».
+    """
+
+    @pytest.fixture
+    def builder_verde(self, monkeypatch):
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica",
+            lambda *a, **k: pytest.fail("il Critic non deve girare con --senza-critic"),
+        )
+
+    def test_il_flag_esiste_e_di_default_e_spento(self):
+        ap = runner.costruisci_parser()
+        assert ap.parse_args(["PBI-212"]).senza_critic is False
+        assert ap.parse_args(["PBI-212", "--senza-critic"]).senza_critic is True
+
+    def test_col_flag_il_critic_non_viene_chiamato(self, git_finto, builder_verde):
+        esito = runner.esegui_pbi(
+            "PBI-102", attivi=set(), dry=False, con_pr=False, con_critic=False
+        )
+        assert esito.stato == "fatto"
+
+    def test_la_riga_del_registro_dice_che_e_saltato(self, git_finto, builder_verde):
+        """Un giro senza Critic non deve somigliare a un giro con il Critic."""
+        esito = runner.esegui_pbi(
+            "PBI-102", attivi=set(), dry=False, con_pr=False, con_critic=False
+        )
+        assert "critic" in esito.nota.lower()
+        assert esito.tempi["critic"] == 0
+
+    def test_senza_il_flag_il_critic_gira_come_sempre(self, monkeypatch, git_finto):
+        """Il default non si sposta: chi non chiede niente ha i tre gate."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        giri = {"critic": 0}
+
+        def critic(_p):
+            giri["critic"] += 1
+            return runner.Verdetto("pass", "", "rapporto")
+
+        monkeypatch.setattr(runner, "revisione_critica", critic)
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        assert giri["critic"] == 1
+        assert "critic" not in esito.nota.lower()
