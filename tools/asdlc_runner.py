@@ -23,6 +23,7 @@ Un PBI = una sessione = un contesto pulito. È il motivo per cui il PBI è un pu
 alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 
     python3 tools/asdlc_runner.py PBI-201 --e2e
+    python3 tools/asdlc_runner.py PBI-313 --senza-critic   # due gate su tre, e lo dichiara
     python3 tools/asdlc_runner.py PBI-201 PBI-203 --dry-run
     python3 tools/asdlc_runner.py --riepilogo --tariffa 90
 
@@ -299,6 +300,10 @@ class Esito:
     nota: str = ""
     pr: str = ""
     rapporto_critic: str = ""
+    # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
+    # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
+    # della PR, che deve dire il vero senza doverla interpretare.
+    critic_saltato: bool = False
     gate_rossi: list[str] = field(default_factory=list)
     # Tempi: il totale è il tempo di parete del PBI, il resto ne è la scomposizione.
     iniziato: str = ""
@@ -465,8 +470,12 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
         f"(`tools/asdlc_runner.py`).\n\n"
-        f"Gate deterministici verdi · revisione avversariale PASS.\n"
-        f"Tempo macchina: **{hms(e.durata_s)}** "
+        + (f"Gate deterministici verdi · **Review Gate saltato** (`--senza-critic`): "
+           f"di questo lavoro non esiste una lettura avversariale, e la revisione è "
+           f"tutta qui.\n"
+           if e.critic_saltato else
+           f"Gate deterministici verdi · revisione avversariale PASS.\n")
+        + f"Tempo macchina: **{hms(e.durata_s)}** "
         f"(agente {hms(e.tempi['builder'] + e.tempi['critic'])}, gate {hms(e.tempi['gate'])}).\n\n"
         f"Manca l'unica cosa che uno script non può dare: **l'accettazione umana**.\n"
         f"Prima del merge, guarda: i criteri di verifica del PBI, il diff fuori scope, "
@@ -509,7 +518,9 @@ def crea_branch(pbi: str) -> str:
     return branch
 
 
-def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
+def esegui_pbi(
+    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
+) -> Esito:
     pbi_path = next(REPO.glob(f"backlog/{pbi}-*.md"), None)
     if pbi_path is None:
         return Esito(pbi, "saltato", nota="PBI inesistente in backlog/")
@@ -610,6 +621,16 @@ def esegui_pbi(pbi: str, attivi: set[str], dry: bool, con_pr: bool) -> Esito:
             return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
 
         # --- Review Gate (probabilistico, sessione separata) ---
+        # Si può togliere, e allora **si dichiara**: `critic_s = 0` non spiega se
+        # stesso — è la lezione di `gate_s = 0` su PBI-208, letto come «gate
+        # rosso» invece che «i gate non sono mai girati». Chi rilegge il registro
+        # deve sapere che quel giro ha avuto due gate su tre, non tre.
+        if not con_critic:
+            e.critic_saltato = True
+            e.nota = "critic saltato (--senza-critic): revisione umana alla PR"
+            print("    critic … saltato (--senza-critic)")
+            break
+
         with misura(e, "critic"):
             verdetto = revisione_critica(pbi_path)
         rapporto = verdetto.rapporto
@@ -728,7 +749,8 @@ def riepilogo(tariffa: float | None) -> int:
     return 0
 
 
-def main() -> int:
+def costruisci_parser() -> argparse.ArgumentParser:
+    """I flag, in una funzione sua: così si possono provare senza eseguire un PBI."""
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -736,12 +758,20 @@ def main() -> int:
     ap.add_argument("--e2e", action="store_true", help="includi il gate Playwright (stack Docker su)")
     ap.add_argument("--dry-run", action="store_true", help="stampa il prompt e non esegue niente")
     ap.add_argument("--no-pr", action="store_true", help="non aprire la PR (resta solo il branch locale)")
+    ap.add_argument("--senza-critic", action="store_true",
+                    help="salta il Review Gate: restano i gate deterministici e la PR. "
+                         "Il giro lo dichiara in runs/tempi.csv")
     ap.add_argument("--continua-sui-rossi", action="store_true",
                     help="prosegui col PBI successivo anche se questo è rimasto rosso")
     ap.add_argument("--riepilogo", action="store_true",
                     help="non esegue niente: somma i tempi già registrati in runs/tempi.csv")
     ap.add_argument("--tariffa", type=float, metavar="EUR_ORA",
                     help="tariffa oraria: aggiunge la colonna del costo")
+    return ap
+
+
+def main() -> int:
+    ap = costruisci_parser()
     a = ap.parse_args()
 
     if a.riepilogo:
@@ -777,7 +807,8 @@ def main() -> int:
             return 2
 
         for pbi in a.pbi:
-            e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr)
+            e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
+                           con_critic=not a.senza_critic)
             esiti.append(e)
             print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
             # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
