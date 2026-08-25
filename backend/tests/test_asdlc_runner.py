@@ -702,3 +702,29 @@ class TestSiPuoSaltareIlCritic:
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
         assert giri["critic"] == 1
         assert "critic" not in esito.nota.lower()
+
+    def test_la_pr_non_dichiara_un_pass_che_non_ce_stato(self, monkeypatch, git_finto):
+        """La riga peggiore da lasciare com'è.
+
+        Il corpo della PR scrive *«revisione avversariale PASS»* fisso. Su un giro
+        `--senza-critic` sarebbe una frase falsa nel documento su cui si decide il
+        merge — e la lezione del 25/08 su PBI-212 è esattamente questa: chi
+        rilegge deve sapere quali gate non ci sono stati **prima** di guardare il
+        diff, non dopo.
+        """
+        catturato: dict[str, list[str]] = {}
+
+        def finto_esegui(cmd, cwd, timeout=7200):
+            catturato["cmd"] = cmd
+            return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
+
+        monkeypatch.setattr(runner, "esegui", finto_esegui)
+        pbi_path = REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
+        esito = runner.Esito("PBI-102", "fatto", critic_saltato=True)
+
+        runner.apri_pr("PBI-102", pbi_path, "pbi/pbi-102", esito)
+
+        cmd = catturato["cmd"]
+        corpo = cmd[cmd.index("--body") + 1]
+        assert "PASS" not in corpo, "non si dichiara un verdetto che nessuno ha emesso"
+        assert "--senza-critic" in corpo
