@@ -541,3 +541,106 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         assert esito.tentativi > runner.MAX_TENTATIVI, (
             "il registro deve continuare a contare la fatica totale"
         )
+
+
+class TestDueRunnerNonGiranoNelloStessoAlbero:
+    """Il worktree è uno solo, e finora non aveva un lucchetto.
+
+    La notte del 24→25/08 il builder del runner e un agente avviato a mano sono
+    finiti sullo stesso `ada-run` sullo stesso branch, e il secondo ha committato
+    due modifiche non committate del primo. È andata bene per caso: due processi
+    che scrivono lo stesso albero si sovrascrivono i file a vicenda e i commit
+    escono mescolati. Difetto n°9 di PBI-102.
+    """
+
+    def test_il_secondo_lucchetto_non_si_prende(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        with runner.lucchetto():
+            with pytest.raises(runner.AlberoOccupato):
+                with runner.lucchetto():
+                    pass
+
+    def test_rilasciato_torna_libero(self, tmp_path, monkeypatch):
+        """Il lucchetto è del **processo**, non del file: se il runner muore di
+        schianto non resta un lucchetto morto da togliere a mano."""
+        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        with runner.lucchetto():
+            pass
+        with runner.lucchetto():
+            pass
+
+
+class TestUnAgenteNelWorktreeFermaIlLancio:
+    """Il lucchetto tiene fuori un secondo runner, non un agente avviato a mano —
+    ed è **quello** che è successo. Prima di partire si guarda chi altro sta
+    lavorando in questo albero."""
+
+    def _finto(self, proc, pid, cwd, cmdline):
+        d = proc / str(pid)
+        d.mkdir(parents=True)
+        (d / "cwd").symlink_to(cwd)
+        (d / "cmdline").write_bytes(cmdline)
+
+    def test_trova_il_claude_che_gira_nello_stesso_albero(self, tmp_path):
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, 797078, albero, b"claude\x00-p\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == [(797078, "claude -p")]
+
+    def test_trova_anche_un_sottoalbero(self, tmp_path):
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        (albero / "frontend").mkdir(parents=True)
+        self._finto(proc, 42, albero / "frontend", b"claude\x00")
+        assert [p for p, _ in runner.agenti_estranei(albero, proc=proc)] == [42]
+
+    def test_ignora_chi_lavora_altrove(self, tmp_path):
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        (tmp_path / "altrove").mkdir()
+        self._finto(proc, 42, tmp_path / "altrove", b"claude\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == []
+
+    def test_ignora_se_stesso(self, tmp_path):
+        """Il runner è un processo dell'albero come gli altri: senza questa
+        esclusione non partirebbe mai."""
+        import os
+
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, os.getpid(), albero, b"python3\x00tools/asdlc_runner.py\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == []
+
+    def test_ignora_chi_non_e_un_agente(self, tmp_path):
+        """Un `tail -f` sul log non è un agente che scrive: fermare il lancio per
+        lui sarebbe un falso positivo, e un controllo che grida sempre si spegne."""
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, 42, albero, b"tail\x00-f\x00runs/tempi.csv\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == []
+
+
+class TestIlLancioSiFermaPrimaDiScrivere:
+    """I due controlli servono se stanno **prima** del primo PBI: dopo, l'albero
+    è già stato scritto da due mani."""
+
+    @pytest.fixture(autouse=True)
+    def albero(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI deve partire con l'albero occupato"),
+        )
+
+    def test_un_agente_estraneo_ferma_tutto(self, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [(797078, "claude -p")])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        assert runner.main() == 2
+        assert "797078" in capsys.readouterr().out
+
+    def test_un_altro_runner_ferma_tutto(self, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        with runner.lucchetto():
+            assert runner.main() == 2
+        assert "lucchetto" in capsys.readouterr().out.lower()

@@ -28,17 +28,22 @@ alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 
 ⚠️ Da usare in un clone o in un worktree dedicato, mai sull'albero che stai guardando:
    l'agente gira in modalità non interattiva e scrive senza chiedere conferma.
+   **Un albero, un agente.** Dal 25/08 il runner lo verifica invece di sperarlo: prende
+   un lucchetto sul worktree e censisce chi altro ci sta lavorando (`lucchetto()`,
+   `agenti_estranei()`). Serve un secondo giro in parallelo? Un altro worktree.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import json
+import os
 import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +51,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 LOG_DIR = REPO / "runs"
 CSV_TEMPI = LOG_DIR / "tempi.csv"
+# Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`.
+LUCCHETTO = LOG_DIR / ".runner.lock"
+
+# Chi, girando in questo albero, ci **scrive**. Un `tail -f` sul log o un `git log`
+# aperto non sono un pericolo, e un controllo che grida sempre si impara a spegnere.
+AGENTI = ("claude", "asdlc_runner")
 
 # I flag di autonomia e di routing stanno qui, in un posto solo, così si vedono e si
 # cambiano. ⚠️ Verifica i nomi con `claude --help`: cambiano fra versioni della CLI.
@@ -294,6 +305,78 @@ class Esito:
     finito: str = ""
     durata_s: float = 0.0
     tempi: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+
+
+class AlberoOccupato(RuntimeError):
+    """Qualcun altro sta già lavorando in questo worktree."""
+
+
+@contextmanager
+def lucchetto():
+    """Un runner per volta in questo albero.
+
+    La notte del 24→25/08 il builder del runner e un agente avviato a mano un
+    minuto prima sono finiti sullo stesso `ada-run` sullo stesso branch: il
+    secondo ha committato due modifiche non committate del primo, e il runner si
+    è fermato accorgendosene dai file. Se n'è accorto — non gliel'ha impedito
+    niente. Difetto n°9 di PBI-102.
+
+    `flock` e non un file con dentro il PID: il lucchetto è dell'**open file
+    description**, quindi il kernel lo rilascia quando il processo muore, comunque
+    muoia. Un PID scritto su disco dopo un `kill -9` resta lì a bloccare il lancio
+    successivo, e il rimedio — cancellarlo a mano — è esattamente il gesto che
+    finisce per diventare automatico e disinnescare il controllo.
+    """
+    LUCCHETTO.parent.mkdir(exist_ok=True)
+    fd = LUCCHETTO.open("w")
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AlberoOccupato(
+                f"un altro runner sta già lavorando in {REPO} ({LUCCHETTO})"
+            ) from exc
+        yield
+    finally:
+        fd.close()
+
+
+def agenti_estranei(radice: Path, proc: Path = Path("/proc")) -> list[tuple[int, str]]:
+    """Gli agenti che stanno già lavorando in `radice`, oltre a noi.
+
+    Il lucchetto tiene fuori un secondo runner; questo tiene fuori il caso che è
+    successo davvero, che è l'altro — una sessione avviata a mano, che un
+    lucchetto del runner non lo prende e nemmeno lo guarda. L'unico segnale
+    comune ai due è **dove lavorano**: `/proc/<pid>/cwd`.
+
+    È un controllo Linux e non si scusa di esserlo: il runner gira sul PC di
+    sviluppo, non è codice che va in produzione. Dove `/proc` non c'è la
+    cartella non si legge e la lista esce vuota — il lucchetto resta.
+    """
+    radice = radice.resolve()
+    nostri = {os.getpid(), os.getppid()}
+    trovati: list[tuple[int, str]] = []
+    try:
+        cartelle = list(proc.iterdir())
+    except OSError:
+        return trovati
+
+    for d in cartelle:
+        if not d.name.isdigit() or int(d.name) in nostri:
+            continue
+        try:
+            cwd = (d / "cwd").resolve()
+            riga = (d / "cmdline").read_bytes()
+        except OSError:
+            # Un processo che finisce mentre lo leggiamo, o di un altro utente.
+            continue
+        if cwd != radice and radice not in cwd.parents:
+            continue
+        cmd = " ".join(riga.decode(errors="replace").split("\x00")).strip()
+        if not any(nome in cmd for nome in AGENTI):
+            continue
+        trovati.append((int(d.name), cmd))
+    return sorted(trovati)
 
 
 def hms(secondi: float) -> str:
@@ -671,27 +754,49 @@ def main() -> int:
     LOG_DIR.mkdir(exist_ok=True)
     esiti: list[Esito] = []
 
-    for pbi in a.pbi:
-        e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr)
-        esiti.append(e)
-        print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
-        # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
-        # superare: i PBI successivi molto spesso poggiano su questo.
-        if e.stato in STATI_CHE_INTERROMPONO and not a.continua_sui_rossi:
-            print("\nInterrotto. La catena dei PBI ha dipendenze dichiarate: proseguire su "
-                  "una base rossa costa più di quanto risparmia.")
-            break
+    # I due controlli stanno **qui**, prima del primo PBI: presi a metà giro non
+    # servono a niente, perché a quel punto l'albero è già scritto da due mani.
+    with ExitStack() as albero:
+        try:
+            albero.enter_context(lucchetto())
+        except AlberoOccupato as exc:
+            print(f"Non parto: {exc}.\n"
+                  "Il lucchetto è di un runner vivo — `ps aux | grep asdlc_runner` dice "
+                  "quale.\nPer un secondo giro in parallelo serve un altro worktree, non "
+                  "un altro processo.")
+            return 2
 
-    scrivi_tempi(run, esiti)
-    (LOG_DIR / f"{run}.json").write_text(
-        json.dumps([{k: v for k, v in e.__dict__.items() if k != "tempi"} | {"tempi": dict(e.tempi)}
-                    for e in esiti], indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    totale = sum(e.durata_s for e in esiti)
-    print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"
-          + (f" · {totale / 3600 * a.tariffa:.2f} €" if a.tariffa else ""))
-    print(f"Rapporto: runs/{run}.json · tempi: runs/tempi.csv")
-    return 0 if all(e.stato in ("fatto", "saltato") for e in esiti) else 1
+        estranei = agenti_estranei(REPO)
+        if estranei:
+            print(f"Non parto: qualcun altro sta già lavorando in {REPO}.")
+            for pid, cmd in estranei:
+                print(f"  PID {pid} — {cmd[:100]}")
+            print("Due agenti sullo stesso albero si sovrascrivono i file a vicenda e i "
+                  "commit escono mescolati.\nChiudi quello di troppo, o dai a questo un "
+                  "worktree suo.")
+            return 2
+
+        for pbi in a.pbi:
+            e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr)
+            esiti.append(e)
+            print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
+            # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
+            # superare: i PBI successivi molto spesso poggiano su questo.
+            if e.stato in STATI_CHE_INTERROMPONO and not a.continua_sui_rossi:
+                print("\nInterrotto. La catena dei PBI ha dipendenze dichiarate: proseguire su "
+                      "una base rossa costa più di quanto risparmia.")
+                break
+
+        scrivi_tempi(run, esiti)
+        (LOG_DIR / f"{run}.json").write_text(
+            json.dumps([{k: v for k, v in e.__dict__.items() if k != "tempi"} | {"tempi": dict(e.tempi)}
+                        for e in esiti], indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        totale = sum(e.durata_s for e in esiti)
+        print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"
+              + (f" · {totale / 3600 * a.tariffa:.2f} €" if a.tariffa else ""))
+        print(f"Rapporto: runs/{run}.json · tempi: runs/tempi.csv")
+        return 0 if all(e.stato in ("fatto", "saltato") for e in esiti) else 1
 
 
 if __name__ == "__main__":
