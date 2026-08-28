@@ -788,6 +788,7 @@ class TestIlRunnerSiStaccaDaSolo:
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(
             runner, "stacca", lambda run: pytest.fail("--in-primo-piano non deve forkare")
         )
@@ -928,6 +929,7 @@ class TestUnGiroLasciaTracciaAppenaComincia:
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
@@ -940,6 +942,7 @@ class TestUnGiroLasciaTracciaAppenaComincia:
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(
             runner, "esegui_pbi", lambda pbi, *a, **k: runner.Esito(pbi, "fatto", commit=3)
         )
