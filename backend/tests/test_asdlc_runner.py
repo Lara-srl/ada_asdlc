@@ -802,3 +802,92 @@ class TestIlRunnerSiStaccaDaSolo:
         due parti, e cercarne uno partendo dall'altro non deve costare niente."""
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         assert runner.log_del_giro("20260828-224500") == tmp_path / "20260828-224500.log"
+
+
+class TestIlBranchLoPubblicaIlRunner:
+    """Difetti 8, 16 e 18 di PBI-102: chi pubblica il branch, quando, e con che nome.
+
+    Le tre storie sono la stessa storia. **PBI-322**, il 26/08: un giro fallito
+    lascia `pbi/pbi-322` su `origin`, il rilancio ci ripassa sopra e muore prima
+    di cominciare. **PBI-324**, il 27/08: il Builder pusha e apre la PR dentro il
+    giro 1, il Critic chiede altri quattro giri, il branch si riscrive, e il push
+    finale si prende un `non-fast-forward` che uccide il processo — in `main` è
+    entrato un terzo del lavoro con la sua checklist spuntata. **PBI-203 e
+    PBI-320**: un giro che chiude `fermato` o `rosso` lascia i commit solo in
+    locale, dove nessuno li guarda.
+    """
+
+    def test_senza_collisione_il_nome_resta_quello_semplice(self):
+        assert runner.nome_libero("PBI-322", presi=set()) == "pbi/pbi-322"
+
+    def test_un_nome_gia_su_origin_fa_nascere_il_giro_due(self):
+        assert runner.nome_libero("PBI-322", presi={"pbi/pbi-322"}) == "pbi/pbi-322-giro2"
+
+    def test_e_si_continua_a_contare(self):
+        presi = {"pbi/pbi-322", "pbi/pbi-322-giro2"}
+        assert runner.nome_libero("PBI-322", presi=presi) == "pbi/pbi-322-giro3"
+
+    def test_crea_branch_chiede_a_origin_prima_di_scegliere(self, monkeypatch):
+        """Il nome non si decide guardando il locale: il locale è appena stato clonato."""
+        chiamate: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args[0] == "ls-remote":
+                return "aef71f4\trefs/heads/pbi/pbi-322\n"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        assert runner.crea_branch("PBI-322") == "pbi/pbi-322-giro2"
+        assert ("switch", "-c", "pbi/pbi-322-giro2", "origin/main") in chiamate
+
+    def test_il_push_del_proprio_branch_e_force_with_lease(self, git_finto):
+        """Fra un giro e l'altro il branch si riscrive — ed è lecito. Un push
+        semplice si prende il non-fast-forward che ha ucciso PBI-324."""
+        assert runner.pubblica("pbi/pbi-322") is True
+        assert ("push", "--force-with-lease", "-u", "origin", "pbi/pbi-322") in git_finto
+
+    def test_un_push_fallito_non_uccide_il_giro(self, monkeypatch, capsys):
+        """L'ultima riga del difetto 16: `git()` alza, nessuno la cattura, e un'ora
+        di lavoro se ne va con il traceback."""
+        def _git(*args: str) -> str:
+            raise RuntimeError("git push → ! [rejected] (stale info)")
+
+        monkeypatch.setattr(runner, "git", _git)
+        assert runner.pubblica("pbi/pbi-322") is False
+        assert "non pubblicato" in capsys.readouterr().out
+
+    def test_un_giro_sospeso_pubblica_lo_stesso_il_suo_branch(self, monkeypatch, git_finto):
+        """Il lavoro c'è: sta su un ramo che nessuno vedrà mai, se resta locale."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica",
+            lambda p: runner.Verdetto("sospeso", "chi decide?", "rapporto"),
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "sospeso"
+        assert any(c[0] == "push" for c in git_finto), "un giro fermo va comunque su origin"
+
+    def test_un_giro_fatto_non_pubblica_due_volte(self, monkeypatch, git_finto):
+        """Sulla strada buona a pubblicare è `apri_pr`, e una volta sola."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+        )
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert [c for c in git_finto if c[0] == "push"] == []
+
+    def test_il_builder_ha_il_divieto_scritto_nel_prompt(self):
+        """La prima causa del difetto 18: a pushare era il Builder, dentro il giro.
+
+        Un branch pubblicato a metà è una promessa fatta su lavoro che il Critic
+        non ha ancora accettato — e su PBI-324 quella promessa è stata riscossa
+        con un merge."""
+        prompt = runner.PROMPT_BUILDER.lower()
+        assert "git push" in prompt and "pr create" in prompt
