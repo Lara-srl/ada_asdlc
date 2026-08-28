@@ -150,6 +150,11 @@ Esegui il PBI con queste regole non negoziabili:
 - Se il PBI cambia un contratto, aggiorna la spec NELLO STESSO commit del codice.
 - Non lasciare modifiche non committate: ciò che non è committato non esiste.
 - Non toccare .github/workflows/ (il push verrebbe rifiutato dal token).
+- **Non pubblicare niente**: nessun `git push`, nessun `gh pr create`. Al branch e alla PR
+  ci pensa il runner, quando il Critic ha finito. Un branch pushato a metà giro è una
+  promessa fatta su lavoro che nessuno ha ancora accettato — su PBI-324 quella promessa è
+  stata riscossa con un merge, e in `main` è entrato un terzo del lavoro con la sua
+  checklist spuntata.
 
 Se incontri un'ambiguità che il protocollo di rifinitura non copre, NON scegliere in
 silenzio: fermati, scrivi la domanda, e termina con la riga esatta
@@ -519,8 +524,15 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
-    """Apre la PR e si ferma lì: il merge è dell'umano (micro-commits §5)."""
-    git("push", "-u", "origin", branch)
+    """Apre la PR e si ferma lì: il merge è dell'umano (micro-commits §5).
+
+    È **qui** che il branch arriva su `origin`, e in nessun altro punto della
+    strada buona: un ramo pubblicato prima che il Critic abbia parlato è una
+    promessa fatta su lavoro che nessuno ha ancora accettato, e su PBI-324 quella
+    promessa è stata riscossa con un merge di un terzo del lavoro (difetto 18).
+    """
+    if not pubblica(branch):
+        return ""
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
         f"(`tools/asdlc_runner.py`).\n\n"
@@ -567,9 +579,64 @@ def crea_branch(pbi: str) -> str:
     disallineato.
     """
     git("fetch", "origin", "main")
-    branch = f"pbi/{pbi.lower()}"
+    branch = nome_libero(pbi, rami_su_origin(pbi))
     git("switch", "-c", branch, "origin/main")
     return branch
+
+
+def rami_su_origin(pbi: str) -> set[str]:
+    """I rami che `origin` ha già per questo PBI.
+
+    Si chiede al remoto e non al locale: il worktree del runner è appena stato
+    creato, e di un giro fallito tre giorni fa non sa niente.
+    """
+    fuori = git("ls-remote", "--heads", "origin", f"pbi/{pbi.lower()}*")
+    return {r.split("refs/heads/")[-1].strip() for r in fuori.splitlines() if "refs/heads/" in r}
+
+
+def nome_libero(pbi: str, presi: set[str]) -> str:
+    """`pbi/pbi-322`, e se è occupato `pbi/pbi-322-giro2`.
+
+    Il nome del branch era fisso, e un giro fallito lo lasciava occupato su
+    `origin`: il rilancio o moriva su *«esiste già un ramo»*, o — peggio — ci
+    scriveva sopra una storia diversa e il push finale si prendeva un
+    `non-fast-forward` a lavoro fatto. Difetto 16 di PBI-102, misurato su PBI-322
+    la notte del 26→27/08.
+
+    Il numero è del **giro**, non del PBI: dice quante volte ci si è provati, che
+    è l'informazione che serve a chi apre la lista dei rami.
+    """
+    base = f"pbi/{pbi.lower()}"
+    if base not in presi:
+        return base
+    n = 2
+    while f"{base}-giro{n}" in presi:
+        n += 1
+    return f"{base}-giro{n}"
+
+
+def pubblica(branch: str) -> bool:
+    """Manda il branch su `origin`. Non alza mai: pubblicare è l'ultimo gesto.
+
+    Due cose, che sono le due cause del difetto 18. **`--force-with-lease`**
+    perché il branch è nostro e fra un giro e l'altro può essere stato riscritto —
+    un rebase, un `commit --amend` sui messaggi — e un push semplice si prende il
+    `non-fast-forward` che su PBI-324 ha ucciso il processo con quattro giri di
+    lavoro dentro. Il lease non è `--force` cieco: se qualcun altro ha scritto su
+    quel ramo il push si rifiuta lo stesso, che è la sola cosa da proteggere.
+
+    E **non alza**: un push che fallisce è una brutta notizia, non una ragione per
+    buttare via l'ora precedente. Chi legge il log la trova scritta, e i commit
+    restano nel worktree.
+    """
+    try:
+        git("push", "--force-with-lease", "-u", "origin", branch)
+        return True
+    except RuntimeError as exc:
+        print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
+        print(f"       i commit restano in locale su {branch}: `git push` a mano quando "
+              f"hai guardato cosa c'è sul remoto.")
+        return False
 
 
 def esegui_pbi(
@@ -601,6 +668,13 @@ def esegui_pbi(
         e.finito = datetime.now().isoformat(timespec="seconds")
         if nota:
             e.nota = nota
+        # Un giro che si ferma ha comunque prodotto commit, e lasciarli solo nel
+        # worktree vuol dire non farli guardare a nessuno: su PBI-320 sono rimasti
+        # lì, su PBI-322 li ha salvati a mano una persona prima di chiudere il
+        # terminale. Difetto 8 di PBI-102. Sulla strada buona non si pubblica qui:
+        # a quello ci pensa `apri_pr`, una volta sola.
+        if stato in STATI_CHE_INTERROMPONO:
+            pubblica(branch)
         print(f"    tempo: {hms(e.durata_s)} "
               f"(builder {hms(e.tempi['builder'])} · gate {hms(e.tempi['gate'])} · "
               f"critic {hms(e.tempi['critic'])})")
