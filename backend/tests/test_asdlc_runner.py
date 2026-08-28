@@ -20,6 +20,7 @@ sarebbe un test che riscrive il repository in cui gira.
 
 import importlib.util
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -634,13 +635,13 @@ class TestIlLancioSiFermaPrimaDiScrivere:
 
     def test_un_agente_estraneo_ferma_tutto(self, monkeypatch, capsys):
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [(797078, "claude -p")])
-        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
         assert runner.main() == 2
         assert "797078" in capsys.readouterr().out
 
     def test_un_altro_runner_ferma_tutto(self, monkeypatch, capsys):
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
-        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
         with runner.lucchetto():
             assert runner.main() == 2
         assert "lucchetto" in capsys.readouterr().out.lower()
@@ -728,3 +729,76 @@ class TestSiPuoSaltareIlCritic:
         corpo = cmd[cmd.index("--body") + 1]
         assert "PASS" not in corpo, "non si dichiara un verdetto che nessuno ha emesso"
         assert "--senza-critic" in corpo
+
+
+class TestIlRunnerSiStaccaDaSolo:
+    """Difetto 15 di PBI-102: chiudere il terminale non deve uccidere il giro.
+
+    Misurato il 26/08 su PBI-322: la catena era `python3 → bash → claude` con il
+    `SID` della shell chiamante, e otto commit buoni sono stati salvati a mano
+    prima di chiudere. Finché il distacco lo fa chi lancia — `setsid nohup … <
+    /dev/null &` — lo stesso runner si comporta in due modi a seconda di come lo
+    si chiama, che è la forma dei difetti 11 e 12. Se ne occupa lui; chi vuole
+    guardarlo lavorare lo dice, con `--in-primo-piano`.
+    """
+
+    def test_il_flag_esiste_e_di_default_e_spento(self):
+        ap = runner.costruisci_parser()
+        assert ap.parse_args(["PBI-212"]).in_primo_piano is False
+        assert ap.parse_args(["PBI-212", "--in-primo-piano"]).in_primo_piano is True
+
+    def test_di_default_si_stacca(self):
+        assert runner.va_staccato(in_primo_piano=False, pid=4242, sid=4200) is True
+
+    def test_col_flag_resta_dove_e(self):
+        """Il debug e la CI vogliono l'output sotto gli occhi, e un exit code."""
+        assert runner.va_staccato(in_primo_piano=True, pid=4242, sid=4200) is False
+
+    def test_chi_e_gia_leader_di_sessione_non_si_stacca_due_volte(self):
+        """Lanciato da `setsid` o da un rilancio, il processo è già dove deve stare."""
+        assert runner.va_staccato(in_primo_piano=False, pid=4242, sid=4242) is False
+
+    def test_si_stacca_prima_di_prendere_il_lucchetto(self, tmp_path, monkeypatch):
+        """L'ordine non è estetico: il `flock` è dell'open file description, e il
+        padre che muore dopo averlo preso se lo porterebbe via."""
+        ordine: list[str] = []
+
+        @contextmanager
+        def finto_lucchetto():
+            ordine.append("lucchetto")
+            yield
+
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "lucchetto", finto_lucchetto)
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "stacca", lambda run: ordine.append("stacca"))
+        monkeypatch.setattr(runner, "va_staccato", lambda *a, **k: True)
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda *a, **k: runner.Esito("PBI-212", "saltato")
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+
+        runner.main()
+
+        assert ordine[:2] == ["stacca", "lucchetto"]
+
+    def test_col_flag_non_si_stacca_affatto(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(
+            runner, "stacca", lambda run: pytest.fail("--in-primo-piano non deve forkare")
+        )
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda *a, **k: runner.Esito("PBI-212", "saltato")
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        assert runner.main() == 0
+
+    def test_il_log_del_giro_sta_accanto_al_suo_rapporto(self, tmp_path, monkeypatch):
+        """Log e rapporto JSON portano lo stesso nome: sono lo stesso giro visto da
+        due parti, e cercarne uno partendo dall'altro non deve costare niente."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        assert runner.log_del_giro("20260828-224500") == tmp_path / "20260828-224500.log"
