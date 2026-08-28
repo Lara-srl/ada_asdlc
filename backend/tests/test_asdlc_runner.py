@@ -19,6 +19,7 @@ sarebbe un test che riscrive il repository in cui gira.
 """
 
 import importlib.util
+import json
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -787,6 +788,7 @@ class TestIlRunnerSiStaccaDaSolo:
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(
             runner, "stacca", lambda run: pytest.fail("--in-primo-piano non deve forkare")
         )
@@ -891,3 +893,124 @@ class TestIlBranchLoPubblicaIlRunner:
         con un merge."""
         prompt = runner.PROMPT_BUILDER.lower()
         assert "git push" in prompt and "pr create" in prompt
+
+
+class TestUnGiroLasciaTracciaAppenaComincia:
+    """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
+
+    `scrivi_tempi` gira in fondo a `main()`. Fino a lì, del giro in corso non
+    esiste niente: né una riga nel CSV né un rapporto. PBI-329, il 28/08, ha
+    prodotto diciassette commit fra le 17:49 e le 18:33 con la Verifica spuntata
+    cinque su cinque, e nel registro non c'è — trovato solo cercando i rami
+    locali. Il rapporto per-run si apre subito, e siccome è gitignored non
+    peggiora il difetto 19 come farebbe una riga aperta nel CSV condiviso.
+    """
+
+    def test_il_rapporto_esiste_prima_del_primo_pbi(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        rapporto = runner.apri_rapporto("20260828-224137", ["PBI-329", "PBI-330"])
+
+        assert rapporto.exists()
+        dentro = json.loads(rapporto.read_text())
+        assert dentro["stato"] == "in-corso"
+        assert dentro["pbi"] == ["PBI-329", "PBI-330"]
+        assert dentro["iniziato"]
+        assert "finito" not in dentro, "un giro in corso non ha una fine"
+
+    def test_main_lo_apre_prima_di_eseguire(self, tmp_path, monkeypatch):
+        """L'ordine è il difetto: aprirlo dopo il primo PBI lascia scoperto
+        proprio il caso che è successo."""
+        visto: dict[str, bool] = {}
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            visto["rapporto"] = any(tmp_path.glob("*.json"))
+            return runner.Esito(pbi, "saltato")
+
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        runner.main()
+
+        assert visto["rapporto"], "il rapporto del giro va aperto prima del primo PBI"
+
+    def test_alla_fine_il_rapporto_e_quello_di_sempre(self, tmp_path, monkeypatch):
+        """L'apertura non deve cambiare cosa si legge a giro finito."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda pbi, *a, **k: runner.Esito(pbi, "fatto", commit=3)
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        runner.main()
+
+        rapporto = json.loads(next(tmp_path.glob("*.json")).read_text())
+        assert [e["pbi"] for e in rapporto["esiti"]] == ["PBI-212"]
+        assert rapporto["stato"] == "finito"
+
+
+class TestIGateSiDichiaranoPrimaDiPartire:
+    """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
+
+    `backend/requirements.txt` è il file del runtime: `pytest` non c'è, e il venv
+    di `~/ada-run` ce l'ha solo perché qualcuno gliel'ha installato a mano. Il
+    28/08, allestendo `~/ada-run-310` per far girare due PBI in parallelo, il
+    primo gate sarebbe morto su `pytest: command not found` **dopo** mezz'ora di
+    Builder. Il controllo sta dove stanno già il lucchetto e il censimento degli
+    agenti: prima del primo PBI.
+    """
+
+    def test_dice_quali_comandi_mancano(self, monkeypatch):
+        monkeypatch.setattr(runner.shutil, "which", lambda c: None if c == "pytest" else "/usr/bin/npm")
+        assert runner.gate_mancanti(attivi=set()) == ["pytest"]
+
+    def test_con_tutto_a_posto_non_dice_niente(self, monkeypatch):
+        monkeypatch.setattr(runner.shutil, "which", lambda c: f"/usr/bin/{c}")
+        assert runner.gate_mancanti(attivi=set()) == []
+
+    def test_guarda_solo_i_gate_accesi(self, monkeypatch):
+        """`--e2e` spento non deve pretendere lo stack Playwright."""
+        monkeypatch.setattr(runner.shutil, "which", lambda c: f"/usr/bin/{c}")
+        assert "e2e" not in runner.gate_mancanti(attivi=set())
+
+    def test_il_lancio_si_ferma_e_li_nomina_tutti(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: ["pytest"])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI parte senza i suoi gate"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        assert runner.main() == 2
+        assert "pytest" in capsys.readouterr().out
+
+    def test_un_dry_run_non_pretende_i_gate(self, tmp_path, monkeypatch):
+        """`--dry-run` stampa il prompt e non esegue niente: pretendere i gate lì
+        vorrebbe dire non poter leggere un prompt su una macchina qualsiasi."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: ["pytest"])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda pbi, *a, **k: runner.Esito(pbi, "saltato")
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["asdlc_runner", "PBI-212", "--dry-run", "--in-primo-piano"]
+        )
+
+        assert runner.main() == 0
+
+    def test_le_dipendenze_di_test_sono_dichiarate(self):
+        """La conoscenza che stava nella testa di chi allestì il primo venv."""
+        dev = REPO / "backend" / "requirements-dev.txt"
+        assert dev.exists(), "un albero nuovo deve poter installare i gate leggendo un file"
+        assert "pytest" in dev.read_text()

@@ -40,6 +40,7 @@ import csv
 import fcntl
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -315,6 +316,60 @@ class Esito:
     finito: str = ""
     durata_s: float = 0.0
     tempi: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+
+
+def apri_rapporto(run: str, pbi: list[str]) -> Path:
+    """Scrive il rapporto del giro **prima** di cominciare, con stato `in-corso`.
+
+    `scrivi_tempi` gira in fondo a `main()`: fino a lì, di un giro in corso non
+    esiste niente da nessuna parte. Un giro che non arriva in fondo — il
+    terminale chiuso, un `kill`, una macchina che si sospende — non lascia
+    traccia, e chi guarda il registro il giorno dopo vede un buco fra due orari.
+    È successo a PBI-329 il 28/08: diciassette commit, la Verifica spuntata
+    cinque su cinque, e nessuna riga da nessuna parte (difetto 20).
+
+    Va nel rapporto per-run e **non** nel CSV: `runs/*.json` è gitignored, quindi
+    aprire una riga qui non moltiplica i conflitti del difetto 19, che nascono
+    proprio dall'appendere in coda a un file condiviso.
+    """
+    rapporto = LOG_DIR / f"{run}.json"
+    rapporto.parent.mkdir(exist_ok=True)
+    rapporto.write_text(
+        json.dumps({"run": run, "stato": "in-corso",
+                    "iniziato": datetime.now().isoformat(timespec="seconds"),
+                    "pbi": pbi}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return rapporto
+
+
+def chiudi_rapporto(run: str, esiti: list[Esito]) -> Path:
+    """Riscrive il rapporto a giro finito: gli esiti, e lo stato che non è più `in-corso`."""
+    rapporto = LOG_DIR / f"{run}.json"
+    rapporto.write_text(
+        json.dumps({
+            "run": run, "stato": "finito",
+            "finito": datetime.now().isoformat(timespec="seconds"),
+            "esiti": [{k: v for k, v in e.__dict__.items() if k != "tempi"}
+                      | {"tempi": dict(e.tempi)} for e in esiti],
+        }, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return rapporto
+
+
+def gate_mancanti(attivi: set[str]) -> list[str]:
+    """I gate accesi il cui comando non esiste su questa macchina.
+
+    `backend/requirements.txt` è il file del runtime e `pytest` non c'è: un
+    worktree nuovo nasce senza il gate più importante, e senza questo controllo
+    lo scopre dopo mezz'ora di Builder, su un gate rosso che sembra un errore del
+    codice (difetto 21). Si guardano solo i gate accesi: `--e2e` spento non deve
+    pretendere lo stack Playwright.
+    """
+    return [g.nome for g in GATE
+            if (g.solo_se is None or g.solo_se in attivi)
+            and shutil.which(g.comando[0]) is None]
 
 
 def log_del_giro(run: str) -> Path:
@@ -943,6 +998,21 @@ def main() -> int:
                   "worktree suo.")
             return 2
 
+        # Un `--dry-run` stampa il prompt e non esegue niente: pretendere i gate lì
+        # vorrebbe dire non poter leggere un prompt su una macchina qualsiasi.
+        if not a.dry_run and (mancano := gate_mancanti(attivi)):
+            print(f"Non parto: {len(mancano)} gate su questa macchina non può girare — "
+                  f"{', '.join(mancano)}.")
+            print("Le dipendenze di test si installano da backend/requirements-dev.txt:\n"
+                  "  backend/.venv/bin/pip install -r backend/requirements-dev.txt\n"
+                  "Un gate che non gira lo si scopre in tre secondi qui, o in mezz'ora "
+                  "dopo il Builder, su un rosso che sembra un errore del codice.")
+            return 2
+
+        # Il rapporto si apre **adesso**, non a giro finito: un giro che muore a metà
+        # deve aver lasciato scritto che è esistito (difetto 20).
+        apri_rapporto(run, list(a.pbi))
+
         for pbi in a.pbi:
             e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
                            con_critic=not a.senza_critic)
@@ -956,10 +1026,7 @@ def main() -> int:
                 break
 
         scrivi_tempi(run, esiti)
-        (LOG_DIR / f"{run}.json").write_text(
-            json.dumps([{k: v for k, v in e.__dict__.items() if k != "tempi"} | {"tempi": dict(e.tempi)}
-                        for e in esiti], indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        chiudi_rapporto(run, esiti)
         totale = sum(e.durata_s for e in esiti)
         print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"
               + (f" · {totale / 3600 * a.tariffa:.2f} €" if a.tariffa else ""))
