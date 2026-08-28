@@ -635,13 +635,13 @@ class TestIlLancioSiFermaPrimaDiScrivere:
 
     def test_un_agente_estraneo_ferma_tutto(self, monkeypatch, capsys):
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [(797078, "claude -p")])
-        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
         assert runner.main() == 2
         assert "797078" in capsys.readouterr().out
 
     def test_un_altro_runner_ferma_tutto(self, monkeypatch, capsys):
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
-        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
         with runner.lucchetto():
             assert runner.main() == 2
         assert "lucchetto" in capsys.readouterr().out.lower()

@@ -312,6 +312,60 @@ class Esito:
     tempi: dict[str, float] = field(default_factory=lambda: defaultdict(float))
 
 
+def log_del_giro(run: str) -> Path:
+    """Il log di un giro porta il nome del suo rapporto JSON.
+
+    `runs/<run>.log` accanto a `runs/<run>.json`: sono lo stesso giro visto da due
+    parti, e chi ne ha uno deve poter aprire l'altro senza cercare.
+    """
+    return LOG_DIR / f"{run}.log"
+
+
+def va_staccato(in_primo_piano: bool, pid: int, sid: int) -> bool:
+    """Se il processo deve mettersi in una sessione sua prima di cominciare.
+
+    Due sole eccezioni al distacco: chi lo chiede esplicitamente — il debug e la
+    CI, che vogliono l'output sotto gli occhi e un exit code — e chi è **già**
+    leader della propria sessione, perché è stato lanciato da `setsid` o è già
+    passato di qui. Staccare due volte non fa danno, ma un fork in più a ogni
+    rilancio è rumore in `ps` e una riga in meno che si capisce.
+    """
+    return not in_primo_piano and pid != sid
+
+
+def stacca(run: str) -> Path:
+    """Mette il runner in una sessione sua, e il suo output in un file.
+
+    Un giro dura un'ora: legarlo al terminale che l'ha lanciato significa che
+    chiudere quella finestra butta via il lavoro a metà. È successo il 26/08 su
+    PBI-322 — difetto 15 di PBI-102 — e finché il distacco lo faceva chi lancia
+    (`setsid nohup … < /dev/null &`) il runner si comportava in due modi a
+    seconda di come lo si chiamava.
+
+    Il padre esce **subito** e con `os._exit`: torna la shell a chi ha lanciato,
+    senza far girare gli `atexit` di un processo che non ha fatto niente. Il
+    figlio prende una sessione sua con `setsid()` — da lì non ha più un terminale
+    di controllo, quindi nessun SIGHUP lo raggiunge — e si riapre i tre canali:
+    stdin sul vuoto, stdout e stderr in append sul log del giro.
+    """
+    log = log_del_giro(run)
+    log.parent.mkdir(exist_ok=True)
+    print(f"Staccato dalla sessione: PID del figlio in `ps`, log in {log.name}.\n"
+          f"  tail -f {log.relative_to(REPO) if log.is_relative_to(REPO) else log}")
+    sys.stdout.flush()
+
+    if os.fork() > 0:
+        os._exit(0)
+
+    os.setsid()
+    vuoto = os.open(os.devnull, os.O_RDONLY)
+    scritto = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    os.dup2(vuoto, 0)
+    os.dup2(scritto, 1)
+    os.dup2(scritto, 2)
+    return log
+
+
 class AlberoOccupato(RuntimeError):
     """Qualcun altro sta già lavorando in questo worktree."""
 
@@ -763,6 +817,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
                          "Il giro lo dichiara in runs/tempi.csv")
     ap.add_argument("--continua-sui-rossi", action="store_true",
                     help="prosegui col PBI successivo anche se questo è rimasto rosso")
+    ap.add_argument("--in-primo-piano", action="store_true",
+                    help="non staccarsi dalla sessione: output a schermo e exit code. "
+                         "Di default il giro si stacca e scrive in runs/<run>.log")
     ap.add_argument("--riepilogo", action="store_true",
                     help="non esegue niente: somma i tempi già registrati in runs/tempi.csv")
     ap.add_argument("--tariffa", type=float, metavar="EUR_ORA",
@@ -783,6 +840,12 @@ def main() -> int:
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
     LOG_DIR.mkdir(exist_ok=True)
     esiti: list[Esito] = []
+
+    # Il distacco sta **prima** del lucchetto, e non è un dettaglio d'ordine: il
+    # `flock` vive nell'open file description del processo che l'ha preso, quindi
+    # un padre che lo prendesse e poi morisse forkando se lo porterebbe via.
+    if va_staccato(a.in_primo_piano, os.getpid(), os.getsid(0)):
+        stacca(run)
 
     # I due controlli stanno **qui**, prima del primo PBI: presi a metà giro non
     # servono a niente, perché a quel punto l'albero è già scritto da due mani.
