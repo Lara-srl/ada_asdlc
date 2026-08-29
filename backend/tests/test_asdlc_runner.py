@@ -1422,6 +1422,37 @@ class TestIlVenvSeLoTrovaDaSolo:
         assert os.environ["PATH"] == f"{bin_venv}:/usr/bin"
 
 
+class TestLUrlDellaPrSiRiconoscePerForma:
+    """L'altra metà del difetto 12 di PBI-102.
+
+    `gh pr create` scrive l'URL sull'ultima riga **quando va tutto liscio**. Un
+    avviso di aggiornamento, una nota sul remoto, una riga di `gh` che parla di
+    sé: bastano a far finire nella colonna `pr` del registro una frase che non è
+    un indirizzo. La colonna serve a una cosa sola — aprire la PR — e un warning
+    lì dentro la rende inutile senza dirlo.
+    """
+
+    def _crea_pr(self, monkeypatch, uscita: str) -> str:
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita))
+        return runner.apri_pr(
+            "PBI-212", runner.REPO / "backlog" / "PBI-212-margine-costo-e-ricavo.md",
+            "pbi/pbi-212", runner.Esito("PBI-212", "fatto"),
+        )
+
+    def test_lurl_si_trova_anche_sotto_un_warning(self, monkeypatch):
+        uscita = ("https://github.com/Lara-srl/ada_controller/pull/212\n"
+                  "A new release of gh is available: 2.55.0 → 2.62.0\n")
+        assert self._crea_pr(monkeypatch, uscita) == (
+            "https://github.com/Lara-srl/ada_controller/pull/212"
+        )
+
+    def test_senza_url_la_colonna_resta_vuota(self, monkeypatch):
+        """Meglio vuota che con dentro una frase: una colonna che mente costa più
+        di una che tace."""
+        assert self._crea_pr(monkeypatch, "A new release of gh is available\n") == ""
+
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
