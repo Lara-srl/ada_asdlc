@@ -1013,11 +1013,31 @@ def registra(cartella: Path) -> int:
         except json.JSONDecodeError:
             print(f"  ⚠️  {f.name} illeggibile: lo salto")
             continue
-        for e in dati.get("esiti", []):
-            # Niente tempo, niente riga: un `saltato` a zero sporcherebbe la media.
-            if e.get("stato") == "saltato":
+
+        # Due forme, e la vecchia va letta: i rapporti scritti prima di
+        # `apri_rapporto()` sono una **lista nuda di esiti**, senza `run` e senza
+        # `stato`. Sono i giri già fatti, cioè esattamente ciò che questo comando
+        # esiste per recuperare; il `run` lo dà il nome del file, che è il
+        # timestamp con cui il giro è nato.
+        if isinstance(dati, list):
+            run, esiti = f.stem, dati
+        elif isinstance(dati, dict):
+            run, esiti = dati.get("run", f.stem), dati.get("esiti", [])
+        else:
+            print(f"  ⚠️  {f.name} non è un rapporto: lo salto")
+            continue
+
+        for e in esiti:
+            # Un file storto non porta via gli altri: è la regola del lettore del
+            # consuntivo — un lettore che esplode su una riga vecchia spegne la
+            # pagina intera per una riga su seicento.
+            if not isinstance(e, dict) or "pbi" not in e or "stato" not in e:
+                print(f"  ⚠️  {f.name}: un esito senza pbi o senza stato, lo salto")
                 continue
-            nuove.append(riga_di_registro(dati.get("run", f.stem), e))
+            # Niente tempo, niente riga: un `saltato` a zero sporcherebbe la media.
+            if e["stato"] == "saltato":
+                continue
+            nuove.append(riga_di_registro(run, e))
 
     presenti: set[tuple[str, str]] = set()
     if CSV_TEMPI.exists():
