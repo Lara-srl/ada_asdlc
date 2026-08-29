@@ -630,6 +630,108 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         )
 
 
+class TestUnFermatoDiceQuantiCommitHaFatto:
+    """Difetto 10 di PBI-102.
+
+    Il conteggio dei commit stava **dopo** il giro dei gate: ogni uscita
+    anticipata — lo `STOP` del Builder, l'albero che resta sporco — scriveva
+    `commit = 0` nel registro. Su PBI-209 quel `fermato` aveva **otto commit e
+    2.174 righe** dentro, e il registro diceva zero: chi legge il giorno dopo
+    decide se buttare il branch guardando quella colonna.
+    """
+
+    def _mondo(self, monkeypatch, uscita_builder: str, commit: str = "8"):
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return ""
+            if args[:2] == ("rev-list", "--count"):
+                return commit
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita_builder))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+
+    def test_uno_stop_del_builder_conta_i_suoi_commit(self, monkeypatch):
+        self._mondo(monkeypatch, "STOP: la migrazione tocca una tabella con dati sopra\n")
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert esito.commit == 8, (
+            "un fermato a mani vuote e un fermato con otto commit dentro si "
+            "leggono uguali, e il secondo finisce buttato"
+        )
+
+    def test_un_sospeso_del_critic_conta_i_suoi_commit(self, monkeypatch):
+        self._mondo(monkeypatch, "FATTO: fatto\n", commit="4")
+        monkeypatch.setattr(
+            runner, "revisione_critica",
+            lambda p: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "sospeso"
+        assert esito.commit == 4
+
+
+class TestDiUnGateRossoRestaLaRagione:
+    """Difetto 14 di PBI-102.
+
+    `gate_rossi` teneva i **nomi** dei gate caduti e buttava il loro output: il
+    rapporto diceva *«pytest»* e chi lo leggeva doveva rifare girare la suite per
+    sapere quale test, o avere il Builder ancora sotto mano. La coda dell'output
+    ce l'abbiamo già in mano — `gira_gate` la restituisce per darla al Builder —
+    e buttarla è l'unico passaggio che costa qualcosa.
+    """
+
+    def _mondo_rosso(self, monkeypatch):
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return ""
+            if args[:2] == ("rev-list", "--count"):
+                return "2"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(
+            runner, "gira_gate",
+            lambda attivi: [("pytest", "E   assert 496.51 == 609.00\ntest_riga_12 FAILED")],
+        )
+
+    def test_la_coda_delloutput_finisce_nel_rapporto(self, monkeypatch, tmp_path):
+        self._mondo_rosso(monkeypatch)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        assert esito.stato == "rosso"
+
+        rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
+        scritto = json.dumps(rapporto, ensure_ascii=False)
+        assert "pytest" in scritto, "il nome del gate c'era già"
+        assert "test_riga_12 FAILED" in scritto, (
+            "senza la coda dell'output il rapporto dice che è rosso e non dice perché"
+        )
+
+    def test_la_coda_delloutput_finisce_anche_nel_log(self, monkeypatch, capsys):
+        self._mondo_rosso(monkeypatch)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert "test_riga_12 FAILED" in capsys.readouterr().out, (
+            "il log del giro è ciò che si apre per primo: la ragione va anche lì"
+        )
+
+
 class TestDueRunnerNonGiranoNelloStessoAlbero:
     """Il worktree è uno solo, e finora non aveva un lucchetto.
 
