@@ -18,6 +18,7 @@ verso il mondo, e si sostituiscono. Un test del runner che chiamasse git davvero
 sarebbe un test che riscrive il repository in cui gira.
 """
 
+import csv
 import importlib.util
 import json
 import sys
@@ -1253,6 +1254,85 @@ class TestUnPbiFinitoELoResta:
         assert visto["esiti"] == ["PBI-212"], (
             "l'esito del primo PBI deve essere già su disco mentre parte il secondo: "
             "un kill a metà della seconda ora non cancella la prima"
+        )
+
+
+class TestIlRegistroEsceDaiBranch:
+    """Difetti 12 e 19 di PBI-102, chiusi insieme da `ADR-0020`.
+
+    `runs/tempi.csv` è versionato e append-only, e il runner lo scriveva in fondo
+    a `main()` — cioè **dentro il worktree del PBI**, sul branch. Ogni branch nato
+    prima che la riga di un altro giro entrasse in `main` scriveva la stessa
+    ultima riga, e la PR si presentava `CONFLICTING` su un file che il PBI non ha
+    mai toccato: due volte il 27/08 (PBI-326, poi PBI-306). Committarlo più
+    spesso — il difetto 12 — alzava la frequenza del conflitto invece di toglierlo.
+
+    Francesco, 29/08: *«il CSV esce dai branch e si scrive su main dopo il
+    merge»*. Il giro scrive solo il suo rapporto, che è gitignored e per-run;
+    `--registra` piega i rapporti nel CSV, su `main`, quando il lavoro è già
+    entrato.
+    """
+
+    def _rapporto(self, cartella: Path, run: str, esiti: list[dict]) -> None:
+        (cartella / f"{run}.json").write_text(
+            json.dumps({"run": run, "stato": "finito", "esiti": esiti}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def _esito(self, pbi: str, iniziato: str, stato: str = "fatto") -> dict:
+        return {"pbi": pbi, "stato": stato, "iniziato": iniziato, "finito": iniziato,
+                "durata_s": 600.0, "tentativi": 1, "revisioni": 0, "commit": 4,
+                "pr": "", "nota": "", "tempi": {"builder": 500.0, "gate": 60.0, "critic": 40.0}}
+
+    def test_il_giro_non_scrive_il_registro_nel_branch(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda pbi, *a, **k: runner.Esito(pbi, "fatto", commit=3)
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        runner.main()
+
+        assert not (tmp_path / "tempi.csv").exists(), (
+            "il registro scritto sul branch è il conflitto del difetto 19"
+        )
+        assert next(tmp_path.glob("*.json")), "il giro deve restare scritto da qualche parte"
+
+    def test_registra_piega_i_rapporti_nel_csv_in_ordine_di_tempo(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        self._rapporto(tmp_path, "20260829-020000", [self._esito("PBI-330", "2026-08-29T02:00:00")])
+        self._rapporto(tmp_path, "20260828-230000", [self._esito("PBI-329", "2026-08-28T23:00:00")])
+
+        assert runner.registra(tmp_path) == 0
+
+        righe = list(csv.DictReader((tmp_path / "tempi.csv").open(encoding="utf-8")))
+        assert [r["pbi"] for r in righe] == ["PBI-329", "PBI-330"], (
+            "una riga persa o fuori ordine è un giro che non è mai esistito"
+        )
+        assert righe[0]["builder_s"] == "500.0" and righe[0]["commit"] == "4"
+
+    def test_registrare_due_volte_non_duplica(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        self._rapporto(tmp_path, "20260829-020000", [self._esito("PBI-330", "2026-08-29T02:00:00")])
+
+        runner.registra(tmp_path)
+        runner.registra(tmp_path)
+
+        righe = list(csv.DictReader((tmp_path / "tempi.csv").open(encoding="utf-8")))
+        assert len(righe) == 1, "la chiave è (run, pbi): rilanciarlo deve essere innocuo"
+
+    def test_un_saltato_non_prende_riga(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        self._rapporto(tmp_path, "20260829-030000",
+                       [self._esito("PBI-000", "2026-08-29T03:00:00", stato="saltato")])
+
+        runner.registra(tmp_path)
+
+        assert not (tmp_path / "tempi.csv").exists(), (
+            "una riga a zero sporcherebbe la media: niente tempo, niente riga"
         )
 
 
