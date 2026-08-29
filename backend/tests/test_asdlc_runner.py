@@ -1309,6 +1309,43 @@ class TestIlRegistroEsceDaiBranch:
         )
         assert righe[0]["builder_s"] == "500.0" and righe[0]["commit"] == "4"
 
+    def test_un_rapporto_vecchio_e_una_lista_nuda_di_esiti(self, tmp_path, monkeypatch):
+        """I rapporti scritti prima di `apri_rapporto()` sono una **lista** di esiti,
+        senza `run` e senza `stato`: `runs/20260828-224137.json` è così, ed è
+        l'unico rimasto sulla macchina quando `--registra` è stato eseguito la
+        prima volta. Leggerli è tutto il punto del comando — sono i giri già
+        fatti — e un `AttributeError` su un file vecchio è un registro che non si
+        può più ricostruire. Il `run` lo dà il nome del file, che è il timestamp
+        con cui il giro è nato.
+        """
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        (tmp_path / "20260828-224137.json").write_text(
+            json.dumps([self._esito("PBI-328", "2026-08-28T22:41:37")]), encoding="utf-8"
+        )
+
+        assert runner.registra(tmp_path) == 0
+
+        righe = list(csv.DictReader((tmp_path / "tempi.csv").open(encoding="utf-8")))
+        assert [(r["run"], r["pbi"]) for r in righe] == [("20260828-224137", "PBI-328")]
+
+    def test_un_rapporto_di_forma_ignota_si_salta_dicendolo(self, tmp_path, monkeypatch, capsys):
+        """Un file storto non porta via gli altri: è la stessa regola del lettore
+        del consuntivo — *«un lettore che esplode su una riga vecchia spegne la
+        pagina intera per una pratica su seicento»*."""
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        (tmp_path / "storto.json").write_text('"un giro"', encoding="utf-8")
+        (tmp_path / "20260829-020000.json").write_text(
+            json.dumps({"run": "20260829-020000",
+                        "esiti": [self._esito("PBI-330", "2026-08-29T02:00:00")]}),
+            encoding="utf-8",
+        )
+
+        assert runner.registra(tmp_path) == 0
+
+        righe = list(csv.DictReader((tmp_path / "tempi.csv").open(encoding="utf-8")))
+        assert [r["pbi"] for r in righe] == ["PBI-330"]
+        assert "storto.json" in capsys.readouterr().out, "un file saltato in silenzio è una riga persa"
+
     def test_registrare_due_volte_non_duplica(self, tmp_path, monkeypatch):
         monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
         self._rapporto(tmp_path, "20260829-020000", [self._esito("PBI-330", "2026-08-29T02:00:00")])
