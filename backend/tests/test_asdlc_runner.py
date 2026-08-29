@@ -1378,6 +1378,50 @@ class TestIlGateE2ENonEDelRunner:
         )
 
 
+class TestIlVenvSeLoTrovaDaSolo:
+    """L'ultimo pezzo di `ada-notte.sh` che il runner non faceva: il `PATH`.
+
+    `backend/requirements.txt` è il file del runtime e `pytest` non c'è, quindi i
+    gate girano col venv del worktree — che finora andava messo sul `PATH` a mano
+    prima di ogni lancio. Dimenticarlo non costa più il giro (difetto 21 lo dice
+    in tre secondi), ma resta una cosa da ricordarsi, e il criterio che chiude
+    PBI-102 è **non doversi ricordare niente**.
+    """
+
+    def test_il_venv_del_worktree_entra_nel_path(self, tmp_path, monkeypatch):
+        (tmp_path / "backend" / ".venv" / "bin").mkdir(parents=True)
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        aggiunto = runner.venv_sul_path()
+
+        import os
+        assert aggiunto == str(tmp_path / "backend" / ".venv" / "bin")
+        assert os.environ["PATH"].startswith(aggiunto), (
+            "il venv del worktree deve venire prima del python di sistema"
+        )
+
+    def test_senza_venv_il_path_resta_quello_che_era(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        assert runner.venv_sul_path() is None
+
+        import os
+        assert os.environ["PATH"] == "/usr/bin"
+
+    def test_non_lo_aggiunge_due_volte(self, tmp_path, monkeypatch):
+        bin_venv = tmp_path / "backend" / ".venv" / "bin"
+        bin_venv.mkdir(parents=True)
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setenv("PATH", f"{bin_venv}:/usr/bin")
+
+        assert runner.venv_sul_path() is None
+
+        import os
+        assert os.environ["PATH"] == f"{bin_venv}:/usr/bin"
+
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
