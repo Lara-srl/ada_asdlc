@@ -789,6 +789,24 @@ class TestDueRunnerNonGiranoNelloStessoAlbero:
         with runner.lucchetto():
             pass
 
+    def test_il_lucchetto_sta_dove_stanno_i_log(self, tmp_path, monkeypatch):
+        """Chi sposta `LOG_DIR` sposta anche il lucchetto — e non è cosmesi.
+
+        Il lucchetto è uno dei file che il runner scrive sotto `runs/`, e chi
+        redirige quella cartella crede di aver spostato tutto: è ciò che fanno i
+        test di `main()`, che girano su `tmp_path`. Con un percorso calcolato
+        all'import il lucchetto resta indietro, nel `runs/` **vero** — e allora
+        quei test non provano più il runner: provano se sul PC c'è un runner
+        vivo. Girando *dentro* un giro del runner — cioè ogni volta che il gate
+        pytest è il suo — falliscono tutti insieme con «Non parto: un altro
+        runner sta già lavorando», che è il contrario di ciò che affermano.
+
+        Due nomi per la stessa cartella divergono; qui erano già divergenti.
+        """
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        with runner.lucchetto():
+            assert (tmp_path / runner.NOME_LUCCHETTO).exists()
+
 
 class TestUnAgenteNelWorktreeFermaIlLancio:
     """Il lucchetto tiene fuori un secondo runner, non un agente avviato a mano —
