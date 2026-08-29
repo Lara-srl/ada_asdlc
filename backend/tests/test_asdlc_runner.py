@@ -65,6 +65,8 @@ def git_finto(monkeypatch):
             return ""  # albero pulito
         if args[:2] == ("rev-list", "--count"):
             return "3"
+        if args[:2] == ("ls-tree", "--name-only"):
+            return "\n".join(f"backlog/{f.name}" for f in sorted((REPO / "backlog").glob("*.md")))
         return ""
 
     monkeypatch.setattr(runner, "git", _git)
@@ -202,6 +204,74 @@ class TestIlBranchNasceDaOriginMain:
         conteggi = [c for c in git_finto if c[:2] == ("rev-list", "--count")]
         assert conteggi, "il conteggio dei commit non è stato fatto"
         assert all("origin/main..HEAD" in c for c in conteggi)
+
+
+class TestIlPbiSiCercaSuOriginMain:
+    """Difetto 7 di PBI-102, ricaduto due volte.
+
+    Il worktree del runner resta fermo al commit su cui qualcuno l'ha messo
+    l'ultima volta; il branch invece nasce da `origin/main` (`crea_branch`).
+    Un PBI mergiato dopo quell'ultimo `switch` c'è **dove il lavoro si farà** e
+    non c'è **dove lo si cercava**: il giro chiudeva «saltato (PBI inesistente)»
+    con il file sotto il naso, e chi lanciava perdeva il giro senza capire.
+    """
+
+    def test_un_pbi_che_ce_solo_su_origin_main_si_esegue(self, monkeypatch):
+        chiamate: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args[:2] == ("status", "--porcelain"):
+                return ""
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                # origin/main ce l'ha; l'albero estratto no — non esiste su disco.
+                return "backlog/PBI-999-mergiato-stanotte.md\nbacklog/README.md"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+        )
+
+        esito = runner.esegui_pbi("PBI-999", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato != "saltato", esito.nota
+        assert any(c[:2] == ("ls-tree", "--name-only") for c in chiamate), (
+            "il nome del file va chiesto a origin/main, non all'albero estratto"
+        )
+        assert any(c[:1] == ("fetch",) for c in chiamate), (
+            "un origin/main vecchio non sa del PBI mergiato stanotte"
+        )
+
+    def test_un_pbi_che_non_esiste_da_nessuna_parte_resta_saltato(self, monkeypatch, git_finto):
+        esito = runner.esegui_pbi("PBI-000", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "saltato"
+        assert "inesistente" in esito.nota
+
+    def test_senza_rete_si_ripiega_sullalbero_estratto(self, monkeypatch, capsys):
+        """Il fetch che non parte non è una ragione per non fare il PBI che si ha
+        già in casa: si ripiega, e lo si dice."""
+
+        def _git(*args: str) -> str:
+            if args[:1] == ("fetch",) or args[:2] == ("ls-tree", "--name-only"):
+                raise RuntimeError("Could not resolve host: github.com")
+            if args[:2] == ("status", "--porcelain"):
+                return ""
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+
+        trovato = runner.trova_pbi("PBI-102")
+
+        assert trovato is not None and trovato.name.startswith("PBI-102-")
+        assert "origin/main" in capsys.readouterr().out
 
 
 class TestIlRiepilogoNonSommaStatiDiversi:
