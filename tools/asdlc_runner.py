@@ -518,7 +518,19 @@ def misura(e: Esito, voce: str):
 
 
 def esegui(cmd: list[str], cwd: Path, timeout: int = 7200) -> tuple[int, str]:
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    """Il varco verso il mondo. Un comando che non esiste torna `127`, non alza.
+
+    `subprocess.run` alza `FileNotFoundError`, e l'eccezione saliva fino a
+    `main()`: il processo moriva col traceback, senza riga nel registro e senza
+    rapporto — un `pytest` non installato spegneva la sequenza invece di essere
+    il gate rosso con la diagnosi più ovvia che ci sia (difetto 11). `127` è la
+    convenzione della shell per «comando non trovato», e la nota dice quale.
+    """
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
+                     f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
     return p.returncode, (p.stdout + p.stderr)
 
 

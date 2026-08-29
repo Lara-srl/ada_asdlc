@@ -1177,6 +1177,85 @@ class TestUnGiroLasciaTracciaAppenaComincia:
         assert rapporto["stato"] == "finito"
 
 
+class TestUnPbiFinitoELoResta:
+    """Difetto 17 di PBI-102, che ha due metà.
+
+    **La prima**: un'eccezione dentro un PBI usciva da `main()` col traceback e
+    portava via la sequenza intera — e con lei i rilievi del Critic dei PBI già
+    chiusi, che stavano ancora in memoria. Un guasto su un PBI è un esito di
+    *quel* PBI; se la catena prosegua lo decide la regola che esiste già,
+    `STATI_CHE_INTERROMPONO`, non il fatto che sia caduta un'eccezione.
+
+    **La seconda**: il rapporto si scriveva solo in fondo a `main()`. Un
+    `kill` a metà della seconda ora cancellava la prima: il giro era esistito e
+    non lo diceva nessuno.
+    """
+
+    def _mondo(self, monkeypatch, tmp_path, esegui_pbi_finto, argv):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", *argv, "--in-primo-piano"])
+
+    def test_uneccezione_chiude_quel_pbi_e_non_la_sequenza(self, tmp_path, monkeypatch):
+        def esegui_pbi_finto(pbi, *a, **k):
+            if pbi == "PBI-212":
+                raise RuntimeError("git switch → already used by worktree")
+            return runner.Esito(pbi, "fatto", commit=3)
+
+        self._mondo(monkeypatch, tmp_path, esegui_pbi_finto,
+                    ["PBI-212", "PBI-214", "--continua-sui-rossi"])
+
+        runner.main()
+
+        rapporto = json.loads(next(tmp_path.glob("*.json")).read_text())
+        esiti = {e["pbi"]: e for e in rapporto["esiti"]}
+        assert set(esiti) == {"PBI-212", "PBI-214"}, (
+            "il traceback si portava via anche i PBI che erano andati bene"
+        )
+        assert esiti["PBI-212"]["stato"] == "rosso"
+        assert "already used by worktree" in esiti["PBI-212"]["nota"], (
+            "la diagnosi del guasto è la cosa che serve, e stava solo nel traceback"
+        )
+
+    def test_uneccezione_ferma_comunque_la_catena_se_nessuno_ha_detto_il_contrario(
+        self, tmp_path, monkeypatch
+    ):
+        partiti: list[str] = []
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            partiti.append(pbi)
+            raise RuntimeError("il mondo è rotto")
+
+        self._mondo(monkeypatch, tmp_path, esegui_pbi_finto, ["PBI-212", "PBI-214"])
+
+        runner.main()
+
+        assert partiti == ["PBI-212"], (
+            "`rosso` interrompe: costruire sul PBI dopo una base rotta costa di più"
+        )
+
+    def test_il_rapporto_di_un_pbi_ce_appena_quel_pbi_e_finito(self, tmp_path, monkeypatch):
+        visto: dict[str, list] = {}
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            if pbi == "PBI-214":
+                rapporto = json.loads(next(tmp_path.glob("*.json")).read_text())
+                visto["esiti"] = [e["pbi"] for e in rapporto.get("esiti", [])]
+            return runner.Esito(pbi, "fatto", commit=3)
+
+        self._mondo(monkeypatch, tmp_path, esegui_pbi_finto, ["PBI-212", "PBI-214"])
+
+        runner.main()
+
+        assert visto["esiti"] == ["PBI-212"], (
+            "l'esito del primo PBI deve essere già su disco mentre parte il secondo: "
+            "un kill a metà della seconda ora non cancella la prima"
+        )
+
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
