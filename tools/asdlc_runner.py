@@ -929,27 +929,86 @@ def esegui_pbi(
     return e
 
 
-def scrivi_tempi(run: str, esiti: list[Esito]) -> None:
-    """Append su runs/tempi.csv: una riga per PBI eseguito, per la fatturazione."""
-    LOG_DIR.mkdir(exist_ok=True)
+def riga_di_registro(run: str, e: dict) -> dict:
+    """Un esito del rapporto JSON nella riga del registro. Le colonne sono `COLONNE_CSV`."""
+    tempi = e.get("tempi", {})
+    return {
+        "run": run, "pbi": e["pbi"], "stato": e["stato"],
+        "iniziato": e.get("iniziato", ""), "finito": e.get("finito", ""),
+        "durata_s": round(float(e.get("durata_s", 0.0)), 1),
+        "durata_hms": hms(float(e.get("durata_s", 0.0))),
+        "builder_s": round(float(tempi.get("builder", 0.0)), 1),
+        "gate_s": round(float(tempi.get("gate", 0.0)), 1),
+        "critic_s": round(float(tempi.get("critic", 0.0)), 1),
+        "tentativi": e.get("tentativi", 0), "revisioni": e.get("revisioni", 0),
+        "commit": e.get("commit", 0), "pr": e.get("pr", ""), "nota": e.get("nota", ""),
+    }
+
+
+def registra(cartella: Path) -> int:
+    """Piega i rapporti dei giri in `runs/tempi.csv`. Si lancia **su `main`**, dopo il merge.
+
+    `ADR-0020`. Il registro è versionato e append-only, e finché lo scriveva il
+    giro finiva **dentro il branch del PBI**: due giri a cavallo di un merge
+    scrivevano la stessa ultima riga, e la PR usciva `CONFLICTING` su un file che
+    il PBI non aveva toccato. Il conflitto si risolveva tenendo tutte le righe —
+    e una riga persa in un conflitto è un giro che non è mai esistito.
+
+    La chiave è `(run, pbi)`: rilanciare il comando è innocuo, ed è ciò che lo
+    rende usabile come gesto di routine dopo ogni merge. L'ordine è quello di
+    `iniziato`, che è l'ordine in cui i giri sono accaduti — non quello in cui
+    qualcuno si è ricordato di registrarli.
+
+    Il commit non lo fa questo comando: le righe si guardano e si portano su
+    `main` con la loro PR (`chore(ci): registra i giri`), che è dove la
+    responsabilità è già umana.
+    """
+    rapporti = sorted(Path(cartella).glob("*.json"))
+    if not rapporti:
+        print(f"Nessun rapporto in {cartella}: niente da registrare.")
+        return 1
+
+    nuove: list[dict] = []
+    for f in rapporti:
+        try:
+            dati = json.loads(f.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            print(f"  ⚠️  {f.name} illeggibile: lo salto")
+            continue
+        for e in dati.get("esiti", []):
+            # Niente tempo, niente riga: un `saltato` a zero sporcherebbe la media.
+            if e.get("stato") == "saltato":
+                continue
+            nuove.append(riga_di_registro(dati.get("run", f.stem), e))
+
+    presenti: set[tuple[str, str]] = set()
+    if CSV_TEMPI.exists():
+        presenti = {(r["run"], r["pbi"])
+                    for r in csv.DictReader(CSV_TEMPI.open(encoding="utf-8"))}
+    nuove = [r for r in nuove if (r["run"], r["pbi"]) not in presenti]
+    nuove.sort(key=lambda r: r["iniziato"])
+
+    if not nuove:
+        print(f"{CSV_TEMPI.name} è già aggiornato: {len(presenti)} righe, nessuna nuova.")
+        return 0
+
+    appendi_righe(nuove)
+    for r in nuove:
+        print(f"  + {r['run']}  {r['pbi']:<10} {r['stato']:<16} {r['durata_hms']:>9}")
+    print(f"{len(nuove)} righe in {CSV_TEMPI}. Ora committale: "
+          f"`git add {CSV_TEMPI.name}` e una PR chore(ci).")
+    return 0
+
+
+def appendi_righe(righe: list[dict]) -> None:
+    """Append su `runs/tempi.csv`, con l'intestazione se il file nasce adesso."""
+    CSV_TEMPI.parent.mkdir(exist_ok=True)
     nuovo = not CSV_TEMPI.exists()
     with CSV_TEMPI.open("a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLONNE_CSV)
         if nuovo:
             w.writeheader()
-        for e in esiti:
-            if e.stato == "saltato":
-                continue  # niente tempo, niente riga: una riga a zero sporcherebbe la media
-            w.writerow({
-                "run": run, "pbi": e.pbi, "stato": e.stato,
-                "iniziato": e.iniziato, "finito": e.finito,
-                "durata_s": round(e.durata_s, 1), "durata_hms": hms(e.durata_s),
-                "builder_s": round(e.tempi["builder"], 1),
-                "gate_s": round(e.tempi["gate"], 1),
-                "critic_s": round(e.tempi["critic"], 1),
-                "tentativi": e.tentativi, "revisioni": e.revisioni,
-                "commit": e.commit, "pr": e.pr, "nota": e.nota,
-            })
+        w.writerows(righe)
 
 
 def riepilogo(tariffa: float | None) -> int:
@@ -1025,6 +1084,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--in-primo-piano", action="store_true",
                     help="non staccarsi dalla sessione: output a schermo e exit code. "
                          "Di default il giro si stacca e scrive in runs/<run>.log")
+    ap.add_argument("--registra", nargs="?", const=str(LOG_DIR), metavar="CARTELLA",
+                    help="non esegue niente: piega i rapporti runs/*.json in runs/tempi.csv. "
+                         "Si lancia su main dopo il merge (ADR-0020)")
     ap.add_argument("--riepilogo", action="store_true",
                     help="non esegue niente: somma i tempi già registrati in runs/tempi.csv")
     ap.add_argument("--tariffa", type=float, metavar="EUR_ORA",
@@ -1036,6 +1098,8 @@ def main() -> int:
     ap = costruisci_parser()
     a = ap.parse_args()
 
+    if a.registra:
+        return registra(Path(a.registra))
     if a.riepilogo:
         return riepilogo(a.tariffa)
     if not a.pbi:
@@ -1114,8 +1178,13 @@ def main() -> int:
                       "una base rossa costa più di quanto risparmia.")
                 break
 
-        scrivi_tempi(run, esiti)
-        chiudi_rapporto(run, esiti)
+        # Il registro **non** si scrive qui: siamo dentro il worktree del PBI, e
+        # una riga in coda a un file versionato è il conflitto del difetto 19
+        # (`ADR-0020`). Il giro lascia il suo rapporto; le righe entrano in `main`
+        # dopo il merge, con `--registra`.
+        rapporto = chiudi_rapporto(run, esiti)
+        print(f"\nRegistro: `python3 tools/asdlc_runner.py --registra {LOG_DIR}` "
+              f"su main, dopo il merge. Rapporto del giro: {rapporto}")
         totale = sum(e.durata_s for e in esiti)
         print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"
               + (f" · {totale / 3600 * a.tariffa:.2f} €" if a.tariffa else ""))
