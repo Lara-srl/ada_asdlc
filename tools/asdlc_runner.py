@@ -310,7 +310,11 @@ class Esito:
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
     critic_saltato: bool = False
-    gate_rossi: list[str] = field(default_factory=list)
+    # Un dizionario per gate caduto — `{"gate": nome, "coda": ultimo output}` — e
+    # non il solo nome: il verdetto senza la ragione obbliga a rifar girare la
+    # suite per sapere quale test, o ad avere ancora il Builder sotto mano
+    # (difetto 14). La coda ce l'abbiamo già: `gira_gate` la restituisce.
+    gate_rossi: list[dict[str, str]] = field(default_factory=list)
     # Tempi: il totale è il tempo di parete del PBI, il resto ne è la scomposizione.
     iniziato: str = ""
     finito: str = ""
@@ -749,7 +753,22 @@ def esegui_pbi(
     t0 = time.monotonic()
     branch = crea_branch(pbi)
 
+    def conta_commit() -> int:
+        """`origin/main..HEAD` e non `main..HEAD`: da quando il main locale del
+        worktree non si estrae più, resta indietro di giorni e conterebbe come
+        commit del PBI tutto ciò che main ha ricevuto nel frattempo."""
+        try:
+            return int(git("rev-list", "--count", "origin/main..HEAD") or 0)
+        except (RuntimeError, ValueError):
+            return e.commit  # un conteggio mancato non cancella quello di prima
+
     def chiudi(stato: str, nota: str = "") -> Esito:
+        # Il conteggio sta **qui** e non dopo il giro dei gate: ogni uscita
+        # anticipata — lo `STOP` del Builder, l'albero che resta sporco — scriveva
+        # `commit = 0` mentre sul branch c'era il lavoro. Su PBI-209 erano otto
+        # commit e 2.174 righe, e la colonna del registro diceva zero: è quella
+        # che si guarda per decidere se un branch fermato si butta (difetto 10).
+        e.commit = conta_commit()
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
         if nota:
@@ -826,12 +845,11 @@ def esegui_pbi(
                 break
             prompt = PROMPT_RIPROVA.format(esiti="\n\n".join(f"## {n}\n{o}" for n, o in rossi))
 
-        # `origin/main` e non `main`: da quando non lo si estrae, il main locale del
-        # worktree resta indietro, e conterebbe come «commit del PBI» tutto ciò che
-        # main ha ricevuto nel frattempo.
-        e.commit = int(git("rev-list", "--count", "origin/main..HEAD") or 0)
+        e.commit = conta_commit()
         if not verde:
-            e.gate_rossi = [n for n, _ in rossi]
+            e.gate_rossi = [{"gate": n, "coda": o[-2000:]} for n, o in rossi]
+            for g in e.gate_rossi:
+                print(f"    ── {g['gate']} ──\n{g['coda']}")
             return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
 
         # --- Review Gate (probabilistico, sessione separata) ---
