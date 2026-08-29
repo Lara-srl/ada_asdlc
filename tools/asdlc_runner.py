@@ -7,7 +7,7 @@ intelligenza — scrivere il codice, e giudicarlo.
 
 Tre livelli di verifica, come in `patterns/context-gates.md`, e sono tre cose diverse:
 
-  1. Quality Gate  (deterministico) — pytest, tsc, eslint, vitest, e2e.
+  1. Quality Gate  (deterministico) — pytest, tsc, eslint, vitest. Gli E2E no: li fa la CI.
      Li esegue QUESTO script e ne legge l'exit code: un agente che si autodichiara
      verde è un agente che ha imparato a dire "verde".
   2. Review Gate   (probabilistico) — il **Critic**, sessione separata, modello
@@ -22,7 +22,7 @@ Ogni esecuzione scrive i **tempi** in `runs/tempi.csv` (una riga per PBI, in app
 Un PBI = una sessione = un contesto pulito. È il motivo per cui il PBI è un puntatore
 alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 
-    python3 tools/asdlc_runner.py PBI-201 --e2e
+    python3 tools/asdlc_runner.py PBI-201
     python3 tools/asdlc_runner.py PBI-313 --senza-critic   # due gate su tre, e lo dichiara
     python3 tools/asdlc_runner.py PBI-201 PBI-203 --dry-run
     python3 tools/asdlc_runner.py --riepilogo --tariffa 90
@@ -120,7 +120,11 @@ GATE: list[Gate] = [
     Gate("tsc", ["npm", "run", "build"], cwd="frontend"),
     Gate("eslint", ["npm", "run", "lint"], cwd="frontend"),
     Gate("vitest", ["npm", "test"], cwd="frontend"),
-    Gate("e2e", ["npm", "run", "e2e"], cwd="e2e", solo_se="e2e"),
+    # Niente e2e qui: `npm run e2e` da un worktree punta a localhost:8081, che è
+    # lo stack del checkout principale — cioè `main`, non il branch che si sta
+    # costruendo. Lo stack andrebbe rialzato a ogni giro del Builder, e questo non
+    # lo fa. Gli E2E li fa la CI sulla PR, che lo stack lo costruisce dal branch
+    # (`ADR-0009`, difetto 13 di PBI-102).
 ]
 
 PROMPT_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
@@ -1073,7 +1077,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("pbi", nargs="*", help="es. PBI-201 PBI-202")
-    ap.add_argument("--e2e", action="store_true", help="includi il gate Playwright (stack Docker su)")
+    ap.add_argument("--e2e", action="store_true",
+                    help="non fa più niente: il gate Playwright è della CI, non del runner "
+                         "(ADR-0009, difetto 13 di PBI-102). Il flag resta per dirlo")
     ap.add_argument("--dry-run", action="store_true", help="stampa il prompt e non esegue niente")
     ap.add_argument("--no-pr", action="store_true", help="non aprire la PR (resta solo il branch locale)")
     ap.add_argument("--senza-critic", action="store_true",
@@ -1105,7 +1111,19 @@ def main() -> int:
     if not a.pbi:
         ap.error("indica almeno un PBI, oppure usa --riepilogo")
 
-    attivi = {"e2e"} if a.e2e else set()
+    if a.e2e:
+        # Il flag resta, e si ferma qui: cancellarlo darebbe un «unrecognized
+        # arguments» a chi se lo ricorda, e quel messaggio non spiega niente.
+        print("Non parto: il gate e2e non è del runner.\n"
+              "`npm run e2e` da un worktree punta a localhost:8081 — lo stack del "
+              "checkout principale, cioè `main` — e produce un rosso che parla di un "
+              "altro codice: 33 minuti su PBI-320, col Critic mai chiamato.\n"
+              "Gli E2E girano nella CI sulla PR, che lo stack lo costruisce dal branch "
+              "(ADR-0009, .github/workflows/ci.yml). A mano, sullo stack del branch: "
+              "e2e/README.md.")
+        return 2
+
+    attivi: set[str] = set()
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
     LOG_DIR.mkdir(exist_ok=True)
     esiti: list[Esito] = []
