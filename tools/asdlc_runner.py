@@ -40,6 +40,7 @@ import csv
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -669,7 +670,16 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     if code != 0:
         print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
         return ""
-    return out.strip().splitlines()[-1]
+    # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga finché
+    # non ha altro da dire, e un avviso di aggiornamento basta a far finire nella
+    # colonna `pr` del registro una frase che non è un indirizzo (difetto 12).
+    # Se non c'è un URL la colonna resta vuota: una colonna che mente costa più
+    # di una che tace.
+    url = re.search(r"https://\S+/pull/\d+", out)
+    if url is None:
+        print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
+        return ""
+    return url.group(0)
 
 
 def crea_branch(pbi: str) -> str:
