@@ -44,6 +44,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -347,19 +348,33 @@ def apri_rapporto(run: str, pbi: list[str]) -> Path:
     return rapporto
 
 
-def chiudi_rapporto(run: str, esiti: list[Esito]) -> Path:
-    """Riscrive il rapporto a giro finito: gli esiti, e lo stato che non è più `in-corso`."""
+def scrivi_rapporto(run: str, esiti: list[Esito], stato: str) -> Path:
+    """Il rapporto del giro con gli esiti che ci sono **finora**.
+
+    Si riscrive dopo ogni PBI e non solo in fondo a `main()`: un `kill` a metà
+    della seconda ora cancellava la prima, e con lei i rilievi del Critic dei PBI
+    già chiusi, che vivevano solo in memoria (difetto 17). Riscrivere tutto il
+    file ogni volta costa niente — sono kilobyte — e non lascia mai un JSON
+    troncato a metà, che è ciò che un append farebbe.
+    """
     rapporto = LOG_DIR / f"{run}.json"
+    rapporto.parent.mkdir(exist_ok=True)
     rapporto.write_text(
         json.dumps({
-            "run": run, "stato": "finito",
-            "finito": datetime.now().isoformat(timespec="seconds"),
+            "run": run, "stato": stato,
+            ("finito" if stato == "finito" else "aggiornato"):
+                datetime.now().isoformat(timespec="seconds"),
             "esiti": [{k: v for k, v in e.__dict__.items() if k != "tempi"}
                       | {"tempi": dict(e.tempi)} for e in esiti],
         }, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     return rapporto
+
+
+def chiudi_rapporto(run: str, esiti: list[Esito]) -> Path:
+    """Riscrive il rapporto a giro finito: gli esiti, e lo stato che non è più `in-corso`."""
+    return scrivi_rapporto(run, esiti, "finito")
 
 
 def gate_mancanti(attivi: set[str]) -> list[str]:
@@ -1075,9 +1090,22 @@ def main() -> int:
         apri_rapporto(run, list(a.pbi))
 
         for pbi in a.pbi:
-            e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
-                           con_critic=not a.senza_critic)
+            try:
+                e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
+                               con_critic=not a.senza_critic)
+            except Exception as exc:  # noqa: BLE001 — qui si cattura per non perdere il resto
+                # Un guasto dentro un PBI è un esito di **quel** PBI. Prima usciva
+                # da `main()` col traceback e si portava via la sequenza intera, e
+                # con lei i rilievi del Critic dei PBI già chiusi (difetto 17).
+                # Lo stato è `rosso` perché è già nella regola che decide se
+                # proseguire: non serve un'eccezione al posto di una regola.
+                traceback.print_exc()
+                e = Esito(pbi, "rosso", nota=f"eccezione nel runner: {exc}"[:300],
+                          iniziato=datetime.now().isoformat(timespec="seconds"),
+                          finito=datetime.now().isoformat(timespec="seconds"))
             esiti.append(e)
+            # Ogni PBI concluso è già su disco quando parte il successivo.
+            scrivi_rapporto(run, esiti, "in-corso")
             print(f"  → {e.stato}" + (f" ({e.nota})" if e.nota else ""))
             # Un PBI rosso, respinto o fermo su una domanda è un fatto da guardare, non da
             # superare: i PBI successivi molto spesso poggiano su questo.
