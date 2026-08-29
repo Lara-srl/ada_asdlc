@@ -732,6 +732,41 @@ class TestDiUnGateRossoRestaLaRagione:
         )
 
 
+class TestUnComandoCheNonCeFaRossoNonUnTraceback:
+    """Difetto 11 di PBI-102.
+
+    `subprocess.run` alza `FileNotFoundError` quando il comando non esiste, e
+    l'eccezione saliva fino a `main()`: il processo moriva col traceback, senza
+    riga nel registro e senza rapporto. Un `pytest` che manca sulla macchina è
+    un gate rosso con una diagnosi ovvia — non la fine della sequenza.
+
+    Il controllo di `gate_mancanti` copre il caso normale, ma copre solo i gate
+    e solo **prima** del primo PBI: qui si tiene il fondo del secchio.
+    """
+
+    def test_il_comando_inesistente_torna_127_invece_di_alzare(self, monkeypatch):
+        def _run(*a, **k):
+            raise FileNotFoundError(2, "No such file or directory", "pytest")
+
+        monkeypatch.setattr(runner.subprocess, "run", _run)
+
+        code, out = runner.esegui(["pytest", "-q"], runner.REPO)
+
+        assert code == 127, "127 è «comando non trovato», la convenzione della shell"
+        assert "pytest" in out
+
+    def test_un_gate_senza_comando_e_un_gate_rosso(self, monkeypatch):
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda cmd, cwd, timeout=0: (127, f"comando non eseguibile: {cmd[0]}"),
+        )
+
+        rossi = runner.gira_gate(attivi=set())
+
+        assert rossi, "un gate che non gira non è un gate verde"
+        assert all("non eseguibile" in coda for _, coda in rossi)
+
+
 class TestDueRunnerNonGiranoNelloStessoAlbero:
     """Il worktree è uno solo, e finora non aveva un lucchetto.
 
