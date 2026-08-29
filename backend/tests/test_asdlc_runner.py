@@ -304,24 +304,25 @@ class TestIlRiepilogoNonSommaStatiDiversi:
         assert "fatto" in uscita
 
 
-class TestLIgieneNonContaIlRegistroDelRunner:
-    def test_il_csv_dei_tempi_non_conta_come_albero_sporco(self, monkeypatch):
-        """Il runner scrive `runs/tempi.csv` a fine invocazione. Da quando quel
-        file è **versionato**, il giro dopo lo trova modificato e si ferma su
-        «albero di lavoro sporco» — al primo PBI, prima ancora di cominciare.
+class TestLIgieneGuardaTuttoLAlbero:
+    """L'eccezione su `runs/` non c'è più, perché non c'è più la sua causa.
 
-        Il controllo esiste per non perdere lavoro non committato dell'agente.
-        Il registro del runner non è lavoro dell'agente: è la sua contabilità.
-        """
-        visti: list[tuple[str, ...]] = []
+    Il controllo d'igiene ha escluso `runs/` da quando `runs/tempi.csv` è
+    versionato: il runner lo scriveva a fine invocazione, e il giro dopo lo
+    trovava modificato fermandosi su «albero di lavoro sporco» prima ancora di
+    cominciare. L'eccezione era la toppa; `ADR-0020` ha tolto il chiodo — il
+    registro esce dai branch — e la regola torna intera, che è ciò che il criterio
+    del difetto 12 chiedeva: *«finché serve, è il sintomo che questo punto non è
+    chiuso»*.
+    """
+
+    def test_nessun_controllo_digiene_ha_piu_eccezioni(self, monkeypatch):
+        viste: list[tuple[str, ...]] = []
 
         def _git(*args: str) -> str:
-            visti.append(args)
-            if args[0] == "status":
-                # Il mondo reale del giro dopo: solo il registro è cambiato.
-                return " M runs/tempi.csv" if "runs" not in " ".join(args) else ""
+            viste.append(args)
             if args[:2] == ("rev-list", "--count"):
-                return "1"
+                return "2"
             if args[:2] == ("ls-tree", "--name-only"):
                 return elenco_backlog()
             return ""
@@ -333,11 +334,13 @@ class TestLIgieneNonContaIlRegistroDelRunner:
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
 
-        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-        assert esito.stato != "fermato", (
-            "il registro del runner non è lavoro non committato: escluderlo dal "
-            "controllo, o il secondo giro non parte mai"
+        controlli = [a for a in viste if a[:2] == ("status", "--porcelain")]
+        assert controlli, "il controllo d'igiene non è stato fatto"
+        assert all("exclude" not in " ".join(a) for a in controlli), (
+            "un pezzo di albero escluso è un pezzo in cui il lavoro dell'agente può "
+            "sparire senza che nessuno se ne accorga"
         )
 
     def test_un_file_vero_non_committato_ferma_ancora_tutto(self, monkeypatch):
@@ -547,16 +550,21 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
             "il guasto dove non è: è successo su PBI-208"
         )
 
-    def test_il_registro_del_runner_non_e_lavoro_da_far_committare(self, monkeypatch):
-        """`runs/tempi.csv` è escluso all'ingresso ma non dentro il giro: nella
-        catena, il secondo PBI trova la riga del primo e il Builder si sente
-        chiedere di committare la contabilità del runner dentro il suo branch."""
+    def test_dentro_il_giro_lalbero_si_guarda_intero(self, monkeypatch):
+        """Il gemello del controllo d'ingresso, dentro il giro.
+
+        Qui l'eccezione su `runs/` serviva alla catena: il secondo PBI trovava la
+        riga di registro del primo e il Builder si sentiva chiedere di committare
+        la contabilità del runner dentro il suo branch. Da `ADR-0020` quella riga
+        non c'è più, e l'albero si guarda intero — se qualcosa resta fuori, resta
+        fuori davvero.
+        """
         viste: list[tuple[str, ...]] = []
 
         def _git(*args: str) -> str:
             viste.append(args)
             if args[:2] == ("status", "--porcelain"):
-                return "" if "runs" in " ".join(args) else " M runs/tempi.csv"
+                return ""
             if args[:2] == ("rev-list", "--count"):
                 return "2"
             if args[:2] == ("ls-tree", "--name-only"):
@@ -572,24 +580,11 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-        assert esito.stato == "fatto", (
-            "il registro del runner ha fatto sembrare sporco l'albero dentro il giro"
-        )
+        assert esito.stato == "fatto"
         assert all(
-            "runs" in " ".join(a) for a in viste if a[:2] == ("status", "--porcelain")
-        ), "ogni controllo d'igiene esclude `runs/`, dentro il giro come all'ingresso"
-
-    def test_il_prompt_dice_di_prendere_anche_i_file_nuovi(self):
-        """La causa prima: `git commit -am` non prende i file non tracciati.
-
-        Il prompt che chiede il commit deve dirlo, perché è esattamente lì che
-        il Builder di PBI-208 si è perso — e la pagina che aveva scritto è
-        rimasta a un `git add` dal non esistere.
-        """
-        prompt = runner.PROMPT_IGIENE.format(sporco="?? frontend/src/pages/AnalisiPage.tsx")
-        assert "add" in prompt, "senza `git add` i file nuovi non entrano nel commit"
-        assert "AnalisiPage" in prompt, "il Builder deve vedere *cosa* è rimasto fuori"
-
+            "exclude" not in " ".join(a)
+            for a in viste if a[:2] == ("status", "--porcelain")
+        ), "nessun controllo d'igiene ha più eccezioni, dentro il giro come all'ingresso"
 
     def test_ogni_revisione_ritrova_i_suoi_tentativi(self, monkeypatch):
         """La pazienza sui gate è **per revisione**, non per PBI.

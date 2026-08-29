@@ -806,13 +806,15 @@ def esegui_pbi(
         print(prompt)
         return Esito(pbi, "saltato", nota="dry-run")
 
-    if git("status", "--porcelain", "--", ":(exclude)runs"):
+    if git("status", "--porcelain"):
         return Esito(pbi, "fermato", nota="albero di lavoro sporco: committa o pulisci prima")
 
-    # `runs/` è escluso e non per comodità: il controllo esiste per non far partire
-    # l'agente sopra al lavoro non committato di qualcun altro, e `runs/tempi.csv` è
-    # la contabilità del runner, che il runner stesso scrive a fine invocazione.
-    # Contarla renderebbe ogni giro il giro sporco del successivo.
+    # Il controllo guarda **tutto** l'albero, senza eccezioni. `runs/` è stato
+    # escluso finché il runner scriveva `runs/tempi.csv` a fine invocazione: da
+    # quando quel file è versionato, ogni giro rendeva sporco il successivo, e
+    # l'eccezione era la toppa. `ADR-0020` ha tolto la causa — il registro esce
+    # dai branch — quindi torna a valere la regola intera: ciò che non è
+    # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
     branch = crea_branch(pbi)
@@ -881,10 +883,9 @@ def esegui_pbi(
                 domanda = out.split("STOP:")[-1].strip().splitlines()[0]
                 return chiudi("fermato", f"domanda dell'agente: {domanda}")
 
-            # `runs/` escluso qui come all'ingresso, e per la stessa ragione: nella catena
-            # il secondo PBI troverebbe la riga di registro del primo e si sentirebbe
-            # chiedere di committare la contabilità del runner dentro il suo branch.
-            if sporco := git("status", "--porcelain", "--", ":(exclude)runs"):
+            # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
+            # il registro non si scrive più dal branch (`ADR-0020`).
+            if sporco := git("status", "--porcelain"):
                 # Non committato = non esiste: niente da giudicare, niente da ripristinare.
                 # Il giro si conta fra quelli d'igiene: `e.tentativi` è la pazienza sui
                 # **gate**, e spenderla qui vorrebbe dire togliere al lavoro vero i giri
