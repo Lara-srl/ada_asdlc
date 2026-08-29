@@ -381,6 +381,29 @@ def chiudi_rapporto(run: str, esiti: list[Esito]) -> Path:
     return scrivi_rapporto(run, esiti, "finito")
 
 
+def venv_sul_path() -> str | None:
+    """Mette `backend/.venv/bin` in testa al `PATH`, se c'è e non c'è già.
+
+    `backend/requirements.txt` è il file del runtime: `pytest` non c'è, e i gate
+    girano col venv del worktree. Finora quel `PATH` andava scritto a mano prima
+    di ogni lancio — `PATH=$PWD/backend/.venv/bin:$PATH python3 …` — e
+    dimenticarlo dava un `pytest: command not found` che sembrava un errore del
+    codice. Il difetto 21 lo ha reso una diagnosi da tre secondi; questo lo
+    toglie di mezzo del tutto, che è il criterio con cui PBI-102 si chiude:
+    lanciare il runner non richiede di ricordarsi niente.
+
+    Torna il percorso aggiunto, o `None` se non c'era niente da fare — così chi
+    lancia lo legge a schermo invece di doverlo dedurre.
+    """
+    bin_venv = REPO / "backend" / ".venv" / "bin"
+    if not bin_venv.is_dir():
+        return None
+    if str(bin_venv) in os.environ.get("PATH", "").split(os.pathsep):
+        return None
+    os.environ["PATH"] = f"{bin_venv}{os.pathsep}{os.environ.get('PATH', '')}"
+    return str(bin_venv)
+
+
 def gate_mancanti(attivi: set[str]) -> list[str]:
     """I gate accesi il cui comando non esiste su questa macchina.
 
@@ -1122,6 +1145,9 @@ def main() -> int:
               "(ADR-0009, .github/workflows/ci.yml). A mano, sullo stack del branch: "
               "e2e/README.md.")
         return 2
+
+    if aggiunto := venv_sul_path():
+        print(f"venv del worktree sul PATH: {aggiunto}")
 
     attivi: set[str] = set()
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
