@@ -774,7 +774,7 @@ class TestDueRunnerNonGiranoNelloStessoAlbero:
     """
 
     def test_il_secondo_lucchetto_non_si_prende(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         with runner.lucchetto():
             with pytest.raises(runner.AlberoOccupato):
                 with runner.lucchetto():
@@ -783,7 +783,7 @@ class TestDueRunnerNonGiranoNelloStessoAlbero:
     def test_rilasciato_torna_libero(self, tmp_path, monkeypatch):
         """Il lucchetto è del **processo**, non del file: se il runner muore di
         schianto non resta un lucchetto morto da togliere a mano."""
-        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         with runner.lucchetto():
             pass
         with runner.lucchetto():
@@ -863,7 +863,6 @@ class TestIlLancioSiFermaPrimaDiScrivere:
 
     @pytest.fixture(autouse=True)
     def albero(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(
             runner, "esegui_pbi",

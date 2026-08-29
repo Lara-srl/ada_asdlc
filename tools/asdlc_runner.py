@@ -55,8 +55,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 LOG_DIR = REPO / "runs"
 CSV_TEMPI = LOG_DIR / "tempi.csv"
-# Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`.
-LUCCHETTO = LOG_DIR / ".runner.lock"
+# Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
+# **nome** del file e non il suo percorso: la cartella è `LOG_DIR`, e un percorso
+# calcolato qui la congelerebbe all'import — chi sposta `LOG_DIR` (i test di
+# `main()`, che girano su `tmp_path`) si ritroverebbe il lucchetto rimasto
+# indietro nel `runs/` vero, cioè un test che misura se sul PC c'è un runner vivo.
+NOME_LUCCHETTO = ".runner.lock"
 
 # Chi, girando in questo albero, ci **scrive**. Un `tail -f` sul log o un `git log`
 # aperto non sono un pericolo, e un controllo che grida sempre si impara a spegnere.
@@ -492,15 +496,22 @@ def lucchetto():
     muoia. Un PID scritto su disco dopo un `kill -9` resta lì a bloccare il lancio
     successivo, e il rimedio — cancellarlo a mano — è esattamente il gesto che
     finisce per diventare automatico e disinnescare il controllo.
+
+    Il percorso si compone **adesso** e non all'import: il lucchetto è uno dei
+    file che il runner scrive sotto `runs/`, e deve seguire `LOG_DIR` ovunque
+    vada. Congelato all'import restava indietro nel `runs/` vero anche per chi
+    aveva spostato la cartella, e i test di `main()` finivano per misurare se su
+    quel PC ci fosse un runner vivo.
     """
-    LUCCHETTO.parent.mkdir(exist_ok=True)
-    fd = LUCCHETTO.open("w")
+    lucchetto_qui = LOG_DIR / NOME_LUCCHETTO
+    lucchetto_qui.parent.mkdir(exist_ok=True)
+    fd = lucchetto_qui.open("w")
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise AlberoOccupato(
-                f"un altro runner sta già lavorando in {REPO} ({LUCCHETTO})"
+                f"un altro runner sta già lavorando in {REPO} ({lucchetto_qui})"
             ) from exc
         yield
     finally:
