@@ -694,12 +694,43 @@ def pubblica(branch: str) -> bool:
         return False
 
 
+def trova_pbi(pbi: str) -> Path | None:
+    """Il file del PBI come lo vede `origin/main`, non come lo vede il worktree.
+
+    Il runner gira in `ada-run`, un albero che resta fermo al commit su cui
+    qualcuno l'ha messo l'ultima volta. Il branch invece nasce **sempre** da
+    `origin/main` (`crea_branch`): un PBI mergiato dopo quell'ultimo `switch` c'è
+    dove il lavoro si farà e non c'è dove lo si cercava. Il giro chiudeva
+    «saltato (PBI inesistente)» — venti secondi, nessun commit, e il file sotto
+    il naso. Difetto 7 di PBI-102, ricaduto due volte.
+
+    Il `fetch` è lo stesso che farebbe `crea_branch` un attimo dopo, e costa una
+    chiamata: cercare su un `origin/main` vecchio sarebbe lo stesso difetto con
+    un altro nome.
+
+    Se il remoto non risponde si **ripiega sull'albero estratto** e lo si dice:
+    un fetch che non parte non è una ragione per non fare un PBI che si ha già
+    in casa. È l'unico caso in cui l'albero decide, ed è dichiarato a schermo.
+    """
+    try:
+        git("fetch", "origin", "main")
+        voci = git("ls-tree", "--name-only", "origin/main", "backlog/").splitlines()
+    except RuntimeError as exc:
+        print(f"    ⚠️  origin/main non raggiungibile ({str(exc)[:120]}): "
+              f"cerco {pbi} nell'albero estratto")
+        return next(REPO.glob(f"backlog/{pbi}-*.md"), None)
+
+    nome = next((v.strip() for v in voci
+                 if Path(v.strip()).name.startswith(f"{pbi}-") and v.strip().endswith(".md")), None)
+    return REPO / nome if nome else None
+
+
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
 ) -> Esito:
-    pbi_path = next(REPO.glob(f"backlog/{pbi}-*.md"), None)
+    pbi_path = trova_pbi(pbi)
     if pbi_path is None:
-        return Esito(pbi, "saltato", nota="PBI inesistente in backlog/")
+        return Esito(pbi, "saltato", nota="PBI inesistente in backlog/ su origin/main")
 
     print(f"\n=== {pbi} — {pbi_path.name}")
     prompt = PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))

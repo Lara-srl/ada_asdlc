@@ -54,6 +54,11 @@ def clear_event_bus():
     return None
 
 
+def elenco_backlog() -> str:
+    """Cosa risponde `git ls-tree origin/main backlog/`: il runner cerca lì il file
+    del PBI (difetto 7), quindi ogni finto `git` deve saperlo dire."""
+    return "\n".join(f"backlog/{f.name}" for f in sorted((REPO / "backlog").glob("*.md")))
+
 @pytest.fixture
 def git_finto(monkeypatch):
     """Registra i comandi git invece di eseguirli, e risponde il minimo indispensabile."""
@@ -66,7 +71,7 @@ def git_finto(monkeypatch):
         if args[:2] == ("rev-list", "--count"):
             return "3"
         if args[:2] == ("ls-tree", "--name-only"):
-            return "\n".join(f"backlog/{f.name}" for f in sorted((REPO / "backlog").glob("*.md")))
+            return elenco_backlog()
         return ""
 
     monkeypatch.setattr(runner, "git", _git)
@@ -316,6 +321,8 @@ class TestLIgieneNonContaIlRegistroDelRunner:
                 return " M runs/tempi.csv" if "runs" not in " ".join(args) else ""
             if args[:2] == ("rev-list", "--count"):
                 return "1"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
@@ -338,7 +345,9 @@ class TestLIgieneNonContaIlRegistroDelRunner:
         qualcun altro."""
         monkeypatch.setattr(
             runner, "git",
-            lambda *a: " M backend/app/marginalita.py" if a[0] == "status" else "",
+            lambda *a: (" M backend/app/marginalita.py" if a[0] == "status"
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
         )
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
         assert esito.stato == "fermato"
@@ -477,6 +486,8 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
                 return rimasti_stati.pop(0) if rimasti_stati else ""
             if args[:2] == ("rev-list", "--count"):
                 return "2"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
             return ""
 
         def _gate(attivi):
@@ -547,6 +558,8 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
                 return "" if "runs" in " ".join(args) else " M runs/tempi.csv"
             if args[:2] == ("rev-list", "--count"):
                 return "2"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
@@ -601,7 +614,9 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         monkeypatch.setattr(runner, "revisione_critica", _critic)
         monkeypatch.setattr(
             runner, "git",
-            lambda *a: "2" if a[:2] == ("rev-list", "--count") else "",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
