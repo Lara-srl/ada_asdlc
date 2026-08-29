@@ -1336,6 +1336,48 @@ class TestIlRegistroEsceDaiBranch:
         )
 
 
+class TestIlGateE2ENonEDelRunner:
+    """Difetto 13 di PBI-102.
+
+    `--e2e` faceva girare `npm run e2e` **senza `E2E_BASE_URL`**: Playwright
+    puntava a `localhost:8081`, che è lo stack del checkout principale, cioè
+    `main`. Il gate cadeva su «element(s) not found» per roba che sul branch
+    c'era — un rosso che parla di un altro checkout. Costato 33 minuti su PBI-320
+    il 26/08, tre tentativi bruciati e **il Critic mai chiamato**, perché il
+    Review Gate viene dopo i gate deterministici.
+
+    Non si aggiusta passando un `E2E_BASE_URL`: lo stack andrebbe **ricostruito
+    a ogni giro del Builder**, e il runner non lo fa. Chi lo fa è la CI sulla PR,
+    che lo stack lo costruisce dal branch (`ADR-0009`, `ci.yml`). Quindi il gate
+    e2e non è del runner, e il flag non resta a mezz'aria.
+    """
+
+    def test_nessun_gate_del_runner_e_l_e2e(self):
+        assert [g.nome for g in runner.GATE if g.nome == "e2e"] == [], (
+            "un gate che prova un altro checkout non è un gate: è un rosso finto"
+        )
+
+    def test_chiedere_l_e2e_ferma_il_lancio_e_dice_dove_gira(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("con --e2e non deve partire niente"),
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["asdlc_runner", "PBI-212", "--e2e", "--in-primo-piano"]
+        )
+
+        assert runner.main() == 2
+        uscita = capsys.readouterr().out
+        assert "CI" in uscita or "ci.yml" in uscita, (
+            "chi ha battuto --e2e vuole gli E2E: va detto dove girano davvero"
+        )
+
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
