@@ -1821,6 +1821,79 @@ class TestIlGateDelRossoCamminaICommit:
         assert "produzione" in mancati[0]["esito"]
         assert not (tmp_path / "girato").exists(), "il diff bastava: i test non vanno eseguiti"
 
+    def test_anche_sul_commit_misto_lid_e_quello_che_pytest_trova(
+        self, repo_di_prova, monkeypatch
+    ):
+        """Il ramo del commit misto è il più visibile del gate — è il caso di
+        PBI-328, l'esempio che il PBI porta per primo — e l'id lo ricostruiva a mano:
+        senza la classe, e col prefisso `backend/` che da `backend/` non si esegue.
+        Chi copia dal `fermato` si prende un «not found» e conclude che il gate ha
+        sbagliato: il difetto che `e64555f` chiude, lasciato aperto proprio lì.
+
+        L'AST si legge dal blob (`git show sha:percorso`): niente worktree, quindi
+        «ferma **senza** girare i test» resta intatto.
+        """
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        repo_di_prova.commit("feat: la somma, con il suo test", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "class TestLaSomma:\n"
+                "    def test_fa_due(self):\n        assert somma(1, 1) == 2\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert mancati[0]["test"] == "tests/test_somma.py::TestLaSomma::test_fa_due", (
+            "l'id va scritto come si esegue, dalla cartella da cui si esegue"
+        )
+        assert "produzione" in mancati[0]["esito"]
+
+    def test_sul_commit_misto_un_test_del_frontend_porta_il_filtro_di_vitest(
+        self, repo_di_prova, monkeypatch
+    ):
+        """`file -t nome`, che è come vitest lo riesegue: `::` lì non vuol dire
+        niente e manderebbe chi legge a cercare un node id che non esiste."""
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        repo_di_prova.commit("feat: il riquadro del margine, col suo test", {
+            "frontend/src/Margine.tsx": "export const Margine = () => null\n",
+            "frontend/src/Margine.test.tsx":
+                "it('mostra il margine', () => {\n  expect(1).toBe(1)\n})\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert mancati[0]["test"] == "src/Margine.test.tsx -t mostra il margine"
+
+    def test_un_nome_che_nel_file_non_ce_non_finge_di_essere_un_node_id(
+        self, repo_di_prova, monkeypatch
+    ):
+        """Un test generato, o dentro un `if`: il gate non indovina, e non scrive un
+        `::` che promette a chi legge un comando che non esiste."""
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        repo_di_prova.commit("feat: la somma, con i suoi test generati", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py":
+                "for _caso in (1, 2):\n"
+                "    def test_generato():\n        assert True\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert "::" not in mancati[0]["test"], (
+            "un id che dà «not found» fa sembrare sbagliato il gate invece del commit"
+        )
+        assert "test_generato" in mancati[0]["test"]
+
     def test_uno_skipif_ferma_con_la_ragione_sua(self, repo_di_prova):
         """«Rosso non osservabile» non è «nato verde», e confonderli nasconde la
         domanda che il PBI-103 vuole vedere posta: *se il rosso non si può vedere,
