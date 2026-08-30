@@ -1865,6 +1865,40 @@ class TestIlGateDelRossoCamminaICommit:
         assert repo_di_prova._git("worktree", "list") == prima
         assert repo_di_prova._git("status", "--porcelain") == ""
 
+    def test_lelenco_dice_il_comando_con_cui_ritrovare_il_test(self, repo_di_prova, tmp_path):
+        """L'elenco porta il **node id**, non un `file::nome` ricostruito.
+
+        Un test dentro una classe si chiama `file::Classe::test`, e chi copia dal
+        rapporto un id senza la classe si prende un «not found» da pytest e crede
+        che il gate abbia sbagliato. È successo il 31/08 rileggendo `4d7b48f`.
+        """
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "class TestLaSomma:\n"
+                "    def test_fa_due(self):\n        assert somma(1, 1) == 2\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert mancati[0]["test"] == "tests/test_somma.py::TestLaSomma::test_fa_due", (
+            "l'id va scritto come si esegue, dalla cartella da cui si esegue"
+        )
+
+    def test_lelenco_non_taglia_un_nome_a_meta(self):
+        """Un commit con quaranta test nuovi non deve finire con un `::test` mozzo:
+        un nome tagliato non si ritrova, e sembra un difetto del gate."""
+        voce = runner.voce_mancata(
+            "abc1234", "test: tanti", [f"tests/test_x.py::test_{n}" for n in range(40)],
+            "nato verde", "",
+        )
+
+        assert "tests/test_x.py::test_0, tests/test_x.py::test_1" in voce["test"]
+        assert voce["test"].endswith("e altri 36")
+
     def test_guarda_solo_i_commit_nuovi_dallultimo_giro(self, repo_di_prova, tmp_path):
         """Al secondo giro del Builder i commit già visti non si rigirano: il gate
         sta dentro un ciclo che può ripetersi quattro volte, e rieseguire ogni volta
