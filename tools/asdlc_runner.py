@@ -639,13 +639,22 @@ class TestNuovo:
     linguaggio: str  # python | vitest
 
 
+# I nomi che vitest esegue per default (`**/*.{test,spec}.?(c|m)[jt]s?(x)`). Una
+# lista sola, e non due: quando `e_file_di_test` conosceva anche i `.spec.*` e
+# `linguaggio_del_test` no, un `Foo.spec.tsx` non era né produzione né portatore di
+# test nuovi, e il commit che lo portava insieme alla pagina usciva dal gate in
+# silenzio. Chi decide cosa è un test e chi lo sa eseguire devono leggere la stessa
+# riga, o tornano a divergere.
+SUFFISSI_VITEST = (".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+                   ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx")
+
+
 def e_file_di_test(percorso: str) -> bool:
     parti = Path(percorso).parts
     nome = Path(percorso).name
     if "tests" in parti or "__tests__" in parti:
         return True
-    if nome.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx",
-                      ".spec.ts", ".spec.tsx", ".spec.js")):
+    if nome.endswith(SUFFISSI_VITEST):
         return True
     return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
@@ -667,7 +676,7 @@ def linguaggio_del_test(percorso: str) -> str | None:
         return None
     if percorso.endswith(".py"):
         return "python"
-    if percorso.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx")):
+    if percorso.endswith(SUFFISSI_VITEST):
         return "vitest"
     return None
 
