@@ -1544,3 +1544,141 @@ class TestIGateSiDichiaranoPrimaDiPartire:
         dev = REPO / "backend" / "requirements-dev.txt"
         assert dev.exists(), "un albero nuovo deve poter installare i gate leggendo un file"
         assert "pytest" in dev.read_text()
+
+
+# --- Il gate del rosso (PBI-103) --------------------------------------------
+#
+# Il Quality Gate risponde a una domanda sola — *i test passano?* — e ne manca una
+# seconda che è meccanica: **quei test sono mai stati rossi?** Un test nato verde
+# non prova niente, e due volte su due in tre giorni (PBI-328, PBI-330) il divieto
+# scritto in AGENTS.md non ha fermato niente, perché una frase in un prompt non è
+# un vincolo. Qui sotto i pezzi di quel gate, dal più piccolo in su.
+
+
+class TestChiEUnTestEChiEProduzione:
+    """Il primo taglio lo fa il **diff**, senza eseguire niente.
+
+    Un commit che porta test nuovi e file di produzione insieme non può aver avuto
+    un rosso in mezzo: il codice che li fa passare è arrivato nello stesso gesto. È
+    il caso di `aa40167` (PBI-328), 1337 righe di pagina e 445 di test insieme.
+    """
+
+    @pytest.mark.parametrize("percorso", [
+        "backend/tests/test_importa_storico.py",
+        "backend/tests/conftest.py",
+        "frontend/src/pages/PratichePage.test.tsx",
+        "e2e/tests/fase2-marginalita.spec.ts",
+    ])
+    def test_questi_sono_test(self, percorso):
+        assert runner.e_file_di_test(percorso)
+
+    @pytest.mark.parametrize("percorso", [
+        "frontend/src/pages/PratichePage.tsx",
+        "backend/app/services/marginalita.py",
+        "tools/importa_storico.py",
+        "e2e/contract.ts",
+    ])
+    def test_questi_sono_produzione(self, percorso):
+        assert runner.e_file_di_produzione(percorso)
+        assert not runner.e_file_di_test(percorso)
+
+    @pytest.mark.parametrize("percorso", [
+        "specs/marginalita/spec.md",
+        "backlog/PBI-330-lo-storico-entra-dal-foglio.md",
+        "decisions/ADR-0015-la-deroga-allo-scope-si-dichiara.md",
+    ])
+    def test_un_documento_non_e_ne_luno_ne_laltro(self, percorso):
+        """La spec viaggia **con** il codice che cambia (AGENTS.md, SEMPRE): se
+        contasse come produzione, ogni commit di soli test con la sua spec
+        aggiornata verrebbe fermato per una regola che non c'entra. È il caso di
+        `f35abd1`, che tocca il file di test e `specs/marginalita/spec.md`."""
+        assert not runner.e_file_di_produzione(percorso)
+        assert not runner.e_file_di_test(percorso)
+
+
+def git_del_commit(monkeypatch, name_status: str, diff: dict[str, str]):
+    """Un `git` che risponde per un commit solo: i suoi file e il suo diff."""
+    def _git(*args: str) -> str:
+        if args[:3] == ("show", "--format=", "--name-status"):
+            return name_status
+        if args[0] == "show" and "--unified=0" in args:
+            return diff.get(args[-1], "")
+        return ""
+
+    monkeypatch.setattr(runner, "git", _git)
+
+
+class TestITestNuoviSiLeggonoDalDiff:
+    """Quali test **nascono** in questo commit: né quelli che c'erano, né quelli
+    che il commit sposta da un file all'altro."""
+
+    def test_una_funzione_aggiunta_e_un_test_nuovo(self, monkeypatch):
+        git_del_commit(
+            monkeypatch,
+            "M\tbackend/tests/test_somma.py",
+            {"backend/tests/test_somma.py":
+             "@@ -1,0 +2,2 @@\n+def test_somma_due_numeri():\n+    assert somma(1, 1) == 2\n"},
+        )
+
+        nuovi = runner.test_nuovi_del_commit("abc1234")
+
+        assert [(t.file, t.nome, t.linguaggio) for t in nuovi] == [
+            ("backend/tests/test_somma.py", "test_somma_due_numeri", "python")
+        ]
+
+    def test_un_test_spostato_non_e_un_test_nuovo(self, monkeypatch):
+        """Lo stesso nome cancellato e riaggiunto è un trasloco, non una nascita.
+
+        È il caso che il Protocollo di rifinitura chiama *«un file di test
+        riscritto per intero»*: senza questo, un riordino farebbe girare tutta la
+        suite di quel commit e la fermerebbe come nata verde.
+        """
+        git_del_commit(
+            monkeypatch,
+            "M\tbackend/tests/test_somma.py",
+            {"backend/tests/test_somma.py":
+             "@@ -3,3 +3,4 @@\n-def test_vecchio():\n-    assert True\n"
+             "+def test_vecchio():\n+    assert True\n+def test_davvero_nuovo():\n+    assert False\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_davvero_nuovo"]
+
+    def test_riconosce_i_test_del_frontend(self, monkeypatch):
+        git_del_commit(
+            monkeypatch,
+            "A\tfrontend/src/pages/PratichePage.test.tsx",
+            {"frontend/src/pages/PratichePage.test.tsx":
+             "@@ -0,0 +1,3 @@\n+  it('mostra il margine in fondo alla colonna', () => {\n"
+             "+    expect(1).toBe(1)\n+  })\n"},
+        )
+
+        nuovi = runner.test_nuovi_del_commit("abc1234")
+
+        assert [(t.nome, t.linguaggio) for t in nuovi] == [
+            ("mostra il margine in fondo alla colonna", "vitest")
+        ]
+
+    def test_gli_e2e_non_sono_del_runner(self, monkeypatch):
+        """`npm run e2e` da un worktree punta allo stack di un altro codice
+        (ADR-0009): quel gate è della CI, e un rosso che il runner non può
+        osservare non lo può nemmeno pretendere."""
+        git_del_commit(
+            monkeypatch,
+            "M\te2e/tests/fase2-marginalita.spec.ts",
+            {"e2e/tests/fase2-marginalita.spec.ts":
+             "@@ -1,0 +2,1 @@\n+  test('la pratica si chiude', async ({ page }) => {\n"},
+        )
+
+        assert runner.test_nuovi_del_commit("abc1234") == []
+
+    def test_le_righe_di_intestazione_del_diff_non_sono_codice(self, monkeypatch):
+        """`+++ b/…` comincia per `+` e non è una riga aggiunta."""
+        git_del_commit(
+            monkeypatch,
+            "M\tbackend/tests/test_somma.py",
+            {"backend/tests/test_somma.py":
+             "--- a/backend/tests/test_somma.py\n+++ b/backend/tests/test_somma.py\n"
+             "@@ -1,0 +2,1 @@\n+def test_uno():\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_uno"]
