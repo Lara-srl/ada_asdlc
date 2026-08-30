@@ -1483,11 +1483,17 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
     è così che si guarda `pbi/pbi-330` — e rileggere un `fermato` senza rifare
     mezz'ora di Builder.
     """
-    mancati = gate_del_rosso(ref=ref)
+    # `BASE..REF` oltre al solo `REF`: un branch già mergiato non ha più commit
+    # fuori da `origin/main`, ed è lì che sta la prova sul caso vero — `pbi/pbi-330`
+    # è entrato in main mentre PBI-103 lo usava come banco di prova.
+    base, separatore, solo_ref = ref.partition("..")
+    if not separatore:
+        base, solo_ref = "origin/main", ref
+    mancati = gate_del_rosso(base=base, ref=solo_ref)
     if not mancati:
-        print(f"Il rosso c'è stato: in origin/main..{ref} nessun test è nato verde.")
+        print(f"Il rosso c'è stato: in {base}..{solo_ref} nessun test è nato verde.")
         return 0
-    print(f"{len(mancati)} commit in cui il rosso non si è mai visto, in origin/main..{ref}:\n")
+    print(f"{len(mancati)} commit in cui il rosso non si è mai visto, in {base}..{solo_ref}:\n")
     for m in mancati:
         print(f"  {m['commit']}  {m['titolo']}\n    {m['test']}\n    → {m['esito']}\n")
     print("Il ciclo mancato è ex ante: nessuna fix lo annulla, la lettura la fa una persona.")
