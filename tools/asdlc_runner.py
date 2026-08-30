@@ -323,6 +323,10 @@ class Esito:
     # suite per sapere quale test, o ad avere ancora il Builder sotto mano
     # (difetto 14). La coda ce l'abbiamo già: `gira_gate` la restituisce.
     gate_rossi: list[dict[str, str]] = field(default_factory=list)
+    # I commit in cui un test è nato senza essere mai stato rosso: `{"commit",
+    # "titolo", "test", "esito", "coda"}`. Un elenco e non un booleano — la lettura
+    # la fa una persona, che deve poter andare a quel commit e guardarlo.
+    commit_senza_rosso: list[dict[str, str]] = field(default_factory=list)
     # Tempi: il totale è il tempo di parete del PBI, il resto ne è la scomposizione.
     iniziato: str = ""
     finito: str = ""
@@ -1169,6 +1173,11 @@ def esegui_pbi(
               f"critic {hms(e.tempi['critic'])})")
         return e
 
+    # I commit già passati sotto il gate del rosso. Vive fuori dal ciclo delle
+    # revisioni apposta: alla seconda revisione i commit del primo giro sono gli
+    # stessi, e rigirarne i test moltiplicherebbe il tempo macchina per le revisioni.
+    visti: set[str] = set()
+
     for revisione in range(MAX_REVISIONI + 1):
         e.revisioni = revisione
 
@@ -1234,6 +1243,30 @@ def esegui_pbi(
             for g in e.gate_rossi:
                 print(f"    ── {g['gate']} ──\n{g['coda']}")
             return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
+
+        # --- Quality Gate, seconda domanda: quei test sono mai stati rossi? ---
+        # Sta qui e non prima: finché i quattro sono rossi il lavoro non è finito, e
+        # non ha senso chiedere di un ciclo che potrebbe non essere ancora chiuso.
+        print("    gate del rosso … ", end="", flush=True)
+        t_rosso = time.monotonic()
+        with misura(e, "gate"):
+            senza_rosso = gate_del_rosso(visti=visti)
+        print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
+        if senza_rosso:
+            # `fermato` e non un rilievo da chiudere in un giro di revisione: il ciclo
+            # mancato è **ex ante**, e nessuna fix lo annulla. Mandare il Builder a
+            # rimediare vorrebbe dire spendere una revisione su una cosa che non si
+            # corregge — e poi far leggere lo stesso elenco a una persona.
+            e.commit_senza_rosso = senza_rosso
+            for m in senza_rosso:
+                print(f"    ── {m['commit']} {m['titolo']} ──\n"
+                      f"       {m['test']}\n       → {m['esito']}")
+            return chiudi(
+                "fermato",
+                f"il rosso non si è mai visto su {len(senza_rosso)} commit "
+                f"({', '.join(m['commit'] for m in senza_rosso[:5])}): elenco nel rapporto "
+                f"del giro. Il ciclo mancato è ex ante e nessuna fix lo annulla",
+            )
 
         # --- Review Gate (probabilistico, sessione separata) ---
         # Si può togliere, e allora **si dichiara**: `critic_s = 0` non spiega se
@@ -1443,6 +1476,24 @@ def riepilogo(tariffa: float | None) -> int:
     return 0
 
 
+def stampa_il_gate_del_rosso(ref: str) -> int:
+    """Il gate senza il giro intorno: `--gate-rosso [ref]`.
+
+    Due usi che il gate dentro il giro non copre: provarlo su un branch già chiuso —
+    è così che si guarda `pbi/pbi-330` — e rileggere un `fermato` senza rifare
+    mezz'ora di Builder.
+    """
+    mancati = gate_del_rosso(ref=ref)
+    if not mancati:
+        print(f"Il rosso c'è stato: in origin/main..{ref} nessun test è nato verde.")
+        return 0
+    print(f"{len(mancati)} commit in cui il rosso non si è mai visto, in origin/main..{ref}:\n")
+    for m in mancati:
+        print(f"  {m['commit']}  {m['titolo']}\n    {m['test']}\n    → {m['esito']}\n")
+    print("Il ciclo mancato è ex ante: nessuna fix lo annulla, la lettura la fa una persona.")
+    return 1
+
+
 def costruisci_parser() -> argparse.ArgumentParser:
     """I flag, in una funzione sua: così si possono provare senza eseguire un PBI."""
     ap = argparse.ArgumentParser(
@@ -1465,6 +1516,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--registra", nargs="?", const=str(LOG_DIR), metavar="CARTELLA",
                     help="non esegue niente: piega i rapporti runs/*.json in runs/tempi.csv. "
                          "Si lancia su main dopo il merge (ADR-0020)")
+    ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
+                    help="non esegue niente: cammina origin/main..REF e dice in quali "
+                         "commit un test è nato senza essere mai stato rosso")
     ap.add_argument("--riepilogo", action="store_true",
                     help="non esegue niente: somma i tempi già registrati in runs/tempi.csv")
     ap.add_argument("--tariffa", type=float, metavar="EUR_ORA",
@@ -1480,6 +1534,11 @@ def main() -> int:
         return registra(Path(a.registra))
     if a.riepilogo:
         return riepilogo(a.tariffa)
+    if a.gate_rosso:
+        # Il venv serve anche qui: i test di quel commit li fa girare `pytest`.
+        if aggiunto := venv_sul_path():
+            print(f"venv del worktree sul PATH: {aggiunto}")
+        return stampa_il_gate_del_rosso(a.gate_rosso)
     if not a.pbi:
         ap.error("indica almeno un PBI, oppure usa --riepilogo")
 
