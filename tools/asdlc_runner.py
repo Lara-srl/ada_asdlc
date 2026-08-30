@@ -647,7 +647,7 @@ def e_file_di_test(percorso: str) -> bool:
     if nome.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx",
                       ".spec.ts", ".spec.tsx", ".spec.js")):
         return True
-    return nome.startswith("test_") and nome.endswith(".py") or nome.endswith("_test.py")
+    return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
 
 def e_file_di_produzione(percorso: str) -> bool:
@@ -820,8 +820,9 @@ def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple],
     scritte come si eseguono — un `file::nome` senza la classe che lo contiene dà
     «not found» a chi prova a rieseguirlo, e fa sembrare sbagliato il gate.
     """
-    per_pytest: dict[Path, tuple[list[str], list[str]]] = {}
-    per_vitest: dict[tuple[Path, str], tuple[list[str], list[str]]] = {}
+    # Per pytest il node id è già l'etichetta: si esegue e si rilegge allo stesso modo.
+    per_pytest: dict[Path, list[str]] = {}
+    per_vitest: dict[tuple[Path, str], list[str]] = {}
     orfani: list[str] = []
 
     for t in nuovi:
@@ -831,22 +832,17 @@ def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple],
             if nodo is None:
                 orfani.append(f"{t.file}::{t.nome}")
                 continue
-            nodi_e_etichette = per_pytest.setdefault(cartella, ([], []))
-            nodi_e_etichette[0].append(nodo)
-            nodi_e_etichette[1].append(nodo)
+            per_pytest.setdefault(cartella, []).append(nodo)
         else:
-            nomi_e_etichette = per_vitest.setdefault((cartella, relativo), ([], []))
-            nomi_e_etichette[0].append(t.nome)
-            nomi_e_etichette[1].append(f"{relativo} -t {t.nome}")
+            per_vitest.setdefault((cartella, relativo), []).append(t.nome)
 
     comandi: list[tuple] = [
-        (cartella, ["pytest", "-q", *nodi], etichette)
-        for cartella, (nodi, etichette) in per_pytest.items()
+        (cartella, ["pytest", "-q", *nodi], nodi) for cartella, nodi in per_pytest.items()
     ]
     comandi += [
         (cartella, ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi)],
-         etichette)
-        for (cartella, relativo), (nomi, etichette) in per_vitest.items()
+         [f"{relativo} -t {n}" for n in nomi])
+        for (cartella, relativo), nomi in per_vitest.items()
     ]
     return comandi, orfani
 
