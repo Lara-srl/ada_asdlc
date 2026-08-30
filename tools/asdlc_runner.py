@@ -809,18 +809,37 @@ def dove_gira(albero: Path, percorso: str) -> tuple[Path, str]:
     return albero, percorso
 
 
-def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple], list[str]]:
+@dataclass(frozen=True)
+class ComandoDiProva:
+    """Un comando che gira i test nuovi di un commit, e come se ne rilegge l'esito.
+
+    `etichette` lega la **chiave** con cui l'esito torna indietro — il node id per
+    pytest, il titolo per vitest — all'id con cui quel test si riesegue a mano. Per
+    pytest sono la stessa cosa; per vitest no, perché `-t` filtra per nome dentro un
+    file e l'id da riscrivere è `file -t nome`.
+    """
+
+    cartella: Path
+    argv: list[str]
+    linguaggio: str
+    etichette: dict[str, str]
+    rapporto: Path | None = None  # dove vitest scrive il suo json
+
+
+def comandi_dei_test(albero: Path,
+                     nuovi: list[TestNuovo]) -> tuple[list[ComandoDiProva], list[str]]:
     """I comandi che eseguono **soltanto** quei test, e i test che non si isolano.
 
     Un comando solo per i pytest di ogni cartella — costa un avvio di interprete —
-    e uno per file per vitest, perché `-t` è un filtro per nome e non un elenco.
+    e uno per file per vitest, perché `-t` è un filtro per nome e non un elenco. Un
+    comando solo, però, non vuol dire un verdetto solo: l'esito si rilegge per test
+    (`esiti_del_comando`), o dodici test in un `pytest` diventerebbero un
+    tutto-o-niente.
 
-    Accanto al comando viaggiano le **etichette**: il node id di pytest, o il file e
-    il nome che vitest filtra. Sono ciò che finisce nell'elenco del gate, e vanno
-    scritte come si eseguono — un `file::nome` senza la classe che lo contiene dà
-    «not found» a chi prova a rieseguirlo, e fa sembrare sbagliato il gate.
+    Le **etichette** sono ciò che finisce nell'elenco del gate, e vanno scritte come
+    si eseguono — un `file::nome` senza la classe che lo contiene dà «not found» a
+    chi prova a rieseguirlo, e fa sembrare sbagliato il gate.
     """
-    # Per pytest il node id è già l'etichetta: si esegue e si rilegge allo stesso modo.
     per_pytest: dict[Path, list[str]] = {}
     per_vitest: dict[tuple[Path, str], list[str]] = {}
     orfani: list[str] = []
@@ -836,14 +855,24 @@ def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple],
         else:
             per_vitest.setdefault((cartella, relativo), []).append(t.nome)
 
-    comandi: list[tuple] = [
-        (cartella, ["pytest", "-q", *nodi], nodi) for cartella, nodi in per_pytest.items()
+    # `-v` e non `-q`: il conteggio finale è una somma e non dice **quale**, mentre
+    # una riga per test dice nome ed esito. `--tb=no` perché il traceback qui non
+    # serve — la coda che finisce nel rapporto è la stessa per tutti.
+    comandi: list[ComandoDiProva] = [
+        ComandoDiProva(cartella, ["pytest", "--tb=no", "-v", *nodi], "python",
+                       {nodo: nodo for nodo in nodi})
+        for cartella, nodi in per_pytest.items()
     ]
-    comandi += [
-        (cartella, ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi)],
-         [f"{relativo} -t {n}" for n in nomi])
-        for (cartella, relativo), nomi in per_vitest.items()
-    ]
+    # Il json di vitest va in un file e non a schermo: `npm test` ci scrive sopra la
+    # sua intestazione, e ritagliare un oggetto json da un output misto è un modo di
+    # sbagliare in silenzio. Il file sta accanto al worktree e se ne va con lui.
+    for numero, ((cartella, relativo), nomi) in enumerate(per_vitest.items()):
+        rapporto = albero.parent / f"vitest-{numero}.json"
+        comandi.append(ComandoDiProva(
+            cartella,
+            ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi),
+             "--reporter=json", f"--outputFile={rapporto}"],
+            "vitest", {nome: f"{relativo} -t {nome}" for nome in nomi}, rapporto))
     return comandi, orfani
 
 
@@ -870,6 +899,77 @@ def leggi_esito(uscita: str) -> str:
     return "nessuno"
 
 
+# Le quattro letture in ordine di forza. Un test parametrizzato — o un `it.each` —
+# gira più volte sotto lo stesso nome: se un caso solo è rosso, quel test un momento
+# in cui mordeva ce l'ha avuto, ed è tutto ciò che il gate chiede.
+ORDINE_ESITI = ("nessuno", "saltato", "verde", "rosso")
+
+# `pytest -v` scrive una riga per test: `file::Classe::test PASSED  [ 33%]`.
+RE_ESITO_PYTEST = re.compile(
+    r"^(\S+::\S+) (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.MULTILINE)
+# `file::test[caso]` → `file::test`: l'id che il gate ha chiesto è quello della
+# funzione, e un test parametrizzato ne stampa uno per caso.
+RE_PARAMETRO = re.compile(r"\[.*\]$")
+
+ESITI_DI_PYTEST = {"PASSED": "verde", "XPASS": "verde",
+                   "FAILED": "rosso", "ERROR": "rosso",
+                   # `xfail` è un rosso già previsto: osservato non lo si vede, e
+                   # sta con lo `skip` invece che col rosso vero.
+                   "SKIPPED": "saltato", "XFAIL": "saltato"}
+# `pending` e `todo` sono i due modi in cui vitest dice «non l'ho eseguito».
+ESITI_DI_VITEST = {"passed": "verde", "failed": "rosso",
+                   "skipped": "saltato", "pending": "saltato", "todo": "saltato"}
+
+
+def piu_forte(uno: str, altro: str) -> str:
+    return max(uno, altro, key=ORDINE_ESITI.index)
+
+
+def esiti_di_pytest(uscita: str) -> dict[str, str]:
+    """Il verdetto **per test**, dalle righe di `pytest -v`, per node id."""
+    letti: dict[str, str] = {}
+    for nodo, esito in RE_ESITO_PYTEST.findall(uscita):
+        chiave = RE_PARAMETRO.sub("", nodo)
+        letti[chiave] = piu_forte(letti.get(chiave, "nessuno"),
+                                  ESITI_DI_PYTEST.get(esito, "nessuno"))
+    return letti
+
+
+def esiti_di_vitest(rapporto: Path | None) -> dict[str, str]:
+    """Il verdetto per test, dal `--reporter=json` di vitest, per titolo.
+
+    Un rapporto che non c'è torna **vuoto** e non «tutto verde»: chi non ha letto
+    niente non ha visto niente, e allora vale l'esito del comando intero.
+    """
+    try:
+        dati = json.loads(rapporto.read_text(encoding="utf-8"))
+    except (AttributeError, OSError, ValueError):
+        return {}
+    letti: dict[str, str] = {}
+    for file in dati.get("testResults", []):
+        for caso in file.get("assertionResults", []):
+            chiave = caso.get("title", "")
+            letti[chiave] = piu_forte(letti.get(chiave, "nessuno"),
+                                      ESITI_DI_VITEST.get(caso.get("status"), "nessuno"))
+    return letti
+
+
+def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
+    """Gira il comando e torna l'esito di **ogni** test che gli era stato chiesto.
+
+    Un errore di **raccolta** — il `from app.x import y` che a quel commit non
+    esiste ancora, cioè il rosso più comune del test-first — non stampa nessuna riga
+    per test: lì vale l'esito del comando intero, che è la sola cosa che si sa.
+    """
+    try:
+        _, uscita = esegui(c.argv, c.cartella, timeout=1800)
+    except subprocess.TimeoutExpired:
+        uscita = "i test non terminano a quel commit"
+    letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
+    complessivo = leggi_esito(uscita)
+    return {chiave: letti.get(chiave, complessivo) for chiave in c.etichette}, uscita
+
+
 # Quanti test dell'elenco si scrivono per esteso. Oltre, si conta il resto: un
 # nome tagliato a metà non si ritrova, e chi legge lo prende per un difetto del gate.
 TEST_IN_ELENCO = 4
@@ -889,14 +989,17 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo]) -> list[dic
         if orfani:
             mancati.append(voce_mancata(sha, titolo, orfani, ESITI_MANCATI["nessuno"],
                                         "il nome non si trova nel file a quel commit"))
-        for cartella, comando, etichette in comandi:
-            try:
-                _, uscita = esegui(comando, cartella, timeout=1800)
-            except subprocess.TimeoutExpired:
-                uscita = "i test non terminano a quel commit"
-            esito = leggi_esito(uscita)
-            if esito != "rosso":
-                mancati.append(voce_mancata(sha, titolo, etichette, ESITI_MANCATI[esito], uscita))
+        for comando in comandi:
+            esiti, coda = esiti_del_comando(comando)
+            # Una voce per **lettura**, non una per comando: «nato verde» e «rosso
+            # non osservabile» sono due domande diverse e vanno davanti a chi legge
+            # separate, anche quando escono dallo stesso `pytest`.
+            per_lettura: dict[str, list[str]] = defaultdict(list)
+            for chiave, etichetta in comando.etichette.items():
+                if esiti[chiave] != "rosso":
+                    per_lettura[esiti[chiave]].append(etichetta)
+            for esito, elenco in per_lettura.items():
+                mancati.append(voce_mancata(sha, titolo, elenco, ESITI_MANCATI[esito], coda))
     return mancati
 
 
