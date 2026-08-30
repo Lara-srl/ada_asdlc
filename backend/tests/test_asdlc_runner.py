@@ -1871,6 +1871,40 @@ class TestIlGateDelRossoCamminaICommit:
 
         assert mancati[0]["test"] == "src/Margine.test.tsx -t mostra il margine"
 
+    def test_un_test_punto_spec_non_esce_dal_gate_per_il_suo_nome(
+        self, repo_di_prova, monkeypatch
+    ):
+        """`.spec.tsx` è un test per vitest quanto `.test.tsx` — è la sua `include`
+        di default — e il gate lo deve trattare come tale.
+
+        Il verso è quello: il file resta un test e i suoi casi sono test nuovi, così
+        il commit che lo porta insieme alla pagina ferma come misto. L'altro verso —
+        toglierlo dai file di test — lo renderebbe produzione, e un commit di soli
+        `.spec` verrebbe fermato per una regola che non c'entra.
+
+        Serve perché le due liste divergevano: `e_file_di_test` conosceva `.spec.*`,
+        `linguaggio_del_test` no. Il file non era né produzione né portatore di test
+        nuovi, e il commit misto passava **in silenzio** — il caso che il Protocollo
+        di rifinitura vieta: in caso di dubbio il gate ferma e lo dice, non indovina.
+        """
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        sha = repo_di_prova.commit("feat: il riquadro del margine, col suo spec", {
+            "frontend/src/Margine.tsx": "export const Margine = () => null\n",
+            "frontend/src/Margine.spec.tsx":
+                "it('mostra il margine', () => {\n  expect(1).toBe(1)\n})\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]], (
+            "un test uscito dal gate per la sola forma del suo nome"
+        )
+        assert "produzione" in mancati[0]["esito"]
+        assert mancati[0]["test"] == "src/Margine.spec.tsx -t mostra il margine"
+
     def test_un_nome_che_nel_file_non_ce_non_finge_di_essere_un_node_id(
         self, repo_di_prova, monkeypatch
     ):
