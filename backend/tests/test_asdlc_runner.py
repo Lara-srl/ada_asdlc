@@ -1838,6 +1838,55 @@ class TestIlGateDelRossoCamminaICommit:
         assert "non osservabile" in mancati[0]["esito"]
         assert "nato verde" not in mancati[0]["esito"]
 
+    def test_un_rosso_accanto_a_un_nato_verde_non_lo_copre(self, repo_di_prova, tmp_path):
+        """La classificazione è **per test**, non per comando.
+
+        Un `test(...) (RED)` porta quasi sempre più di un test, e girano tutti in un
+        `pytest` solo: se basta un rosso per dire «il RED c'è stato», il test nato
+        verde accanto sparisce dall'elenco. È il caso di `f35abd1`, che di funzioni
+        di test ne introduce dodici — e leggere l'esito dal totale ne farebbe un
+        tutto-o-niente su dodici invece che una misura per test.
+        """
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        sha = repo_di_prova.commit("test: la somma e la differenza (RED)", {
+            "backend/tests/test_conti.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_fa_due():\n    assert somma(1, 1) == 2\n\n\n"
+                "def test_la_differenza_fa_zero():\n"
+                "    from app.differenza import differenza\n"
+                "    assert differenza(1, 1) == 0\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]], (
+            "il rosso di un test vicino ha coperto quello nato verde"
+        )
+        assert "test_la_somma_fa_due" in mancati[0]["test"]
+        assert "test_la_differenza_fa_zero" not in mancati[0]["test"], (
+            "un test che a quel commit è davvero rosso non va nell'elenco"
+        )
+
+    def test_uno_skipif_accanto_a_un_rosso_non_sparisce(self, repo_di_prova):
+        """Lo `skipped` in mezzo a un `failed`: il PBI-103 esiste per **raccogliere**
+        i casi in cui il rosso non si può vedere, e sommarli al totale li perde."""
+        sha = repo_di_prova.commit("test: il golden e la somma (RED)", {
+            "backend/tests/test_conti.py":
+                "import pytest\n\n\n"
+                "@pytest.mark.skipif(True, reason='il foglio non c\\'è su questa macchina')\n"
+                "def test_il_golden_coincide():\n    assert False\n\n\n"
+                "def test_la_somma_fa_due():\n"
+                "    from app.somma import somma\n    assert somma(1, 1) == 2\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "non osservabile" in mancati[0]["esito"]
+        assert "test_il_golden_coincide" in mancati[0]["test"]
+
     def test_un_refactor_senza_test_nuovi_non_ferma(self, repo_di_prova):
         """La regola morde sul test nuovo, non su ogni riga scritta."""
         repo_di_prova.commit("feat: la somma", {
@@ -1915,6 +1964,64 @@ class TestIlGateDelRossoCamminaICommit:
 
         assert runner.gate_del_rosso(visti=visti) == []
         assert not (tmp_path / "girato").exists(), "un commit già visto è stato rigirato"
+
+
+class TestLEsitoSiLeggePerTest:
+    """Il verdetto è di **ogni test**, non del comando che li ha girati insieme.
+
+    I test nuovi di un commit girano in un `pytest` solo — costa un avvio di
+    interprete invece di dodici — ma il conteggio finale (`1 failed, 11 passed`) è
+    una somma, e una somma non dice **quale**. Leggere l'esito dal totale farebbe di
+    ogni `test(...) (RED)` un tutto-o-niente: basterebbe un test che morde per
+    coprire gli undici nati verdi accanto.
+    """
+
+    def test_pytest_lo_dice_riga_per_riga(self):
+        uscita = (
+            "tests/test_conti.py::test_la_somma_fa_due PASSED                  [ 33%]\n"
+            "tests/test_conti.py::TestIlGolden::test_coincide SKIPPED (il foglio) [ 66%]\n"
+            "tests/test_conti.py::test_la_differenza_fa_zero FAILED            [100%]\n"
+            "\n1 failed, 1 passed, 1 skipped in 0.12s\n"
+        )
+
+        assert runner.esiti_di_pytest(uscita) == {
+            "tests/test_conti.py::test_la_somma_fa_due": "verde",
+            "tests/test_conti.py::TestIlGolden::test_coincide": "saltato",
+            "tests/test_conti.py::test_la_differenza_fa_zero": "rosso",
+        }
+
+    def test_un_test_parametrizzato_torna_sotto_il_nome_della_funzione(self):
+        """`pytest -v` stampa una riga per caso — `test_x[1]`, `test_x[2]` — mentre
+        l'id che il gate ha chiesto è quello della funzione. Un caso rosso basta:
+        quel test un momento in cui mordeva ce l'ha avuto."""
+        uscita = ("tests/t.py::test_lo_scarto[1] PASSED   [ 50%]\n"
+                  "tests/t.py::test_lo_scarto[2] FAILED   [100%]\n")
+
+        assert runner.esiti_di_pytest(uscita) == {"tests/t.py::test_lo_scarto": "rosso"}
+
+    def test_vitest_lo_dice_nel_suo_json(self, tmp_path):
+        """`--reporter=json`: l'unica forma in cui vitest dà l'esito per test senza
+        farlo dedurre da un simbolo in mezzo all'output."""
+        rapporto = tmp_path / "vitest.json"
+        rapporto.write_text(json.dumps({"testResults": [{
+            "name": "src/Margine.test.tsx",
+            "assertionResults": [
+                {"title": "mostra il margine", "status": "passed"},
+                {"title": "senza dati non mostra niente", "status": "failed"},
+                {"title": "il caso lento", "status": "skipped"},
+            ],
+        }]}), encoding="utf-8")
+
+        assert runner.esiti_di_vitest(rapporto) == {
+            "mostra il margine": "verde",
+            "senza dati non mostra niente": "rosso",
+            "il caso lento": "saltato",
+        }
+
+    def test_un_rapporto_che_non_ce_non_e_un_verdetto(self, tmp_path):
+        """Vuoto e non «tutto verde»: chi non ha letto niente non ha visto niente, e
+        l'esito del comando intero resta l'unica cosa che si sa."""
+        assert runner.esiti_di_vitest(tmp_path / "mai-scritto.json") == {}
 
 
 class TestIlGateDelRossoStaNelGiro:
