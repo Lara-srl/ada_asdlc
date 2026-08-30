@@ -2024,6 +2024,63 @@ class TestLEsitoSiLeggePerTest:
         assert runner.esiti_di_vitest(tmp_path / "mai-scritto.json") == {}
 
 
+class TestUnGateGuastoNonEUnCicloMancato:
+    """`127` non è «nato verde».
+
+    Il gate butta via il codice di uscita di proposito — pytest torna 0 anche con
+    tutto saltato — ma un comando che **non parte** non ha detto niente sui test: non
+    stampa conteggi, e leggerlo come «il rosso non si è mai visto» accusa il Builder
+    di un guasto della macchina. Il caso concreto è il venv fuori dal `PATH`, ed è
+    già costato una diagnosi sbagliata (difetto 11).
+    """
+
+    def _comando(self, linguaggio="python"):
+        return runner.ComandoDiProva(
+            Path("/tmp"), ["pytest", "--tb=no", "-v", "tests/t.py::test_x"],
+            linguaggio, {"tests/t.py::test_x": "tests/t.py::test_x"},
+        )
+
+    def test_un_comando_che_non_parte_alza_invece_di_accusare(self, monkeypatch):
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda *a, **k: (127, "comando non eseguibile: pytest — [Errno 2]"),
+        )
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando())
+
+        assert "pytest" in str(guasto.value)
+
+    def test_una_riga_di_comando_sbagliata_e_del_gate_non_del_builder(self, monkeypatch):
+        """`4` è l'uso sbagliato di pytest: se l'id l'ha scritto il gate, l'errore è
+        del gate."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (4, "ERROR: not found"))
+
+        with pytest.raises(runner.GuastoDelGate):
+            runner.esiti_del_comando(self._comando())
+
+    def test_nessun_test_raccolto_resta_una_lettura_sui_test(self, monkeypatch):
+        """`5` lo dice pytest **sui test**: lì il gate non indovina e lo scrive, che
+        è un'altra cosa dal non aver potuto guardare."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (5, "no tests ran in 0.01s"))
+
+        esiti, _ = runner.esiti_del_comando(self._comando())
+
+        assert esiti == {"tests/t.py::test_x": "nessuno"}
+
+    def test_un_errore_di_raccolta_resta_un_rosso(self, monkeypatch):
+        """L'import che a quel commit non esiste ancora è il rosso più comune del
+        test-first: `2` è un codice di pytest, e il conteggio c'è."""
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda *a, **k: (2, "ERROR tests/t.py\n1 error in 0.02s"),
+        )
+
+        esiti, _ = runner.esiti_del_comando(self._comando())
+
+        assert esiti == {"tests/t.py::test_x": "rosso"}
+
+
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
 
@@ -2127,6 +2184,29 @@ class TestIlGateDelRossoStaNelGiro:
             "il secondo giro ha riguardato i commit del primo"
         )
 
+    def test_un_gate_guasto_chiude_rosso_con_la_ragione_vera(self, monkeypatch):
+        """Un `pytest` fuori dal `PATH` non è un ciclo mancato.
+
+        Senza distinguerli, il runner accusa il Builder di aver saltato il TDD su
+        **tutti** i commit del branch insieme quando il guasto è un venv: è la
+        diagnosi sbagliata sul rilievo più grave che sappia emettere, e chi legge il
+        rapporto non ha modo di accorgersene. È la lezione del difetto 11, già
+        scritta in `esegui`.
+        """
+        def _guasto(**k):
+            raise runner.GuastoDelGate("comando non eseguibile: pytest")
+
+        self._mondo(monkeypatch, _guasto)
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "rosso", "un gate rotto è un gate rosso, non un TDD saltato"
+        assert "pytest" in esito.nota
+        assert "il rosso non si è mai visto" not in esito.nota
+        assert esito.commit_senza_rosso == [], (
+            "nessun commit è stato accusato: il gate non ha guardato niente"
+        )
+
     def test_un_gate_verde_lascia_passare_al_critic(self, monkeypatch):
         interrogato: list[int] = []
         self._mondo(monkeypatch, lambda **k: interrogato.append(1) or [])
@@ -2180,6 +2260,18 @@ class TestIlGateDelRossoSiLanciaDaSolo:
 
         assert runner.main() == 0
         assert visto == {"base": "d2c084c", "ref": "pbi/pbi-330"}
+
+    def test_un_guasto_non_si_confonde_con_un_ciclo_mancato(self, monkeypatch, capsys):
+        """`2` e non `1`: chi lancia il gate a mano deve poter distinguere «il rosso
+        non c'è stato» da «il gate non ha potuto guardare»."""
+        def _guasto(**k):
+            raise runner.GuastoDelGate("comando non eseguibile: pytest")
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _guasto)
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso", "pbi/pbi-330"])
+
+        assert runner.main() == 2
+        assert "pytest" in capsys.readouterr().out
 
     def test_torna_0_quando_il_rosso_ce_stato(self, monkeypatch):
         monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [])
