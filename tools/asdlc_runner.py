@@ -599,6 +599,122 @@ def gira_gate(attivi: set[str]) -> list[tuple[str, str]]:
     return rossi
 
 
+# --- Il gate del rosso: quei test sono mai stati rossi? ----------------------
+#
+# La seconda domanda del Quality Gate (PBI-103). La prima — *i test passano?* — la
+# risponde `gira_gate`; questa chiede se quei test hanno **mai** avuto un momento in
+# cui erano rossi. Un test nato verde non prova niente: può essere verde perché il
+# codice è giusto, o perché non guarda niente. Il RED del ciclo TDD è la prova
+# gratuita che il test morde, ed è per questo che `AGENTS.md` lo mette fra i SEMPRE.
+#
+# Dichiararlo non basta: due volte su due in tre giorni — `aa40167` (PBI-328, pagina
+# e test nello stesso commit) e `e6a394f` → `f35abd1` (PBI-330, il `feat` e i suoi
+# test dopo) — il divieto scritto non ha fermato niente, perché una frase in un
+# prompt è un consiglio che l'agente pesa insieme agli altri. I gate sono l'unica
+# cosa che lega.
+
+# I file che sono **codice**. Un `.md` non c'è dentro: la spec si aggiorna nello
+# stesso commit del codice che ne cambia il comportamento (`AGENTS.md`, SEMPRE), e
+# contarla come produzione fermerebbe ogni commit di soli test con la sua spec.
+ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh"}
+
+RE_TEST_PY = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
+# `it('…')`, `test("…")`, e le loro varianti `.each` / `.skip`: il nome è ciò che
+# vitest filtra con `-t`.
+RE_TEST_JS = re.compile(r"""^\s*(?:it|test)(?:\.\w+)?\s*\(\s*(['"`])(.+?)\1""")
+
+
+@dataclass(frozen=True)
+class TestNuovo:
+    """Un test che **nasce** in un commit: dove sta, come si chiama, chi lo esegue."""
+
+    file: str       # dalla radice del repository
+    nome: str       # la funzione (python) o il titolo (vitest)
+    linguaggio: str  # python | vitest
+
+
+def e_file_di_test(percorso: str) -> bool:
+    parti = Path(percorso).parts
+    nome = Path(percorso).name
+    if "tests" in parti or "__tests__" in parti:
+        return True
+    if nome.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+                      ".spec.ts", ".spec.tsx", ".spec.js")):
+        return True
+    return nome.startswith("test_") and nome.endswith(".py") or nome.endswith("_test.py")
+
+
+def e_file_di_produzione(percorso: str) -> bool:
+    """Codice che non è un test. È la metà del criterio che ferma PBI-328."""
+    return not e_file_di_test(percorso) and Path(percorso).suffix in ESTENSIONI_CODICE
+
+
+def linguaggio_del_test(percorso: str) -> str | None:
+    """Chi sa eseguire quel test, e `None` se non è il runner.
+
+    Gli `e2e/` tornano `None` e non è una dimenticanza: `npm run e2e` da un worktree
+    punta a `localhost:8081`, cioè allo stack di un altro codice, e quel gate è della
+    CI sulla PR (`ADR-0009`). Un rosso che il runner non può osservare non lo può
+    nemmeno pretendere.
+    """
+    if percorso.startswith("e2e/"):
+        return None
+    if percorso.endswith(".py"):
+        return "python"
+    if percorso.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx")):
+        return "vitest"
+    return None
+
+
+def file_del_commit(sha: str) -> list[tuple[str, str]]:
+    """`(stato, percorso)` per ogni file toccato. Su un rename vale il nome nuovo."""
+    righe = git("show", "--format=", "--name-status", sha).splitlines()
+    voci: list[tuple[str, str]] = []
+    for riga in righe:
+        campi = riga.split("\t")
+        if len(campi) >= 2 and campi[0]:
+            voci.append((campi[0], campi[-1].strip()))
+    return voci
+
+
+def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
+    """I nomi di test aggiunti e quelli cancellati, dalle righe del diff."""
+    regola = RE_TEST_PY if linguaggio == "python" else RE_TEST_JS
+    aggiunti: list[str] = []
+    tolti: set[str] = set()
+    for riga in diff.splitlines():
+        if riga.startswith(("+++", "---")) or riga[:1] not in ("+", "-"):
+            continue
+        trovato = regola.match(riga[1:])
+        if trovato is None:
+            continue
+        nome = trovato.group(1) if linguaggio == "python" else trovato.group(2)
+        if riga[0] == "+":
+            aggiunti.append(nome)
+        else:
+            tolti.add(nome)
+    return aggiunti, tolti
+
+
+def test_nuovi_del_commit(sha: str) -> list[TestNuovo]:
+    """I test che **nascono** in questo commit.
+
+    Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
+    caso del file di test riscritto per intero, e senza questa sottrazione il gate
+    farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
+    """
+    nuovi: list[TestNuovo] = []
+    for _, percorso in file_del_commit(sha):
+        linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
+        if linguaggio is None:
+            continue
+        aggiunti, tolti = nomi_dei_test(
+            git("show", "--format=", "--unified=0", sha, "--", percorso), linguaggio
+        )
+        nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    return nuovi
+
+
 VERDETTI = {"VERDETTO: PASS": "pass",
             "VERDETTO: NON PRONTO": "non pronto",
             "VERDETTO: SOSPESO": "sospeso"}
