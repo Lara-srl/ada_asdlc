@@ -56,6 +56,21 @@ def clear_event_bus():
     return None
 
 
+@pytest.fixture(autouse=True)
+def lucchetto_di_prova(tmp_path, monkeypatch):
+    """Il lucchetto del runner, spostato in una cartella usa e getta.
+
+    `LUCCHETTO` è `runs/.runner.lock`, un percorso solo per albero, e i test che
+    passano da `main()` lo prendono davvero. Lanciare la suite **mentre** un giro è
+    vivo trovava quel file già preso e faceva rosso nove test di `main()` per colpa
+    di un processo vicino invece che del codice — ed è esattamente la condizione in
+    cui la suite gira sempre, perché il Builder lo lancia il runner, che il
+    lucchetto ce l'ha in mano. `LOG_DIR` quei test lo spostavano già; questo no,
+    perché `LUCCHETTO` è calcolato all'import e non segue la patch.
+    """
+    monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+
+
 def elenco_backlog() -> str:
     """Cosa risponde `git ls-tree origin/main backlog/`: il runner cerca lì il file
     del PBI (difetto 7), quindi ogni finto `git` deve saperlo dire."""
