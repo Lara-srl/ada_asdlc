@@ -899,6 +899,23 @@ def leggi_esito(uscita: str) -> str:
     return "nessuno"
 
 
+class GuastoDelGate(RuntimeError):
+    """Il gate non ha potuto guardare: è rotto lo strumento, non il ciclo del Builder.
+
+    Sono due diagnosi opposte e vanno tenute separate. «Il rosso non si è mai visto»
+    accusa chi ha scritto i commit; un `pytest` che non parte accusa il `PATH` di
+    chi ha lanciato il giro, e confonderle mette il rilievo più grave che il runner
+    sappia emettere su tutti i commit del branch insieme, senza che chi legge il
+    rapporto possa accorgersene.
+    """
+
+
+# I codici con cui pytest e vitest dicono qualcosa **sui test**: 0 tutto verde, 1
+# fallimenti, 2 interrotto (l'errore di raccolta), 5 nessun test raccolto. Fuori da
+# qui — `127` «comando non eseguibile», `4` «riga di comando sbagliata» — a parlare
+# non è stato il test: è stato il gate, e va detto così.
+CODICI_DEL_TEST = {"python": {0, 1, 2, 5}, "vitest": {0, 1}}
+
 # Le quattro letture in ordine di forza. Un test parametrizzato — o un `it.each` —
 # gira più volte sotto lo stesso nome: se un caso solo è rosso, quel test un momento
 # in cui mordeva ce l'ha avuto, ed è tutto ciò che il gate chiede.
@@ -962,11 +979,16 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     per test: lì vale l'esito del comando intero, che è la sola cosa che si sa.
     """
     try:
-        _, uscita = esegui(c.argv, c.cartella, timeout=1800)
+        codice, uscita = esegui(c.argv, c.cartella, timeout=1800)
     except subprocess.TimeoutExpired:
-        uscita = "i test non terminano a quel commit"
+        # Un timeout lo dicono i test: a quel commit non terminano, e il gate non
+        # indovina. Lo strumento ha girato — quindi non è un guasto.
+        codice, uscita = 0, "i test non terminano a quel commit"
     letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
     complessivo = leggi_esito(uscita)
+    if complessivo == "nessuno" and codice not in CODICI_DEL_TEST[c.linguaggio]:
+        raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
+                            f"{uscita.strip()[-1000:]}")
     return {chiave: letti.get(chiave, complessivo) for chiave in c.etichette}, uscita
 
 
@@ -1362,8 +1384,15 @@ def esegui_pbi(
         # non ha senso chiedere di un ciclo che potrebbe non essere ancora chiuso.
         print("    gate del rosso … ", end="", flush=True)
         t_rosso = time.monotonic()
-        with misura(e, "gate"):
-            senza_rosso = gate_del_rosso(visti=visti)
+        try:
+            with misura(e, "gate"):
+                senza_rosso = gate_del_rosso(visti=visti)
+        except GuastoDelGate as guasto:
+            # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
+            # accusa nessun commit, perché il gate non ne ha guardato nessuno.
+            print(f"GUASTO ({hms(time.monotonic() - t_rosso)})")
+            print(f"    ── gate del rosso ──\n{guasto}")
+            return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
         print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
         if senza_rosso:
             # `fermato` e non un rilievo da chiudere in un giro di revisione: il ciclo
@@ -1602,7 +1631,13 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
     base, separatore, solo_ref = ref.partition("..")
     if not separatore:
         base, solo_ref = "origin/main", ref
-    mancati = gate_del_rosso(base=base, ref=solo_ref)
+    try:
+        mancati = gate_del_rosso(base=base, ref=solo_ref)
+    except GuastoDelGate as guasto:
+        # `2` e non `1`: chi lancia il gate a mano deve distinguere «il rosso non
+        # c'è stato» da «il gate non ha potuto guardare».
+        print(f"Il gate non ha potuto guardare {base}..{solo_ref}: {guasto}")
+        return 2
     if not mancati:
         print(f"Il rosso c'è stato: in {base}..{solo_ref} nessun test è nato verde.")
         return 0
