@@ -21,6 +21,7 @@ sarebbe un test che riscrive il repository in cui gira.
 import csv
 import importlib.util
 import json
+import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -1682,3 +1683,185 @@ class TestITestNuoviSiLeggonoDalDiff:
         )
 
         assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_uno"]
+
+
+class RepoDiProva:
+    """Un repository vero e minuscolo, con la forma di questo: `backend/app` e
+    `backend/tests`.
+
+    Qui git non si può fingere. Il gate del rosso estrae un commit in un
+    `git worktree` usa e getta e **ci esegue i test dentro**: è tutto ciò che fa, e
+    un doppio lo lascerebbe fuori dalla prova. Il prezzo è qualche decimo di secondo
+    per commit; la prova è che il rosso viene osservato, non dedotto dal messaggio.
+    """
+
+    def __init__(self, radice: Path):
+        self.radice = radice
+        self._git("init", "-q")
+        self._git("config", "user.email", "prova@example.invalid")
+        self._git("config", "user.name", "prova")
+        self._git("config", "commit.gpgsign", "false")
+        base = self.commit("chore: l'impalcatura", {
+            "backend/app/__init__.py": "",
+            "backend/tests/__init__.py": "",
+        })
+        self._git("update-ref", "refs/remotes/origin/main", base)
+
+    def _git(self, *args: str) -> str:
+        fatto = subprocess.run(["git", *args], cwd=self.radice,
+                               capture_output=True, text=True, check=True)
+        return fatto.stdout.strip()
+
+    def commit(self, messaggio: str, file: dict[str, str]) -> str:
+        for percorso, contenuto in file.items():
+            f = self.radice / percorso
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(contenuto, encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", messaggio)
+        return self._git("rev-parse", "HEAD")
+
+
+@pytest.fixture
+def repo_di_prova(tmp_path, monkeypatch):
+    radice = tmp_path / "repo"
+    radice.mkdir()
+    repo = RepoDiProva(radice)
+    monkeypatch.setattr(runner, "REPO", radice)
+    return repo
+
+
+def sorgente_che_lascia_un_segno(marcatore: Path, corpo: str) -> str:
+    """Un test che lascia scritto di essere stato eseguito, poi decide se passare.
+
+    Il marcatore è la sola prova che il test è **girato** invece di essere saltato,
+    dedotto dal messaggio del commit, o mai raccolto: il worktree in cui gira viene
+    distrutto, quindi il segno va lasciato fuori.
+    """
+    return (
+        "from pathlib import Path\n\n\n"
+        "def test_la_somma_fa_due():\n"
+        f"    Path({str(marcatore)!r}).write_text('eseguito')\n"
+        f"    {corpo}\n"
+    )
+
+
+class TestIlGateDelRossoCamminaICommit:
+    """PBI-103: *quei test sono mai stati rossi?*
+
+    Tre esiti e non due (dalla tabella del PBI): a quel commit il test **fallisce**
+    — il RED c'è stato, e il gate passa; **passa** — è nato verde, e il gate ferma;
+    **si salta** — il rosso non era osservabile lì, e il gate ferma con una ragione
+    distinta, perché le due letture non vanno confuse.
+    """
+
+    def test_un_test_nato_verde_ferma_e_dice_quale(self, repo_di_prova, tmp_path):
+        """Il caso di `f35abd1`: il codice era già in un commit precedente."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        sha = repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "nato verde" in mancati[0]["esito"]
+        assert "test_la_somma_fa_due" in mancati[0]["test"]
+        assert (tmp_path / "girato").exists(), "il verdetto va osservato, non dedotto"
+
+    def test_la_coppia_giusta_passa_e_il_test_e_girato_davvero(self, repo_di_prova, tmp_path):
+        """`test(...) (RED)` e poi `fix(...)`: il ciclo fatto come si deve."""
+        repo_di_prova.commit("test: la somma fa due (RED)", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        repo_di_prova.commit("fix: aggiungi la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+
+        assert runner.gate_del_rosso() == []
+        assert (tmp_path / "girato").exists(), (
+            "il rosso è stato dedotto dal messaggio del commit invece che osservato"
+        )
+
+    def test_un_commit_misto_ferma_senza_girare_niente(self, repo_di_prova, tmp_path):
+        """Il caso di `aa40167` (PBI-328): pagina e test nello stesso commit.
+
+        Il rosso non può essere esistito in mezzo a un commit solo, e si riconosce
+        dal solo diff: eseguire i test lì non aggiungerebbe niente.
+        """
+        sha = repo_di_prova.commit("feat: la somma, con il suo test", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "produzione" in mancati[0]["esito"]
+        assert not (tmp_path / "girato").exists(), "il diff bastava: i test non vanno eseguiti"
+
+    def test_uno_skipif_ferma_con_la_ragione_sua(self, repo_di_prova):
+        """«Rosso non osservabile» non è «nato verde», e confonderli nasconde la
+        domanda che il PBI-103 vuole vedere posta: *se il rosso non si può vedere,
+        cosa vale al suo posto?*"""
+        sha = repo_di_prova.commit("test: il golden, se il foglio c'è", {
+            "backend/tests/test_golden.py":
+                "import pytest\n\n\n"
+                "@pytest.mark.skipif(True, reason='il foglio non c\\'è su questa macchina')\n"
+                "def test_il_golden_coincide():\n    assert False\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "non osservabile" in mancati[0]["esito"]
+        assert "nato verde" not in mancati[0]["esito"]
+
+    def test_un_refactor_senza_test_nuovi_non_ferma(self, repo_di_prova):
+        """La regola morde sul test nuovo, non su ogni riga scritta."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("refactor: dai un nome ai due addendi", {
+            "backend/app/somma.py": "def somma(primo, secondo):\n    return primo + secondo\n",
+        })
+
+        assert runner.gate_del_rosso() == []
+
+    def test_non_lascia_worktree_appesi_ne_sporca_lalbero(self, repo_di_prova, tmp_path):
+        """Il gate gira **sotto** l'agente che lavora: se toccasse l'albero del giro
+        romperebbe il lavoro che sta giudicando."""
+        prima = repo_di_prova._git("worktree", "list")
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+
+        assert runner.gate_del_rosso() != []
+        assert repo_di_prova._git("worktree", "list") == prima
+        assert repo_di_prova._git("status", "--porcelain") == ""
+
+    def test_guarda_solo_i_commit_nuovi_dallultimo_giro(self, repo_di_prova, tmp_path):
+        """Al secondo giro del Builder i commit già visti non si rigirano: il gate
+        sta dentro un ciclo che può ripetersi quattro volte, e rieseguire ogni volta
+        la storia intera moltiplicherebbe il tempo macchina per le revisioni."""
+        repo_di_prova.commit("test: la somma fa due (RED)", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        visti: set[str] = set()
+
+        assert runner.gate_del_rosso(visti=visti) == []
+        assert len(visti) == 1
+        (tmp_path / "girato").unlink()
+
+        assert runner.gate_del_rosso(visti=visti) == []
+        assert not (tmp_path / "girato").exists(), "un commit già visto è stato rigirato"
