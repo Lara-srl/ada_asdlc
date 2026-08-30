@@ -2024,6 +2024,22 @@ class TestIlGateDelRossoSiLanciaDaSolo:
         assert runner.main() == 1
         assert "f35abd1" in capsys.readouterr().out
 
+    def test_accetta_anche_un_intervallo(self, monkeypatch):
+        """`BASE..REF`, perché un branch **già mergiato** non ha più commit fuori da
+        `origin/main` — e la prova sul caso vero è esattamente lì. `pbi/pbi-330` è
+        entrato in main il 31/08, mentre PBI-103 lo stava usando come prova."""
+        visto: dict[str, str] = {}
+        monkeypatch.setattr(
+            runner, "gate_del_rosso",
+            lambda base="origin/main", ref="HEAD", **k: visto.update(base=base, ref=ref) or [],
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["asdlc_runner", "--gate-rosso", "d2c084c..pbi/pbi-330"]
+        )
+
+        assert runner.main() == 0
+        assert visto == {"base": "d2c084c", "ref": "pbi/pbi-330"}
+
     def test_torna_0_quando_il_rosso_ce_stato(self, monkeypatch):
         monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso"])
