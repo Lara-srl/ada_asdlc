@@ -774,8 +774,12 @@ def worktree_usa_e_getta(sha: str):
         shutil.rmtree(cartella, ignore_errors=True)
 
 
-def id_pytest(albero: Path, t: TestNuovo, relativo: str) -> str | None:
+def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
     """`file::Classe::test`, letto dall'AST del file **a quel commit**.
+
+    Prende la sorgente e non un percorso, perché il file a quel commit si legge in
+    due modi: dal worktree quando c'è, e da `git show sha:percorso` quando il gate
+    ferma dal solo diff e non deve estrarre niente.
 
     E non `-k`, che seleziona per sottostringa: `test_somma` prenderebbe anche
     `test_somma_negativa`, e il rosso di un test vicino coprirebbe quello nato
@@ -783,30 +787,75 @@ def id_pytest(albero: Path, t: TestNuovo, relativo: str) -> str | None:
     lì il gate non indovina, ferma e lo dice.
     """
     try:
-        modulo = ast.parse((albero / t.file).read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, ValueError):
+        modulo = ast.parse(sorgente)
+    except (SyntaxError, ValueError):
         return None
     definizioni = (ast.FunctionDef, ast.AsyncFunctionDef)
     for nodo in modulo.body:
-        if isinstance(nodo, definizioni) and nodo.name == t.nome:
-            return f"{relativo}::{t.nome}"
+        if isinstance(nodo, definizioni) and nodo.name == nome:
+            return f"{relativo}::{nome}"
         if isinstance(nodo, ast.ClassDef):
             for figlio in nodo.body:
-                if isinstance(figlio, definizioni) and figlio.name == t.nome:
-                    return f"{relativo}::{nodo.name}::{t.nome}"
+                if isinstance(figlio, definizioni) and figlio.name == nome:
+                    return f"{relativo}::{nodo.name}::{nome}"
     return None
 
 
-def dove_gira(albero: Path, percorso: str) -> tuple[Path, str]:
+def dove_gira(percorso: str) -> tuple[str, str]:
     """La cartella da cui si lancia il test, e il suo percorso da lì.
 
     Sono le stesse di `GATE`: `pytest` da `backend`, `npm test` da `frontend`. Un
-    test isolato che girasse da un'altra parte non sarebbe più lo stesso test.
+    test isolato che girasse da un'altra parte non sarebbe più lo stesso test — e un
+    id scritto col prefisso `backend/` non si riesegue da `backend/`.
     """
     for radice in ("backend", "frontend"):
         if percorso.startswith(f"{radice}/"):
-            return albero / radice, percorso[len(radice) + 1:]
-    return albero, percorso
+            return radice, percorso[len(radice) + 1:]
+    return ".", percorso
+
+
+def leggi_sorgente(percorso: Path) -> str | None:
+    """Il file dal worktree, o `None` se a quel commit non c'era."""
+    try:
+        return percorso.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def sorgente_al_commit(sha: str, percorso: str) -> str | None:
+    """Il file com'era a quel commit, dall'oggetto git e **senza worktree**."""
+    try:
+        return git("show", f"{sha}:{percorso}")
+    except RuntimeError:
+        return None
+
+
+def etichetta_del_test(sorgente: str | None, t: TestNuovo, relativo: str) -> str:
+    """L'id con cui quel test si riesegue a mano, dalla cartella da cui si esegue.
+
+    Quando il nome non si trova nel file non si inventa un node id: si scrive in una
+    forma che non finge di esserlo. Un `file::nome` che dà «not found» fa sembrare
+    sbagliato il gate invece del commit, ed è il difetto che questa regola chiude.
+    """
+    if t.linguaggio != "python":
+        return f"{relativo} -t {t.nome}"
+    nodo = id_pytest(sorgente, t.nome, relativo) if sorgente is not None else None
+    return nodo if nodo is not None else f"{relativo} → {t.nome}"
+
+
+def etichette_al_commit(sha: str, nuovi: list[TestNuovo]) -> list[str]:
+    """Gli id dei test nuovi di un commit, letti **senza estrarne niente**.
+
+    È l'elenco che si porta dietro il commit misto, che ferma dal solo diff e deve
+    restare così: `git show` dà il file di allora, e il criterio «ferma senza girare
+    i test» resta intatto. Che l'id sia eseguibile conta lì quanto altrove — anzi di
+    più, perché è il ramo del gate che si legge più spesso.
+    """
+    etichette: list[str] = []
+    for t in nuovi:
+        _, relativo = dove_gira(t.file)
+        etichette.append(etichetta_del_test(sorgente_al_commit(sha, t.file), t, relativo))
+    return etichette
 
 
 @dataclass(frozen=True)
@@ -845,11 +894,13 @@ def comandi_dei_test(albero: Path,
     orfani: list[str] = []
 
     for t in nuovi:
-        cartella, relativo = dove_gira(albero, t.file)
+        radice, relativo = dove_gira(t.file)
+        cartella = albero / radice
+        sorgente = leggi_sorgente(albero / t.file)
         if t.linguaggio == "python":
-            nodo = id_pytest(albero, t, relativo)
+            nodo = id_pytest(sorgente, t.nome, relativo) if sorgente is not None else None
             if nodo is None:
-                orfani.append(f"{t.file}::{t.nome}")
+                orfani.append(etichetta_del_test(sorgente, t, relativo))
                 continue
             per_pytest.setdefault(cartella, []).append(nodo)
         else:
@@ -1049,7 +1100,7 @@ def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
         titolo = git("show", "--no-patch", "--format=%s", sha)
         produzione = [p for _, p in file if e_file_di_produzione(p)]
         if produzione:
-            mancati.append(voce_mancata(sha, titolo, [f"{t.file}::{t.nome}" for t in nuovi],
+            mancati.append(voce_mancata(sha, titolo, etichette_al_commit(sha, nuovi),
                                         MISTO, ", ".join(produzione[:10])))
             continue
         mancati += esamina_il_commit(sha, titolo, nuovi)
