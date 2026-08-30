@@ -36,6 +36,7 @@ alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import fcntl
 import json
@@ -44,6 +45,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from collections import Counter, defaultdict
@@ -696,7 +698,7 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
     return aggiunti, tolti
 
 
-def test_nuovi_del_commit(sha: str) -> list[TestNuovo]:
+def test_nuovi_del_commit(sha: str, file: list[tuple[str, str]] | None = None) -> list[TestNuovo]:
     """I test che **nascono** in questo commit.
 
     Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
@@ -704,7 +706,7 @@ def test_nuovi_del_commit(sha: str) -> list[TestNuovo]:
     farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
     """
     nuovi: list[TestNuovo] = []
-    for _, percorso in file_del_commit(sha):
+    for _, percorso in (file if file is not None else file_del_commit(sha)):
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
@@ -713,6 +715,206 @@ def test_nuovi_del_commit(sha: str) -> list[TestNuovo]:
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
+
+
+# Ciò che il worktree usa e getta non ha perché è gitignored, e senza cui i test non
+# girano: si presta dall'albero del giro con un link. `data/` è il foglio vero, che
+# la CI non ha e questa macchina sì; `node_modules` è mezzo minuto di `npm ci` per
+# ogni commit da guardare. Sono le dipendenze di **oggi** e non quelle di quel
+# commit: se un test di allora chiedesse un pacchetto che oggi non c'è più, il gate
+# lo leggerebbe come rosso — che è il verso giusto in cui sbagliare.
+PRESTITI = ("data", "frontend/node_modules")
+
+# Le tre letture che **non** sono un rosso osservato, con la ragione che le
+# distingue. `nato verde` e `rosso non osservabile` sono due cose diverse: la prima
+# dice che il codice c'era già, la seconda che lì il rosso non si poteva vedere. Il
+# PBI-103 esiste per raccogliere i casi della seconda, e confonderli li perderebbe.
+ESITI_MANCATI = {
+    "verde": "nato verde: a quel commit il test passa, il codice c'era già",
+    "saltato": "rosso non osservabile: a quel commit il test si salta",
+    "nessuno": "rosso non isolabile: a quel commit il test non gira, e il gate non indovina",
+}
+MISTO = ("test e produzione nello stesso commit: il rosso non può essere esistito "
+         "in mezzo a un commit solo, e basta il diff per dirlo")
+
+
+def commit_da_esaminare(base: str, ref: str, visti: set[str]) -> list[str]:
+    """I commit del branch dal più vecchio, saltando quelli di un giro precedente."""
+    fuori = git("rev-list", "--reverse", f"{base}..{ref}")
+    return [sha for sha in fuori.split() if sha not in visti]
+
+
+@contextmanager
+def worktree_usa_e_getta(sha: str):
+    """Estrae un commit **fuori** dall'albero del giro, e lo smonta comunque vada.
+
+    Fuori e non dentro: sotto l'albero del giro c'è l'agente che lavora, e un gate
+    che gli sposta i file sotto rompe il lavoro che sta giudicando. Per la stessa
+    ragione la cartella sta in `/tmp` e non in `REPO`, dove sporcherebbe il
+    `git status` che il controllo d'igiene legge un istante dopo.
+    """
+    cartella = Path(tempfile.mkdtemp(prefix="ada-rosso-"))
+    albero = cartella / "albero"
+    try:
+        git("worktree", "add", "--detach", "--quiet", str(albero), sha)
+        for prestito in PRESTITI:
+            sorgente, destinazione = REPO / prestito, albero / prestito
+            if sorgente.exists() and not destinazione.exists() and destinazione.parent.is_dir():
+                destinazione.symlink_to(sorgente)
+        yield albero
+    finally:
+        try:
+            git("worktree", "remove", "--force", str(albero))
+        except RuntimeError as exc:  # smontarlo è igiene, non è il verdetto
+            print(f"    ⚠️  worktree non smontato: {str(exc)[:200]}")
+        shutil.rmtree(cartella, ignore_errors=True)
+
+
+def id_pytest(albero: Path, t: TestNuovo, relativo: str) -> str | None:
+    """`file::Classe::test`, letto dall'AST del file **a quel commit**.
+
+    E non `-k`, che seleziona per sottostringa: `test_somma` prenderebbe anche
+    `test_somma_negativa`, e il rosso di un test vicino coprirebbe quello nato
+    verde. `None` quando il nome non si trova — un test generato, o dentro un `if`:
+    lì il gate non indovina, ferma e lo dice.
+    """
+    try:
+        modulo = ast.parse((albero / t.file).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return None
+    definizioni = (ast.FunctionDef, ast.AsyncFunctionDef)
+    for nodo in modulo.body:
+        if isinstance(nodo, definizioni) and nodo.name == t.nome:
+            return f"{relativo}::{t.nome}"
+        if isinstance(nodo, ast.ClassDef):
+            for figlio in nodo.body:
+                if isinstance(figlio, definizioni) and figlio.name == t.nome:
+                    return f"{relativo}::{nodo.name}::{t.nome}"
+    return None
+
+
+def dove_gira(albero: Path, percorso: str) -> tuple[Path, str]:
+    """La cartella da cui si lancia il test, e il suo percorso da lì.
+
+    Sono le stesse di `GATE`: `pytest` da `backend`, `npm test` da `frontend`. Un
+    test isolato che girasse da un'altra parte non sarebbe più lo stesso test.
+    """
+    for radice in ("backend", "frontend"):
+        if percorso.startswith(f"{radice}/"):
+            return albero / radice, percorso[len(radice) + 1:]
+    return albero, percorso
+
+
+def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple], list[TestNuovo]]:
+    """I comandi che eseguono **soltanto** quei test, e i test che non si isolano.
+
+    Un comando solo per i pytest di ogni cartella — costa un avvio di interprete —
+    e uno per file per vitest, perché `-t` è un filtro per nome e non un elenco.
+    """
+    per_pytest: dict[Path, tuple[list[str], list[TestNuovo]]] = {}
+    per_vitest: dict[tuple[Path, str], tuple[list[str], list[TestNuovo]]] = {}
+    orfani: list[TestNuovo] = []
+
+    for t in nuovi:
+        cartella, relativo = dove_gira(albero, t.file)
+        if t.linguaggio == "python":
+            nodo = id_pytest(albero, t, relativo)
+            if nodo is None:
+                orfani.append(t)
+                continue
+            id_e_test = per_pytest.setdefault(cartella, ([], []))
+            id_e_test[0].append(nodo)
+            id_e_test[1].append(t)
+        else:
+            nomi_e_test = per_vitest.setdefault((cartella, relativo), ([], []))
+            nomi_e_test[0].append(t.nome)
+            nomi_e_test[1].append(t)
+
+    comandi: list[tuple] = [
+        (cartella, ["pytest", "-q", *nodi], test) for cartella, (nodi, test) in per_pytest.items()
+    ]
+    comandi += [
+        (cartella, ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi)], test)
+        for (cartella, relativo), (nomi, test) in per_vitest.items()
+    ]
+    return comandi, orfani
+
+
+def leggi_esito(uscita: str) -> str:
+    """`rosso` | `verde` | `saltato` | `nessuno`, dai conteggi che pytest e vitest
+    scrivono tutti e due come «N passed», «N failed», «N skipped».
+
+    Un **errore** conta come rosso: il caso più comune di test-first in Python è un
+    `from app.x import y` che a quel commit non esiste ancora, e leggerlo come «non
+    ha girato» fermerebbe proprio il ciclo fatto bene.
+
+    Non si guarda l'exit code: `pytest` torna 0 anche con tutto saltato, e `vitest`
+    torna 1 sia per un test rosso sia per un file che non ha trovato.
+    """
+    conti = Counter()
+    for numero, voce in re.findall(r"(\d+) (passed|failed|skipped|error)", uscita):
+        conti[voce] += int(numero)
+    if conti["failed"] or conti["error"]:
+        return "rosso"
+    if conti["passed"]:
+        return "verde"
+    if conti["skipped"]:
+        return "saltato"
+    return "nessuno"
+
+
+def voce_mancata(sha: str, titolo: str, test: list[TestNuovo], esito: str, coda: str) -> dict[str, str]:
+    return {"commit": sha[:7], "titolo": titolo, "esito": esito, "coda": coda[-2000:],
+            "test": ", ".join(f"{t.file}::{t.nome}" for t in test)[:400]}
+
+
+def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo]) -> list[dict[str, str]]:
+    """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso."""
+    mancati: list[dict[str, str]] = []
+    with worktree_usa_e_getta(sha) as albero:
+        comandi, orfani = comandi_dei_test(albero, nuovi)
+        if orfani:
+            mancati.append(voce_mancata(sha, titolo, orfani, ESITI_MANCATI["nessuno"],
+                                        "il nome non si trova nel file a quel commit"))
+        for cartella, comando, test in comandi:
+            try:
+                _, uscita = esegui(comando, cartella, timeout=1800)
+            except subprocess.TimeoutExpired:
+                uscita = "i test non terminano a quel commit"
+            esito = leggi_esito(uscita)
+            if esito != "rosso":
+                mancati.append(voce_mancata(sha, titolo, test, ESITI_MANCATI[esito], uscita))
+    return mancati
+
+
+def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
+                   visti: set[str] | None = None) -> list[dict[str, str]]:
+    """I commit del branch in cui un test è nato senza essere mai stato rosso.
+
+    Lista vuota = il gate passa. `visti` è l'insieme dei commit già guardati e viene
+    **riempito**: il gate sta dentro un ciclo che può ripetersi cinque volte, e
+    rigirare ogni volta la storia intera moltiplicherebbe il tempo macchina per le
+    revisioni.
+
+    Non si ferma al primo mancato: chi legge deve avere l'elenco intero — commit,
+    test, esito — perché la lettura la fa una persona, e una persona decide meglio
+    su tre casi che su uno.
+    """
+    visti = visti if visti is not None else set()
+    mancati: list[dict[str, str]] = []
+    for sha in commit_da_esaminare(base, ref, visti):
+        visti.add(sha)
+        file = file_del_commit(sha)
+        nuovi = test_nuovi_del_commit(sha, file)
+        if not nuovi:
+            continue  # un refactor non porta test nuovi, e la regola morde su quelli
+        titolo = git("show", "--no-patch", "--format=%s", sha)
+        produzione = [p for _, p in file if e_file_di_produzione(p)]
+        if produzione:
+            mancati.append(voce_mancata(sha, titolo, nuovi, MISTO, ", ".join(produzione[:10])))
+            continue
+        mancati += esamina_il_commit(sha, titolo, nuovi)
+    return mancati
 
 
 VERDETTI = {"VERDETTO: PASS": "pass",

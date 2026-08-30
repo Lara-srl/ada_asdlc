@@ -1851,7 +1851,6 @@ class TestIlGateDelRossoCamminaICommit:
     def test_non_lascia_worktree_appesi_ne_sporca_lalbero(self, repo_di_prova, tmp_path):
         """Il gate gira **sotto** l'agente che lavora: se toccasse l'albero del giro
         romperebbe il lavoro che sta giudicando."""
-        prima = repo_di_prova._git("worktree", "list")
         repo_di_prova.commit("feat: la somma", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
         })
@@ -1859,6 +1858,7 @@ class TestIlGateDelRossoCamminaICommit:
             "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
                 tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
         })
+        prima = repo_di_prova._git("worktree", "list")
 
         assert runner.gate_del_rosso() != []
         assert repo_di_prova._git("worktree", "list") == prima
