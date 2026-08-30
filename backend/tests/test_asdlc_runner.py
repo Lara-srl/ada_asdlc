@@ -23,6 +23,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1880,3 +1881,151 @@ class TestIlGateDelRossoCamminaICommit:
 
         assert runner.gate_del_rosso(visti=visti) == []
         assert not (tmp_path / "girato").exists(), "un commit già visto è stato rigirato"
+
+
+class TestIlGateDelRossoStaNelGiro:
+    """Dove sta il gate, e cosa succede quando ferma.
+
+    Sta nel **Quality Gate**, dopo che i quattro sono verdi e prima del Critic: è la
+    seconda domanda dello stesso gate — *i test passano?* e *sono mai stati rossi?* —
+    e la sa una macchina come l'altra. Ferma vuol dire `fermato` **subito**: il ciclo
+    mancato è *ex ante* e nessuna fix lo annulla, quindi rimandare il Builder a
+    correggere sarebbe spendere una revisione su una cosa che non si corregge.
+    """
+
+    def _mondo(self, monkeypatch, mancati, critic=None):
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(
+            runner, "revisione_critica", critic or (lambda p: runner.Verdetto("pass", "", "ok"))
+        )
+        monkeypatch.setattr(runner, "gate_del_rosso", mancati)
+
+    def test_un_commit_senza_rosso_ferma_il_pbi_subito(self, monkeypatch):
+        visto = {"critic": 0}
+
+        def _critic(_p):
+            visto["critic"] += 1
+            return runner.Verdetto("pass", "", "ok")
+
+        self._mondo(monkeypatch, lambda **k: [
+            {"commit": "f35abd1", "titolo": "test: rimisura dal database",
+             "test": "backend/tests/test_importa_storico.py::test_la_riga_12",
+             "esito": "nato verde: a quel commit il test passa, il codice c'era già",
+             "coda": ""},
+        ], critic=_critic)
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert "f35abd1" in esito.nota
+        assert visto["critic"] == 0, (
+            "il Critic è stato chiamato su un lavoro già fermo: sono minuti di modello "
+            "spesi per farsi porre una domanda che il gate aveva già posto"
+        )
+
+    def test_lelenco_finisce_nel_rapporto_e_a_schermo(self, monkeypatch, capsys):
+        """Commit, test, esito: il giro si chiude con l'elenco, e la lettura la fa
+        una persona che non ha più il worktree sotto mano."""
+        self._mondo(monkeypatch, lambda **k: [
+            {"commit": "f35abd1", "titolo": "test: rimisura dal database",
+             "test": "backend/tests/test_importa_storico.py::test_la_riga_12",
+             "esito": "nato verde: a quel commit il test passa, il codice c'era già",
+             "coda": "1 passed"},
+        ])
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert [m["commit"] for m in esito.commit_senza_rosso] == ["f35abd1"]
+        a_schermo = capsys.readouterr().out
+        assert "gate del rosso" in a_schermo, "il log lo stampa come gli altri quattro"
+        assert "f35abd1" in a_schermo and "nato verde" in a_schermo
+
+    def test_il_suo_tempo_e_tempo_di_gate(self, monkeypatch):
+        """Sta in `gate_s` perché è tempo di **macchina**, come pytest e vitest: la
+        colonna del registro separa il modello dalla macchina, non i gate fra loro."""
+        def _lento(**k):
+            time.sleep(0.05)
+            return []
+
+        self._mondo(monkeypatch, _lento)
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        assert esito.tempi["gate"] >= 0.05
+        assert runner.riga_di_registro("r", {"pbi": "PBI-103", "stato": "fatto",
+                                             "tempi": dict(esito.tempi)})["gate_s"] >= 0.05
+
+    def test_al_secondo_giro_non_rigira_i_commit_gia_visti(self, monkeypatch):
+        """Il gate sta dentro un ciclo che può ripetersi cinque volte: rigirare ogni
+        volta la storia intera moltiplicherebbe il tempo macchina per le revisioni."""
+        chiamate: list[set[str]] = []
+        giri = {"critic": 0}
+
+        def _gate(visti=None, **k):
+            chiamate.append(set(visti))
+            visti.add("abc1234")
+            return []
+
+        def _critic(_p):
+            giri["critic"] += 1
+            return runner.Verdetto("non pronto" if giri["critic"] == 1 else "pass", "", "")
+
+        self._mondo(monkeypatch, _gate, critic=_critic)
+
+        assert runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False).stato == "fatto"
+        assert chiamate == [set(), {"abc1234"}], (
+            "il secondo giro ha riguardato i commit del primo"
+        )
+
+    def test_un_gate_verde_lascia_passare_al_critic(self, monkeypatch):
+        interrogato: list[int] = []
+        self._mondo(monkeypatch, lambda **k: interrogato.append(1) or [])
+
+        assert runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False).stato == "fatto"
+        assert interrogato, (
+            "il gate non è stato nemmeno interrogato: un `fatto` che nessuno ha misurato"
+        )
+
+
+class TestIlGateDelRossoSiLanciaDaSolo:
+    """`--gate-rosso <ref>`: il gate senza il giro intorno.
+
+    Serve a due cose che il gate dentro il giro non dà: provarlo su un branch già
+    chiuso — è così che si guarda `pbi/pbi-330` — e rileggere un `fermato` senza
+    rifare mezz'ora di Builder.
+    """
+
+    def test_senza_argomento_guarda_head(self):
+        assert runner.costruisci_parser().parse_args(["--gate-rosso"]).gate_rosso == "HEAD"
+        assert runner.costruisci_parser().parse_args(
+            ["--gate-rosso", "pbi/pbi-330"]).gate_rosso == "pbi/pbi-330"
+
+    def test_non_esegue_nessun_pbi_e_torna_1_se_ferma(self, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [
+            {"commit": "f35abd1", "titolo": "test: rimisura dal database",
+             "test": "backend/tests/test_importa_storico.py::test_la_riga_12",
+             "esito": "nato verde: a quel commit il test passa, il codice c'era già",
+             "coda": ""},
+        ])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda *a, **k: pytest.fail("non esegue nessun PBI")
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso", "pbi/pbi-330"])
+
+        assert runner.main() == 1
+        assert "f35abd1" in capsys.readouterr().out
+
+    def test_torna_0_quando_il_rosso_ce_stato(self, monkeypatch):
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso"])
+
+        assert runner.main() == 0
