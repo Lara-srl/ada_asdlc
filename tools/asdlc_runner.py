@@ -809,37 +809,44 @@ def dove_gira(albero: Path, percorso: str) -> tuple[Path, str]:
     return albero, percorso
 
 
-def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple], list[TestNuovo]]:
+def comandi_dei_test(albero: Path, nuovi: list[TestNuovo]) -> tuple[list[tuple], list[str]]:
     """I comandi che eseguono **soltanto** quei test, e i test che non si isolano.
 
     Un comando solo per i pytest di ogni cartella — costa un avvio di interprete —
     e uno per file per vitest, perché `-t` è un filtro per nome e non un elenco.
+
+    Accanto al comando viaggiano le **etichette**: il node id di pytest, o il file e
+    il nome che vitest filtra. Sono ciò che finisce nell'elenco del gate, e vanno
+    scritte come si eseguono — un `file::nome` senza la classe che lo contiene dà
+    «not found» a chi prova a rieseguirlo, e fa sembrare sbagliato il gate.
     """
-    per_pytest: dict[Path, tuple[list[str], list[TestNuovo]]] = {}
-    per_vitest: dict[tuple[Path, str], tuple[list[str], list[TestNuovo]]] = {}
-    orfani: list[TestNuovo] = []
+    per_pytest: dict[Path, tuple[list[str], list[str]]] = {}
+    per_vitest: dict[tuple[Path, str], tuple[list[str], list[str]]] = {}
+    orfani: list[str] = []
 
     for t in nuovi:
         cartella, relativo = dove_gira(albero, t.file)
         if t.linguaggio == "python":
             nodo = id_pytest(albero, t, relativo)
             if nodo is None:
-                orfani.append(t)
+                orfani.append(f"{t.file}::{t.nome}")
                 continue
-            id_e_test = per_pytest.setdefault(cartella, ([], []))
-            id_e_test[0].append(nodo)
-            id_e_test[1].append(t)
+            nodi_e_etichette = per_pytest.setdefault(cartella, ([], []))
+            nodi_e_etichette[0].append(nodo)
+            nodi_e_etichette[1].append(nodo)
         else:
-            nomi_e_test = per_vitest.setdefault((cartella, relativo), ([], []))
-            nomi_e_test[0].append(t.nome)
-            nomi_e_test[1].append(t)
+            nomi_e_etichette = per_vitest.setdefault((cartella, relativo), ([], []))
+            nomi_e_etichette[0].append(t.nome)
+            nomi_e_etichette[1].append(f"{relativo} -t {t.nome}")
 
     comandi: list[tuple] = [
-        (cartella, ["pytest", "-q", *nodi], test) for cartella, (nodi, test) in per_pytest.items()
+        (cartella, ["pytest", "-q", *nodi], etichette)
+        for cartella, (nodi, etichette) in per_pytest.items()
     ]
     comandi += [
-        (cartella, ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi)], test)
-        for (cartella, relativo), (nomi, test) in per_vitest.items()
+        (cartella, ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi)],
+         etichette)
+        for (cartella, relativo), (nomi, etichette) in per_vitest.items()
     ]
     return comandi, orfani
 
@@ -867,9 +874,15 @@ def leggi_esito(uscita: str) -> str:
     return "nessuno"
 
 
-def voce_mancata(sha: str, titolo: str, test: list[TestNuovo], esito: str, coda: str) -> dict[str, str]:
+# Quanti test dell'elenco si scrivono per esteso. Oltre, si conta il resto: un
+# nome tagliato a metà non si ritrova, e chi legge lo prende per un difetto del gate.
+TEST_IN_ELENCO = 4
+
+
+def voce_mancata(sha: str, titolo: str, test: list[str], esito: str, coda: str) -> dict[str, str]:
+    resto = len(test) - TEST_IN_ELENCO
     return {"commit": sha[:7], "titolo": titolo, "esito": esito, "coda": coda[-2000:],
-            "test": ", ".join(f"{t.file}::{t.nome}" for t in test)[:400]}
+            "test": ", ".join(test[:TEST_IN_ELENCO]) + (f" e altri {resto}" if resto > 0 else "")}
 
 
 def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo]) -> list[dict[str, str]]:
@@ -880,14 +893,14 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo]) -> list[dic
         if orfani:
             mancati.append(voce_mancata(sha, titolo, orfani, ESITI_MANCATI["nessuno"],
                                         "il nome non si trova nel file a quel commit"))
-        for cartella, comando, test in comandi:
+        for cartella, comando, etichette in comandi:
             try:
                 _, uscita = esegui(comando, cartella, timeout=1800)
             except subprocess.TimeoutExpired:
                 uscita = "i test non terminano a quel commit"
             esito = leggi_esito(uscita)
             if esito != "rosso":
-                mancati.append(voce_mancata(sha, titolo, test, ESITI_MANCATI[esito], uscita))
+                mancati.append(voce_mancata(sha, titolo, etichette, ESITI_MANCATI[esito], uscita))
     return mancati
 
 
@@ -915,7 +928,8 @@ def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
         titolo = git("show", "--no-patch", "--format=%s", sha)
         produzione = [p for _, p in file if e_file_di_produzione(p)]
         if produzione:
-            mancati.append(voce_mancata(sha, titolo, nuovi, MISTO, ", ".join(produzione[:10])))
+            mancati.append(voce_mancata(sha, titolo, [f"{t.file}::{t.nome}" for t in nuovi],
+                                        MISTO, ", ".join(produzione[:10])))
             continue
         mancati += esamina_il_commit(sha, titolo, nuovi)
     return mancati
