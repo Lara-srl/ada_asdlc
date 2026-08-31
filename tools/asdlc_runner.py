@@ -1053,12 +1053,39 @@ def esiti_di_vitest(rapporto: Path | None) -> dict[str, str]:
     return letti
 
 
+def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
+    """`rosso` quando un file **non si è caricato**, `nessuno` in ogni altro caso.
+
+    È il gemello frontend dell'errore di raccolta: un `import FoglioPage from
+    './FoglioPage'` che a quel commit non esiste ancora fa fallire il file **prima**
+    dei test, e allora non c'è nessun `assertionResult` da leggere. In Python quel
+    caso è un rosso perché `pytest` scrive `1 error` e `leggi_esito` lo conta; col
+    `--reporter=json` di vitest i conteggi non sono a schermo, e senza questa lettura
+    lo stesso identico ciclo TDD risulta `nessuno` e ferma il gate.
+
+    Solo quel caso, e non lo stato del file in generale: un file `passed` con zero
+    test è il filtro `-t` che non ha matchato niente, e leggerlo come verde darebbe
+    per girato un test che non è mai partito — il gate passerebbe in silenzio proprio
+    dove non ha guardato.
+    """
+    try:
+        dati = json.loads(rapporto.read_text(encoding="utf-8"))
+    except (AttributeError, OSError, ValueError):
+        return "nessuno"
+    for file in dati.get("testResults", []):
+        if file.get("status") == "failed" and not file.get("assertionResults"):
+            return "rosso"
+    return "nessuno"
+
+
 def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     """Gira il comando e torna l'esito di **ogni** test che gli era stato chiesto.
 
     Un errore di **raccolta** — il `from app.x import y` che a quel commit non
     esiste ancora, cioè il rosso più comune del test-first — non stampa nessuna riga
-    per test: lì vale l'esito del comando intero, che è la sola cosa che si sa.
+    per test: lì vale l'esito del comando intero, che è la sola cosa che si sa. In
+    vitest quell'esito non è nell'output ma nel json (`esito_dei_file_di_vitest`),
+    perché il `--reporter=json` porta via da schermo anche i conteggi.
     """
     try:
         codice, uscita = esegui(c.argv, c.cartella, timeout=1800)
@@ -1068,6 +1095,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         codice, uscita = 0, "i test non terminano a quel commit"
     letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
     complessivo = leggi_esito(uscita)
+    if c.linguaggio == "vitest" and complessivo == "nessuno":
+        complessivo = esito_dei_file_di_vitest(c.rapporto)
     if complessivo == "nessuno" and codice not in CODICI_DEL_TEST[c.linguaggio]:
         raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
                             f"{uscita.strip()[-1000:]}")
