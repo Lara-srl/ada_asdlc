@@ -21,7 +21,9 @@ sarebbe un test che riscrive il repository in cui gira.
 import csv
 import importlib.util
 import json
+import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1561,3 +1563,827 @@ class TestIGateSiDichiaranoPrimaDiPartire:
         dev = REPO / "backend" / "requirements-dev.txt"
         assert dev.exists(), "un albero nuovo deve poter installare i gate leggendo un file"
         assert "pytest" in dev.read_text()
+
+
+# --- Il gate del rosso (PBI-103) --------------------------------------------
+#
+# Il Quality Gate risponde a una domanda sola — *i test passano?* — e ne manca una
+# seconda che è meccanica: **quei test sono mai stati rossi?** Un test nato verde
+# non prova niente, e due volte su due in tre giorni (PBI-328, PBI-330) il divieto
+# scritto in AGENTS.md non ha fermato niente, perché una frase in un prompt non è
+# un vincolo. Qui sotto i pezzi di quel gate, dal più piccolo in su.
+
+
+class TestChiEUnTestEChiEProduzione:
+    """Il primo taglio lo fa il **diff**, senza eseguire niente.
+
+    Un commit che porta test nuovi e file di produzione insieme non può aver avuto
+    un rosso in mezzo: il codice che li fa passare è arrivato nello stesso gesto. È
+    il caso di `aa40167` (PBI-328), 1337 righe di pagina e 445 di test insieme.
+    """
+
+    @pytest.mark.parametrize("percorso", [
+        "backend/tests/test_importa_storico.py",
+        "backend/tests/conftest.py",
+        "frontend/src/pages/PratichePage.test.tsx",
+        "e2e/tests/fase2-marginalita.spec.ts",
+    ])
+    def test_questi_sono_test(self, percorso):
+        assert runner.e_file_di_test(percorso)
+
+    @pytest.mark.parametrize("percorso", [
+        "frontend/src/pages/PratichePage.tsx",
+        "backend/app/services/marginalita.py",
+        "tools/importa_storico.py",
+        "e2e/contract.ts",
+    ])
+    def test_questi_sono_produzione(self, percorso):
+        assert runner.e_file_di_produzione(percorso)
+        assert not runner.e_file_di_test(percorso)
+
+    @pytest.mark.parametrize("percorso", [
+        "specs/marginalita/spec.md",
+        "backlog/PBI-330-lo-storico-entra-dal-foglio.md",
+        "decisions/ADR-0015-la-deroga-allo-scope-si-dichiara.md",
+    ])
+    def test_un_documento_non_e_ne_luno_ne_laltro(self, percorso):
+        """La spec viaggia **con** il codice che cambia (AGENTS.md, SEMPRE): se
+        contasse come produzione, ogni commit di soli test con la sua spec
+        aggiornata verrebbe fermato per una regola che non c'entra. È il caso di
+        `f35abd1`, che tocca il file di test e `specs/marginalita/spec.md`."""
+        assert not runner.e_file_di_produzione(percorso)
+        assert not runner.e_file_di_test(percorso)
+
+
+def git_del_commit(monkeypatch, name_status: str, diff: dict[str, str]):
+    """Un `git` che risponde per un commit solo: i suoi file e il suo diff."""
+    def _git(*args: str) -> str:
+        if args[:3] == ("show", "--format=", "--name-status"):
+            return name_status
+        if args[0] == "show" and "--unified=0" in args:
+            return diff.get(args[-1], "")
+        return ""
+
+    monkeypatch.setattr(runner, "git", _git)
+
+
+class TestITestNuoviSiLeggonoDalDiff:
+    """Quali test **nascono** in questo commit: né quelli che c'erano, né quelli
+    che il commit sposta da un file all'altro."""
+
+    def test_una_funzione_aggiunta_e_un_test_nuovo(self, monkeypatch):
+        git_del_commit(
+            monkeypatch,
+            "M\tbackend/tests/test_somma.py",
+            {"backend/tests/test_somma.py":
+             "@@ -1,0 +2,2 @@\n+def test_somma_due_numeri():\n+    assert somma(1, 1) == 2\n"},
+        )
+
+        nuovi = runner.test_nuovi_del_commit("abc1234")
+
+        assert [(t.file, t.nome, t.linguaggio) for t in nuovi] == [
+            ("backend/tests/test_somma.py", "test_somma_due_numeri", "python")
+        ]
+
+    def test_un_test_spostato_non_e_un_test_nuovo(self, monkeypatch):
+        """Lo stesso nome cancellato e riaggiunto è un trasloco, non una nascita.
+
+        È il caso che il Protocollo di rifinitura chiama *«un file di test
+        riscritto per intero»*: senza questo, un riordino farebbe girare tutta la
+        suite di quel commit e la fermerebbe come nata verde.
+        """
+        git_del_commit(
+            monkeypatch,
+            "M\tbackend/tests/test_somma.py",
+            {"backend/tests/test_somma.py":
+             "@@ -3,3 +3,4 @@\n-def test_vecchio():\n-    assert True\n"
+             "+def test_vecchio():\n+    assert True\n+def test_davvero_nuovo():\n+    assert False\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_davvero_nuovo"]
+
+    def test_riconosce_i_test_del_frontend(self, monkeypatch):
+        git_del_commit(
+            monkeypatch,
+            "A\tfrontend/src/pages/PratichePage.test.tsx",
+            {"frontend/src/pages/PratichePage.test.tsx":
+             "@@ -0,0 +1,3 @@\n+  it('mostra il margine in fondo alla colonna', () => {\n"
+             "+    expect(1).toBe(1)\n+  })\n"},
+        )
+
+        nuovi = runner.test_nuovi_del_commit("abc1234")
+
+        assert [(t.nome, t.linguaggio) for t in nuovi] == [
+            ("mostra il margine in fondo alla colonna", "vitest")
+        ]
+
+    def test_gli_e2e_non_sono_del_runner(self, monkeypatch):
+        """`npm run e2e` da un worktree punta allo stack di un altro codice
+        (ADR-0009): quel gate è della CI, e un rosso che il runner non può
+        osservare non lo può nemmeno pretendere."""
+        git_del_commit(
+            monkeypatch,
+            "M\te2e/tests/fase2-marginalita.spec.ts",
+            {"e2e/tests/fase2-marginalita.spec.ts":
+             "@@ -1,0 +2,1 @@\n+  test('la pratica si chiude', async ({ page }) => {\n"},
+        )
+
+        assert runner.test_nuovi_del_commit("abc1234") == []
+
+    def test_le_righe_di_intestazione_del_diff_non_sono_codice(self, monkeypatch):
+        """`+++ b/…` comincia per `+` e non è una riga aggiunta."""
+        git_del_commit(
+            monkeypatch,
+            "M\tbackend/tests/test_somma.py",
+            {"backend/tests/test_somma.py":
+             "--- a/backend/tests/test_somma.py\n+++ b/backend/tests/test_somma.py\n"
+             "@@ -1,0 +2,1 @@\n+def test_uno():\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_uno"]
+
+
+class RepoDiProva:
+    """Un repository vero e minuscolo, con la forma di questo: `backend/app` e
+    `backend/tests`.
+
+    Qui git non si può fingere. Il gate del rosso estrae un commit in un
+    `git worktree` usa e getta e **ci esegue i test dentro**: è tutto ciò che fa, e
+    un doppio lo lascerebbe fuori dalla prova. Il prezzo è qualche decimo di secondo
+    per commit; la prova è che il rosso viene osservato, non dedotto dal messaggio.
+    """
+
+    def __init__(self, radice: Path):
+        self.radice = radice
+        self._git("init", "-q")
+        self._git("config", "user.email", "prova@example.invalid")
+        self._git("config", "user.name", "prova")
+        self._git("config", "commit.gpgsign", "false")
+        base = self.commit("chore: l'impalcatura", {
+            "backend/app/__init__.py": "",
+            "backend/tests/__init__.py": "",
+        })
+        self._git("update-ref", "refs/remotes/origin/main", base)
+
+    def _git(self, *args: str) -> str:
+        fatto = subprocess.run(["git", *args], cwd=self.radice,
+                               capture_output=True, text=True, check=True)
+        return fatto.stdout.strip()
+
+    def commit(self, messaggio: str, file: dict[str, str]) -> str:
+        for percorso, contenuto in file.items():
+            f = self.radice / percorso
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(contenuto, encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", messaggio)
+        return self._git("rev-parse", "HEAD")
+
+
+@pytest.fixture
+def repo_di_prova(tmp_path, monkeypatch):
+    radice = tmp_path / "repo"
+    radice.mkdir()
+    repo = RepoDiProva(radice)
+    monkeypatch.setattr(runner, "REPO", radice)
+    return repo
+
+
+def sorgente_che_lascia_un_segno(marcatore: Path, corpo: str) -> str:
+    """Un test che lascia scritto di essere stato eseguito, poi decide se passare.
+
+    Il marcatore è la sola prova che il test è **girato** invece di essere saltato,
+    dedotto dal messaggio del commit, o mai raccolto: il worktree in cui gira viene
+    distrutto, quindi il segno va lasciato fuori.
+    """
+    return (
+        "from pathlib import Path\n\n\n"
+        "def test_la_somma_fa_due():\n"
+        f"    Path({str(marcatore)!r}).write_text('eseguito')\n"
+        f"    {corpo}\n"
+    )
+
+
+class TestIlGateDelRossoCamminaICommit:
+    """PBI-103: *quei test sono mai stati rossi?*
+
+    Tre esiti e non due (dalla tabella del PBI): a quel commit il test **fallisce**
+    — il RED c'è stato, e il gate passa; **passa** — è nato verde, e il gate ferma;
+    **si salta** — il rosso non era osservabile lì, e il gate ferma con una ragione
+    distinta, perché le due letture non vanno confuse.
+    """
+
+    def test_un_test_nato_verde_ferma_e_dice_quale(self, repo_di_prova, tmp_path):
+        """Il caso di `f35abd1`: il codice era già in un commit precedente."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        sha = repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "nato verde" in mancati[0]["esito"]
+        assert "test_la_somma_fa_due" in mancati[0]["test"]
+        assert (tmp_path / "girato").exists(), "il verdetto va osservato, non dedotto"
+
+    def test_la_coppia_giusta_passa_e_il_test_e_girato_davvero(self, repo_di_prova, tmp_path):
+        """`test(...) (RED)` e poi `fix(...)`: il ciclo fatto come si deve."""
+        repo_di_prova.commit("test: la somma fa due (RED)", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        repo_di_prova.commit("fix: aggiungi la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+
+        assert runner.gate_del_rosso() == []
+        assert (tmp_path / "girato").exists(), (
+            "il rosso è stato dedotto dal messaggio del commit invece che osservato"
+        )
+
+    def test_un_commit_misto_ferma_senza_girare_niente(self, repo_di_prova, tmp_path):
+        """Il caso di `aa40167` (PBI-328): pagina e test nello stesso commit.
+
+        Il rosso non può essere esistito in mezzo a un commit solo, e si riconosce
+        dal solo diff: eseguire i test lì non aggiungerebbe niente.
+        """
+        sha = repo_di_prova.commit("feat: la somma, con il suo test", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "produzione" in mancati[0]["esito"]
+        assert not (tmp_path / "girato").exists(), "il diff bastava: i test non vanno eseguiti"
+
+    def test_anche_sul_commit_misto_lid_e_quello_che_pytest_trova(
+        self, repo_di_prova, monkeypatch
+    ):
+        """Il ramo del commit misto è il più visibile del gate — è il caso di
+        PBI-328, l'esempio che il PBI porta per primo — e l'id lo ricostruiva a mano:
+        senza la classe, e col prefisso `backend/` che da `backend/` non si esegue.
+        Chi copia dal `fermato` si prende un «not found» e conclude che il gate ha
+        sbagliato: il difetto che `e64555f` chiude, lasciato aperto proprio lì.
+
+        L'AST si legge dal blob (`git show sha:percorso`): niente worktree, quindi
+        «ferma **senza** girare i test» resta intatto.
+        """
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        repo_di_prova.commit("feat: la somma, con il suo test", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "class TestLaSomma:\n"
+                "    def test_fa_due(self):\n        assert somma(1, 1) == 2\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert mancati[0]["test"] == "tests/test_somma.py::TestLaSomma::test_fa_due", (
+            "l'id va scritto come si esegue, dalla cartella da cui si esegue"
+        )
+        assert "produzione" in mancati[0]["esito"]
+
+    def test_sul_commit_misto_un_test_del_frontend_porta_il_filtro_di_vitest(
+        self, repo_di_prova, monkeypatch
+    ):
+        """`file -t nome`, che è come vitest lo riesegue: `::` lì non vuol dire
+        niente e manderebbe chi legge a cercare un node id che non esiste."""
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        repo_di_prova.commit("feat: il riquadro del margine, col suo test", {
+            "frontend/src/Margine.tsx": "export const Margine = () => null\n",
+            "frontend/src/Margine.test.tsx":
+                "it('mostra il margine', () => {\n  expect(1).toBe(1)\n})\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert mancati[0]["test"] == "src/Margine.test.tsx -t mostra il margine"
+
+    def test_un_test_punto_spec_non_esce_dal_gate_per_il_suo_nome(
+        self, repo_di_prova, monkeypatch
+    ):
+        """`.spec.tsx` è un test per vitest quanto `.test.tsx` — è la sua `include`
+        di default — e il gate lo deve trattare come tale.
+
+        Il verso è quello: il file resta un test e i suoi casi sono test nuovi, così
+        il commit che lo porta insieme alla pagina ferma come misto. L'altro verso —
+        toglierlo dai file di test — lo renderebbe produzione, e un commit di soli
+        `.spec` verrebbe fermato per una regola che non c'entra.
+
+        Serve perché le due liste divergevano: `e_file_di_test` conosceva `.spec.*`,
+        `linguaggio_del_test` no. Il file non era né produzione né portatore di test
+        nuovi, e il commit misto passava **in silenzio** — il caso che il Protocollo
+        di rifinitura vieta: in caso di dubbio il gate ferma e lo dice, non indovina.
+        """
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        sha = repo_di_prova.commit("feat: il riquadro del margine, col suo spec", {
+            "frontend/src/Margine.tsx": "export const Margine = () => null\n",
+            "frontend/src/Margine.spec.tsx":
+                "it('mostra il margine', () => {\n  expect(1).toBe(1)\n})\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]], (
+            "un test uscito dal gate per la sola forma del suo nome"
+        )
+        assert "produzione" in mancati[0]["esito"]
+        assert mancati[0]["test"] == "src/Margine.spec.tsx -t mostra il margine"
+
+    def test_un_nome_che_nel_file_non_ce_non_finge_di_essere_un_node_id(
+        self, repo_di_prova, monkeypatch
+    ):
+        """Un test generato, o dentro un `if`: il gate non indovina, e non scrive un
+        `::` che promette a chi legge un comando che non esiste."""
+        monkeypatch.setattr(
+            runner, "worktree_usa_e_getta",
+            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+        )
+        repo_di_prova.commit("feat: la somma, con i suoi test generati", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py":
+                "for _caso in (1, 2):\n"
+                "    def test_generato():\n        assert True\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert "::" not in mancati[0]["test"], (
+            "un id che dà «not found» fa sembrare sbagliato il gate invece del commit"
+        )
+        assert "test_generato" in mancati[0]["test"]
+
+    def test_uno_skipif_ferma_con_la_ragione_sua(self, repo_di_prova):
+        """«Rosso non osservabile» non è «nato verde», e confonderli nasconde la
+        domanda che il PBI-103 vuole vedere posta: *se il rosso non si può vedere,
+        cosa vale al suo posto?*"""
+        sha = repo_di_prova.commit("test: il golden, se il foglio c'è", {
+            "backend/tests/test_golden.py":
+                "import pytest\n\n\n"
+                "@pytest.mark.skipif(True, reason='il foglio non c\\'è su questa macchina')\n"
+                "def test_il_golden_coincide():\n    assert False\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "non osservabile" in mancati[0]["esito"]
+        assert "nato verde" not in mancati[0]["esito"]
+
+    def test_un_rosso_accanto_a_un_nato_verde_non_lo_copre(self, repo_di_prova, tmp_path):
+        """La classificazione è **per test**, non per comando.
+
+        Un `test(...) (RED)` porta quasi sempre più di un test, e girano tutti in un
+        `pytest` solo: se basta un rosso per dire «il RED c'è stato», il test nato
+        verde accanto sparisce dall'elenco. È il caso di `f35abd1`, che di funzioni
+        di test ne introduce dodici — e leggere l'esito dal totale ne farebbe un
+        tutto-o-niente su dodici invece che una misura per test.
+        """
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        sha = repo_di_prova.commit("test: la somma e la differenza (RED)", {
+            "backend/tests/test_conti.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_fa_due():\n    assert somma(1, 1) == 2\n\n\n"
+                "def test_la_differenza_fa_zero():\n"
+                "    from app.differenza import differenza\n"
+                "    assert differenza(1, 1) == 0\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]], (
+            "il rosso di un test vicino ha coperto quello nato verde"
+        )
+        assert "test_la_somma_fa_due" in mancati[0]["test"]
+        assert "test_la_differenza_fa_zero" not in mancati[0]["test"], (
+            "un test che a quel commit è davvero rosso non va nell'elenco"
+        )
+
+    def test_uno_skipif_accanto_a_un_rosso_non_sparisce(self, repo_di_prova):
+        """Lo `skipped` in mezzo a un `failed`: il PBI-103 esiste per **raccogliere**
+        i casi in cui il rosso non si può vedere, e sommarli al totale li perde."""
+        sha = repo_di_prova.commit("test: il golden e la somma (RED)", {
+            "backend/tests/test_conti.py":
+                "import pytest\n\n\n"
+                "@pytest.mark.skipif(True, reason='il foglio non c\\'è su questa macchina')\n"
+                "def test_il_golden_coincide():\n    assert False\n\n\n"
+                "def test_la_somma_fa_due():\n"
+                "    from app.somma import somma\n    assert somma(1, 1) == 2\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "non osservabile" in mancati[0]["esito"]
+        assert "test_il_golden_coincide" in mancati[0]["test"]
+
+    def test_un_refactor_senza_test_nuovi_non_ferma(self, repo_di_prova):
+        """La regola morde sul test nuovo, non su ogni riga scritta."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("refactor: dai un nome ai due addendi", {
+            "backend/app/somma.py": "def somma(primo, secondo):\n    return primo + secondo\n",
+        })
+
+        assert runner.gate_del_rosso() == []
+
+    def test_non_lascia_worktree_appesi_ne_sporca_lalbero(self, repo_di_prova, tmp_path):
+        """Il gate gira **sotto** l'agente che lavora: se toccasse l'albero del giro
+        romperebbe il lavoro che sta giudicando."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        prima = repo_di_prova._git("worktree", "list")
+
+        assert runner.gate_del_rosso() != []
+        assert repo_di_prova._git("worktree", "list") == prima
+        assert repo_di_prova._git("status", "--porcelain") == ""
+
+    def test_lelenco_dice_il_comando_con_cui_ritrovare_il_test(self, repo_di_prova, tmp_path):
+        """L'elenco porta il **node id**, non un `file::nome` ricostruito.
+
+        Un test dentro una classe si chiama `file::Classe::test`, e chi copia dal
+        rapporto un id senza la classe si prende un «not found» da pytest e crede
+        che il gate abbia sbagliato. È successo il 31/08 rileggendo `4d7b48f`.
+        """
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "class TestLaSomma:\n"
+                "    def test_fa_due(self):\n        assert somma(1, 1) == 2\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert mancati[0]["test"] == "tests/test_somma.py::TestLaSomma::test_fa_due", (
+            "l'id va scritto come si esegue, dalla cartella da cui si esegue"
+        )
+
+    def test_lelenco_non_taglia_un_nome_a_meta(self):
+        """Un commit con quaranta test nuovi non deve finire con un `::test` mozzo:
+        un nome tagliato non si ritrova, e sembra un difetto del gate."""
+        voce = runner.voce_mancata(
+            "abc1234", "test: tanti", [f"tests/test_x.py::test_{n}" for n in range(40)],
+            "nato verde", "",
+        )
+
+        assert "tests/test_x.py::test_0, tests/test_x.py::test_1" in voce["test"]
+        assert voce["test"].endswith("e altri 36")
+
+    def test_guarda_solo_i_commit_nuovi_dallultimo_giro(self, repo_di_prova, tmp_path):
+        """Al secondo giro del Builder i commit già visti non si rigirano: il gate
+        sta dentro un ciclo che può ripetersi quattro volte, e rieseguire ogni volta
+        la storia intera moltiplicherebbe il tempo macchina per le revisioni."""
+        repo_di_prova.commit("test: la somma fa due (RED)", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        visti: set[str] = set()
+
+        assert runner.gate_del_rosso(visti=visti) == []
+        assert len(visti) == 1
+        (tmp_path / "girato").unlink()
+
+        assert runner.gate_del_rosso(visti=visti) == []
+        assert not (tmp_path / "girato").exists(), "un commit già visto è stato rigirato"
+
+
+class TestLEsitoSiLeggePerTest:
+    """Il verdetto è di **ogni test**, non del comando che li ha girati insieme.
+
+    I test nuovi di un commit girano in un `pytest` solo — costa un avvio di
+    interprete invece di dodici — ma il conteggio finale (`1 failed, 11 passed`) è
+    una somma, e una somma non dice **quale**. Leggere l'esito dal totale farebbe di
+    ogni `test(...) (RED)` un tutto-o-niente: basterebbe un test che morde per
+    coprire gli undici nati verdi accanto.
+    """
+
+    def test_pytest_lo_dice_riga_per_riga(self):
+        uscita = (
+            "tests/test_conti.py::test_la_somma_fa_due PASSED                  [ 33%]\n"
+            "tests/test_conti.py::TestIlGolden::test_coincide SKIPPED (il foglio) [ 66%]\n"
+            "tests/test_conti.py::test_la_differenza_fa_zero FAILED            [100%]\n"
+            "\n1 failed, 1 passed, 1 skipped in 0.12s\n"
+        )
+
+        assert runner.esiti_di_pytest(uscita) == {
+            "tests/test_conti.py::test_la_somma_fa_due": "verde",
+            "tests/test_conti.py::TestIlGolden::test_coincide": "saltato",
+            "tests/test_conti.py::test_la_differenza_fa_zero": "rosso",
+        }
+
+    def test_un_test_parametrizzato_torna_sotto_il_nome_della_funzione(self):
+        """`pytest -v` stampa una riga per caso — `test_x[1]`, `test_x[2]` — mentre
+        l'id che il gate ha chiesto è quello della funzione. Un caso rosso basta:
+        quel test un momento in cui mordeva ce l'ha avuto."""
+        uscita = ("tests/t.py::test_lo_scarto[1] PASSED   [ 50%]\n"
+                  "tests/t.py::test_lo_scarto[2] FAILED   [100%]\n")
+
+        assert runner.esiti_di_pytest(uscita) == {"tests/t.py::test_lo_scarto": "rosso"}
+
+    def test_vitest_lo_dice_nel_suo_json(self, tmp_path):
+        """`--reporter=json`: l'unica forma in cui vitest dà l'esito per test senza
+        farlo dedurre da un simbolo in mezzo all'output."""
+        rapporto = tmp_path / "vitest.json"
+        rapporto.write_text(json.dumps({"testResults": [{
+            "name": "src/Margine.test.tsx",
+            "assertionResults": [
+                {"title": "mostra il margine", "status": "passed"},
+                {"title": "senza dati non mostra niente", "status": "failed"},
+                {"title": "il caso lento", "status": "skipped"},
+            ],
+        }]}), encoding="utf-8")
+
+        assert runner.esiti_di_vitest(rapporto) == {
+            "mostra il margine": "verde",
+            "senza dati non mostra niente": "rosso",
+            "il caso lento": "saltato",
+        }
+
+    def test_un_rapporto_che_non_ce_non_e_un_verdetto(self, tmp_path):
+        """Vuoto e non «tutto verde»: chi non ha letto niente non ha visto niente, e
+        l'esito del comando intero resta l'unica cosa che si sa."""
+        assert runner.esiti_di_vitest(tmp_path / "mai-scritto.json") == {}
+
+
+class TestUnGateGuastoNonEUnCicloMancato:
+    """`127` non è «nato verde».
+
+    Il gate butta via il codice di uscita di proposito — pytest torna 0 anche con
+    tutto saltato — ma un comando che **non parte** non ha detto niente sui test: non
+    stampa conteggi, e leggerlo come «il rosso non si è mai visto» accusa il Builder
+    di un guasto della macchina. Il caso concreto è il venv fuori dal `PATH`, ed è
+    già costato una diagnosi sbagliata (difetto 11).
+    """
+
+    def _comando(self, linguaggio="python"):
+        return runner.ComandoDiProva(
+            Path("/tmp"), ["pytest", "--tb=no", "-v", "tests/t.py::test_x"],
+            linguaggio, {"tests/t.py::test_x": "tests/t.py::test_x"},
+        )
+
+    def test_un_comando_che_non_parte_alza_invece_di_accusare(self, monkeypatch):
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda *a, **k: (127, "comando non eseguibile: pytest — [Errno 2]"),
+        )
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando())
+
+        assert "pytest" in str(guasto.value)
+
+    def test_una_riga_di_comando_sbagliata_e_del_gate_non_del_builder(self, monkeypatch):
+        """`4` è l'uso sbagliato di pytest: se l'id l'ha scritto il gate, l'errore è
+        del gate."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (4, "ERROR: not found"))
+
+        with pytest.raises(runner.GuastoDelGate):
+            runner.esiti_del_comando(self._comando())
+
+    def test_nessun_test_raccolto_resta_una_lettura_sui_test(self, monkeypatch):
+        """`5` lo dice pytest **sui test**: lì il gate non indovina e lo scrive, che
+        è un'altra cosa dal non aver potuto guardare."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (5, "no tests ran in 0.01s"))
+
+        esiti, _ = runner.esiti_del_comando(self._comando())
+
+        assert esiti == {"tests/t.py::test_x": "nessuno"}
+
+    def test_un_errore_di_raccolta_resta_un_rosso(self, monkeypatch):
+        """L'import che a quel commit non esiste ancora è il rosso più comune del
+        test-first: `2` è un codice di pytest, e il conteggio c'è."""
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda *a, **k: (2, "ERROR tests/t.py\n1 error in 0.02s"),
+        )
+
+        esiti, _ = runner.esiti_del_comando(self._comando())
+
+        assert esiti == {"tests/t.py::test_x": "rosso"}
+
+
+class TestIlGateDelRossoStaNelGiro:
+    """Dove sta il gate, e cosa succede quando ferma.
+
+    Sta nel **Quality Gate**, dopo che i quattro sono verdi e prima del Critic: è la
+    seconda domanda dello stesso gate — *i test passano?* e *sono mai stati rossi?* —
+    e la sa una macchina come l'altra. Ferma vuol dire `fermato` **subito**: il ciclo
+    mancato è *ex ante* e nessuna fix lo annulla, quindi rimandare il Builder a
+    correggere sarebbe spendere una revisione su una cosa che non si corregge.
+    """
+
+    def _mondo(self, monkeypatch, mancati, critic=None):
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(
+            runner, "revisione_critica", critic or (lambda p: runner.Verdetto("pass", "", "ok"))
+        )
+        monkeypatch.setattr(runner, "gate_del_rosso", mancati)
+
+    def test_un_commit_senza_rosso_ferma_il_pbi_subito(self, monkeypatch):
+        visto = {"critic": 0}
+
+        def _critic(_p):
+            visto["critic"] += 1
+            return runner.Verdetto("pass", "", "ok")
+
+        self._mondo(monkeypatch, lambda **k: [
+            {"commit": "f35abd1", "titolo": "test: rimisura dal database",
+             "test": "backend/tests/test_importa_storico.py::test_la_riga_12",
+             "esito": "nato verde: a quel commit il test passa, il codice c'era già",
+             "coda": ""},
+        ], critic=_critic)
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert "f35abd1" in esito.nota
+        assert visto["critic"] == 0, (
+            "il Critic è stato chiamato su un lavoro già fermo: sono minuti di modello "
+            "spesi per farsi porre una domanda che il gate aveva già posto"
+        )
+
+    def test_lelenco_finisce_nel_rapporto_e_a_schermo(self, monkeypatch, capsys):
+        """Commit, test, esito: il giro si chiude con l'elenco, e la lettura la fa
+        una persona che non ha più il worktree sotto mano."""
+        self._mondo(monkeypatch, lambda **k: [
+            {"commit": "f35abd1", "titolo": "test: rimisura dal database",
+             "test": "backend/tests/test_importa_storico.py::test_la_riga_12",
+             "esito": "nato verde: a quel commit il test passa, il codice c'era già",
+             "coda": "1 passed"},
+        ])
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert [m["commit"] for m in esito.commit_senza_rosso] == ["f35abd1"]
+        a_schermo = capsys.readouterr().out
+        assert "gate del rosso" in a_schermo, "il log lo stampa come gli altri quattro"
+        assert "f35abd1" in a_schermo and "nato verde" in a_schermo
+
+    def test_il_suo_tempo_e_tempo_di_gate(self, monkeypatch):
+        """Sta in `gate_s` perché è tempo di **macchina**, come pytest e vitest: la
+        colonna del registro separa il modello dalla macchina, non i gate fra loro."""
+        def _lento(**k):
+            time.sleep(0.05)
+            return []
+
+        self._mondo(monkeypatch, _lento)
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        assert esito.tempi["gate"] >= 0.05
+        assert runner.riga_di_registro("r", {"pbi": "PBI-103", "stato": "fatto",
+                                             "tempi": dict(esito.tempi)})["gate_s"] >= 0.05
+
+    def test_al_secondo_giro_non_rigira_i_commit_gia_visti(self, monkeypatch):
+        """Il gate sta dentro un ciclo che può ripetersi cinque volte: rigirare ogni
+        volta la storia intera moltiplicherebbe il tempo macchina per le revisioni."""
+        chiamate: list[set[str]] = []
+        giri = {"critic": 0}
+
+        def _gate(visti=None, **k):
+            chiamate.append(set(visti))
+            visti.add("abc1234")
+            return []
+
+        def _critic(_p):
+            giri["critic"] += 1
+            return runner.Verdetto("non pronto" if giri["critic"] == 1 else "pass", "", "")
+
+        self._mondo(monkeypatch, _gate, critic=_critic)
+
+        assert runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False).stato == "fatto"
+        assert chiamate == [set(), {"abc1234"}], (
+            "il secondo giro ha riguardato i commit del primo"
+        )
+
+    def test_un_gate_guasto_chiude_rosso_con_la_ragione_vera(self, monkeypatch):
+        """Un `pytest` fuori dal `PATH` non è un ciclo mancato.
+
+        Senza distinguerli, il runner accusa il Builder di aver saltato il TDD su
+        **tutti** i commit del branch insieme quando il guasto è un venv: è la
+        diagnosi sbagliata sul rilievo più grave che sappia emettere, e chi legge il
+        rapporto non ha modo di accorgersene. È la lezione del difetto 11, già
+        scritta in `esegui`.
+        """
+        def _guasto(**k):
+            raise runner.GuastoDelGate("comando non eseguibile: pytest")
+
+        self._mondo(monkeypatch, _guasto)
+
+        esito = runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "rosso", "un gate rotto è un gate rosso, non un TDD saltato"
+        assert "pytest" in esito.nota
+        assert "il rosso non si è mai visto" not in esito.nota
+        assert esito.commit_senza_rosso == [], (
+            "nessun commit è stato accusato: il gate non ha guardato niente"
+        )
+
+    def test_un_gate_verde_lascia_passare_al_critic(self, monkeypatch):
+        interrogato: list[int] = []
+        self._mondo(monkeypatch, lambda **k: interrogato.append(1) or [])
+
+        assert runner.esegui_pbi("PBI-103", attivi=set(), dry=False, con_pr=False).stato == "fatto"
+        assert interrogato, (
+            "il gate non è stato nemmeno interrogato: un `fatto` che nessuno ha misurato"
+        )
+
+
+class TestIlGateDelRossoSiLanciaDaSolo:
+    """`--gate-rosso <ref>`: il gate senza il giro intorno.
+
+    Serve a due cose che il gate dentro il giro non dà: provarlo su un branch già
+    chiuso — è così che si guarda `pbi/pbi-330` — e rileggere un `fermato` senza
+    rifare mezz'ora di Builder.
+    """
+
+    def test_senza_argomento_guarda_head(self):
+        assert runner.costruisci_parser().parse_args(["--gate-rosso"]).gate_rosso == "HEAD"
+        assert runner.costruisci_parser().parse_args(
+            ["--gate-rosso", "pbi/pbi-330"]).gate_rosso == "pbi/pbi-330"
+
+    def test_non_esegue_nessun_pbi_e_torna_1_se_ferma(self, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [
+            {"commit": "f35abd1", "titolo": "test: rimisura dal database",
+             "test": "backend/tests/test_importa_storico.py::test_la_riga_12",
+             "esito": "nato verde: a quel commit il test passa, il codice c'era già",
+             "coda": ""},
+        ])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda *a, **k: pytest.fail("non esegue nessun PBI")
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso", "pbi/pbi-330"])
+
+        assert runner.main() == 1
+        assert "f35abd1" in capsys.readouterr().out
+
+    def test_accetta_anche_un_intervallo(self, monkeypatch):
+        """`BASE..REF`, perché un branch **già mergiato** non ha più commit fuori da
+        `origin/main` — e la prova sul caso vero è esattamente lì. `pbi/pbi-330` è
+        entrato in main il 31/08, mentre PBI-103 lo stava usando come prova."""
+        visto: dict[str, str] = {}
+        monkeypatch.setattr(
+            runner, "gate_del_rosso",
+            lambda base="origin/main", ref="HEAD", **k: visto.update(base=base, ref=ref) or [],
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["asdlc_runner", "--gate-rosso", "d2c084c..pbi/pbi-330"]
+        )
+
+        assert runner.main() == 0
+        assert visto == {"base": "d2c084c", "ref": "pbi/pbi-330"}
+
+    def test_un_guasto_non_si_confonde_con_un_ciclo_mancato(self, monkeypatch, capsys):
+        """`2` e non `1`: chi lancia il gate a mano deve poter distinguere «il rosso
+        non c'è stato» da «il gate non ha potuto guardare»."""
+        def _guasto(**k):
+            raise runner.GuastoDelGate("comando non eseguibile: pytest")
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _guasto)
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso", "pbi/pbi-330"])
+
+        assert runner.main() == 2
+        assert "pytest" in capsys.readouterr().out
+
+    def test_torna_0_quando_il_rosso_ce_stato(self, monkeypatch):
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso"])
+
+        assert runner.main() == 0
