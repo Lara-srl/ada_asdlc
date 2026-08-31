@@ -1699,6 +1699,46 @@ class TestITestNuoviSiLeggonoDalDiff:
             ("mostra il margine in fondo alla colonna", "vitest")
         ]
 
+    def test_un_titolo_con_un_escape_unicode_si_legge_come_lo_esegue_vitest(
+            self, monkeypatch):
+        """Il nome estratto dal sorgente deve essere la stringa **valutata**.
+
+        Il gate lo usa per due cose che vivono a runtime: il filtro `-t`, che vitest
+        matcha sul titolo vero, e la chiave con cui si rilegge il json, dove il
+        titolo è già valutato. Passare `all’officina` a `-t` non matcha niente:
+        zero test girati, `nessuno`, e il gate ferma un commit sano.
+        """
+        git_del_commit(
+            monkeypatch,
+            "M\tfrontend/src/pages/AnalisiPage.test.tsx",
+            {"frontend/src/pages/AnalisiPage.test.tsx":
+             "@@ -1,0 +2,1 @@\n"
+             "+  it('non compare all\\u2019officina: sono i conti dell\\u2019azienda', () => {\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == [
+            "non compare all’officina: sono i conti dell’azienda"
+        ]
+
+    def test_un_apostrofo_con_la_barra_non_taglia_il_titolo_a_meta(self, monkeypatch):
+        """`it('l\\'officina non lo vede')`: l'apice scappato non chiude la stringa.
+
+        Qui il titolo si perde due volte — la regola si ferma all'apice e ne legge
+        metà, e quella metà porta ancora la barra — e tutte e due le volte `-t` non
+        matcha.
+        """
+        git_del_commit(
+            monkeypatch,
+            "M\tfrontend/src/pages/AnalisiPage.test.tsx",
+            {"frontend/src/pages/AnalisiPage.test.tsx":
+             "@@ -1,0 +2,1 @@\n"
+             "+  it('l\\'officina non lo vede', () => {\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == [
+            "l'officina non lo vede"
+        ]
+
     def test_gli_e2e_non_sono_del_runner(self, monkeypatch):
         """`npm run e2e` da un worktree punta allo stack di un altro codice
         (ADR-0009): quel gate è della CI, e un rosso che il runner non può
@@ -2210,6 +2250,54 @@ class TestUnGateGuastoNonEUnCicloMancato:
         esiti, _ = runner.esiti_del_comando(self._comando())
 
         assert esiti == {"tests/t.py::test_x": "rosso"}
+
+    def _comando_vitest(self, rapporto):
+        relativo = "src/pages/FoglioPage.test.tsx"
+        nome = "mostra le commesse del foglio"
+        return runner.ComandoDiProva(
+            Path("/tmp"), ["npm", "test", "--", relativo, "-t", nome], "vitest",
+            {nome: f"{relativo} -t {nome}"}, rapporto,
+        )
+
+    def test_un_file_che_non_si_carica_e_un_rosso_anche_in_vitest(
+            self, monkeypatch, tmp_path):
+        """Il gemello frontend dell'import che non esiste ancora.
+
+        `FoglioPage.test.tsx` senza `FoglioPage.tsx` è il RED classico del
+        test-first nel frontend, ed è il caso che in Python `leggi_esito` conta come
+        rosso leggendo `1 error`. Col `--reporter=json` quel conteggio a schermo non
+        c'è mai: il file non si carica, quindi non esiste nessun risultato per-test,
+        e l'unica cosa scritta è il file `failed` con zero `assertionResults`.
+        """
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({"testResults": [
+            {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+             "assertionResults": []},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "\n RUN  v3.2.4\n"))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": "rosso"}
+
+    def test_un_file_verde_senza_test_non_diventa_un_rosso_ne_un_verde(
+            self, monkeypatch, tmp_path):
+        """Il file `passed` con zero test è il filtro `-t` che non ha matchato niente.
+
+        Leggerlo come verde darebbe per girato un test che non è mai partito — il
+        gate del rosso passerebbe in silenzio proprio dove non ha guardato. Resta
+        `nessuno`, che è quello che il gate segnala come «rosso non isolabile».
+        """
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({"testResults": [
+            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+             "assertionResults": []},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "\n RUN  v3.2.4\n"))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": "nessuno"}
 
 
 class TestIlGateDelRossoStaNelGiro:
