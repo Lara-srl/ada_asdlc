@@ -1153,6 +1153,19 @@ class TestIlBranchLoPubblicaIlRunner:
         prompt = runner.PROMPT_BUILDER.lower()
         assert "git push" in prompt and "pr create" in prompt
 
+    def test_il_builder_sa_che_una_restrizione_si_guadagna(self):
+        """Il gate ha fermato PBI-333 su `not.toContain('/analisi/foglio')`.
+
+        A quel commit quella voce non esiste per nessun ruolo: l'asserzione è vera
+        per costruzione, e nessuna riscrittura del commit la fa mordere finché ciò
+        che nega non esiste. L'ordine in cui invece morde esiste — la cosa senza la
+        restrizione, poi il test dell'assenza, poi la restrizione — ma è l'unico, e
+        un Builder che non lo conosce riscrive lo stesso test nello stesso posto al
+        giro dopo.
+        """
+        prompt = runner.PROMPT_BUILDER.lower()
+        assert "assenza" in prompt and "restrizione" in prompt
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
