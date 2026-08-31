@@ -159,6 +159,16 @@ Esegui il PBI con queste regole non negoziabili:
   regge la prova «un estraneo capisce cosa è cambiato?», riscrivilo.
 - **Un commit RED lo dichiara**, e dice quale comportamento sta fissando:
   `test(marginalita): il ricambio lordo entra nel costo maggiorato dell'IVA (RED)`.
+- **Una restrizione si guadagna in due coppie RED→GREEN, non in una.** Un test che
+  asserisce un'**assenza** — `not.toContain(…)`, `assert x not in …`, il 403 che deve
+  arrivare — è verde per costruzione finché ciò che nega non esiste ancora. Scritto nel RED
+  della cosa che non c'è, non può fallire, quindi non dimostra niente e il gate del rosso
+  ferma il giro. L'ordine in cui invece morde è uno solo:
+  (1) fai esistere la cosa nel modo più semplice, **senza** la restrizione — il test della
+  presenza passa; (2) **poi** scrivi il test dell'assenza, che ora è **rosso** perché la
+  restrizione non c'è; (3) aggiungi la restrizione, che lo fa passare. Il commit intermedio
+  in cui la cosa è visibile a chi non deve vederla vive dentro il branch e non si
+  distribuisce: è il prezzo di una prova che vale.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
 - Se il PBI cambia un contratto, aggiorna la spec NELLO STESSO commit del codice.
 - Non lasciare modifiche non committate: ciò che non è committato non esiste.
