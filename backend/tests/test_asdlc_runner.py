@@ -455,6 +455,28 @@ class TestIlPromptDiRimedioSiReggeDaSolo:
         )
         assert "1. [scope]" in prompt, "il rapporto del Critic resta il cuore del prompt"
 
+    def test_dice_come_si_fa_il_test_first_quando_il_codice_c_e_gia(self):
+        """Sulla strada del rimedio «test-first» alla lettera è ineseguibile.
+
+        Il codice che il rilievo riguarda è già committato: qualunque test il
+        Builder scriva adesso nasce verde, e il gate del rosso lo ferma. È
+        successo su **PBI-332**, due commit su due — `851c967` (la guardia
+        scritta dopo l'import che difende) e `f429096` (test e produzione
+        insieme) — dopo che il Critic aveva chiesto proprio quei test. Ripetere
+        «test-first» senza dire **come** è un ordine che non si può eseguire, e
+        un ordine ineseguibile lo si smette di leggere.
+        """
+        prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+
+        assert "rebase" in prompt, (
+            "senza il riordino il Builder non ha modo di rendere rosso un test "
+            "scritto su codice che c'è già: è l'unico gesto che glielo permette"
+        )
+        assert "rosso" in prompt, (
+            "il criterio è il rosso a quel commit, non il riordino per sé: "
+            "un rebase che lascia il test verde non ha chiuso niente"
+        )
+
     def test_ripete_le_regole_che_il_rimedio_puo_violare(self):
         """Il rimedio è codice come il resto: stesse regole, non un'eccezione.
 
