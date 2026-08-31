@@ -277,6 +277,17 @@ del resto del PBI (`tipo(scope): descrizione imperativa`, in italiano). Valgono 
 regole di prima: test-first, la spec nello stesso commit del codice che ne cambia il
 comportamento, niente modifiche non committate.
 
+**Qui «test-first» vuol dire riordinare la storia.** Il codice che il rilievo riguarda è
+già committato: un test scritto adesso nasce verde, e il gate del rosso lo ferma — a
+ragione, perché un test mai stato rosso non ha dimostrato di mordere. Quindi:
+
+- il test che chiude un rilievo entra in storia **prima** del commit che lo fa passare:
+  scrivilo, spostalo lì con `git rebase`, e verifica che a quel commit sia **rosso**;
+- se il rimedio è anche una correzione di codice, sono **due** commit — `test (RED)` e poi
+  il `fix` — mai uno: il rosso non può essere esistito in mezzo a un commit solo;
+- se il rosso non si ottiene in nessun modo, **non** riscrivere la storia per nasconderlo:
+  scrivi nel commit perché non era osservabile e lascialo vedere.
+
 **Un rilievo non si chiude spegnendo ciò che lo ha trovato.** Cancellare un test, allargare
 una tolleranza o aggiungere uno `skip` fa passare il gate e disfa la cosa che il gate
 proteggeva: se una violazione si chiude solo così, non è una violazione da chiudere ed è il
