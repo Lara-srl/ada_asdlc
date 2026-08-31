@@ -1699,6 +1699,46 @@ class TestITestNuoviSiLeggonoDalDiff:
             ("mostra il margine in fondo alla colonna", "vitest")
         ]
 
+    def test_un_titolo_con_un_escape_unicode_si_legge_come_lo_esegue_vitest(
+            self, monkeypatch):
+        """Il nome estratto dal sorgente deve essere la stringa **valutata**.
+
+        Il gate lo usa per due cose che vivono a runtime: il filtro `-t`, che vitest
+        matcha sul titolo vero, e la chiave con cui si rilegge il json, dove il
+        titolo è già valutato. Passare `all’officina` a `-t` non matcha niente:
+        zero test girati, `nessuno`, e il gate ferma un commit sano.
+        """
+        git_del_commit(
+            monkeypatch,
+            "M\tfrontend/src/pages/AnalisiPage.test.tsx",
+            {"frontend/src/pages/AnalisiPage.test.tsx":
+             "@@ -1,0 +2,1 @@\n"
+             "+  it('non compare all\\u2019officina: sono i conti dell\\u2019azienda', () => {\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == [
+            "non compare all’officina: sono i conti dell’azienda"
+        ]
+
+    def test_un_apostrofo_con_la_barra_non_taglia_il_titolo_a_meta(self, monkeypatch):
+        """`it('l\\'officina non lo vede')`: l'apice scappato non chiude la stringa.
+
+        Qui il titolo si perde due volte — la regola si ferma all'apice e ne legge
+        metà, e quella metà porta ancora la barra — e tutte e due le volte `-t` non
+        matcha.
+        """
+        git_del_commit(
+            monkeypatch,
+            "M\tfrontend/src/pages/AnalisiPage.test.tsx",
+            {"frontend/src/pages/AnalisiPage.test.tsx":
+             "@@ -1,0 +2,1 @@\n"
+             "+  it('l\\'officina non lo vede', () => {\n"},
+        )
+
+        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == [
+            "l'officina non lo vede"
+        ]
+
     def test_gli_e2e_non_sono_del_runner(self, monkeypatch):
         """`npm run e2e` da un worktree punta allo stack di un altro codice
         (ADR-0009): quel gate è della CI, e un rosso che il runner non può
