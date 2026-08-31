@@ -57,21 +57,6 @@ def clear_event_bus():
     return None
 
 
-@pytest.fixture(autouse=True)
-def lucchetto_di_prova(tmp_path, monkeypatch):
-    """Il lucchetto del runner, spostato in una cartella usa e getta.
-
-    `LUCCHETTO` è `runs/.runner.lock`, un percorso solo per albero, e i test che
-    passano da `main()` lo prendono davvero. Lanciare la suite **mentre** un giro è
-    vivo trovava quel file già preso e faceva rosso nove test di `main()` per colpa
-    di un processo vicino invece che del codice — ed è esattamente la condizione in
-    cui la suite gira sempre, perché il Builder lo lancia il runner, che il
-    lucchetto ce l'ha in mano. `LOG_DIR` quei test lo spostavano già; questo no,
-    perché `LUCCHETTO` è calcolato all'import e non segue la patch.
-    """
-    monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
-
-
 def elenco_backlog() -> str:
     """Cosa risponde `git ls-tree origin/main backlog/`: il runner cerca lì il file
     del PBI (difetto 7), quindi ogni finto `git` deve saperlo dire."""
@@ -791,7 +776,7 @@ class TestDueRunnerNonGiranoNelloStessoAlbero:
     """
 
     def test_il_secondo_lucchetto_non_si_prende(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         with runner.lucchetto():
             with pytest.raises(runner.AlberoOccupato):
                 with runner.lucchetto():
@@ -800,11 +785,29 @@ class TestDueRunnerNonGiranoNelloStessoAlbero:
     def test_rilasciato_torna_libero(self, tmp_path, monkeypatch):
         """Il lucchetto è del **processo**, non del file: se il runner muore di
         schianto non resta un lucchetto morto da togliere a mano."""
-        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         with runner.lucchetto():
             pass
         with runner.lucchetto():
             pass
+
+    def test_il_lucchetto_sta_dove_stanno_i_log(self, tmp_path, monkeypatch):
+        """Chi sposta `LOG_DIR` sposta anche il lucchetto — e non è cosmesi.
+
+        Il lucchetto è uno dei file che il runner scrive sotto `runs/`, e chi
+        redirige quella cartella crede di aver spostato tutto: è ciò che fanno i
+        test di `main()`, che girano su `tmp_path`. Con un percorso calcolato
+        all'import il lucchetto resta indietro, nel `runs/` **vero** — e allora
+        quei test non provano più il runner: provano se sul PC c'è un runner
+        vivo. Girando *dentro* un giro del runner — cioè ogni volta che il gate
+        pytest è il suo — falliscono tutti insieme con «Non parto: un altro
+        runner sta già lavorando», che è il contrario di ciò che affermano.
+
+        Due nomi per la stessa cartella divergono; qui erano già divergenti.
+        """
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        with runner.lucchetto():
+            assert (tmp_path / runner.NOME_LUCCHETTO).exists()
 
 
 class TestUnAgenteNelWorktreeFermaIlLancio:
@@ -862,7 +865,6 @@ class TestIlLancioSiFermaPrimaDiScrivere:
 
     @pytest.fixture(autouse=True)
     def albero(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(runner, "LUCCHETTO", tmp_path / ".runner.lock")
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(
             runner, "esegui_pbi",
