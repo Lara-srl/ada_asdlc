@@ -648,8 +648,41 @@ ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql"
 
 RE_TEST_PY = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
 # `it('…')`, `test("…")`, e le loro varianti `.each` / `.skip`: il nome è ciò che
-# vitest filtra con `-t`.
-RE_TEST_JS = re.compile(r"""^\s*(?:it|test)(?:\.\w+)?\s*\(\s*(['"`])(.+?)\1""")
+# vitest filtra con `-t`. Un apice **scappato** non chiude la stringa —
+# `(?:\\.|[^\\])+?` mangia il `\'` invece di fermarcisi — o di `it('l\'officina…')`
+# si leggerebbe `l\`, che non è il titolo di nessun test.
+RE_TEST_JS = re.compile(r"""^\s*(?:it|test)(?:\.\w+)?\s*\(\s*(['"`])((?:\\.|[^\\])+?)\1""")
+
+# Gli escape che JavaScript valuta dentro una stringa: `\u2019` e `\u{1f600}`,
+# `\xe8`, i sette con la lettera, e `\<qualsiasi altro>` che vale il carattere
+# stesso — è la forma di `\'` e di `\\`.
+RE_ESCAPE_JS = re.compile(
+    r"\\(?:u\{([0-9a-fA-F]{1,6})\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|(.))")
+ESCAPE_CON_LETTERA = {"n": "\n", "t": "\t", "r": "\r",
+                      "b": "\b", "f": "\f", "v": "\v", "0": "\0"}
+
+
+def decodifica_escape(titolo: str) -> str:
+    """Il titolo com'è **a runtime**, dal titolo com'è scritto nel sorgente.
+
+    Il gate legge i nomi dal testo del file, ma li usa in due posti dove il titolo è
+    già valutato: il filtro `-t`, che vitest matcha sul titolo vero, e la chiave con
+    cui si rilegge il json del rapporto. Senza questo passaggio ogni test il cui
+    titolo contiene un apostrofo tipografico scritto `\u2019` — la forma che il
+    linter del frontend impone — non matcha niente: zero test girati, `nessuno`, e
+    il gate ferma un ciclo TDD fatto bene.
+
+    Non si usa `unicode_escape`: decodifica in latin-1 e trasformerebbe in mojibake
+    le lettere accentate che nel sorgente stanno già in chiaro, che qui sono la norma.
+    """
+    def uno(trovato: re.Match[str]) -> str:
+        graffe, u, x, semplice = trovato.groups()
+        punto = graffe or u or x
+        if punto is not None:
+            return chr(int(punto, 16))
+        return ESCAPE_CON_LETTERA.get(semplice, semplice)
+
+    return RE_ESCAPE_JS.sub(uno, titolo)
 
 
 @dataclass(frozen=True)
@@ -725,7 +758,8 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
         trovato = regola.match(riga[1:])
         if trovato is None:
             continue
-        nome = trovato.group(1) if linguaggio == "python" else trovato.group(2)
+        nome = (trovato.group(1) if linguaggio == "python"
+                else decodifica_escape(trovato.group(2)))
         if riga[0] == "+":
             aggiunti.append(nome)
         else:
