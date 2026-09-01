@@ -1089,6 +1089,9 @@ class ComandoDiProva:
     linguaggio: str
     etichette: dict[str, str]
     rapporto: Path | None = None  # dove vitest scrive il suo json
+    # chiave → il test da cui viene: serve a rigirarlo **da solo**, quando la
+    # quarta lettura lo prova contro i mutanti uno alla volta.
+    origine: dict[str, TestNuovo] = field(default_factory=dict)
 
 
 def comandi_dei_test(albero: Path,
@@ -1108,6 +1111,7 @@ def comandi_dei_test(albero: Path,
     per_pytest: dict[Path, list[str]] = {}
     per_vitest: dict[tuple[Path, str], list[str]] = {}
     orfani: list[str] = []
+    origine: dict[str, TestNuovo] = {}
 
     for t in nuovi:
         radice, relativo = dove_gira(t.file)
@@ -1119,15 +1123,18 @@ def comandi_dei_test(albero: Path,
                 orfani.append(etichetta_del_test(sorgente, t, relativo))
                 continue
             per_pytest.setdefault(cartella, []).append(nodo)
+            origine[nodo] = t
         else:
             per_vitest.setdefault((cartella, relativo), []).append(t.nome)
+            origine[t.nome] = t
 
     # `-v` e non `-q`: il conteggio finale è una somma e non dice **quale**, mentre
     # una riga per test dice nome ed esito. `--tb=no` perché il traceback qui non
     # serve — la coda che finisce nel rapporto è la stessa per tutti.
     comandi: list[ComandoDiProva] = [
         ComandoDiProva(cartella, ["pytest", "--tb=no", "-v", *nodi], "python",
-                       {nodo: nodo for nodo in nodi})
+                       {nodo: nodo for nodo in nodi},
+                       origine={nodo: origine[nodo] for nodo in nodi})
         for cartella, nodi in per_pytest.items()
     ]
     # Il json di vitest va in un file e non a schermo: `npm test` ci scrive sopra la
@@ -1139,7 +1146,8 @@ def comandi_dei_test(albero: Path,
             cartella,
             ["npm", "test", "--", relativo, "-t", "|".join(re.escape(n) for n in nomi),
              "--reporter=json", f"--outputFile={rapporto}"],
-            "vitest", {nome: f"{relativo} -t {nome}" for nome in nomi}, rapporto))
+            "vitest", {nome: f"{relativo} -t {nome}" for nome in nomi}, rapporto,
+            origine={nome: origine[nome] for nome in nomi}))
     return comandi, orfani
 
 
@@ -1384,6 +1392,103 @@ def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
     return mutanti
 
 
+def descrizione_del_mutante(percorso: str, m: Mutante) -> str:
+    """`file:riga  `prima` → `dopo``, com'è scritto nel rapporto: chi legge deve
+    poter aprire quella riga e vedere il guasto che il test ha sentito."""
+    dopo = f"`{m.dopo.strip()}`" if m.dopo.strip() else "riga cancellata"
+    return f"{percorso}:{m.riga}  `{m.prima.strip()}` → {dopo}"
+
+
+def falliti_per_asserzione(c: ComandoDiProva, uscita: str) -> set[str]:
+    """Le chiavi dei test che hanno **girato e fallito**, e solo quelle.
+
+    È la lettura stretta, diversa da `esiti_del_comando`: lì un errore di raccolta
+    vale come rosso di tutto il comando, perché il `from app.x import y` che non
+    esiste ancora è il rosso più comune del test-first. Qui vale il contrario. Un
+    mutante che rompe la sintassi fa fallire *tutto* — l'errore di raccolta di
+    pytest, il file che vitest non carica — e nessuna riga per test lo dice: non è
+    il test che ha morso, è il file che non c'è più. Contare quelli farebbe
+    passare ogni guardia, perché cancellare una riga a caso rompe la sintassi una
+    volta su tre. E l'`ERROR` per test — la fixture che esplode — sta dalla stessa
+    parte: il test non è arrivato all'asserzione.
+    """
+    if c.linguaggio == "python":
+        return {RE_PARAMETRO.sub("", nodo)
+                for nodo, esito in RE_ESITO_PYTEST.findall(uscita) if esito == "FAILED"}
+    try:
+        dati = json.loads(c.rapporto.read_text(encoding="utf-8"))
+    except (AttributeError, OSError, ValueError):
+        return set()
+    return {caso.get("title", "")
+            for file in dati.get("testResults", [])
+            for caso in file.get("assertionResults", []) if caso.get("status") == "failed"}
+
+
+def morde(c: ComandoDiProva, chiave: str) -> bool:
+    """Il test `chiave`, rigirato com'è adesso l'albero, fallisce **per asserzione**.
+
+    Il rapporto di vitest si toglie prima di girare: se il mutante fa morire il
+    processo prima di scriverlo, resterebbe quello del giro prima a dire il falso.
+    Un test che non termina sotto il mutante non ha morso: ha girato a vuoto.
+    """
+    if c.rapporto is not None:
+        c.rapporto.unlink(missing_ok=True)
+    try:
+        _, uscita = esegui(c.argv, c.cartella, timeout=600)
+    except subprocess.TimeoutExpired:
+        return False
+    return chiave in falliti_per_asserzione(c, uscita)
+
+
+def quarta_lettura(albero: Path, base: str, sha: str,
+                   comando: ComandoDiProva, chiave: str) -> tuple[str | None, int]:
+    """Il test nato verde, rigirato contro i mutanti delle righe del branch.
+
+    Torna il primo mutante che lo fa fallire — descritto — e quanti ne ha provati.
+    `None` e il conto quando nessuno lo fa fallire: quel test non guarda le righe
+    che il branch ha scritto, e la lettura resta «nato verde».
+
+    Un mutante alla volta, nello stesso worktree in cui il test è stato visto
+    verde: il file si riscrive con la riga guasta, il test gira da solo, e si esce
+    al primo kill perché uno basta — il gate chiede che il test osservi le righe
+    nuove, non che le copra tutte.
+    """
+    da_solo, _ = comandi_dei_test(albero, [comando.origine[chiave]])
+    provati = 0
+    for percorso, righe in righe_cambiate(base, sha).items():
+        file = albero / percorso
+        sorgente = leggi_sorgente(file)
+        if sorgente is None:
+            continue
+        righe_del_file = sorgente.splitlines(keepends=True)
+        for m in mutanti_del_sorgente(sorgente, righe):
+            guasto = "".join(
+                righe_del_file[:m.riga - 1] + [m.dopo + "\n"] + righe_del_file[m.riga:])
+            if not compila(percorso, guasto):
+                continue
+            file.write_text(guasto, encoding="utf-8")
+            provati += 1
+            if morde(da_solo[0], chiave):
+                return descrizione_del_mutante(percorso, m), provati
+    return None, provati
+
+
+def compila(percorso: str, sorgente: str) -> bool:
+    """`False` se il mutante ha rotto la sintassi di un file Python: non si prova
+    nemmeno. Il `return` cancellato lascia un `def` vuoto, e un test che importa
+    il modulo **dentro** il proprio corpo lo vede come un `FAILED` suo — mentre
+    non è il test che ha morso, è il file che non c'è più. Per TypeScript decide
+    vitest, che un file rotto non lo carica e non scrive nessun esito per test.
+    """
+    if not percorso.endswith(".py"):
+        return True
+    try:
+        compile(sorgente, percorso, "exec")
+    except SyntaxError:
+        return False
+    return True
+
+
 # Quanti test dell'elenco si scrivono per esteso. Oltre, si conta il resto: un
 # nome tagliato a metà non si ritrova, e chi legge lo prende per un difetto del gate.
 TEST_IN_ELENCO = 4
@@ -1395,9 +1500,17 @@ def voce_mancata(sha: str, titolo: str, test: list[str], esito: str, coda: str) 
             "test": ", ".join(test[:TEST_IN_ELENCO]) + (f" e altri {resto}" if resto > 0 else "")}
 
 
-def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo]) -> list[dict[str, str]]:
-    """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso."""
+def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo],
+                      base: str = "origin/main",
+                      morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+    """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso.
+
+    Un test nato verde ha la quarta lettura prima di finire fra i mancati: se
+    morde un mutante delle righe del branch, va in `morsi` — commit, test, mutante
+    — e non ferma niente.
+    """
     mancati: list[dict[str, str]] = []
+    morsi = morsi if morsi is not None else []
     with worktree_usa_e_getta(sha) as albero:
         comandi, orfani = comandi_dei_test(albero, nuovi)
         if orfani:
@@ -1410,21 +1523,30 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo]) -> list[dic
             # separate, anche quando escono dallo stesso `pytest`.
             per_lettura: dict[str, list[str]] = defaultdict(list)
             for chiave, etichetta in comando.etichette.items():
-                if esiti[chiave] != "rosso":
-                    per_lettura[esiti[chiave]].append(etichetta)
+                if esiti[chiave] == "rosso":
+                    continue
+                if esiti[chiave] == "verde":
+                    mutante, _ = quarta_lettura(albero, base, sha, comando, chiave)
+                    if mutante is not None:
+                        morsi.append({"commit": sha[:7], "titolo": titolo,
+                                      "test": etichetta, "mutante": mutante})
+                        continue
+                per_lettura[esiti[chiave]].append(etichetta)
             for esito, elenco in per_lettura.items():
                 mancati.append(voce_mancata(sha, titolo, elenco, ESITI_MANCATI[esito], coda))
     return mancati
 
 
 def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
-                   visti: set[str] | None = None) -> list[dict[str, str]]:
+                   visti: set[str] | None = None,
+                   morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     """I commit del branch in cui un test è nato senza essere mai stato rosso.
 
     Lista vuota = il gate passa. `visti` è l'insieme dei commit già guardati e viene
     **riempito**: il gate sta dentro un ciclo che può ripetersi cinque volte, e
     rigirare ogni volta la storia intera moltiplicherebbe il tempo macchina per le
-    revisioni.
+    revisioni. `morsi` si riempie allo stesso modo, con i test nati verdi che hanno
+    ucciso un mutante: passano, e il rapporto deve dire perché.
 
     Non si ferma al primo mancato: chi legge deve avere l'elenco intero — commit,
     test, esito — perché la lettura la fa una persona, e una persona decide meglio
@@ -1444,7 +1566,7 @@ def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
             mancati.append(voce_mancata(sha, titolo, etichette_al_commit(sha, nuovi),
                                         MISTO, ", ".join(produzione[:10])))
             continue
-        mancati += esamina_il_commit(sha, titolo, nuovi)
+        mancati += esamina_il_commit(sha, titolo, nuovi, base, morsi)
     return mancati
 
 

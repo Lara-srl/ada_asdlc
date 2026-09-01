@@ -3298,10 +3298,15 @@ class TestIlTestNatoVerdePassaSeMorde:
     def test_una_guardia_che_uccide_un_mutante_passa_e_il_gate_dice_quale(
         self, repo_di_prova, tmp_path
     ):
-        """Il caso di `9f952c0`: il test nasce verde, e cancellato il `return` si
-        accorge che la somma non fa più due."""
+        """Il caso di `9f952c0`: il test nasce verde, e cancellata la riga che
+        somma si accorge che il totale non c'è più.
+
+        Tre righe e non due: con `return a + b` da solo l'unico mutante è il `def`
+        vuoto, che non compila e non si prova — e una guardia che non ha mutanti
+        da uccidere non è il caso di questo test."""
         repo_di_prova.commit("feat: la somma", {
-            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
         })
         sha = repo_di_prova.commit("test: la somma fa due", {
             "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
@@ -3313,4 +3318,5 @@ class TestIlTestNatoVerdePassaSeMorde:
         assert [m["commit"] for m in morsi] == [sha[:7]]
         assert morsi[0]["test"] == "tests/test_somma.py::test_la_somma_fa_due"
         assert "backend/app/somma.py:2" in morsi[0]["mutante"]
-        assert "return a + b" in morsi[0]["mutante"]
+        assert "totale = a + b" in morsi[0]["mutante"]
+        assert "riga cancellata" in morsi[0]["mutante"]
