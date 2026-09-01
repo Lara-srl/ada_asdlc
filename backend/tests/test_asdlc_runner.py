@@ -20,7 +20,9 @@ sarebbe un test che riscrive il repository in cui gira.
 
 import csv
 import importlib.util
+import io
 import json
+import os
 import subprocess
 import sys
 import time
@@ -2510,3 +2512,521 @@ class TestIlGateDelRossoSiLanciaDaSolo:
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso"])
 
         assert runner.main() == 0
+
+
+class TestLaFaseDecideCosaSiPuoScrivere:
+    """Il lucchetto ex ante: `PBI-104`.
+
+    Il gate del rosso è un'autopsia — accerta a giro finito che un test è nato
+    verde, quando non c'è più niente da correggere e l'ora è spesa. La stessa
+    regola messa **prima** della scrittura non accerta: impedisce. Il Builder in
+    `TEST_ONLY` non può toccare la produzione, quindi non può implementare ciò
+    che nessun rosso gli ha chiesto; in `IMPL` non può toccare i test, quindi il
+    verde non si ottiene ammorbidendo l'asserzione. Sono i due imbrogli
+    simmetrici, e servono due lucchetti opposti.
+
+    Fuori da un giro il file della fase non c'è e la guardia tace: le sessioni
+    di una persona non se ne devono accorgere.
+    """
+
+    PAGINA = "frontend/src/pages/FoglioPage.tsx"
+    PROVA = "frontend/src/pages/FoglioPage.test.tsx"
+
+    def test_senza_fase_non_dice_niente(self):
+        assert runner.guardia_di_fase(None, self.PAGINA) is None
+        assert runner.guardia_di_fase(None, self.PROVA) is None
+
+    def test_in_test_only_la_produzione_e_chiusa(self):
+        ragione = runner.guardia_di_fase("TEST_ONLY", self.PAGINA)
+        assert ragione is not None
+        assert self.PAGINA in ragione
+
+    def test_in_test_only_il_test_si_scrive(self):
+        assert runner.guardia_di_fase("TEST_ONLY", self.PROVA) is None
+        assert runner.guardia_di_fase("TEST_ONLY", "backend/tests/test_margine.py") is None
+
+    def test_in_impl_il_test_e_in_sola_lettura(self):
+        """L'imbroglio simmetrico: il verde ottenuto ammorbidendo l'asserzione."""
+        ragione = runner.guardia_di_fase("IMPL", self.PROVA)
+        assert ragione is not None
+        assert self.PROVA in ragione
+
+    def test_in_impl_la_produzione_si_scrive(self):
+        assert runner.guardia_di_fase("IMPL", self.PAGINA) is None
+
+    def test_la_spec_si_scrive_in_tutte_e_due_le_fasi(self):
+        """`AGENTS.md`, SEMPRE: la spec si aggiorna nello stesso commit del codice.
+
+        Un `.md` non è né test né produzione — è la stessa esclusione con cui il
+        gate del rosso non ferma un commit di soli test con la sua spec.
+        """
+        for fase in ("TEST_ONLY", "IMPL"):
+            assert runner.guardia_di_fase(fase, "specs/analisi-kpi/spec.md") is None
+
+    def test_il_file_della_fase_non_lo_scrive_lagente(self):
+        """Il permesso non si prende: lo dà `--chiedi-impl` sul rosso osservato."""
+        for fase in ("TEST_ONLY", "IMPL"):
+            ragione = runner.guardia_di_fase(fase, runner.FILE_DELLA_FASE)
+            assert ragione is not None
+            assert "non la decidi tu" in ragione
+
+    def test_una_fase_che_non_si_conosce_chiude(self):
+        """Si sbaglia dalla parte del blocco: un file di fase corrotto o scritto a
+        metà non deve valere come «nessuna fase», o il lucchetto si apre da sé."""
+        assert runner.guardia_di_fase("VERDE", self.PAGINA) is not None
+        assert runner.guardia_di_fase("VERDE", self.PROVA) is not None
+
+
+class TestLaFaseSiLeggeDalWorktree:
+    """Il file sta accanto al lavoro e se ne va col worktree: è stato del giro,
+    non del repository. La guardia lo cerca risalendo, perché l'agente può aver
+    cambiato cartella e `cwd` arriva da Claude Code così com'è."""
+
+    def test_la_fase_si_legge_dalla_radice(self, tmp_path):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        assert runner.fase_corrente(tmp_path) == "TEST_ONLY"
+
+    def test_la_fase_si_cerca_risalendo(self, tmp_path):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("IMPL\n")
+        sotto = tmp_path / "frontend" / "src" / "pages"
+        sotto.mkdir(parents=True)
+        assert runner.fase_corrente(sotto) == "IMPL"
+
+    def test_senza_file_non_ce_fase(self, tmp_path):
+        assert runner.fase_corrente(tmp_path) is None
+
+
+class TestLHookChiedeAlRunnerSeSiPuoScrivere:
+    """`--guardia-fase`: il ponte fra `PreToolUse` e la guardia.
+
+    Claude Code passa allo script un JSON su stdin (`tool_name`, `tool_input`,
+    `cwd`) e legge l'uscita: **solo `exit 2` blocca davvero**, e in
+    `bypassPermissions` — cioè `--dangerously-skip-permissions`, come il runner
+    lancia il Builder — il JSON con `permissionDecision: "deny"` non basta. Per
+    questo la ragione va su stderr e l'uscita è 2.
+
+    Il mestiere di classificare i percorsi resta in Python e non finisce in uno
+    script di shell: `e_file_di_produzione` è la stessa funzione con cui il gate
+    del rosso ferma un commit misto, e due copie della stessa regola divergono.
+    """
+
+    def _stdin(self, monkeypatch, **campi):
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": {}}
+        dato.update(campi)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(dato)))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-fase"])
+
+    def test_il_flag_esiste(self):
+        assert runner.costruisci_parser().parse_args(["--guardia-fase"]).guardia_fase
+
+    def test_blocca_con_2_e_scrive_la_ragione_su_stderr(self, monkeypatch, tmp_path, capsys):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        self._stdin(monkeypatch, cwd=str(tmp_path),
+                    tool_input={"file_path": str(tmp_path / "frontend/src/App.tsx")})
+
+        assert runner.main() == 2
+        assert "TEST_ONLY" in capsys.readouterr().err
+
+    def test_lascia_passare_il_test_e_non_dice_niente(self, monkeypatch, tmp_path, capsys):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        self._stdin(monkeypatch, cwd=str(tmp_path),
+                    tool_input={"file_path": str(tmp_path / "frontend/src/App.test.tsx")})
+
+        assert runner.main() == 0
+        assert capsys.readouterr().err == ""
+
+    def test_uno_strumento_senza_percorso_non_lo_riguarda(self, monkeypatch, tmp_path):
+        """Il matcher è `Edit|Write`, ma la guardia non si fida del matcher."""
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        self._stdin(monkeypatch, cwd=str(tmp_path), tool_name="Bash",
+                    tool_input={"command": "npm test"})
+
+        assert runner.main() == 0
+
+    def test_un_json_rotto_non_blocca_la_sessione(self, monkeypatch, capsys):
+        """Si sbaglia dalla parte del passaggio, ed è l'unico posto dove si fa.
+
+        Un hook che esce 2 su un guasto proprio blocca **ogni** scrittura di ogni
+        sessione del repository, e la cura sarebbe modificare un file — cioè
+        proprio ciò che ha appena vietato. Il confine duro non è qui: è il
+        `pre-commit`, che nessuna tool call aggira.
+        """
+        monkeypatch.setattr(sys, "stdin", io.StringIO("{non è json"))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-fase"])
+
+        assert runner.main() == 0
+        assert "guardia" in capsys.readouterr().err
+
+
+class TestLHookERegistratoEFerma:
+    """Lo script e la sua registrazione, provati sul file vero.
+
+    Il resto della suite gira senza toccare il mondo; qui no, e apposta: un hook
+    che non è eseguibile, o registrato con un matcher sbagliato, non dà nessun
+    errore — semplicemente non scatta, e il lucchetto sembra esserci senza
+    esserci. È lo stesso motivo per cui i gate si dichiarano prima di partire.
+    """
+
+    SCRIPT = REPO / ".claude" / "hooks" / "fase-tdd.sh"
+    IMPOSTAZIONI = REPO / ".claude" / "settings.json"
+
+    def test_lo_script_ce_ed_e_eseguibile(self):
+        assert self.SCRIPT.is_file()
+        assert os.access(self.SCRIPT, os.X_OK), "un hook non eseguibile non scatta e non lo dice"
+
+    def test_e_registrato_su_pretooluse_per_edit_e_write(self):
+        registrate = json.loads(self.IMPOSTAZIONI.read_text())["hooks"]["PreToolUse"]
+        voci = [v for v in registrate if v.get("matcher") == "Edit|Write"]
+        assert voci, "senza matcher Edit|Write l'hook non vede le scritture"
+        comandi = [h["command"] for v in voci for h in v["hooks"]]
+        assert any("fase-tdd.sh" in c for c in comandi)
+
+    def test_ferma_la_produzione_in_test_only(self, tmp_path):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(tmp_path),
+                "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
+
+        esito = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
+                               capture_output=True, text=True, cwd=tmp_path)
+
+        assert esito.returncode == 2, esito.stderr
+        assert "TEST_ONLY" in esito.stderr
+
+    def test_fuori_da_un_giro_non_dice_niente(self, tmp_path):
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(tmp_path),
+                "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
+
+        esito = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
+                               capture_output=True, text=True, cwd=tmp_path)
+
+        assert esito.returncode == 0
+        assert esito.stderr == ""
+
+
+class TestIlPermessoDiImplementareSiChiede:
+    """`--chiedi-impl`: l'unico modo di passare da `TEST_ONLY` a `IMPL`.
+
+    È il cardine del lucchetto. L'agente può **chiedere** il permesso di scrivere
+    codice di produzione, non prenderselo: il runner gira i test che sono nati
+    nell'albero e apre la fase solo se li vede fallire. Un test che passa al
+    primo colpo non è un permesso negato per pignoleria — è la prova che quel
+    comportamento c'è già, e che non è questo il commit in cui nasce.
+
+    Il rosso si osserva **prima** del commit, quindi il commit di soli test che
+    ne segue è per costruzione quello che il gate di PBI-103 vorrebbe: nessun
+    file di produzione dentro, e il fallimento visto sull'albero esatto.
+    """
+
+    TEST_NUOVO = "backend/tests/test_foglio.py"
+    SORGENTE = "def test_il_clic_apre_la_pratica():\n    assert False\n"
+
+    def _in_test_only(self, repo, monkeypatch, esito="rosso"):
+        (repo.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        (repo.radice / self.TEST_NUOVO).write_text(self.SORGENTE, encoding="utf-8")
+        monkeypatch.setattr(runner, "esiti_del_comando",
+                            lambda c: ({k: esito for k in c.etichette}, "coda"))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+    def _fase(self, repo):
+        return (repo.radice / runner.FILE_DELLA_FASE).read_text().strip()
+
+    def test_il_flag_chiedi_impl_esiste(self):
+        assert runner.costruisci_parser().parse_args(["--chiedi-impl"]).chiedi_impl
+
+    def test_apre_la_fase_quando_il_test_nuovo_e_rosso(self, repo_di_prova, monkeypatch):
+        self._in_test_only(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 0
+        assert self._fase(repo_di_prova) == runner.FASE_IMPL
+
+    def test_non_apre_su_un_test_nato_verde(self, repo_di_prova, monkeypatch, capsys):
+        self._in_test_only(repo_di_prova, monkeypatch, esito="verde")
+
+        assert runner.main() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert runner.ESITI_MANCATI["verde"] in capsys.readouterr().out
+
+    def test_non_apre_se_il_rosso_non_e_isolabile(self, repo_di_prova, monkeypatch, capsys):
+        """Il caso del 31/08: il test non gira perché importa ciò che non c'è.
+
+        Si chiude come il verde, ma la ragione è un'altra e va detta: la cura non
+        è cambiare il test, è far esistere il modulo vuoto prima.
+        """
+        self._in_test_only(repo_di_prova, monkeypatch, esito="nessuno")
+
+        assert runner.main() == 1
+        assert runner.ESITI_MANCATI["nessuno"] in capsys.readouterr().out
+
+    def test_senza_test_nuovi_non_apre(self, repo_di_prova, monkeypatch, capsys):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+        assert runner.main() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_fuori_da_test_only_non_si_chiede(self, repo_di_prova, monkeypatch, capsys):
+        """Da `IMPL` la richiesta non ha senso, e riaprirla sarebbe il modo di
+        restarci per sempre: un giro che non torna mai a `TEST_ONLY` è un giro
+        senza lucchetto."""
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_IMPL}\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+        assert runner.main() == 1
+        assert runner.FASE_TEST_ONLY in capsys.readouterr().out
+
+
+class TestITestNuoviSiLeggonoDallAlbero:
+    """Il gate di PBI-103 legge i test nuovi da un **commit**; il lucchetto deve
+    leggerli da ciò che non è ancora committato, perché il permesso si chiede
+    prima del commit. Un file di test appena creato non è tracciato, e
+    `git diff HEAD` non lo nomina: va cercato apposta, o il caso più comune —
+    il primo test di un modulo nuovo — non verrebbe visto affatto."""
+
+    def test_vede_un_file_di_test_non_tracciato(self, repo_di_prova):
+        (repo_di_prova.radice / "backend/tests/test_nuovo.py").write_text(
+            "def test_la_riga_si_apre():\n    assert False\n", encoding="utf-8")
+
+        nuovi = runner.test_nuovi_dellalbero()
+
+        assert [(t.file, t.nome) for t in nuovi] == [
+            ("backend/tests/test_nuovo.py", "test_la_riga_si_apre")]
+
+    def test_vede_un_test_aggiunto_a_un_file_che_ce_gia(self, repo_di_prova):
+        repo_di_prova.commit("test: il primo", {
+            "backend/tests/test_c_era.py": "def test_il_primo():\n    assert True\n"})
+        (repo_di_prova.radice / "backend/tests/test_c_era.py").write_text(
+            "def test_il_primo():\n    assert True\n\n\ndef test_il_secondo():\n    assert False\n",
+            encoding="utf-8")
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == ["test_il_secondo"]
+
+    def test_la_produzione_non_e_un_test(self, repo_di_prova):
+        (repo_di_prova.radice / "backend/app/foglio.py").write_text("def calcola():\n    pass\n")
+
+        assert runner.test_nuovi_dellalbero() == []
+
+
+class TestIlCommitNonNasceFuoriFase:
+    """Il confine che nessuna tool call aggira.
+
+    L'hook `PreToolUse` guarda `Edit` e `Write`, e un agente a cui la scrittura
+    viene negata ha una via laterale ovvia: `cat > pagina.tsx <<'EOF'` da Bash.
+    Filtrare i comandi di shell a colpi di regex è una guerra che si perde, così
+    il confine duro sta dove nessuno strumento arriva — il `pre-commit` di git,
+    che vede ciò che è **in stage** e non come ci è finito.
+
+    I due livelli hanno mestieri diversi e servono tutti e due: l'hook è veloce e
+    spiega mentre l'agente scrive, il `pre-commit` è invalicabile e arriva tardi.
+    """
+
+    def _stage(self, repo, percorso, contenuto="x = 1\n"):
+        f = repo.radice / percorso
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(contenuto, encoding="utf-8")
+        repo._git("add", percorso)
+
+    def test_ferma_il_commit_con_produzione_in_test_only(self, repo_di_prova, monkeypatch, capsys):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        self._stage(repo_di_prova, "backend/app/foglio.py")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.main() == 1
+        assert "backend/app/foglio.py" in capsys.readouterr().out
+
+    def test_lascia_passare_il_commit_di_soli_test(self, repo_di_prova, monkeypatch):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        self._stage(repo_di_prova, "backend/tests/test_foglio.py", "def test_x():\n    pass\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.main() == 0
+
+    def test_fuori_da_un_giro_non_guarda_niente(self, repo_di_prova, monkeypatch):
+        self._stage(repo_di_prova, "backend/app/foglio.py")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.main() == 0
+
+    def test_il_pre_commit_si_installa_e_non_calpesta_quello_che_ce(self, repo_di_prova):
+        """Installarlo è del runner, non di chi lancia: un lucchetto che dipende da
+        un gesto ricordato a mano è un lucchetto che a un certo punto non c'è."""
+        runner.installa_la_guardia_del_commit()
+        hook = repo_di_prova.radice / ".git" / "hooks" / "pre-commit"
+
+        assert hook.is_file() and os.access(hook, os.X_OK)
+        assert "--guardia-commit" in hook.read_text()
+
+        hook.write_text("#!/bin/sh\n# di qualcun altro\n", encoding="utf-8")
+        runner.installa_la_guardia_del_commit()
+        assert "di qualcun altro" in hook.read_text()
+
+
+class TestOgniCommitRiportaAllaFaseDelTest:
+    """Il ciclo si chiude da sé, o il lucchetto vale una volta sola.
+
+    Il Builder fa molti criteri in una sessione, e fra un commit e l'altro il
+    runner non c'è: se `IMPL` restasse aperta dopo il primo permesso, il secondo
+    comportamento tornerebbe a nascere senza rosso e avremmo speso tutto questo
+    per un criterio solo. Chi vede ogni commit è git, quindi è git a riportare
+    la fase indietro — `post-commit`, subito dopo che il commit è nato.
+    """
+
+    def test_il_post_commit_riporta_in_test_only(self, repo_di_prova):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_IMPL}\n")
+        runner.installa_il_ritorno_in_test_only()
+        hook = repo_di_prova.radice / ".git" / "hooks" / "post-commit"
+
+        assert hook.is_file() and os.access(hook, os.X_OK)
+        repo_di_prova.commit("feat: il minimo che fa passare il test",
+                             {"backend/app/foglio.py": "def calcola():\n    return 1\n"})
+
+        assert (repo_di_prova.radice / runner.FILE_DELLA_FASE).read_text().strip() == \
+            runner.FASE_TEST_ONLY
+
+    def test_fuori_da_un_giro_il_post_commit_non_crea_niente(self, repo_di_prova):
+        runner.installa_il_ritorno_in_test_only()
+        repo_di_prova.commit("chore: un commit di una persona", {"README.md": "ciao\n"})
+
+        assert not (repo_di_prova.radice / runner.FILE_DELLA_FASE).exists()
+
+
+class TestIlGiroSiApreInTestOnly:
+    """Il lucchetto si accende con il giro e si spegne con lui: un worktree
+    lasciato in fase è un worktree in cui la sessione dopo non può scrivere, e la
+    diagnosi costerebbe più del giro."""
+
+    def test_apri_la_fase_installa_gli_hook_e_scrive_test_only(self, repo_di_prova):
+        runner.apri_la_fase()
+
+        assert (repo_di_prova.radice / runner.FILE_DELLA_FASE).read_text().strip() == \
+            runner.FASE_TEST_ONLY
+        assert (repo_di_prova.radice / ".git" / "hooks" / "pre-commit").is_file()
+        assert (repo_di_prova.radice / ".git" / "hooks" / "post-commit").is_file()
+
+    def test_chiudi_la_fase_toglie_il_file(self, repo_di_prova):
+        runner.apri_la_fase()
+        runner.chiudi_la_fase()
+
+        assert not (repo_di_prova.radice / runner.FILE_DELLA_FASE).exists()
+
+    def test_chiudere_due_volte_non_e_un_errore(self, repo_di_prova):
+        runner.chiudi_la_fase()
+        runner.chiudi_la_fase()
+
+    def test_il_giro_apre_la_fase_e_la_chiude(self, tmp_path, monkeypatch):
+        """Il PBI non si esegue mai senza lucchetto: aprirlo è del runner."""
+        visto: dict[str, object] = {}
+        monkeypatch.setattr(runner, "trova_pbi", lambda pbi: tmp_path / "backlog" / f"{pbi}.md")
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        monkeypatch.setattr(runner, "crea_branch", lambda pbi: f"pbi/{pbi.lower()}")
+        monkeypatch.setattr(runner, "apri_la_fase", lambda: visto.__setitem__("aperta", True))
+        monkeypatch.setattr(runner, "chiudi_la_fase", lambda: visto.__setitem__("chiusa", True))
+        monkeypatch.setattr(runner, "esegui",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("basta")))
+
+        with pytest.raises(RuntimeError):
+            runner.esegui_pbi("PBI-333", set(), dry=False, con_pr=False)
+
+        assert visto.get("aperta"), "il giro deve aprire la fase prima del Builder"
+
+
+class TestIlBuilderSaComeSiApreLaProduzione:
+    """Il lucchetto senza le istruzioni è una porta chiusa senza cartello.
+
+    Un agente che trova l'edit negato e non sa che esiste `--chiedi-impl` fa la
+    cosa che farebbe chiunque: ci riprova da un'altra strada — un heredoc da
+    Bash, `sed -i` — e finisce contro il `pre-commit` dopo aver speso il turno.
+    Il blocco deve costare secondi, non un giro, e la differenza è tutta scritta
+    qui dentro.
+    """
+
+    def _prompt(self):
+        return runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
+
+    def test_dice_il_nome_del_comando_che_apre_la_fase(self):
+        assert "--chiedi-impl" in self._prompt()
+
+    def test_dice_che_si_scrive_solo_il_minimo(self):
+        """La causa a monte di PBI-333: 494 righe di pagina con dentro un
+        comportamento che nessun rosso aveva chiesto. «Il codice che lo fa
+        passare» non è «solo il codice che lo fa passare»."""
+        prompt = self._prompt()
+        assert "solo il codice" in prompt or "il minimo" in prompt
+
+    def test_dice_come_far_nascere_un_modulo_senza_rompere_il_rosso(self):
+        """L'altra fermata, quella del 31/08: il primo test di un modulo che non
+        esiste non fallisce, esplode in raccolta. Lo scheletro vuoto prima."""
+        assert "scheletro" in self._prompt()
+
+    def test_non_promette_piu_un_numero_di_commit_scollegato_dai_criteri(self):
+        """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
+        aritmetica: due o tre coppie non coprono otto comportamenti."""
+        assert "3-5" not in self._prompt(), "il testo va a capo: il numero si cerca da solo"
+
+
+class TestUnNomeDiTestAmbiguoNonSiIndovina:
+    """Trovato addosso a se stesso: il gate del rosso girato su questa PR.
+
+    `id_pytest` tornava il **primo** metodo con quel nome trovato nel file. Due
+    classi che definiscono un test omonimo — cosa normale, `test_il_flag_esiste`
+    esiste già due volte in questa suite da prima di oggi — e il gate esegue il
+    test sbagliato: quello vecchio, che a quel commit passa. Verdetto *nato
+    verde* su un test che era rosso davvero.
+
+    Non è il caso «il gate è troppo severo»: è un gate che dice una cosa falsa
+    con la stessa faccia con cui dice le vere, ed è peggio. In caso di dubbio
+    ferma e lo dice — la regola c'è già per i test generati e per quelli dentro
+    un `if`, e questo è lo stesso dubbio.
+    """
+
+    # `def ` sta fuori dalla stringa apposta: `nomi_dei_test` legge i nomi dal
+    # **testo del diff**, quindi un `def test_…` dentro un letterale conterebbe
+    # come test nato in questo commit. Il gate del rosso di questa stessa PR ci è
+    # cascato: ha eseguito un omonimo vero, l'ha trovato verde, e ha fermato il
+    # branch per un test che qui non esiste. Il difetto è suo e resta scritto in
+    # PBI-104; questa riga evita di darglielo in pasto.
+    DEF = "def "
+    SORGENTE = f"""
+class TestVecchia:
+    {DEF}test_omonimo(self):
+        pass
+
+
+class TestNuova:
+    {DEF}test_omonimo(self):
+        pass
+"""
+
+    def test_due_classi_con_lo_stesso_nome_non_danno_un_id(self):
+        assert runner.id_pytest(self.SORGENTE, "test_omonimo", "tests/test_x.py") is None
+
+    def test_anche_una_funzione_fuori_classe_conta_come_omonima(self):
+        sorgente = self.SORGENTE + f"\n\n{self.DEF}test_omonimo():\n    pass\n"
+        assert runner.id_pytest(sorgente, "test_omonimo", "tests/test_x.py") is None
+
+
+class TestSenzaUnRepositorySottoNonSiApreNiente:
+    """Il lucchetto non scrive dove non c'è un giro.
+
+    Trovato dalla suite stessa: `apri_la_fase` è entrato in `esegui_pbi`, e le
+    decine di test che eseguono un PBI con `git` sostituito hanno cominciato a
+    lasciare `pre-commit` e `post-commit` **nella radice del repository vero** —
+    `git rev-parse --git-path hooks` tornava la stringa vuota del doppio, e
+    `Path("")` è la cartella corrente. Con `.asdlc-fase` sarebbe stato peggio:
+    un albero lasciato in fase è un albero in cui la sessione dopo non scrive.
+
+    Un dubbio su dove si sta scrivendo si risolve non scrivendo.
+    """
+
+    def test_un_percorso_che_non_finisce_in_hooks_non_e_una_cartella_di_hook(self, monkeypatch):
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        assert runner.cartella_degli_hook() is None
+
+    def test_apri_la_fase_non_scrive_niente_senza_hook(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+
+        runner.apri_la_fase()
+
+        assert list(tmp_path.iterdir()) == []

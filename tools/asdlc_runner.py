@@ -143,11 +143,32 @@ Leggi, in quest'ordine:
 
 Esegui il PBI con queste regole non negoziabili:
 
-- **TDD**: scrivi PRIMA il test che fallisce, poi il codice che lo fa passare.
-- **Micro-commit**: committa dopo ogni pezzo che sta in piedi da solo — un test aggiunto,
-  una funzione che compila, un modulo che passa il lint. Un PBI produce tipicamente 3-5
-  commit. Non accumulare tutto in un commit finale: i commit sono i punti di ripristino,
-  e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa la PR.
+- **TDD, e il permesso di scrivere codice te lo dà il rosso.** Il giro nasce in fase
+  `TEST_ONLY`: i file di produzione sono in **sola lettura**, e ogni tentativo di
+  scriverli viene bloccato — da qualunque strumento, `Edit`, `Write` o una scrittura da
+  shell. Il ciclo di ogni comportamento è questo, e non ha scorciatoie:
+  1. scrivi il test del comportamento che ti serve, **solo quello**;
+  2. `python3 tools/asdlc_runner.py --chiedi-impl` — gira i test appena nati e apre la
+     fase `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e
+     non è questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
+  3. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
+     successivo per quanto ti sia già chiaro: ciò che scrivi adesso senza un rosso
+     davanti non potrai più dimostrarlo, e il criterio dopo ha diritto al suo ciclo;
+  4. committa — il commit riporta il giro in `TEST_ONLY`, e si ricomincia dal punto 1.
+  In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
+  il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
+  dillo con `STOP:`.
+- **Un modulo nuovo nasce vuoto, in un commit suo.** Il primo test di un file che non
+  esiste non fallisce: esplode in raccolta, e un errore di import non è un rosso — non
+  dimostra che il test morde, e `--chiedi-impl` lo rifiuta dicendolo. Fai prima lo
+  **scheletro** che compila e non fa niente — il componente che rende un contenitore
+  vuoto, la funzione che torna `None` — committalo, e da lì ogni rosso è un'asserzione
+  che fallisce. Uno scheletro generoso però si ritorce contro di te: se fa già quello
+  che il test chiede, il test passa e la fase non si apre.
+- **Micro-commit**: una coppia RED→GREEN **per criterio** della checklist del PBI. Un
+  PBI da otto criteri fa sedici commit, ed è giusto così — i commit sono i punti di
+  ripristino, e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa
+  la PR.
 - **Il messaggio di commit si legge senza il diff sotto gli occhi.** Formato
   `tipo(scope): descrizione imperativa` in italiano, corpo con i dettagli. Il soggetto dice
   **cosa cambia**, con un verbo e un oggetto concreti; il corpo dice **perché**, e cosa
@@ -729,6 +750,81 @@ def e_file_di_produzione(percorso: str) -> bool:
     return not e_file_di_test(percorso) and Path(percorso).suffix in ESTENSIONI_CODICE
 
 
+# --- Il lucchetto ex ante: la fase dice cosa si può scrivere ----------------
+#
+# Il gate del rosso guarda **dopo**: a giro finito dice quali test sono nati
+# verdi, quando l'ora è spesa e il ciclo mancato non si annulla. Su PBI-333 sono
+# stati due giri e 49 minuti per due fermate, e in mezzo il Builder aveva scritto
+# 494 righe di pagina con dentro un comportamento che nessun test gli aveva
+# chiesto — il test nato verde era solo la ricevuta di quell'anticipo.
+#
+# La stessa regola messa **prima** della scrittura non accerta: impedisce. Le due
+# fasi sono i due imbrogli simmetrici, e ognuna chiude il suo:
+#
+#   TEST_ONLY   la produzione è chiusa → non si implementa ciò che nessun rosso
+#               ha chiesto, che è la causa a monte
+#   IMPL        i test sono in sola lettura → il verde non si ottiene
+#               ammorbidendo l'asserzione, che è la scorciatoia dell'altro verso
+#
+# Chi apre il passaggio non è l'agente: è `--chiedi-impl`, che gira i test nuovi
+# e scrive `IMPL` solo se li vede fallire **per asserzione**. L'agente può
+# chiedere il permesso, non prenderselo — per questo il file della fase è
+# protetto in tutte e due le fasi.
+#
+# Fuori da un giro il file non c'è e la guardia tace: `.claude/settings.json` sta
+# nel repository e l'hook vale per ogni sessione, comprese quelle di una persona.
+
+FILE_DELLA_FASE = ".asdlc-fase"
+FASE_TEST_ONLY = "TEST_ONLY"
+FASE_IMPL = "IMPL"
+
+
+def fase_corrente(cartella: Path) -> str | None:
+    """La fase del giro, cercata risalendo. `None` quando non c'è un giro.
+
+    Si risale invece di guardare solo la radice perché `cwd` arriva da Claude
+    Code così com'è, e l'agente può essersi spostato in `frontend/` per lanciare
+    `npm`. Il file sta accanto al lavoro e se ne va col worktree: è stato del
+    giro, non del repository, e infatti è gitignorato.
+    """
+    cartella = Path(cartella).resolve()
+    for livello in (cartella, *cartella.parents):
+        file = livello / FILE_DELLA_FASE
+        if file.is_file():
+            return file.read_text(encoding="utf-8").strip()
+    return None
+
+
+def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
+    """Perché questa scrittura non si fa, o `None` se si fa.
+
+    Torna una **ragione** e non un booleano perché è ciò che l'agente legge: un
+    blocco che non spiega come procedere costa il turno che avrebbe risparmiato.
+    """
+    if fase is None:
+        return None
+    if Path(percorso).name == FILE_DELLA_FASE:
+        return (f"{percorso}: la fase non la decidi tu. Il passaggio a {FASE_IMPL} lo "
+                f"apre `asdlc_runner.py --chiedi-impl`, e solo se i test nuovi "
+                f"falliscono davvero.")
+    if fase == FASE_TEST_ONLY:
+        if e_file_di_produzione(percorso):
+            return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
+                    f"qui si scrivono solo i test. Scrivi il test del comportamento che "
+                    f"ti serve, poi `asdlc_runner.py --chiedi-impl`: se è rosso, la "
+                    f"produzione si apre. Se il test passa già, quel comportamento c'è "
+                    f"di suo e non è questo il commit in cui nasce.")
+        return None
+    if fase == FASE_IMPL:
+        if e_file_di_test(percorso):
+            return (f"{percorso} è un test e il giro è in {FASE_IMPL}: il verde si "
+                    f"ottiene scrivendo il codice, non ammorbidendo l'asserzione. "
+                    f"Se il test è davvero sbagliato, fermati e dillo con STOP:.")
+        return None
+    return (f"fase «{fase}» sconosciuta in {FILE_DELLA_FASE}: la guardia si chiude. "
+            f"Un file scritto a metà non vale come «nessun giro in corso».")
+
+
 def linguaggio_del_test(percorso: str) -> str | None:
     """Chi sa eseguire quel test, e `None` se non è il runner.
 
@@ -792,6 +888,34 @@ def test_nuovi_del_commit(sha: str, file: list[tuple[str, str]] | None = None) -
         aggiunti, tolti = nomi_dei_test(
             git("show", "--format=", "--unified=0", sha, "--", percorso), linguaggio
         )
+        nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    return nuovi
+
+
+def test_nuovi_dellalbero() -> list[TestNuovo]:
+    """I test che nascono nell'**albero di lavoro**, rispetto a `HEAD`.
+
+    Il gate del rosso legge un commit; il lucchetto deve leggere ciò che non è
+    ancora committato, perché il permesso di implementare si chiede **prima** del
+    commit — è tutto il punto della differenza fra impedire e accertare.
+
+    I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
+    appena creato, e il primo test di un modulo nuovo è il caso più comune di
+    tutti. Per quelli il diff è il file intero, che è esattamente ciò che sono.
+    """
+    tracciati = [p for p in git("diff", "HEAD", "--name-only").splitlines() if p]
+    non_tracciati = [p for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p]
+    nuovi: list[TestNuovo] = []
+    for percorso in tracciati + non_tracciati:
+        linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
+        if linguaggio is None:
+            continue
+        if percorso in non_tracciati:
+            sorgente = leggi_sorgente(REPO / percorso) or ""
+            diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
+        else:
+            diff = git("diff", "HEAD", "--unified=0", "--", percorso)
+        aggiunti, tolti = nomi_dei_test(diff, linguaggio)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
 
@@ -866,14 +990,19 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
     except (SyntaxError, ValueError):
         return None
     definizioni = (ast.FunctionDef, ast.AsyncFunctionDef)
+    trovati: list[str] = []
     for nodo in modulo.body:
         if isinstance(nodo, definizioni) and nodo.name == nome:
-            return f"{relativo}::{nome}"
+            trovati.append(f"{relativo}::{nome}")
         if isinstance(nodo, ast.ClassDef):
             for figlio in nodo.body:
                 if isinstance(figlio, definizioni) and figlio.name == nome:
-                    return f"{relativo}::{nodo.name}::{nome}"
-    return None
+                    trovati.append(f"{relativo}::{nodo.name}::{nome}")
+    # Due classi che definiscono un test omonimo sono normali, e il diff dice solo
+    # che *un* `def` con quel nome è nato: quale delle due, non lo dice. Prendere il
+    # primo è la scelta che sembra innocua e non lo è — il gate esegue il test
+    # vecchio, lo trova verde, e stampa «nato verde» su un test che era rosso.
+    return trovati[0] if len(trovati) == 1 else None
 
 
 def dove_gira(percorso: str) -> tuple[str, str]:
@@ -1430,6 +1559,7 @@ def esegui_pbi(
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
     branch = crea_branch(pbi)
+    apri_la_fase()
 
     def conta_commit() -> int:
         """`origin/main..HEAD` e non `main..HEAD`: da quando il main locale del
@@ -1446,6 +1576,7 @@ def esegui_pbi(
         # `commit = 0` mentre sul branch c'era il lavoro. Su PBI-209 erano otto
         # commit e 2.174 righe, e la colonna del registro diceva zero: è quella
         # che si guarda per decidere se un branch fermato si butta (difetto 10).
+        chiudi_la_fase()
         e.commit = conta_commit()
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
@@ -1773,6 +1904,196 @@ def riepilogo(tariffa: float | None) -> int:
     return 0
 
 
+def stampa_la_guardia_di_fase() -> int:
+    """L'hook `PreToolUse` in forma di comando: JSON su stdin, `2` se si blocca.
+
+    Perché `2` e non un JSON di rifiuto: sotto `--dangerously-skip-permissions`
+    — cioè `bypassPermissions`, il modo in cui il runner lancia il Builder — la
+    documentazione di Claude Code è netta, *«hooks remain active and can block
+    via exit 2, but permissionDecision: "deny" does not block»*. Il sistema dei
+    permessi è spento e l'hook è l'unico cancello rimasto: se sbaglia forma, non
+    ferma niente e non lo dice a nessuno.
+
+    Un guasto nostro **non** blocca. Un hook che esce `2` su un JSON che non sa
+    leggere ferma ogni scrittura di ogni sessione aperta in questo repository, e
+    la cura — modificare un file — è la cosa che ha appena vietato. Il confine
+    invalicabile è il `pre-commit`; questo qui è il confine che *spiega*, e vale
+    quanto vale la sua correttezza.
+    """
+    try:
+        dato = json.loads(sys.stdin.read())
+        percorso = (dato.get("tool_input") or {}).get("file_path")
+        cartella = dato.get("cwd") or os.getcwd()
+    except (json.JSONDecodeError, AttributeError, TypeError) as guasto:
+        print(f"guardia di fase: stdin illeggibile ({guasto}), lascio passare", file=sys.stderr)
+        return 0
+    if not percorso:
+        return 0  # non è una scrittura su un file: non ci riguarda
+    ragione = guardia_di_fase(fase_corrente(Path(cartella)), percorso)
+    if ragione is None:
+        return 0
+    print(ragione, file=sys.stderr)
+    return 2
+
+
+def chiedi_impl() -> int:
+    """Il permesso di scrivere produzione, dato dal rosso e non dalla parola.
+
+    Gira i test nati nell'albero e apre `IMPL` solo se **tutti** falliscono. Non
+    è pignoleria sul singolo test: un test che passa al primo colpo dice che quel
+    comportamento c'è già, e allora non è questo il commit in cui nasce — o è
+    stato scritto in anticipo, che è la cosa che il lucchetto esiste per rendere
+    impossibile.
+
+    Le ragioni sono le stesse tre di `ESITI_MANCATI`, e non per pigrizia: chi
+    legge il rifiuto qui e il rapporto del gate là deve trovare le stesse parole,
+    o crederà di avere davanti due controlli diversi.
+    """
+    fase = fase_corrente(REPO)
+    if fase != FASE_TEST_ONLY:
+        print(f"Niente da aprire: il giro non è in {FASE_TEST_ONLY} "
+              f"(fase: {fase or 'nessuna'}). Il permesso si chiede una volta per "
+              f"comportamento, e il giro torna in {FASE_TEST_ONLY} dopo il commit.")
+        return 1
+    nuovi = test_nuovi_dellalbero()
+    if not nuovi:
+        print("Non c'è nessun test nuovo nell'albero, quindi nessun rosso da osservare. "
+              "Scrivi prima il test del comportamento che ti serve.")
+        return 1
+    comandi, orfani = comandi_dei_test(REPO, nuovi)
+    mancati: list[tuple[str, list[str]]] = []
+    if orfani:
+        mancati.append((ESITI_MANCATI["nessuno"], orfani))
+    for comando in comandi:
+        esiti, _ = esiti_del_comando(comando)
+        per_lettura: dict[str, list[str]] = defaultdict(list)
+        for chiave, etichetta in comando.etichette.items():
+            if esiti[chiave] != "rosso":
+                per_lettura[esiti[chiave]].append(etichetta)
+        for esito, elenco in per_lettura.items():
+            mancati.append((ESITI_MANCATI[esito], elenco))
+    if mancati:
+        print(f"Il permesso resta chiuso: su {len(nuovi)} test nuovi il rosso non "
+              f"si è visto dappertutto.\n")
+        for ragione, elenco in mancati:
+            for etichetta in elenco:
+                print(f"  {etichetta}")
+            print(f"    → {ragione}\n")
+        return 1
+    (REPO / FILE_DELLA_FASE).write_text(f"{FASE_IMPL}\n", encoding="utf-8")
+    print(f"Rosso osservato su {len(nuovi)} test nuovi: la fase passa a {FASE_IMPL}. "
+          f"Ora scrivi il minimo che li fa passare.")
+    return 0
+
+
+# Il `pre-commit` che il runner installa. Inerte fuori da un giro, come l'hook di
+# Claude Code e per la stessa ragione: sta in `.git/hooks`, che i worktree di
+# questo repository condividono, e non deve farsi sentire da chi non è in un giro.
+GUARDIA_DEL_COMMIT = """#!/bin/sh
+# Installato da tools/asdlc_runner.py (PBI-104): il commit non nasce fuori fase.
+exec python3 "$(git rev-parse --show-toplevel)/tools/asdlc_runner.py" --guardia-commit
+"""
+
+
+def installa_la_guardia_del_commit() -> bool:
+    """Mette il `pre-commit` al suo posto. `False` se ce n'era già uno.
+
+    Un `pre-commit` di qualcun altro non si calpesta: potrebbe essere un
+    formattatore, o la cura di qualcosa che non sappiamo. Chi lo trova occupato
+    lo legge e decide — il lucchetto perde il suo secondo livello e resta il
+    primo, che è meglio di un hook altrui cancellato in silenzio.
+    """
+    return installa_un_hook("pre-commit", GUARDIA_DEL_COMMIT)
+
+
+def cartella_degli_hook() -> Path | None:
+    """`.git/hooks` di questo albero, o `None` se non si riesce a dirlo.
+
+    Il controllo sulla forma del percorso non è paranoia: sotto i test `git` è
+    sostituito e torna la stringa vuota, `Path("")` è la cartella corrente, e i
+    due hook finivano nella radice del repository vero. Un dubbio su dove si sta
+    scrivendo si risolve non scrivendo.
+    """
+    try:
+        detto = git("rev-parse", "--git-path", "hooks")
+    except RuntimeError:
+        return None
+    if not detto or Path(detto).name != "hooks":
+        return None
+    cartella = Path(detto)
+    return cartella if cartella.is_absolute() else REPO / cartella
+
+
+def installa_un_hook(nome: str, corpo: str) -> bool:
+    """Scrive un hook di git in `.git/hooks`, e `False` se ce n'era già uno."""
+    cartella = cartella_degli_hook()
+    if cartella is None:
+        return False
+    cartella.mkdir(parents=True, exist_ok=True)
+    hook = cartella / nome
+    if hook.exists():
+        return False
+    hook.write_text(corpo, encoding="utf-8")
+    hook.chmod(0o755)
+    return True
+
+
+# Il `post-commit` che chiude il ciclo. Il Builder fa molti criteri in una
+# sessione e fra un commit e l'altro il runner non c'è: se `IMPL` restasse aperta
+# dopo il primo permesso, il comportamento successivo tornerebbe a nascere senza
+# rosso. Chi vede ogni commit è git, quindi è git a riportare la fase indietro.
+RITORNO_IN_TEST_ONLY = f"""#!/bin/sh
+# Installato da tools/asdlc_runner.py (PBI-104): un commit chiude il ciclo.
+fase="$(git rev-parse --show-toplevel)/{FILE_DELLA_FASE}"
+[ -f "$fase" ] && printf '{FASE_TEST_ONLY}\\n' > "$fase"
+exit 0
+"""
+
+
+def installa_il_ritorno_in_test_only() -> bool:
+    return installa_un_hook("post-commit", RITORNO_IN_TEST_ONLY)
+
+
+def apri_la_fase() -> None:
+    """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
+
+    L'hook di Claude Code non si installa qui — sta in `.claude/settings.json`,
+    versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
+    albero appena clonato non li avrebbe.
+    """
+    if cartella_degli_hook() is None:
+        return  # non c'è un repository sotto: non c'è un giro da lucchettare
+    installa_la_guardia_del_commit()
+    installa_il_ritorno_in_test_only()
+    (REPO / FILE_DELLA_FASE).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
+
+
+def chiudi_la_fase() -> None:
+    """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
+    sessione dopo non può scrivere, e la diagnosi costerebbe più del giro."""
+    (REPO / FILE_DELLA_FASE).unlink(missing_ok=True)
+
+
+def guardia_del_commit() -> int:
+    """Il `pre-commit`: ciò che è in stage deve stare nella fase corrente.
+
+    Guarda lo **stage** e non il modo in cui ci è arrivato, ed è la differenza
+    che conta: `Edit`, `Write`, un heredoc da Bash, `sed -i` e una patch applicata
+    a mano finiscono tutti nello stesso posto, e qui valgono uguale.
+    """
+    fase = fase_corrente(REPO)
+    if fase is None:
+        return 0
+    ragioni = [r for percorso in git("diff", "--cached", "--name-only").splitlines()
+               if percorso and (r := guardia_di_fase(fase, percorso))]
+    if not ragioni:
+        return 0
+    print(f"Il commit non si fa: il giro è in {fase}.\n")
+    for ragione in ragioni:
+        print(f"  {ragione}\n")
+    return 1
+
+
 def stampa_il_gate_del_rosso(ref: str) -> int:
     """Il gate senza il giro intorno: `--gate-rosso [ref]`.
 
@@ -1828,6 +2149,15 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
                     help="non esegue niente: cammina origin/main..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
+    ap.add_argument("--guardia-commit", action="store_true",
+                    help="non esegue niente: il pre-commit del giro — ciò che è in stage "
+                         "deve stare nella fase corrente")
+    ap.add_argument("--chiedi-impl", action="store_true",
+                    help="non esegue un PBI: gira i test nati nell'albero e apre la fase "
+                         "IMPL solo se li vede fallire")
+    ap.add_argument("--guardia-fase", action="store_true",
+                    help="non esegue niente: legge su stdin il JSON di un hook PreToolUse "
+                         "e esce 2 se quella scrittura non si può fare nella fase corrente")
     ap.add_argument("--riepilogo", action="store_true",
                     help="non esegue niente: somma i tempi già registrati in runs/tempi.csv")
     ap.add_argument("--tariffa", type=float, metavar="EUR_ORA",
@@ -1843,6 +2173,14 @@ def main() -> int:
         return registra(Path(a.registra))
     if a.riepilogo:
         return riepilogo(a.tariffa)
+    if a.guardia_commit:
+        return guardia_del_commit()
+    if a.chiedi_impl:
+        if aggiunto := venv_sul_path():
+            print(f"venv del worktree sul PATH: {aggiunto}")
+        return chiedi_impl()
+    if a.guardia_fase:
+        return stampa_la_guardia_di_fase()
     if a.gate_rosso:
         # Il venv serve anche qui: i test di quel commit li fa girare `pytest`.
         if aggiunto := venv_sul_path():
