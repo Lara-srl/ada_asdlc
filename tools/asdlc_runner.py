@@ -1288,6 +1288,54 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     return {chiave: letti.get(chiave, complessivo) for chiave in c.etichette}, uscita
 
 
+# --- La quarta lettura: il test nato verde passa se morde (PBI-105) ------------
+#
+# «Nato verde» è una prova di processo, e ha un falso positivo sistematico: la
+# guardia che il Critic ordina su un comportamento che c'è già nasce verde per
+# forza. La domanda di sostanza — *se guasto il codice che copre, se ne accorge?* —
+# si misura: si mutano le righe di produzione che il branch ha cambiato e si rigira
+# quel test. Un mutante ucciso è la prova che il test guarda quelle righe.
+
+@dataclass(frozen=True)
+class Mutante:
+    """Una riga guastata: dov'è, com'era, come diventa. `dopo` vuoto = cancellata."""
+
+    riga: int   # 1-based, come nel file
+    prima: str
+    dopo: str
+
+
+# Gli scambi, per occorrenza: `(regola, sostituto)`. Ognuno inverte un confronto o
+# una congiunzione, cioè cambia il **verso** di una decisione senza toccarne la
+# forma — il guasto più piccolo che un test può essere chiamato ad accorgersi.
+SCAMBI: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"==="), "!=="), (re.compile(r"!=="), "==="),
+    (re.compile(r"&&"), "||"), (re.compile(r"\|\|"), "&&"),
+]
+
+
+def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
+    """I mutanti delle sole `righe` (1-based) di `sorgente`, in ordine di riga.
+
+    Sulle righe cambiate e non su tutto il file: è il codice che quel giro ha
+    scritto, ed è l'unico di cui i suoi test rispondono. La cancellazione è
+    l'operatore più forte e vale in tutti e due i linguaggi; una riga di sola
+    punteggiatura non si cancella, perché romperebbe la sintassi e basta, e un
+    guasto di forma non è una prova che il test morda.
+    """
+    mutanti: list[Mutante] = []
+    for numero, testo in enumerate(sorgente.splitlines(), start=1):
+        if numero not in righe:
+            continue
+        if re.search(r"[A-Za-z0-9]", testo):
+            mutanti.append(Mutante(numero, testo, ""))
+        for regola, sostituto in SCAMBI:
+            for trovato in regola.finditer(testo):
+                dopo = testo[:trovato.start()] + sostituto + testo[trovato.end():]
+                mutanti.append(Mutante(numero, testo, dopo))
+    return mutanti
+
+
 # Quanti test dell'elenco si scrivono per esteso. Oltre, si conta il resto: un
 # nome tagliato a metà non si ritrova, e chi legge lo prende per un difetto del gate.
 TEST_IN_ELENCO = 4
