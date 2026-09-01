@@ -729,6 +729,81 @@ def e_file_di_produzione(percorso: str) -> bool:
     return not e_file_di_test(percorso) and Path(percorso).suffix in ESTENSIONI_CODICE
 
 
+# --- Il lucchetto ex ante: la fase dice cosa si può scrivere ----------------
+#
+# Il gate del rosso guarda **dopo**: a giro finito dice quali test sono nati
+# verdi, quando l'ora è spesa e il ciclo mancato non si annulla. Su PBI-333 sono
+# stati due giri e 49 minuti per due fermate, e in mezzo il Builder aveva scritto
+# 494 righe di pagina con dentro un comportamento che nessun test gli aveva
+# chiesto — il test nato verde era solo la ricevuta di quell'anticipo.
+#
+# La stessa regola messa **prima** della scrittura non accerta: impedisce. Le due
+# fasi sono i due imbrogli simmetrici, e ognuna chiude il suo:
+#
+#   TEST_ONLY   la produzione è chiusa → non si implementa ciò che nessun rosso
+#               ha chiesto, che è la causa a monte
+#   IMPL        i test sono in sola lettura → il verde non si ottiene
+#               ammorbidendo l'asserzione, che è la scorciatoia dell'altro verso
+#
+# Chi apre il passaggio non è l'agente: è `--chiedi-impl`, che gira i test nuovi
+# e scrive `IMPL` solo se li vede fallire **per asserzione**. L'agente può
+# chiedere il permesso, non prenderselo — per questo il file della fase è
+# protetto in tutte e due le fasi.
+#
+# Fuori da un giro il file non c'è e la guardia tace: `.claude/settings.json` sta
+# nel repository e l'hook vale per ogni sessione, comprese quelle di una persona.
+
+FILE_DELLA_FASE = ".asdlc-fase"
+FASE_TEST_ONLY = "TEST_ONLY"
+FASE_IMPL = "IMPL"
+
+
+def fase_corrente(cartella: Path) -> str | None:
+    """La fase del giro, cercata risalendo. `None` quando non c'è un giro.
+
+    Si risale invece di guardare solo la radice perché `cwd` arriva da Claude
+    Code così com'è, e l'agente può essersi spostato in `frontend/` per lanciare
+    `npm`. Il file sta accanto al lavoro e se ne va col worktree: è stato del
+    giro, non del repository, e infatti è gitignorato.
+    """
+    cartella = Path(cartella).resolve()
+    for livello in (cartella, *cartella.parents):
+        file = livello / FILE_DELLA_FASE
+        if file.is_file():
+            return file.read_text(encoding="utf-8").strip()
+    return None
+
+
+def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
+    """Perché questa scrittura non si fa, o `None` se si fa.
+
+    Torna una **ragione** e non un booleano perché è ciò che l'agente legge: un
+    blocco che non spiega come procedere costa il turno che avrebbe risparmiato.
+    """
+    if fase is None:
+        return None
+    if Path(percorso).name == FILE_DELLA_FASE:
+        return (f"{percorso}: la fase non la decidi tu. Il passaggio a {FASE_IMPL} lo "
+                f"apre `asdlc_runner.py --chiedi-impl`, e solo se i test nuovi "
+                f"falliscono davvero.")
+    if fase == FASE_TEST_ONLY:
+        if e_file_di_produzione(percorso):
+            return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
+                    f"qui si scrivono solo i test. Scrivi il test del comportamento che "
+                    f"ti serve, poi `asdlc_runner.py --chiedi-impl`: se è rosso, la "
+                    f"produzione si apre. Se il test passa già, quel comportamento c'è "
+                    f"di suo e non è questo il commit in cui nasce.")
+        return None
+    if fase == FASE_IMPL:
+        if e_file_di_test(percorso):
+            return (f"{percorso} è un test e il giro è in {FASE_IMPL}: il verde si "
+                    f"ottiene scrivendo il codice, non ammorbidendo l'asserzione. "
+                    f"Se il test è davvero sbagliato, fermati e dillo con STOP:.")
+        return None
+    return (f"fase «{fase}» sconosciuta in {FILE_DELLA_FASE}: la guardia si chiude. "
+            f"Un file scritto a metà non vale come «nessun giro in corso».")
+
+
 def linguaggio_del_test(percorso: str) -> str | None:
     """Chi sa eseguire quel test, e `None` se non è il runner.
 
