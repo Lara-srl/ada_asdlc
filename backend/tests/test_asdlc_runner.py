@@ -3449,3 +3449,18 @@ class TestITestCheMordonoFinisconoNelRapporto:
         a_schermo = capsys.readouterr().out
         assert "9f952c0" in a_schermo and "morde" in a_schermo
         assert "nav.ts:67" in a_schermo
+
+    def test_anche_il_gate_lanciato_da_solo_li_stampa(self, monkeypatch, capsys):
+        """`--gate-rosso` è il modo di rileggere un `fermato` e di provare un branch
+        chiuso: se non dice chi è passato per la quarta lettura, la prova sul caso
+        vero — `9f952c0` — non si può leggere da nessuna parte."""
+        def _gate(base, ref, morsi=None, **k):
+            morsi.append(dict(self.MORSO))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+
+        assert runner.stampa_il_gate_del_rosso("origin/main..pbi/pbi-333-giro4") == 0
+        a_schermo = capsys.readouterr().out
+        assert "9f952c0" in a_schermo and "morde" in a_schermo
+        assert "nav.ts:67" in a_schermo
