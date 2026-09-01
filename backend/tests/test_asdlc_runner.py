@@ -3238,3 +3238,44 @@ class TestGliScambiValgonoInTuttiEDueILinguaggi:
         assert self._dopo("def somma(a, b):") == []
         assert self._dopo("export function somma(a: number, b: number) {") == []
         assert self._dopo("  const voci = NAV_ITEMS.filter(") == []
+
+
+class TestLeRigheCambiateSiLeggonoDalDiff:
+    """Quali righe si mutano: quelle di produzione che il branch ha cambiato **fino a
+    quel commit**, nella numerazione del file a quel commit — è lì che il test
+    nato verde viene rigirato, e un numero di riga preso altrove guasterebbe la
+    riga sbagliata."""
+
+    def test_le_righe_nuove_di_un_file_nuovo_e_quelle_toccate_di_uno_vecchio(
+        self, repo_di_prova
+    ):
+        vecchio = repo_di_prova.commit("feat: la differenza", {
+            "backend/app/differenza.py":
+                "def differenza(a, b):\n    return a - b\n\n\ndef zero():\n    return 0\n",
+        })
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        sha = repo_di_prova.commit("feat: la somma, e lo zero che diventa uno", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/app/differenza.py":
+                "def differenza(a, b):\n    return a - b\n\n\ndef zero():\n    return 1\n",
+        })
+
+        righe = runner.righe_cambiate("origin/main", sha)
+
+        assert righe == {"backend/app/somma.py": {1, 2},
+                         "backend/app/differenza.py": {6}}
+
+    def test_i_test_i_documenti_e_le_sole_cancellazioni_non_contano(self, repo_di_prova):
+        """Si muta la produzione: un test non è ciò che il test guarda, un `.md`
+        non gira, e una riga tolta non c'è più da guastare."""
+        vecchio = repo_di_prova.commit("feat: la somma, con una riga di troppo", {
+            "backend/app/somma.py": "def somma(a, b):\n    c = 0\n    return a + b\n",
+        })
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        sha = repo_di_prova.commit("refactor: togli la riga di troppo", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py": "def test_x():\n    assert True\n",
+            "docs/somma.md": "# la somma\n",
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {}
