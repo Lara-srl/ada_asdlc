@@ -2701,3 +2701,107 @@ class TestLHookERegistratoEFerma:
 
         assert esito.returncode == 0
         assert esito.stderr == ""
+
+
+class TestIlPermessoDiImplementareSiChiede:
+    """`--chiedi-impl`: l'unico modo di passare da `TEST_ONLY` a `IMPL`.
+
+    È il cardine del lucchetto. L'agente può **chiedere** il permesso di scrivere
+    codice di produzione, non prenderselo: il runner gira i test che sono nati
+    nell'albero e apre la fase solo se li vede fallire. Un test che passa al
+    primo colpo non è un permesso negato per pignoleria — è la prova che quel
+    comportamento c'è già, e che non è questo il commit in cui nasce.
+
+    Il rosso si osserva **prima** del commit, quindi il commit di soli test che
+    ne segue è per costruzione quello che il gate di PBI-103 vorrebbe: nessun
+    file di produzione dentro, e il fallimento visto sull'albero esatto.
+    """
+
+    TEST_NUOVO = "backend/tests/test_foglio.py"
+    SORGENTE = "def test_il_clic_apre_la_pratica():\n    assert False\n"
+
+    def _in_test_only(self, repo, monkeypatch, esito="rosso"):
+        (repo.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        (repo.radice / self.TEST_NUOVO).write_text(self.SORGENTE, encoding="utf-8")
+        monkeypatch.setattr(runner, "esiti_del_comando",
+                            lambda c: ({k: esito for k in c.etichette}, "coda"))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+    def _fase(self, repo):
+        return (repo.radice / runner.FILE_DELLA_FASE).read_text().strip()
+
+    def test_il_flag_chiedi_impl_esiste(self):
+        assert runner.costruisci_parser().parse_args(["--chiedi-impl"]).chiedi_impl
+
+    def test_apre_la_fase_quando_il_test_nuovo_e_rosso(self, repo_di_prova, monkeypatch):
+        self._in_test_only(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 0
+        assert self._fase(repo_di_prova) == runner.FASE_IMPL
+
+    def test_non_apre_su_un_test_nato_verde(self, repo_di_prova, monkeypatch, capsys):
+        self._in_test_only(repo_di_prova, monkeypatch, esito="verde")
+
+        assert runner.main() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert runner.ESITI_MANCATI["verde"] in capsys.readouterr().out
+
+    def test_non_apre_se_il_rosso_non_e_isolabile(self, repo_di_prova, monkeypatch, capsys):
+        """Il caso del 31/08: il test non gira perché importa ciò che non c'è.
+
+        Si chiude come il verde, ma la ragione è un'altra e va detta: la cura non
+        è cambiare il test, è far esistere il modulo vuoto prima.
+        """
+        self._in_test_only(repo_di_prova, monkeypatch, esito="nessuno")
+
+        assert runner.main() == 1
+        assert runner.ESITI_MANCATI["nessuno"] in capsys.readouterr().out
+
+    def test_senza_test_nuovi_non_apre(self, repo_di_prova, monkeypatch, capsys):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+        assert runner.main() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_fuori_da_test_only_non_si_chiede(self, repo_di_prova, monkeypatch, capsys):
+        """Da `IMPL` la richiesta non ha senso, e riaprirla sarebbe il modo di
+        restarci per sempre: un giro che non torna mai a `TEST_ONLY` è un giro
+        senza lucchetto."""
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_IMPL}\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+        assert runner.main() == 1
+        assert runner.FASE_TEST_ONLY in capsys.readouterr().out
+
+
+class TestITestNuoviSiLeggonoDallAlbero:
+    """Il gate di PBI-103 legge i test nuovi da un **commit**; il lucchetto deve
+    leggerli da ciò che non è ancora committato, perché il permesso si chiede
+    prima del commit. Un file di test appena creato non è tracciato, e
+    `git diff HEAD` non lo nomina: va cercato apposta, o il caso più comune —
+    il primo test di un modulo nuovo — non verrebbe visto affatto."""
+
+    def test_vede_un_file_di_test_non_tracciato(self, repo_di_prova):
+        (repo_di_prova.radice / "backend/tests/test_nuovo.py").write_text(
+            "def test_la_riga_si_apre():\n    assert False\n", encoding="utf-8")
+
+        nuovi = runner.test_nuovi_dellalbero()
+
+        assert [(t.file, t.nome) for t in nuovi] == [
+            ("backend/tests/test_nuovo.py", "test_la_riga_si_apre")]
+
+    def test_vede_un_test_aggiunto_a_un_file_che_ce_gia(self, repo_di_prova):
+        repo_di_prova.commit("test: il primo", {
+            "backend/tests/test_c_era.py": "def test_il_primo():\n    assert True\n"})
+        (repo_di_prova.radice / "backend/tests/test_c_era.py").write_text(
+            "def test_il_primo():\n    assert True\n\n\ndef test_il_secondo():\n    assert False\n",
+            encoding="utf-8")
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == ["test_il_secondo"]
+
+    def test_la_produzione_non_e_un_test(self, repo_di_prova):
+        (repo_di_prova.radice / "backend/app/foglio.py").write_text("def calcola():\n    pass\n")
+
+        assert runner.test_nuovi_dellalbero() == []
