@@ -1525,16 +1525,33 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo],
             for chiave, etichetta in comando.etichette.items():
                 if esiti[chiave] == "rosso":
                     continue
+                lettura = ESITI_MANCATI[esiti[chiave]]
                 if esiti[chiave] == "verde":
-                    mutante, _ = quarta_lettura(albero, base, sha, comando, chiave)
+                    mutante, provati = quarta_lettura(albero, base, sha, comando, chiave)
                     if mutante is not None:
                         morsi.append({"commit": sha[:7], "titolo": titolo,
                                       "test": etichetta, "mutante": mutante})
                         continue
-                per_lettura[esiti[chiave]].append(etichetta)
-            for esito, elenco in per_lettura.items():
-                mancati.append(voce_mancata(sha, titolo, elenco, ESITI_MANCATI[esito], coda))
+                    lettura = lettura_del_verde(provati)
+                per_lettura[lettura].append(etichetta)
+            for lettura, elenco in per_lettura.items():
+                mancati.append(voce_mancata(sha, titolo, elenco, lettura, coda))
     return mancati
+
+
+def lettura_del_verde(provati: int) -> str:
+    """Cosa si scrive di un nato verde dopo la quarta lettura.
+
+    Con dei mutanti provati la lettura è più forte di «il codice c'era già»: dice
+    che il test **non guarda** le righe che il branch ha scritto. Senza — il branch
+    non ha righe di produzione, o i suoi mutanti non compilano — resta quella di
+    prima, e lo dice: zero provati non è «nessuno lo fa fallire».
+    """
+    if provati == 0:
+        return f"{ESITI_MANCATI['verde']} — e nessun mutante da provare sulle righe cambiate"
+    quanti = "1 mutante provato" if provati == 1 else f"{provati} mutanti provati"
+    return (f"nato verde e non morde: a quel commit il test passa, e {quanti} sulle "
+            f"righe che il branch ha cambiato non lo fanno fallire")
 
 
 def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
