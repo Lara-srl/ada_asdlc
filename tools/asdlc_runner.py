@@ -385,6 +385,12 @@ class Esito:
     # "titolo", "test", "esito", "coda"}`. Un elenco e non un booleano — la lettura
     # la fa una persona, che deve poter andare a quel commit e guardarlo.
     commit_senza_rosso: list[dict[str, str]] = field(default_factory=list)
+    # I test nati verdi che il gate ha lasciato passare perché mordono: `{"commit",
+    # "titolo", "test", "mutante"}`. Stanno nel rapporto per la stessa ragione dei
+    # commit senza rosso — chi legge deve poter andare a quella riga — e in più
+    # perché un passaggio senza ragione scritta è una parola, e la parola qui non
+    # vale (PBI-105).
+    test_che_mordono: list[dict[str, str]] = field(default_factory=list)
     # Tempi: il totale è il tempo di parete del PBI, il resto ne è la scomposizione.
     iniziato: str = ""
     finito: str = ""
@@ -1934,9 +1940,10 @@ def esegui_pbi(
         # non ha senso chiedere di un ciclo che potrebbe non essere ancora chiuso.
         print("    gate del rosso … ", end="", flush=True)
         t_rosso = time.monotonic()
+        morsi: list[dict[str, str]] = []
         try:
             with misura(e, "gate"):
-                senza_rosso = gate_del_rosso(visti=visti)
+                senza_rosso = gate_del_rosso(visti=visti, morsi=morsi)
         except GuastoDelGate as guasto:
             # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
             # accusa nessun commit, perché il gate non ne ha guardato nessuno.
@@ -1944,6 +1951,12 @@ def esegui_pbi(
             print(f"    ── gate del rosso ──\n{guasto}")
             return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
         print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
+        # I nati verdi che mordono si scrivono **prima** dell'eventuale fermata: sono
+        # passati, e il rapporto lo dice anche quando un altro commit ferma il giro.
+        e.test_che_mordono += morsi
+        for m in morsi:
+            print(f"    ── {m['commit']} {m['titolo']} ──\n"
+                  f"       {m['test']}\n       → nato verde, ma morde: {m['mutante']}")
         if senza_rosso:
             # `fermato` e non un rilievo da chiudere in un giro di revisione: il ciclo
             # mancato è **ex ante**, e nessuna fix lo annulla. Mandare il Builder a
