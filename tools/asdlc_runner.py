@@ -1952,7 +1952,10 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
-    return test_nuovi_del_commit("HEAD")
+    file = file_del_commit("HEAD")
+    if any(e_file_di_produzione(percorso) for _, percorso in file):
+        return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
+    return test_nuovi_del_commit("HEAD", file)
 
 
 def chiedi_impl() -> int:
