@@ -3404,3 +3404,48 @@ class TestIlTestNatoVerdePassaSeMorde:
                                   "tests/test_somma.py::test_la_somma_esiste")
 
             assert (albero / "backend/app/somma.py").read_text() == sorgente
+
+
+class TestITestCheMordonoFinisconoNelRapporto:
+    """Un test nato verde che passa per la quarta lettura non sparisce: il
+    rapporto del giro dice **perché** è passato — commit, test, mutante — accanto
+    ai commit senza rosso. Chi rilegge il giro deve poter andare a quella riga e
+    vedere il guasto che il test ha sentito; e chi non ci crede deve poterlo
+    contestare col Protocollo di rifinitura di PBI-105.
+    """
+
+    MORSO = {"commit": "9f952c0",
+             "titolo": "test(analisi): presidia l'altra metà della regola del rail",
+             "test": "src/components/AppLayout.test.tsx -t su una pratica tiene accesa "
+                     "la sezione che la contiene",
+             "mutante": "frontend/src/lib/nav.ts:67  `a || b` → `a && b`"}
+
+    def _mondo(self, monkeypatch):
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p: runner.Verdetto("pass", "", "ok"))
+
+        def _gate(visti=None, morsi=None, **k):
+            morsi.append(dict(self.MORSO))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+
+    def test_il_morso_finisce_nellesito_e_a_schermo(self, monkeypatch, capsys):
+        self._mondo(monkeypatch)
+
+        esito = runner.esegui_pbi("PBI-105", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        assert esito.test_che_mordono == [self.MORSO]
+        a_schermo = capsys.readouterr().out
+        assert "9f952c0" in a_schermo and "morde" in a_schermo
+        assert "nav.ts:67" in a_schermo
