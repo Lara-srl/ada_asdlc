@@ -2510,3 +2510,85 @@ class TestIlGateDelRossoSiLanciaDaSolo:
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso"])
 
         assert runner.main() == 0
+
+
+class TestLaFaseDecideCosaSiPuoScrivere:
+    """Il lucchetto ex ante: `PBI-104`.
+
+    Il gate del rosso è un'autopsia — accerta a giro finito che un test è nato
+    verde, quando non c'è più niente da correggere e l'ora è spesa. La stessa
+    regola messa **prima** della scrittura non accerta: impedisce. Il Builder in
+    `TEST_ONLY` non può toccare la produzione, quindi non può implementare ciò
+    che nessun rosso gli ha chiesto; in `IMPL` non può toccare i test, quindi il
+    verde non si ottiene ammorbidendo l'asserzione. Sono i due imbrogli
+    simmetrici, e servono due lucchetti opposti.
+
+    Fuori da un giro il file della fase non c'è e la guardia tace: le sessioni
+    di una persona non se ne devono accorgere.
+    """
+
+    PAGINA = "frontend/src/pages/FoglioPage.tsx"
+    PROVA = "frontend/src/pages/FoglioPage.test.tsx"
+
+    def test_senza_fase_non_dice_niente(self):
+        assert runner.guardia_di_fase(None, self.PAGINA) is None
+        assert runner.guardia_di_fase(None, self.PROVA) is None
+
+    def test_in_test_only_la_produzione_e_chiusa(self):
+        ragione = runner.guardia_di_fase("TEST_ONLY", self.PAGINA)
+        assert ragione is not None
+        assert self.PAGINA in ragione
+
+    def test_in_test_only_il_test_si_scrive(self):
+        assert runner.guardia_di_fase("TEST_ONLY", self.PROVA) is None
+        assert runner.guardia_di_fase("TEST_ONLY", "backend/tests/test_margine.py") is None
+
+    def test_in_impl_il_test_e_in_sola_lettura(self):
+        """L'imbroglio simmetrico: il verde ottenuto ammorbidendo l'asserzione."""
+        ragione = runner.guardia_di_fase("IMPL", self.PROVA)
+        assert ragione is not None
+        assert self.PROVA in ragione
+
+    def test_in_impl_la_produzione_si_scrive(self):
+        assert runner.guardia_di_fase("IMPL", self.PAGINA) is None
+
+    def test_la_spec_si_scrive_in_tutte_e_due_le_fasi(self):
+        """`AGENTS.md`, SEMPRE: la spec si aggiorna nello stesso commit del codice.
+
+        Un `.md` non è né test né produzione — è la stessa esclusione con cui il
+        gate del rosso non ferma un commit di soli test con la sua spec.
+        """
+        for fase in ("TEST_ONLY", "IMPL"):
+            assert runner.guardia_di_fase(fase, "specs/analisi-kpi/spec.md") is None
+
+    def test_il_file_della_fase_non_lo_scrive_lagente(self):
+        """Il permesso non si prende: lo dà `--chiedi-impl` sul rosso osservato."""
+        for fase in ("TEST_ONLY", "IMPL"):
+            ragione = runner.guardia_di_fase(fase, runner.FILE_DELLA_FASE)
+            assert ragione is not None
+            assert "non la decidi tu" in ragione
+
+    def test_una_fase_che_non_si_conosce_chiude(self):
+        """Si sbaglia dalla parte del blocco: un file di fase corrotto o scritto a
+        metà non deve valere come «nessuna fase», o il lucchetto si apre da sé."""
+        assert runner.guardia_di_fase("VERDE", self.PAGINA) is not None
+        assert runner.guardia_di_fase("VERDE", self.PROVA) is not None
+
+
+class TestLaFaseSiLeggeDalWorktree:
+    """Il file sta accanto al lavoro e se ne va col worktree: è stato del giro,
+    non del repository. La guardia lo cerca risalendo, perché l'agente può aver
+    cambiato cartella e `cwd` arriva da Claude Code così com'è."""
+
+    def test_la_fase_si_legge_dalla_radice(self, tmp_path):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        assert runner.fase_corrente(tmp_path) == "TEST_ONLY"
+
+    def test_la_fase_si_cerca_risalendo(self, tmp_path):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("IMPL\n")
+        sotto = tmp_path / "frontend" / "src" / "pages"
+        sotto.mkdir(parents=True)
+        assert runner.fase_corrente(sotto) == "IMPL"
+
+    def test_senza_file_non_ce_fase(self, tmp_path):
+        assert runner.fase_corrente(tmp_path) is None
