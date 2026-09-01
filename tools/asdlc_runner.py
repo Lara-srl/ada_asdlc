@@ -1349,12 +1349,19 @@ SCAMBI: list[tuple[re.Pattern[str], str]] = [
 # commento, e una riga che **apre** — un blocco in Python, una parentesi o una
 # graffa in TypeScript. Toglierle rompe la sintassi e basta, e un guasto di forma
 # non è una prova che il test morda: è solo un test rigirato a vuoto.
+#
+# E una riga a livello di modulo, senza indentazione: dichiara, non decide. La
+# prima prova sul caso vero (pbi-333-giro4) ha nominato come mutante ucciso
+# l'`import { … } from '../lib/nav'` di `AppLayout.tsx` — un guasto di
+# **esistenza**, che ogni test che rende il componente uccide, compreso uno che
+# non guarda niente. Le decisioni stanno dentro i corpi, ed è lì che si cancella.
 RE_COMMENTO = re.compile(r"^\s*(#|//|/\*|\*)")
 RE_APRE = re.compile(r"[:({\[]\s*$")
 
 
 def si_puo_cancellare(testo: str) -> bool:
     return (re.search(r"[A-Za-z0-9]", testo) is not None
+            and testo[:1].isspace()
             and RE_COMMENTO.match(testo) is None
             and RE_APRE.search(testo) is None)
 
