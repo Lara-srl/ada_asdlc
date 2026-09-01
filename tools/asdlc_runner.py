@@ -1848,6 +1848,38 @@ def riepilogo(tariffa: float | None) -> int:
     return 0
 
 
+def stampa_la_guardia_di_fase() -> int:
+    """L'hook `PreToolUse` in forma di comando: JSON su stdin, `2` se si blocca.
+
+    Perché `2` e non un JSON di rifiuto: sotto `--dangerously-skip-permissions`
+    — cioè `bypassPermissions`, il modo in cui il runner lancia il Builder — la
+    documentazione di Claude Code è netta, *«hooks remain active and can block
+    via exit 2, but permissionDecision: "deny" does not block»*. Il sistema dei
+    permessi è spento e l'hook è l'unico cancello rimasto: se sbaglia forma, non
+    ferma niente e non lo dice a nessuno.
+
+    Un guasto nostro **non** blocca. Un hook che esce `2` su un JSON che non sa
+    leggere ferma ogni scrittura di ogni sessione aperta in questo repository, e
+    la cura — modificare un file — è la cosa che ha appena vietato. Il confine
+    invalicabile è il `pre-commit`; questo qui è il confine che *spiega*, e vale
+    quanto vale la sua correttezza.
+    """
+    try:
+        dato = json.loads(sys.stdin.read())
+        percorso = (dato.get("tool_input") or {}).get("file_path")
+        cartella = dato.get("cwd") or os.getcwd()
+    except (json.JSONDecodeError, AttributeError, TypeError) as guasto:
+        print(f"guardia di fase: stdin illeggibile ({guasto}), lascio passare", file=sys.stderr)
+        return 0
+    if not percorso:
+        return 0  # non è una scrittura su un file: non ci riguarda
+    ragione = guardia_di_fase(fase_corrente(Path(cartella)), percorso)
+    if ragione is None:
+        return 0
+    print(ragione, file=sys.stderr)
+    return 2
+
+
 def stampa_il_gate_del_rosso(ref: str) -> int:
     """Il gate senza il giro intorno: `--gate-rosso [ref]`.
 
@@ -1903,6 +1935,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
                     help="non esegue niente: cammina origin/main..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
+    ap.add_argument("--guardia-fase", action="store_true",
+                    help="non esegue niente: legge su stdin il JSON di un hook PreToolUse "
+                         "e esce 2 se quella scrittura non si può fare nella fase corrente")
     ap.add_argument("--riepilogo", action="store_true",
                     help="non esegue niente: somma i tempi già registrati in runs/tempi.csv")
     ap.add_argument("--tariffa", type=float, metavar="EUR_ORA",
@@ -1918,6 +1953,8 @@ def main() -> int:
         return registra(Path(a.registra))
     if a.riepilogo:
         return riepilogo(a.tariffa)
+    if a.guardia_fase:
+        return stampa_la_guardia_di_fase()
     if a.gate_rosso:
         # Il venv serve anche qui: i test di quel commit li fa girare `pytest`.
         if aggiunto := venv_sul_path():
