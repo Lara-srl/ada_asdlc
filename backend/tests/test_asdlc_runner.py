@@ -3361,3 +3361,26 @@ class TestIlTestNatoVerdePassaSeMorde:
 
         assert "nato verde" in mancati[0]["esito"]
         assert "nessun mutante da provare" in mancati[0]["esito"]
+
+    def test_si_mutano_solo_i_file_del_linguaggio_del_test(self, repo_di_prova):
+        """Un test Python non morde un `.ts`: mutare l'altra metà del monolite è
+        tempo speso a rigirare un test che non può vedere niente — e un conto
+        gonfiato di mutanti che «non lo fanno fallire»."""
+        repo_di_prova.commit("feat: la somma, di qua e di là", {
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
+            "frontend/src/lib/somma.ts":
+                "export function somma(a: number, b: number) {\n"
+                "  const totale = a + b\n  return totale\n}\n",
+        })
+        repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert "2 mutanti provati" in mancati[0]["esito"], (
+            "le righe del .ts sono entrate nel conto di un test Python"
+        )
