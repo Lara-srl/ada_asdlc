@@ -2963,6 +2963,16 @@ class TestIlBuilderSaComeSiApreLaProduzione:
         esiste non fallisce, esplode in raccolta. Lo scheletro vuoto prima."""
         assert "scheletro" in self._prompt()
 
+    def test_dice_che_una_guardia_nata_verde_passa_solo_se_morde(self):
+        """Il Critic ordina guardie su comportamenti che ci sono già, e il Builder
+        le scrive: nascono verdi per forza. Il prompt deve dire che è lecito, e
+        a che condizione — il gate le rigira contro i mutanti delle righe del
+        branch, e passa solo quella che se ne accorge (PBI-105)."""
+        prompt = self._prompt()
+        assert "guardia" in prompt
+        assert "morde" in prompt
+        assert "mutant" in prompt
+
     def test_non_promette_piu_un_numero_di_commit_scollegato_dai_criteri(self):
         """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
         aritmetica: due o tre coppie non coprono otto comportamenti."""
