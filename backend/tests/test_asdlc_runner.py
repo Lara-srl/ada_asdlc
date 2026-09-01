@@ -22,6 +22,7 @@ import csv
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import time
@@ -2655,3 +2656,48 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
 
         assert runner.main() == 0
         assert "guardia" in capsys.readouterr().err
+
+
+class TestLHookERegistratoEFerma:
+    """Lo script e la sua registrazione, provati sul file vero.
+
+    Il resto della suite gira senza toccare il mondo; qui no, e apposta: un hook
+    che non è eseguibile, o registrato con un matcher sbagliato, non dà nessun
+    errore — semplicemente non scatta, e il lucchetto sembra esserci senza
+    esserci. È lo stesso motivo per cui i gate si dichiarano prima di partire.
+    """
+
+    SCRIPT = REPO / ".claude" / "hooks" / "fase-tdd.sh"
+    IMPOSTAZIONI = REPO / ".claude" / "settings.json"
+
+    def test_lo_script_ce_ed_e_eseguibile(self):
+        assert self.SCRIPT.is_file()
+        assert os.access(self.SCRIPT, os.X_OK), "un hook non eseguibile non scatta e non lo dice"
+
+    def test_e_registrato_su_pretooluse_per_edit_e_write(self):
+        registrate = json.loads(self.IMPOSTAZIONI.read_text())["hooks"]["PreToolUse"]
+        voci = [v for v in registrate if v.get("matcher") == "Edit|Write"]
+        assert voci, "senza matcher Edit|Write l'hook non vede le scritture"
+        comandi = [h["command"] for v in voci for h in v["hooks"]]
+        assert any("fase-tdd.sh" in c for c in comandi)
+
+    def test_ferma_la_produzione_in_test_only(self, tmp_path):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(tmp_path),
+                "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
+
+        esito = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
+                               capture_output=True, text=True, cwd=tmp_path)
+
+        assert esito.returncode == 2, esito.stderr
+        assert "TEST_ONLY" in esito.stderr
+
+    def test_fuori_da_un_giro_non_dice_niente(self, tmp_path):
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(tmp_path),
+                "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
+
+        esito = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
+                               capture_output=True, text=True, cwd=tmp_path)
+
+        assert esito.returncode == 0
+        assert esito.stderr == ""
