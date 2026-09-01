@@ -3146,3 +3146,47 @@ class TestIlBuilderGiraDoveGliHookScattano:
         trappola annotata per il Critic."""
         assert "--allowedTools" in runner.BUILDER
         assert runner.BUILDER.index("--allowedTools") < len(runner.BUILDER) - 2
+
+
+class TestIMutantiSiFannoDalleRigheCambiate:
+    """La quarta lettura del gate: `PBI-105`.
+
+    Un test nato verde non prova niente **se non morde**. La domanda giusta non è
+    «è mai stato rosso?» ma «se guasto il codice che copre, se ne accorge?» — e la
+    seconda si misura, mentre la prima è una prova di processo che due giri su
+    quattro ha ucciso lavoro buono.
+
+    I mutanti si fanno sulle **righe che il branch ha cambiato**, non su tutto il
+    file: è il codice che quel giro ha scritto, ed è l'unico di cui i suoi test
+    devono rispondere. La cancellazione della riga è l'operatore più forte e vale
+    in tutti e due i linguaggi; gli scambi servono dove togliere la riga non
+    cambia niente di osservabile.
+    """
+
+    def test_cancella_la_riga_cambiata(self):
+        sorgente = "def calcola():\n    x = 1\n    return x\n"
+        mutanti = runner.mutanti_del_sorgente(sorgente, {2})
+
+        assert ("    x = 1", "") in [(m.prima, m.dopo) for m in mutanti]
+
+    def test_scambia_gli_operatori_di_confronto(self):
+        sorgente = "  const senza = soglia.valore === null\n"
+        dopo = [m.dopo for m in runner.mutanti_del_sorgente(sorgente, {1})]
+
+        assert "  const senza = soglia.valore !== null" in dopo
+
+    def test_scambia_la_congiunzione(self):
+        dopo = [m.dopo for m in runner.mutanti_del_sorgente("  if (a && b) return\n", {1})]
+
+        assert "  if (a || b) return" in dopo
+
+    def test_non_muta_le_righe_che_il_branch_non_ha_toccato(self):
+        sorgente = "  const a = 1 === 2\n  const b = 3 === 4\n"
+        mutanti = runner.mutanti_del_sorgente(sorgente, {1})
+
+        assert all(m.riga == 1 for m in mutanti)
+
+    def test_una_riga_di_sola_parentesi_non_e_un_mutante(self):
+        """Cancellarla rompe la sintassi e basta: il file non compila, nessun test
+        gira, e un guasto di forma non è una prova che il test morda."""
+        assert runner.mutanti_del_sorgente("}\n", {1}) == []
