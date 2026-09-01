@@ -1453,9 +1453,12 @@ def quarta_lettura(albero: Path, base: str, sha: str,
     al primo kill perché uno basta — il gate chiede che il test osservi le righe
     nuove, non che le copra tutte.
     """
-    da_solo, _ = comandi_dei_test(albero, [comando.origine[chiave]])
+    test = comando.origine[chiave]
+    da_solo, _ = comandi_dei_test(albero, [test])
     provati = 0
     for percorso, righe in righe_cambiate(base, sha).items():
+        if linguaggio_del_file(percorso) != test.linguaggio:
+            continue  # un test Python non morde un .ts, e rigirarlo lì è tempo perso
         file = albero / percorso
         sorgente = leggi_sorgente(file)
         if sorgente is None:
@@ -1471,6 +1474,15 @@ def quarta_lettura(albero: Path, base: str, sha: str,
             if morde(da_solo[0], chiave):
                 return descrizione_del_mutante(percorso, m), provati
     return None, provati
+
+
+def linguaggio_del_file(percorso: str) -> str | None:
+    """Chi può vedere un guasto in quel file: `python`, `vitest`, o nessuno."""
+    if percorso.endswith(".py"):
+        return "python"
+    if Path(percorso).suffix in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+        return "vitest"
+    return None
 
 
 def compila(percorso: str, sorgente: str) -> bool:
