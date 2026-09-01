@@ -3030,3 +3030,80 @@ class TestSenzaUnRepositorySottoNonSiApreNiente:
         runner.apri_la_fase()
 
         assert list(tmp_path.iterdir()) == []
+
+
+class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
+    """Il buco trovato al primo giro vero, il 01/09 alle 15:09.
+
+    `--chiedi-impl` guardava solo i test **non committati**, e il ciclo non si
+    chiudeva: il commit RED — che la convenzione del progetto vuole, e che il
+    gate del rosso pretende di soli test — rendeva la richiesta cieca. L'unica
+    via rimasta era non committare il RED, aprire `IMPL` e scoprire che lì il
+    `pre-commit` vieta di mettere in stage un file di test: il commit del test
+    non poteva più nascere, e la storia sarebbe uscita `feat` prima e `test`
+    dopo. Nata verde, cioè la cosa che tutto questo esiste per impedire.
+
+    Il Builder se n'è accorto da solo e ha chiesto con `STOP:` — 12 minuti,
+    zero commit, nessun danno.
+
+    Si guarda **l'ultimo commit e basta**, non tutto `origin/main..HEAD`: dopo
+    tre criteri i test dei primi due sono verdi, e la richiesta verrebbe
+    rifiutata per «nato verde» su lavoro già dimostrato.
+    """
+
+    TEST = "backend/tests/test_foglio.py"
+    ROSSO = "def test_il_clic_apre_la_pratica():\n    assert False\n"
+
+    def _chiedi(self, repo, monkeypatch, esito="rosso"):
+        (repo.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(runner, "esiti_del_comando",
+                            lambda c: ({k: esito for k in c.etichette}, "coda"))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+    def _fase(self, repo):
+        return (repo.radice / runner.FILE_DELLA_FASE).read_text().strip()
+
+    def test_apre_sul_commit_di_soli_test_appena_fatto(self, repo_di_prova, monkeypatch):
+        repo_di_prova.commit("test(analisi): il clic apre la pratica (RED)", {self.TEST: self.ROSSO})
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 0
+        assert self._fase(repo_di_prova) == runner.FASE_IMPL
+
+    def test_non_apre_se_lultimo_commit_porta_anche_produzione(self, repo_di_prova, monkeypatch, capsys):
+        """Un commit misto non è un RED: il rosso non può essere esistito in mezzo."""
+        repo_di_prova.commit("feat: la pagina e il suo test", {
+            self.TEST: self.ROSSO, "backend/app/foglio.py": "def calcola():\n    pass\n"})
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 1
+        assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_non_guarda_un_commit_che_e_gia_su_origin_main(self, repo_di_prova, monkeypatch, capsys):
+        """Il branch nasce da `origin/main`: se lì l'ultimo commit fosse di soli
+        test, la fase si aprirebbe senza che questo giro abbia scritto niente."""
+        repo_di_prova.commit("test(analisi): un test di qualcun altro", {self.TEST: self.ROSSO})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 1
+        assert "nessun test nuovo" in capsys.readouterr().out
+
+
+class TestIlPromptDiceDiCommittareIlRossoPrima:
+    """L'ordine dei passi è la metà del lucchetto.
+
+    Il prompt descriveva quattro passi — scrivi il test, chiedi, scrivi il
+    codice, committa — e in quell'ordine il commit RED non esiste: il test entra
+    in storia insieme al `feat`, cioè in un commit misto che il gate ferma. Il
+    Builder del 01/09 ha seguito il prompt alla lettera ed è finito contro il
+    muro dopo dodici minuti.
+    """
+
+    def test_il_commit_del_rosso_viene_prima_della_richiesta(self):
+        prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
+        posto_del_commit = prompt.index("(RED)`")
+        posto_della_richiesta = prompt.index("--chiedi-impl")
+        assert posto_del_commit < posto_della_richiesta, (
+            "il prompt deve dire di committare il RED prima di chiedere il permesso"
+        )

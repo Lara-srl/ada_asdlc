@@ -148,13 +148,17 @@ Esegui il PBI con queste regole non negoziabili:
   scriverli viene bloccato — da qualunque strumento, `Edit`, `Write` o una scrittura da
   shell. Il ciclo di ogni comportamento è questo, e non ha scorciatoie:
   1. scrivi il test del comportamento che ti serve, **solo quello**;
-  2. `python3 tools/asdlc_runner.py --chiedi-impl` — gira i test appena nati e apre la
-     fase `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e
-     non è questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
-  3. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
+  2. **committalo**, da solo: `test(scope): … (RED)`. Un commit di soli test, senza una
+     riga di produzione dentro — il rosso non può essere esistito in mezzo a un commit
+     misto, e il gate lo ferma dal solo diff;
+  3. `python3 tools/asdlc_runner.py --chiedi-impl` — rigira quei test e apre la fase
+     `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e non è
+     questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
+  4. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
      successivo per quanto ti sia già chiaro: ciò che scrivi adesso senza un rosso
      davanti non potrai più dimostrarlo, e il criterio dopo ha diritto al suo ciclo;
-  4. committa — il commit riporta il giro in `TEST_ONLY`, e si ricomincia dal punto 1.
+  5. committa il `feat` o il `fix`, di sola produzione — il commit riporta il giro in
+     `TEST_ONLY`, e si ricomincia dal punto 1 col criterio dopo.
   In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
   il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
   dillo con `STOP:`.
@@ -1936,6 +1940,33 @@ def stampa_la_guardia_di_fase() -> int:
     return 2
 
 
+def test_nuovi_da_aprire() -> list[TestNuovo]:
+    """I test su cui si chiede il permesso: quelli non ancora committati, e se non
+    ce ne sono quelli dell'**ultimo commit**.
+
+    Guardare solo l'albero non committato non chiudeva il ciclo: il commit RED,
+    che la convenzione vuole e che il gate del rosso pretende di soli test,
+    rendeva cieca la richiesta. Lo ha trovato il Builder al primo giro vero, il
+    01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita.
+
+    L'ultimo commit e basta, non tutto `origin/main..HEAD`: dopo tre criteri i
+    test dei primi due sono verdi, e la richiesta verrebbe rifiutata per «nato
+    verde» su lavoro che il suo rosso l'aveva già avuto.
+    """
+    nuovi = test_nuovi_dellalbero()
+    if nuovi:
+        return nuovi
+    if git("rev-list", "--count", "origin/main..HEAD") == "0":
+        # Il branch nasce da `origin/main`, quindi al primo `--chiedi-impl` di ogni
+        # giro HEAD **è** origin/main: se lì l'ultimo commit fosse di soli test, il
+        # Builder otterrebbe la produzione aperta senza aver scritto una riga.
+        return []
+    file = file_del_commit("HEAD")
+    if any(e_file_di_produzione(percorso) for _, percorso in file):
+        return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
+    return test_nuovi_del_commit("HEAD", file)
+
+
 def chiedi_impl() -> int:
     """Il permesso di scrivere produzione, dato dal rosso e non dalla parola.
 
@@ -1955,7 +1986,7 @@ def chiedi_impl() -> int:
               f"(fase: {fase or 'nessuna'}). Il permesso si chiede una volta per "
               f"comportamento, e il giro torna in {FASE_TEST_ONLY} dopo il commit.")
         return 1
-    nuovi = test_nuovi_dellalbero()
+    nuovi = test_nuovi_da_aprire()
     if not nuovi:
         print("Non c'è nessun test nuovo nell'albero, quindi nessun rosso da osservare. "
               "Scrivi prima il test del comportamento che ti serve.")
