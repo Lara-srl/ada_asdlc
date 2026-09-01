@@ -70,7 +70,15 @@ AGENTI = ("claude", "asdlc_runner")
 
 # I flag di autonomia e di routing stanno qui, in un posto solo, così si vedono e si
 # cambiano. ⚠️ Verifica i nomi con `claude --help`: cambiano fra versioni della CLI.
-BUILDER = ["claude", "-p", "--dangerously-skip-permissions"]
+# ⚠️ **Non** `--dangerously-skip-permissions`, e nemmeno `--permission-mode auto`:
+# in quelle due modalità l'hook di fase (`.claude/hooks/fase-tdd.sh`) non viene
+# chiamato affatto — misurato il 01/09, e la documentazione dice il contrario. Il
+# lucchetto sembrerebbe esserci e non ci sarebbe, che è il modo peggiore di non
+# funzionare. `acceptEdits` accetta le modifiche senza chiedere ma le fa passare
+# dall'hook; `Bash` va permesso per nome, o gira in una sandbox che non scrive
+# fuori dalla working directory. `--allowedTools` è variadico e non deve restare
+# in coda: il prompt si concatena subito dopo, e se lo mangia.
+BUILDER = ["claude", "-p", "--allowedTools", "Bash", "--permission-mode", "acceptEdits"]
 # Model routing (patterns/model-routing.md): il giudizio costa più della generazione,
 # e il Critic non scrive niente — solo lettura e `git diff`.
 # ⚠️ `--allowedTools <tools...>` è **variadico**: se resta in coda si mangia il prompt,
