@@ -2805,3 +2805,57 @@ class TestITestNuoviSiLeggonoDallAlbero:
         (repo_di_prova.radice / "backend/app/foglio.py").write_text("def calcola():\n    pass\n")
 
         assert runner.test_nuovi_dellalbero() == []
+
+
+class TestIlCommitNonNasceFuoriFase:
+    """Il confine che nessuna tool call aggira.
+
+    L'hook `PreToolUse` guarda `Edit` e `Write`, e un agente a cui la scrittura
+    viene negata ha una via laterale ovvia: `cat > pagina.tsx <<'EOF'` da Bash.
+    Filtrare i comandi di shell a colpi di regex è una guerra che si perde, così
+    il confine duro sta dove nessuno strumento arriva — il `pre-commit` di git,
+    che vede ciò che è **in stage** e non come ci è finito.
+
+    I due livelli hanno mestieri diversi e servono tutti e due: l'hook è veloce e
+    spiega mentre l'agente scrive, il `pre-commit` è invalicabile e arriva tardi.
+    """
+
+    def _stage(self, repo, percorso, contenuto="x = 1\n"):
+        f = repo.radice / percorso
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(contenuto, encoding="utf-8")
+        repo._git("add", percorso)
+
+    def test_ferma_il_commit_con_produzione_in_test_only(self, repo_di_prova, monkeypatch, capsys):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        self._stage(repo_di_prova, "backend/app/foglio.py")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.main() == 1
+        assert "backend/app/foglio.py" in capsys.readouterr().out
+
+    def test_lascia_passare_il_commit_di_soli_test(self, repo_di_prova, monkeypatch):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        self._stage(repo_di_prova, "backend/tests/test_foglio.py", "def test_x():\n    pass\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.main() == 0
+
+    def test_fuori_da_un_giro_non_guarda_niente(self, repo_di_prova, monkeypatch):
+        self._stage(repo_di_prova, "backend/app/foglio.py")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.main() == 0
+
+    def test_il_pre_commit_si_installa_e_non_calpesta_quello_che_ce(self, repo_di_prova):
+        """Installarlo è del runner, non di chi lancia: un lucchetto che dipende da
+        un gesto ricordato a mano è un lucchetto che a un certo punto non c'è."""
+        runner.installa_la_guardia_del_commit()
+        hook = repo_di_prova.radice / ".git" / "hooks" / "pre-commit"
+
+        assert hook.is_file() and os.access(hook, os.X_OK)
+        assert "--guardia-commit" in hook.read_text()
+
+        hook.write_text("#!/bin/sh\n# di qualcun altro\n", encoding="utf-8")
+        runner.installa_la_guardia_del_commit()
+        assert "di qualcun altro" in hook.read_text()
