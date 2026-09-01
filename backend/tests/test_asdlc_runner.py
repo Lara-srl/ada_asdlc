@@ -2582,21 +2582,62 @@ class TestLaFaseDecideCosaSiPuoScrivere:
 
 
 class TestLaFaseSiLeggeDalWorktree:
-    """Il file sta accanto al lavoro e se ne va col worktree: è stato del giro,
-    non del repository. La guardia lo cerca risalendo, perché l'agente può aver
-    cambiato cartella e `cwd` arriva da Claude Code così com'è."""
+    """La fase è stato del giro, non del repository, e sta nel **git dir del
+    worktree** — `git rev-parse --git-path asdlc-fase` — non nell'albero di
+    lavoro. La guardia la trova da qualunque sottocartella, perché l'agente può
+    aver cambiato cartella e `cwd` arriva da Claude Code così com'è: la risalita
+    la fa git, non noi."""
 
-    def test_la_fase_si_legge_dalla_radice(self, tmp_path):
-        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
-        assert runner.fase_corrente(tmp_path) == "TEST_ONLY"
+    def test_la_fase_si_legge_dalla_radice(self, repo_di_prova):
+        runner.percorso_della_fase(repo_di_prova.radice).write_text("TEST_ONLY\n")
+        assert runner.fase_corrente(repo_di_prova.radice) == "TEST_ONLY"
 
-    def test_la_fase_si_cerca_risalendo(self, tmp_path):
-        (tmp_path / runner.FILE_DELLA_FASE).write_text("IMPL\n")
-        sotto = tmp_path / "frontend" / "src" / "pages"
+    def test_la_fase_si_trova_da_una_sottocartella(self, repo_di_prova):
+        runner.percorso_della_fase(repo_di_prova.radice).write_text("IMPL\n")
+        sotto = repo_di_prova.radice / "frontend" / "src" / "pages"
         sotto.mkdir(parents=True)
         assert runner.fase_corrente(sotto) == "IMPL"
 
-    def test_senza_file_non_ce_fase(self, tmp_path):
+    def test_senza_file_non_ce_fase(self, repo_di_prova):
+        assert runner.fase_corrente(repo_di_prova.radice) is None
+
+
+class TestLaFaseStaFuoriDalWorktree:
+    """Il lucchetto si spegneva da solo. `.asdlc-fase` stava nella radice
+    dell'albero, protetto da `Edit`/`Write` ma non da un `rm` o da un
+    `git clean -fdx` via Bash: nei due giri del 01/09 è sparito a metà, e da lì
+    hook e `pre-commit` sono stati inerti **in silenzio** — la guardia tace quando
+    il file non c'è, ed è giusto, ma «non c'è» non distingueva «nessun giro» da
+    «il giro l'ha perso». Il file sta ora dove l'albero di lavoro non arriva: nel
+    git dir **di quel worktree**, così la fase di `~/ada-run` non si accende
+    nell'albero accanto.
+    """
+
+    def test_il_file_sta_nel_git_dir_e_non_nellalbero(self, repo_di_prova):
+        percorso = runner.percorso_della_fase(repo_di_prova.radice)
+
+        assert ".git" in percorso.parts
+        assert not (repo_di_prova.radice / ".asdlc-fase").exists()
+
+    def test_ogni_worktree_ha_la_sua_fase(self, repo_di_prova, tmp_path):
+        altro = tmp_path / "altro"
+        repo_di_prova._git("worktree", "add", "-q", str(altro), "HEAD")
+        runner.percorso_della_fase(repo_di_prova.radice).write_text("IMPL\n")
+
+        assert runner.fase_corrente(altro) is None, "la fase di un albero si è accesa nell'altro"
+        assert runner.percorso_della_fase(altro) != runner.percorso_della_fase(repo_di_prova.radice)
+
+    def test_git_clean_non_lo_porta_via(self, repo_di_prova):
+        runner.apri_la_fase()
+        repo_di_prova._git("clean", "-fdxq")
+
+        assert runner.fase_corrente(repo_di_prova.radice) == runner.FASE_TEST_ONLY
+
+    def test_senza_repository_non_ce_un_percorso_ne_una_fase(self, monkeypatch, tmp_path):
+        """Sotto i test `git` è sostituito e torna la stringa vuota: `Path("")` è
+        la cartella corrente, e lì non si scrive niente — e non si legge una fase."""
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        assert runner.percorso_della_fase(tmp_path) is None
         assert runner.fase_corrente(tmp_path) is None
 
 
@@ -2623,25 +2664,28 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
     def test_il_flag_esiste(self):
         assert runner.costruisci_parser().parse_args(["--guardia-fase"]).guardia_fase
 
-    def test_blocca_con_2_e_scrive_la_ragione_su_stderr(self, monkeypatch, tmp_path, capsys):
-        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+    def test_blocca_con_2_e_scrive_la_ragione_su_stderr(self, monkeypatch, repo_di_prova, capsys):
+        tmp_path = repo_di_prova.radice
+        runner.percorso_della_fase(tmp_path).write_text("TEST_ONLY\n")
         self._stdin(monkeypatch, cwd=str(tmp_path),
                     tool_input={"file_path": str(tmp_path / "frontend/src/App.tsx")})
 
         assert runner.main() == 2
         assert "TEST_ONLY" in capsys.readouterr().err
 
-    def test_lascia_passare_il_test_e_non_dice_niente(self, monkeypatch, tmp_path, capsys):
-        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+    def test_lascia_passare_il_test_e_non_dice_niente(self, monkeypatch, repo_di_prova, capsys):
+        tmp_path = repo_di_prova.radice
+        runner.percorso_della_fase(tmp_path).write_text("TEST_ONLY\n")
         self._stdin(monkeypatch, cwd=str(tmp_path),
                     tool_input={"file_path": str(tmp_path / "frontend/src/App.test.tsx")})
 
         assert runner.main() == 0
         assert capsys.readouterr().err == ""
 
-    def test_uno_strumento_senza_percorso_non_lo_riguarda(self, monkeypatch, tmp_path):
+    def test_uno_strumento_senza_percorso_non_lo_riguarda(self, monkeypatch, repo_di_prova):
         """Il matcher è `Edit|Write`, ma la guardia non si fida del matcher."""
-        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        tmp_path = repo_di_prova.radice
+        runner.percorso_della_fase(tmp_path).write_text("TEST_ONLY\n")
         self._stdin(monkeypatch, cwd=str(tmp_path), tool_name="Bash",
                     tool_input={"command": "npm test"})
 
@@ -2685,8 +2729,9 @@ class TestLHookERegistratoEFerma:
         comandi = [h["command"] for v in voci for h in v["hooks"]]
         assert any("fase-tdd.sh" in c for c in comandi)
 
-    def test_ferma_la_produzione_in_test_only(self, tmp_path):
-        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+    def test_ferma_la_produzione_in_test_only(self, repo_di_prova):
+        tmp_path = repo_di_prova.radice
+        runner.percorso_della_fase(tmp_path).write_text("TEST_ONLY\n")
         dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(tmp_path),
                 "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
 
@@ -2725,14 +2770,14 @@ class TestIlPermessoDiImplementareSiChiede:
     SORGENTE = "def test_il_clic_apre_la_pratica():\n    assert False\n"
 
     def _in_test_only(self, repo, monkeypatch, esito="rosso"):
-        (repo.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        runner.percorso_della_fase(repo.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
         (repo.radice / self.TEST_NUOVO).write_text(self.SORGENTE, encoding="utf-8")
         monkeypatch.setattr(runner, "esiti_del_comando",
                             lambda c: ({k: esito for k in c.etichette}, "coda"))
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
 
     def _fase(self, repo):
-        return (repo.radice / runner.FILE_DELLA_FASE).read_text().strip()
+        return runner.percorso_della_fase(repo.radice).read_text().strip()
 
     def test_il_flag_chiedi_impl_esiste(self):
         assert runner.costruisci_parser().parse_args(["--chiedi-impl"]).chiedi_impl
@@ -2762,7 +2807,7 @@ class TestIlPermessoDiImplementareSiChiede:
         assert runner.ESITI_MANCATI["nessuno"] in capsys.readouterr().out
 
     def test_senza_test_nuovi_non_apre(self, repo_di_prova, monkeypatch, capsys):
-        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
 
         assert runner.main() == 1
@@ -2773,7 +2818,7 @@ class TestIlPermessoDiImplementareSiChiede:
         """Da `IMPL` la richiesta non ha senso, e riaprirla sarebbe il modo di
         restarci per sempre: un giro che non torna mai a `TEST_ONLY` è un giro
         senza lucchetto."""
-        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_IMPL}\n")
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_IMPL}\n")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
 
         assert runner.main() == 1
@@ -2831,7 +2876,7 @@ class TestIlCommitNonNasceFuoriFase:
         repo._git("add", percorso)
 
     def test_ferma_il_commit_con_produzione_in_test_only(self, repo_di_prova, monkeypatch, capsys):
-        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
         self._stage(repo_di_prova, "backend/app/foglio.py")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
 
@@ -2839,7 +2884,7 @@ class TestIlCommitNonNasceFuoriFase:
         assert "backend/app/foglio.py" in capsys.readouterr().out
 
     def test_lascia_passare_il_commit_di_soli_test(self, repo_di_prova, monkeypatch):
-        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
         self._stage(repo_di_prova, "backend/tests/test_foglio.py", "def test_x():\n    pass\n")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
 
@@ -2876,7 +2921,7 @@ class TestOgniCommitRiportaAllaFaseDelTest:
     """
 
     def test_il_post_commit_riporta_in_test_only(self, repo_di_prova):
-        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_IMPL}\n")
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_IMPL}\n")
         runner.installa_il_ritorno_in_test_only()
         hook = repo_di_prova.radice / ".git" / "hooks" / "post-commit"
 
@@ -2884,14 +2929,14 @@ class TestOgniCommitRiportaAllaFaseDelTest:
         repo_di_prova.commit("feat: il minimo che fa passare il test",
                              {"backend/app/foglio.py": "def calcola():\n    return 1\n"})
 
-        assert (repo_di_prova.radice / runner.FILE_DELLA_FASE).read_text().strip() == \
+        assert runner.percorso_della_fase(repo_di_prova.radice).read_text().strip() == \
             runner.FASE_TEST_ONLY
 
     def test_fuori_da_un_giro_il_post_commit_non_crea_niente(self, repo_di_prova):
         runner.installa_il_ritorno_in_test_only()
         repo_di_prova.commit("chore: un commit di una persona", {"README.md": "ciao\n"})
 
-        assert not (repo_di_prova.radice / runner.FILE_DELLA_FASE).exists()
+        assert not runner.percorso_della_fase(repo_di_prova.radice).exists()
 
 
 class TestIlGiroSiApreInTestOnly:
@@ -2902,7 +2947,7 @@ class TestIlGiroSiApreInTestOnly:
     def test_apri_la_fase_installa_gli_hook_e_scrive_test_only(self, repo_di_prova):
         runner.apri_la_fase()
 
-        assert (repo_di_prova.radice / runner.FILE_DELLA_FASE).read_text().strip() == \
+        assert runner.percorso_della_fase(repo_di_prova.radice).read_text().strip() == \
             runner.FASE_TEST_ONLY
         assert (repo_di_prova.radice / ".git" / "hooks" / "pre-commit").is_file()
         assert (repo_di_prova.radice / ".git" / "hooks" / "post-commit").is_file()
@@ -2911,7 +2956,7 @@ class TestIlGiroSiApreInTestOnly:
         runner.apri_la_fase()
         runner.chiudi_la_fase()
 
-        assert not (repo_di_prova.radice / runner.FILE_DELLA_FASE).exists()
+        assert not runner.percorso_della_fase(repo_di_prova.radice).exists()
 
     def test_chiudere_due_volte_non_e_un_errore(self, repo_di_prova):
         runner.chiudi_la_fase()
@@ -3069,13 +3114,13 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
     ROSSO = "def test_il_clic_apre_la_pratica():\n    assert False\n"
 
     def _chiedi(self, repo, monkeypatch, esito="rosso"):
-        (repo.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        runner.percorso_della_fase(repo.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
         monkeypatch.setattr(runner, "esiti_del_comando",
                             lambda c: ({k: esito for k in c.etichette}, "coda"))
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
 
     def _fase(self, repo):
-        return (repo.radice / runner.FILE_DELLA_FASE).read_text().strip()
+        return runner.percorso_della_fase(repo.radice).read_text().strip()
 
     def test_apre_sul_commit_di_soli_test_appena_fatto(self, repo_di_prova, monkeypatch):
         repo_di_prova.commit("test(analisi): il clic apre la pratica (RED)", {self.TEST: self.ROSSO})

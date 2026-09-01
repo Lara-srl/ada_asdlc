@@ -799,26 +799,45 @@ def e_file_di_produzione(percorso: str) -> bool:
 #
 # Fuori da un giro il file non c'è e la guardia tace: `.claude/settings.json` sta
 # nel repository e l'hook vale per ogni sessione, comprese quelle di una persona.
+#
+# Il file sta nel **git dir del worktree** (`git rev-parse --git-path asdlc-fase`,
+# cioè `.git/worktrees/<nome>/asdlc-fase`), non nella radice dell'albero. Quando
+# stava lì, era protetto da `Edit` e `Write` ma non da un `rm` o da un `git clean
+# -fdx` via Bash: nei due giri del 01/09 è sparito a metà, e da lì hook e
+# `pre-commit` sono stati inerti in silenzio. Dove sta ora l'albero di lavoro non
+# arriva, e ogni worktree ha il suo: la fase di `~/ada-run` non si accende
+# nell'albero accanto.
 
-FILE_DELLA_FASE = ".asdlc-fase"
+FILE_DELLA_FASE = "asdlc-fase"
 FASE_TEST_ONLY = "TEST_ONLY"
 FASE_IMPL = "IMPL"
 
 
-def fase_corrente(cartella: Path) -> str | None:
-    """La fase del giro, cercata risalendo. `None` quando non c'è un giro.
+def percorso_della_fase(cartella: Path) -> Path | None:
+    """Dove sta la fase per l'albero che contiene `cartella`, o `None` se non c'è
+    un repository sotto — e allora non si scrive da nessuna parte."""
+    try:
+        detto = git("-C", str(cartella), "rev-parse", "--git-path", FILE_DELLA_FASE)
+    except RuntimeError:
+        return None
+    if not detto or Path(detto).name != FILE_DELLA_FASE:
+        return None  # sotto i test `git` torna "", e `Path("")` è la cartella corrente
+    percorso = Path(detto)
+    return percorso if percorso.is_absolute() else Path(cartella) / percorso
 
-    Si risale invece di guardare solo la radice perché `cwd` arriva da Claude
-    Code così com'è, e l'agente può essersi spostato in `frontend/` per lanciare
-    `npm`. Il file sta accanto al lavoro e se ne va col worktree: è stato del
-    giro, non del repository, e infatti è gitignorato.
+
+def fase_corrente(cartella: Path) -> str | None:
+    """La fase del giro dell'albero in cui sta `cartella`. `None` quando non c'è
+    un giro, o un repository.
+
+    `cwd` arriva da Claude Code così com'è, e l'agente può essersi spostato in
+    `frontend/` per lanciare `npm`: a risalire fino al worktree giusto ci pensa
+    git.
     """
-    cartella = Path(cartella).resolve()
-    for livello in (cartella, *cartella.parents):
-        file = livello / FILE_DELLA_FASE
-        if file.is_file():
-            return file.read_text(encoding="utf-8").strip()
-    return None
+    file = percorso_della_fase(Path(cartella))
+    if file is None or not file.is_file():
+        return None
+    return file.read_text(encoding="utf-8").strip()
 
 
 def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
@@ -2299,7 +2318,7 @@ def chiedi_impl() -> int:
                 print(f"  {etichetta}")
             print(f"    → {ragione}\n")
         return 1
-    (REPO / FILE_DELLA_FASE).write_text(f"{FASE_IMPL}\n", encoding="utf-8")
+    percorso_della_fase(REPO).write_text(f"{FASE_IMPL}\n", encoding="utf-8")
     print(f"Rosso osservato su {len(nuovi)} test nuovi: la fase passa a {FASE_IMPL}. "
           f"Ora scrivi il minimo che li fa passare.")
     return 0
@@ -2363,7 +2382,7 @@ def installa_un_hook(nome: str, corpo: str) -> bool:
 # rosso. Chi vede ogni commit è git, quindi è git a riportare la fase indietro.
 RITORNO_IN_TEST_ONLY = f"""#!/bin/sh
 # Installato da tools/asdlc_runner.py (PBI-104): un commit chiude il ciclo.
-fase="$(git rev-parse --show-toplevel)/{FILE_DELLA_FASE}"
+fase="$(git rev-parse --git-path {FILE_DELLA_FASE})"
 [ -f "$fase" ] && printf '{FASE_TEST_ONLY}\\n' > "$fase"
 exit 0
 """
@@ -2384,13 +2403,15 @@ def apri_la_fase() -> None:
         return  # non c'è un repository sotto: non c'è un giro da lucchettare
     installa_la_guardia_del_commit()
     installa_il_ritorno_in_test_only()
-    (REPO / FILE_DELLA_FASE).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
+    percorso_della_fase(REPO).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
 
 
 def chiudi_la_fase() -> None:
     """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
     sessione dopo non può scrivere, e la diagnosi costerebbe più del giro."""
-    (REPO / FILE_DELLA_FASE).unlink(missing_ok=True)
+    file = percorso_della_fase(REPO)
+    if file is not None:
+        file.unlink(missing_ok=True)
 
 
 def guardia_del_commit() -> int:
