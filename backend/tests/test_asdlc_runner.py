@@ -2922,7 +2922,7 @@ class TestIlGiroSiApreInTestOnly:
         monkeypatch.setattr(runner, "crea_branch", lambda pbi: f"pbi/{pbi.lower()}")
         monkeypatch.setattr(runner, "apri_la_fase", lambda: visto.__setitem__("aperta", True))
         monkeypatch.setattr(runner, "chiudi_la_fase", lambda: visto.__setitem__("chiusa", True))
-        monkeypatch.setattr(runner, "gira_builder",
+        monkeypatch.setattr(runner, "esegui",
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("basta")))
 
         with pytest.raises(RuntimeError):
