@@ -3512,3 +3512,30 @@ class TestIlMorsoEUnFallimentoPerAsserzione:
                   "tests/test_x.py::test_c PASSED\n")
 
         assert runner.falliti_per_asserzione(comando, uscita) == {"tests/test_x.py::test_a"}
+
+
+class TestSiCancellaSoloDentroUnCorpo:
+    """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
+    la guardia ha ucciso era la cancellazione di `import { … } from '../lib/nav'`
+    in `AppLayout.tsx`. Non è un guasto di **comportamento**, è un guasto di
+    **esistenza**: senza quell'import ogni test che rende il componente fallisce,
+    compreso uno che non guarda niente. Lo stesso vale per un `export const` o
+    per una costante di modulo in Python. La riga a livello di modulo — senza
+    indentazione — dichiara; la riga dentro un corpo decide, ed è quella che si
+    cancella. Gli scambi restano dove sono, anche a livello di modulo.
+    """
+
+    def _dopo(self, riga: str) -> list[str]:
+        return [m.dopo for m in runner.mutanti_del_sorgente(riga + "\n", {1})]
+
+    def test_una_importazione_non_si_cancella(self):
+        assert self._dopo("import { navItemsForRole } from '../lib/nav'") == []
+        assert self._dopo("from app.somma import somma") == []
+
+    def test_una_dichiarazione_di_modulo_non_si_cancella_ma_si_scambia(self):
+        assert self._dopo("export const APERTO = true") == ["export const APERTO = false"]
+        assert self._dopo("SOGLIA_ALTA = 1 < 2") == ["SOGLIA_ALTA = 1 <= 2"]
+
+    def test_dentro_un_corpo_si_cancella(self):
+        assert "" in self._dopo("    totale = a + b")
+        assert "" in self._dopo("  const totale = a + b")
