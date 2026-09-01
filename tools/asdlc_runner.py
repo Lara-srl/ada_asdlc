@@ -1337,6 +1337,31 @@ def si_puo_cancellare(testo: str) -> bool:
             and RE_APRE.search(testo) is None)
 
 
+# `@@ -a,b +c,d @@`: le righe **nuove** partono da `c` e sono `d` (una, se manca).
+RE_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
+
+
+def righe_cambiate(base: str, sha: str) -> dict[str, set[int]]:
+    """Per ogni file di **produzione** che il branch ha cambiato fino a `sha`, le
+    righe nuove o toccate, numerate come nel file a quel commit.
+
+    `base...sha` e non `base..sha`: il diff parte dal merge-base, così un `main`
+    andato avanti nel frattempo non entra nel conto come se fosse del branch.
+    Una riga tolta non c'è più da guastare, e un file di soli `-` non compare.
+    """
+    righe: dict[str, set[int]] = {}
+    for percorso in git("diff", "--name-only", f"{base}...{sha}").splitlines():
+        if not percorso or not e_file_di_produzione(percorso):
+            continue
+        diff = git("diff", "--unified=0", f"{base}...{sha}", "--", percorso)
+        nuove: set[int] = set()
+        for inizio, quante in RE_HUNK.findall(diff):
+            nuove.update(range(int(inizio), int(inizio) + (int(quante) if quante else 1)))
+        if nuove:
+            righe[percorso] = nuove
+    return righe
+
+
 def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
     """I mutanti delle sole `righe` (1-based) di `sorgente`, in ordine di riga.
 
