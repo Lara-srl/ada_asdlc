@@ -3078,3 +3078,13 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
 
         assert runner.main() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_non_guarda_un_commit_che_e_gia_su_origin_main(self, repo_di_prova, monkeypatch, capsys):
+        """Il branch nasce da `origin/main`: se lì l'ultimo commit fosse di soli
+        test, la fase si aprirebbe senza che questo giro abbia scritto niente."""
+        repo_di_prova.commit("test(analisi): un test di qualcun altro", {self.TEST: self.ROSSO})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 1
+        assert "nessun test nuovo" in capsys.readouterr().out
