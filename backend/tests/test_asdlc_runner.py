@@ -2963,3 +2963,44 @@ class TestIlBuilderSaComeSiApreLaProduzione:
         """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
         aritmetica: due o tre coppie non coprono otto comportamenti."""
         assert "3-5" not in self._prompt(), "il testo va a capo: il numero si cerca da solo"
+
+
+class TestUnNomeDiTestAmbiguoNonSiIndovina:
+    """Trovato addosso a se stesso: il gate del rosso girato su questa PR.
+
+    `id_pytest` tornava il **primo** metodo con quel nome trovato nel file. Due
+    classi che definiscono un test omonimo — cosa normale, `test_il_flag_esiste`
+    esiste già due volte in questa suite da prima di oggi — e il gate esegue il
+    test sbagliato: quello vecchio, che a quel commit passa. Verdetto *nato
+    verde* su un test che era rosso davvero.
+
+    Non è il caso «il gate è troppo severo»: è un gate che dice una cosa falsa
+    con la stessa faccia con cui dice le vere, ed è peggio. In caso di dubbio
+    ferma e lo dice — la regola c'è già per i test generati e per quelli dentro
+    un `if`, e questo è lo stesso dubbio.
+    """
+
+    # `def ` sta fuori dalla stringa apposta: `nomi_dei_test` legge i nomi dal
+    # **testo del diff**, quindi un `def test_…` dentro un letterale conterebbe
+    # come test nato in questo commit. Il gate del rosso di questa stessa PR ci è
+    # cascato: ha eseguito un omonimo vero, l'ha trovato verde, e ha fermato il
+    # branch per un test che qui non esiste. Il difetto è suo e resta scritto in
+    # PBI-104; questa riga evita di darglielo in pasto.
+    DEF = "def "
+    SORGENTE = f"""
+class TestVecchia:
+    {DEF}test_omonimo(self):
+        pass
+
+
+class TestNuova:
+    {DEF}test_omonimo(self):
+        pass
+"""
+
+    def test_due_classi_con_lo_stesso_nome_non_danno_un_id(self):
+        assert runner.id_pytest(self.SORGENTE, "test_omonimo", "tests/test_x.py") is None
+
+    def test_anche_una_funzione_fuori_classe_conta_come_omonima(self):
+        sorgente = self.SORGENTE + f"\n\n{self.DEF}test_omonimo():\n    pass\n"
+        assert runner.id_pytest(sorgente, "test_omonimo", "tests/test_x.py") is None
