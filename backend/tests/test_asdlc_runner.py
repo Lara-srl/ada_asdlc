@@ -3088,3 +3088,22 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
 
         assert runner.main() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
+
+
+class TestIlPromptDiceDiCommittareIlRossoPrima:
+    """L'ordine dei passi è la metà del lucchetto.
+
+    Il prompt descriveva quattro passi — scrivi il test, chiedi, scrivi il
+    codice, committa — e in quell'ordine il commit RED non esiste: il test entra
+    in storia insieme al `feat`, cioè in un commit misto che il gate ferma. Il
+    Builder del 01/09 ha seguito il prompt alla lettera ed è finito contro il
+    muro dopo dodici minuti.
+    """
+
+    def test_il_commit_del_rosso_viene_prima_della_richiesta(self):
+        prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
+        posto_del_commit = prompt.index("(RED)`")
+        posto_della_richiesta = prompt.index("--chiedi-impl")
+        assert posto_del_commit < posto_della_richiesta, (
+            "il prompt deve dire di committare il RED prima di chiedere il permesso"
+        )
