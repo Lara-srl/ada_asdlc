@@ -1952,6 +1952,11 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
+    if git("rev-list", "--count", "origin/main..HEAD") == "0":
+        # Il branch nasce da `origin/main`, quindi al primo `--chiedi-impl` di ogni
+        # giro HEAD **è** origin/main: se lì l'ultimo commit fosse di soli test, il
+        # Builder otterrebbe la produzione aperta senza aver scritto una riga.
+        return []
     file = file_del_commit("HEAD")
     if any(e_file_di_produzione(percorso) for _, percorso in file):
         return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
