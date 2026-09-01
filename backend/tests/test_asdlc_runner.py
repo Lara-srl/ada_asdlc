@@ -3069,3 +3069,12 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
 
         assert runner.main() == 0
         assert self._fase(repo_di_prova) == runner.FASE_IMPL
+
+    def test_non_apre_se_lultimo_commit_porta_anche_produzione(self, repo_di_prova, monkeypatch, capsys):
+        """Un commit misto non è un RED: il rosso non può essere esistito in mezzo."""
+        repo_di_prova.commit("feat: la pagina e il suo test", {
+            self.TEST: self.ROSSO, "backend/app/foglio.py": "def calcola():\n    pass\n"})
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 1
+        assert "nessun test nuovo" in capsys.readouterr().out
