@@ -3320,3 +3320,44 @@ class TestIlTestNatoVerdePassaSeMorde:
         assert "backend/app/somma.py:2" in morsi[0]["mutante"]
         assert "totale = a + b" in morsi[0]["mutante"]
         assert "riga cancellata" in morsi[0]["mutante"]
+
+    def test_una_guardia_che_non_uccide_nessun_mutante_ferma_e_dice_quanti_ne_ha_provati(
+        self, repo_di_prova
+    ):
+        """«Nato verde e non morde» è una lettura più forte di «il codice c'era
+        già»: dice che il test non guarda le righe che il branch ha scritto. Il
+        conto dei mutanti provati è ciò che permette a chi legge di crederci."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
+        })
+        sha = repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+        morsi: list[dict[str, str]] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+        assert "2 mutanti provati" in mancati[0]["esito"]
+
+    def test_senza_righe_da_mutare_la_lettura_lo_dice(self, repo_di_prova):
+        """Un `def` con il solo `return` ha un mutante solo, e non compila: zero
+        provati non è «nessuno lo fa fallire», è «non c'era niente da provare»."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert "nato verde" in mancati[0]["esito"]
+        assert "nessun mutante da provare" in mancati[0]["esito"]
