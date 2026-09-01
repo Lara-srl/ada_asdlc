@@ -1464,15 +1464,20 @@ def quarta_lettura(albero: Path, base: str, sha: str,
         if sorgente is None:
             continue
         righe_del_file = sorgente.splitlines(keepends=True)
-        for m in mutanti_del_sorgente(sorgente, righe):
-            guasto = "".join(
-                righe_del_file[:m.riga - 1] + [m.dopo + "\n"] + righe_del_file[m.riga:])
-            if not compila(percorso, guasto):
-                continue
-            file.write_text(guasto, encoding="utf-8")
-            provati += 1
-            if morde(da_solo[0], chiave):
-                return descrizione_del_mutante(percorso, m), provati
+        try:
+            for m in mutanti_del_sorgente(sorgente, righe):
+                guasto = "".join(
+                    righe_del_file[:m.riga - 1] + [m.dopo + "\n"] + righe_del_file[m.riga:])
+                if not compila(percorso, guasto):
+                    continue
+                file.write_text(guasto, encoding="utf-8")
+                provati += 1
+                if morde(da_solo[0], chiave):
+                    return descrizione_del_mutante(percorso, m), provati
+        finally:
+            # Com'era, sempre: il test nato verde dopo questo legge lo stesso file,
+            # e i suoi mutanti devono nascere dal sorgente e non dall'ultimo guasto.
+            file.write_text(sorgente, encoding="utf-8")
     return None, provati
 
 
