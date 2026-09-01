@@ -1851,13 +1851,17 @@ class TestIlGateDelRossoCamminaICommit:
     """
 
     def test_un_test_nato_verde_ferma_e_dice_quale(self, repo_di_prova, tmp_path):
-        """Il caso di `f35abd1`: il codice era già in un commit precedente."""
+        """Il caso di `f35abd1`: il codice era già in un commit precedente.
+
+        E il test **non guarda niente** — `callable(somma)` è vero anche con un
+        `return` cancellato. Da PBI-105 un nato verde che morde passa: il caso che
+        ferma è questo, il verde che non prova niente."""
         repo_di_prova.commit("feat: la somma", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
         })
         sha = repo_di_prova.commit("test: la somma fa due", {
             "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
-                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+                tmp_path / "girato", "from app.somma import somma\n    assert callable(somma)"),
         })
 
         mancati = runner.gate_del_rosso()
@@ -2039,7 +2043,7 @@ class TestIlGateDelRossoCamminaICommit:
         sha = repo_di_prova.commit("test: la somma e la differenza (RED)", {
             "backend/tests/test_conti.py":
                 "from app.somma import somma\n\n\n"
-                "def test_la_somma_fa_due():\n    assert somma(1, 1) == 2\n\n\n"
+                "def test_la_somma_fa_due():\n    assert callable(somma)\n\n\n"
                 "def test_la_differenza_fa_zero():\n"
                 "    from app.differenza import differenza\n"
                 "    assert differenza(1, 1) == 0\n",
@@ -2092,7 +2096,7 @@ class TestIlGateDelRossoCamminaICommit:
         })
         repo_di_prova.commit("test: la somma fa due", {
             "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
-                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+                tmp_path / "girato", "from app.somma import somma\n    assert callable(somma)"),
         })
         prima = repo_di_prova._git("worktree", "list")
 
@@ -2114,7 +2118,7 @@ class TestIlGateDelRossoCamminaICommit:
             "backend/tests/test_somma.py":
                 "from app.somma import somma\n\n\n"
                 "class TestLaSomma:\n"
-                "    def test_fa_due(self):\n        assert somma(1, 1) == 2\n",
+                "    def test_fa_due(self):\n        assert callable(somma)\n",
         })
 
         mancati = runner.gate_del_rosso()
@@ -3279,3 +3283,34 @@ class TestLeRigheCambiateSiLeggonoDalDiff:
         })
 
         assert runner.righe_cambiate("origin/main", sha) == {}
+
+
+class TestIlTestNatoVerdePassaSeMorde:
+    """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
+
+    «Nato verde» è una prova di processo con un falso positivo sistematico: la
+    guardia che il Critic ordina su un comportamento che c'è già nasce verde per
+    forza, e su PBI-333 ha chiuso due giri su quattro. Prima di fermare, il gate
+    muta le righe di produzione che il branch ha cambiato e rigira **quel test**:
+    un mutante ucciso è la prova che il test guarda quelle righe.
+    """
+
+    def test_una_guardia_che_uccide_un_mutante_passa_e_il_gate_dice_quale(
+        self, repo_di_prova, tmp_path
+    ):
+        """Il caso di `9f952c0`: il test nasce verde, e cancellato il `return` si
+        accorge che la somma non fa più due."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        sha = repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        morsi: list[dict[str, str]] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [m["commit"] for m in morsi] == [sha[:7]]
+        assert morsi[0]["test"] == "tests/test_somma.py::test_la_somma_fa_due"
+        assert "backend/app/somma.py:2" in morsi[0]["mutante"]
+        assert "return a + b" in morsi[0]["mutante"]
