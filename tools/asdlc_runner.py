@@ -1936,6 +1936,25 @@ def stampa_la_guardia_di_fase() -> int:
     return 2
 
 
+def test_nuovi_da_aprire() -> list[TestNuovo]:
+    """I test su cui si chiede il permesso: quelli non ancora committati, e se non
+    ce ne sono quelli dell'**ultimo commit**.
+
+    Guardare solo l'albero non committato non chiudeva il ciclo: il commit RED,
+    che la convenzione vuole e che il gate del rosso pretende di soli test,
+    rendeva cieca la richiesta. Lo ha trovato il Builder al primo giro vero, il
+    01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita.
+
+    L'ultimo commit e basta, non tutto `origin/main..HEAD`: dopo tre criteri i
+    test dei primi due sono verdi, e la richiesta verrebbe rifiutata per «nato
+    verde» su lavoro che il suo rosso l'aveva già avuto.
+    """
+    nuovi = test_nuovi_dellalbero()
+    if nuovi:
+        return nuovi
+    return test_nuovi_del_commit("HEAD")
+
+
 def chiedi_impl() -> int:
     """Il permesso di scrivere produzione, dato dal rosso e non dalla parola.
 
@@ -1955,7 +1974,7 @@ def chiedi_impl() -> int:
               f"(fase: {fase or 'nessuna'}). Il permesso si chiede una volta per "
               f"comportamento, e il giro torna in {FASE_TEST_ONLY} dopo il commit.")
         return 1
-    nuovi = test_nuovi_dellalbero()
+    nuovi = test_nuovi_da_aprire()
     if not nuovi:
         print("Non c'è nessun test nuovo nell'albero, quindi nessun rosso da osservare. "
               "Scrivi prima il test del comportamento che ti serve.")
