@@ -2411,13 +2411,19 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
     base, separatore, solo_ref = ref.partition("..")
     if not separatore:
         base, solo_ref = "origin/main", ref
+    morsi: list[dict[str, str]] = []
     try:
-        mancati = gate_del_rosso(base=base, ref=solo_ref)
+        mancati = gate_del_rosso(base=base, ref=solo_ref, morsi=morsi)
     except GuastoDelGate as guasto:
         # `2` e non `1`: chi lancia il gate a mano deve distinguere «il rosso non
         # c'è stato» da «il gate non ha potuto guardare».
         print(f"Il gate non ha potuto guardare {base}..{solo_ref}: {guasto}")
         return 2
+    if morsi:
+        print(f"{len(morsi)} test nati verdi che mordono, in {base}..{solo_ref}:\n")
+        for m in morsi:
+            print(f"  {m['commit']}  {m['titolo']}\n    {m['test']}\n"
+                  f"    → nato verde, ma morde: {m['mutante']}\n")
     if not mancati:
         print(f"Il rosso c'è stato: in {base}..{solo_ref} nessun test è nato verde.")
         return 0
