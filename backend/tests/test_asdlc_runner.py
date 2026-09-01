@@ -3474,3 +3474,41 @@ class TestITestCheMordonoFinisconoNelRapporto:
         a_schermo = capsys.readouterr().out
         assert "9f952c0" in a_schermo and "morde" in a_schermo
         assert "nav.ts:67" in a_schermo
+
+
+class TestIlMorsoEUnFallimentoPerAsserzione:
+    """Guardia nata verde su `falliti_per_asserzione` — e giudicata, come ogni
+    guardia, dalla quarta lettura di questo stesso branch.
+
+    Il lato pytest lo esercitano già le fixture `callable(somma)`; qui il lato
+    vitest, che legge dal json: il file che non si carica non ha esiti per test
+    e non è un morso, l'asserzione fallita lo è.
+    """
+
+    def _comando(self, rapporto):
+        return runner.ComandoDiProva(Path("/nessuna"), ["npm", "test"], "vitest",
+                                     {"morde": "x.test.ts -t morde"}, rapporto)
+
+    def test_il_file_che_vitest_non_carica_non_e_un_morso(self, tmp_path):
+        rapporto = tmp_path / "vitest.json"
+        rapporto.write_text(json.dumps({"testResults": [
+            {"status": "failed", "assertionResults": []}]}))
+
+        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == set()
+
+    def test_lasserzione_fallita_e_un_morso(self, tmp_path):
+        rapporto = tmp_path / "vitest.json"
+        rapporto.write_text(json.dumps({"testResults": [{"status": "failed", "assertionResults": [
+            {"title": "morde", "status": "failed"},
+            {"title": "non morde", "status": "passed"}]}]}))
+
+        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == {"morde"}
+
+    def test_in_pytest_conta_il_failed_e_non_lerror(self):
+        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python",
+                                        {"tests/test_x.py::test_a": "tests/test_x.py::test_a"})
+        uscita = ("tests/test_x.py::test_a FAILED\n"
+                  "tests/test_x.py::test_b ERROR\n"
+                  "tests/test_x.py::test_c PASSED\n")
+
+        assert runner.falliti_per_asserzione(comando, uscita) == {"tests/test_x.py::test_a"}
