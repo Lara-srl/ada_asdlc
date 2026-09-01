@@ -990,14 +990,19 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
     except (SyntaxError, ValueError):
         return None
     definizioni = (ast.FunctionDef, ast.AsyncFunctionDef)
+    trovati: list[str] = []
     for nodo in modulo.body:
         if isinstance(nodo, definizioni) and nodo.name == nome:
-            return f"{relativo}::{nome}"
+            trovati.append(f"{relativo}::{nome}")
         if isinstance(nodo, ast.ClassDef):
             for figlio in nodo.body:
                 if isinstance(figlio, definizioni) and figlio.name == nome:
-                    return f"{relativo}::{nodo.name}::{nome}"
-    return None
+                    trovati.append(f"{relativo}::{nodo.name}::{nome}")
+    # Due classi che definiscono un test omonimo sono normali, e il diff dice solo
+    # che *un* `def` con quel nome è nato: quale delle due, non lo dice. Prendere il
+    # primo è la scelta che sembra innocua e non lo è — il gate esegue il test
+    # vecchio, lo trova verde, e stampa «nato verde» su un test che era rosso.
+    return trovati[0] if len(trovati) == 1 else None
 
 
 def dove_gira(percorso: str) -> tuple[str, str]:
