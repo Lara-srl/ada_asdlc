@@ -148,13 +148,17 @@ Esegui il PBI con queste regole non negoziabili:
   scriverli viene bloccato — da qualunque strumento, `Edit`, `Write` o una scrittura da
   shell. Il ciclo di ogni comportamento è questo, e non ha scorciatoie:
   1. scrivi il test del comportamento che ti serve, **solo quello**;
-  2. `python3 tools/asdlc_runner.py --chiedi-impl` — gira i test appena nati e apre la
-     fase `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e
-     non è questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
-  3. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
+  2. **committalo**, da solo: `test(scope): … (RED)`. Un commit di soli test, senza una
+     riga di produzione dentro — il rosso non può essere esistito in mezzo a un commit
+     misto, e il gate lo ferma dal solo diff;
+  3. `python3 tools/asdlc_runner.py --chiedi-impl` — rigira quei test e apre la fase
+     `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e non è
+     questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
+  4. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
      successivo per quanto ti sia già chiaro: ciò che scrivi adesso senza un rosso
      davanti non potrai più dimostrarlo, e il criterio dopo ha diritto al suo ciclo;
-  4. committa — il commit riporta il giro in `TEST_ONLY`, e si ricomincia dal punto 1.
+  5. committa il `feat` o il `fix`, di sola produzione — il commit riporta il giro in
+     `TEST_ONLY`, e si ricomincia dal punto 1 col criterio dopo.
   In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
   il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
   dillo con `STOP:`.
