@@ -871,6 +871,34 @@ def test_nuovi_del_commit(sha: str, file: list[tuple[str, str]] | None = None) -
     return nuovi
 
 
+def test_nuovi_dellalbero() -> list[TestNuovo]:
+    """I test che nascono nell'**albero di lavoro**, rispetto a `HEAD`.
+
+    Il gate del rosso legge un commit; il lucchetto deve leggere ciò che non è
+    ancora committato, perché il permesso di implementare si chiede **prima** del
+    commit — è tutto il punto della differenza fra impedire e accertare.
+
+    I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
+    appena creato, e il primo test di un modulo nuovo è il caso più comune di
+    tutti. Per quelli il diff è il file intero, che è esattamente ciò che sono.
+    """
+    tracciati = [p for p in git("diff", "HEAD", "--name-only").splitlines() if p]
+    non_tracciati = [p for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p]
+    nuovi: list[TestNuovo] = []
+    for percorso in tracciati + non_tracciati:
+        linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
+        if linguaggio is None:
+            continue
+        if percorso in non_tracciati:
+            sorgente = leggi_sorgente(REPO / percorso) or ""
+            diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
+        else:
+            diff = git("diff", "HEAD", "--unified=0", "--", percorso)
+        aggiunti, tolti = nomi_dei_test(diff, linguaggio)
+        nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    return nuovi
+
+
 # Ciò che il worktree usa e getta non ha perché è gitignored, e senza cui i test non
 # girano: si presta dall'albero del giro con un link. `data/` è il foglio vero, che
 # la CI non ha e questa macchina sì; `node_modules` è mezzo minuto di `npm ci` per
@@ -1880,6 +1908,56 @@ def stampa_la_guardia_di_fase() -> int:
     return 2
 
 
+def chiedi_impl() -> int:
+    """Il permesso di scrivere produzione, dato dal rosso e non dalla parola.
+
+    Gira i test nati nell'albero e apre `IMPL` solo se **tutti** falliscono. Non
+    è pignoleria sul singolo test: un test che passa al primo colpo dice che quel
+    comportamento c'è già, e allora non è questo il commit in cui nasce — o è
+    stato scritto in anticipo, che è la cosa che il lucchetto esiste per rendere
+    impossibile.
+
+    Le ragioni sono le stesse tre di `ESITI_MANCATI`, e non per pigrizia: chi
+    legge il rifiuto qui e il rapporto del gate là deve trovare le stesse parole,
+    o crederà di avere davanti due controlli diversi.
+    """
+    fase = fase_corrente(REPO)
+    if fase != FASE_TEST_ONLY:
+        print(f"Niente da aprire: il giro non è in {FASE_TEST_ONLY} "
+              f"(fase: {fase or 'nessuna'}). Il permesso si chiede una volta per "
+              f"comportamento, e il giro torna in {FASE_TEST_ONLY} dopo il commit.")
+        return 1
+    nuovi = test_nuovi_dellalbero()
+    if not nuovi:
+        print("Non c'è nessun test nuovo nell'albero, quindi nessun rosso da osservare. "
+              "Scrivi prima il test del comportamento che ti serve.")
+        return 1
+    comandi, orfani = comandi_dei_test(REPO, nuovi)
+    mancati: list[tuple[str, list[str]]] = []
+    if orfani:
+        mancati.append((ESITI_MANCATI["nessuno"], orfani))
+    for comando in comandi:
+        esiti, _ = esiti_del_comando(comando)
+        per_lettura: dict[str, list[str]] = defaultdict(list)
+        for chiave, etichetta in comando.etichette.items():
+            if esiti[chiave] != "rosso":
+                per_lettura[esiti[chiave]].append(etichetta)
+        for esito, elenco in per_lettura.items():
+            mancati.append((ESITI_MANCATI[esito], elenco))
+    if mancati:
+        print(f"Il permesso resta chiuso: su {len(nuovi)} test nuovi il rosso non "
+              f"si è visto dappertutto.\n")
+        for ragione, elenco in mancati:
+            for etichetta in elenco:
+                print(f"  {etichetta}")
+            print(f"    → {ragione}\n")
+        return 1
+    (REPO / FILE_DELLA_FASE).write_text(f"{FASE_IMPL}\n", encoding="utf-8")
+    print(f"Rosso osservato su {len(nuovi)} test nuovi: la fase passa a {FASE_IMPL}. "
+          f"Ora scrivi il minimo che li fa passare.")
+    return 0
+
+
 def stampa_il_gate_del_rosso(ref: str) -> int:
     """Il gate senza il giro intorno: `--gate-rosso [ref]`.
 
@@ -1935,6 +2013,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
                     help="non esegue niente: cammina origin/main..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
+    ap.add_argument("--chiedi-impl", action="store_true",
+                    help="non esegue un PBI: gira i test nati nell'albero e apre la fase "
+                         "IMPL solo se li vede fallire")
     ap.add_argument("--guardia-fase", action="store_true",
                     help="non esegue niente: legge su stdin il JSON di un hook PreToolUse "
                          "e esce 2 se quella scrittura non si può fare nella fase corrente")
@@ -1953,6 +2034,10 @@ def main() -> int:
         return registra(Path(a.registra))
     if a.riepilogo:
         return riepilogo(a.tariffa)
+    if a.chiedi_impl:
+        if aggiunto := venv_sul_path():
+            print(f"venv del worktree sul PATH: {aggiunto}")
+        return chiedi_impl()
     if a.guardia_fase:
         return stampa_la_guardia_di_fase()
     if a.gate_rosso:
