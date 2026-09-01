@@ -1533,6 +1533,7 @@ def esegui_pbi(
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
     branch = crea_branch(pbi)
+    apri_la_fase()
 
     def conta_commit() -> int:
         """`origin/main..HEAD` e non `main..HEAD`: da quando il main locale del
@@ -1549,6 +1550,7 @@ def esegui_pbi(
         # `commit = 0` mentre sul branch c'era il lavoro. Su PBI-209 erano otto
         # commit e 2.174 righe, e la colonna del registro diceva zero: è quella
         # che si guarda per decidere se un branch fermato si butta (difetto 10).
+        chiudi_la_fase()
         e.commit = conta_commit()
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
@@ -1975,16 +1977,55 @@ def installa_la_guardia_del_commit() -> bool:
     lo legge e decide — il lucchetto perde il suo secondo livello e resta il
     primo, che è meglio di un hook altrui cancellato in silenzio.
     """
+    return installa_un_hook("pre-commit", GUARDIA_DEL_COMMIT)
+
+
+def installa_un_hook(nome: str, corpo: str) -> bool:
+    """Scrive un hook di git in `.git/hooks`, e `False` se ce n'era già uno."""
     cartella = Path(git("rev-parse", "--git-path", "hooks"))
     if not cartella.is_absolute():
         cartella = REPO / cartella
     cartella.mkdir(parents=True, exist_ok=True)
-    hook = cartella / "pre-commit"
+    hook = cartella / nome
     if hook.exists():
         return False
-    hook.write_text(GUARDIA_DEL_COMMIT, encoding="utf-8")
+    hook.write_text(corpo, encoding="utf-8")
     hook.chmod(0o755)
     return True
+
+
+# Il `post-commit` che chiude il ciclo. Il Builder fa molti criteri in una
+# sessione e fra un commit e l'altro il runner non c'è: se `IMPL` restasse aperta
+# dopo il primo permesso, il comportamento successivo tornerebbe a nascere senza
+# rosso. Chi vede ogni commit è git, quindi è git a riportare la fase indietro.
+RITORNO_IN_TEST_ONLY = f"""#!/bin/sh
+# Installato da tools/asdlc_runner.py (PBI-104): un commit chiude il ciclo.
+fase="$(git rev-parse --show-toplevel)/{FILE_DELLA_FASE}"
+[ -f "$fase" ] && printf '{FASE_TEST_ONLY}\\n' > "$fase"
+exit 0
+"""
+
+
+def installa_il_ritorno_in_test_only() -> bool:
+    return installa_un_hook("post-commit", RITORNO_IN_TEST_ONLY)
+
+
+def apri_la_fase() -> None:
+    """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
+
+    L'hook di Claude Code non si installa qui — sta in `.claude/settings.json`,
+    versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
+    albero appena clonato non li avrebbe.
+    """
+    installa_la_guardia_del_commit()
+    installa_il_ritorno_in_test_only()
+    (REPO / FILE_DELLA_FASE).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
+
+
+def chiudi_la_fase() -> None:
+    """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
+    sessione dopo non può scrivere, e la diagnosi costerebbe più del giro."""
+    (REPO / FILE_DELLA_FASE).unlink(missing_ok=True)
 
 
 def guardia_del_commit() -> int:
