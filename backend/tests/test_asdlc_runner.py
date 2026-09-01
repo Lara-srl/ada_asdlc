@@ -3004,3 +3004,29 @@ class TestNuova:
     def test_anche_una_funzione_fuori_classe_conta_come_omonima(self):
         sorgente = self.SORGENTE + f"\n\n{self.DEF}test_omonimo():\n    pass\n"
         assert runner.id_pytest(sorgente, "test_omonimo", "tests/test_x.py") is None
+
+
+class TestSenzaUnRepositorySottoNonSiApreNiente:
+    """Il lucchetto non scrive dove non c'è un giro.
+
+    Trovato dalla suite stessa: `apri_la_fase` è entrato in `esegui_pbi`, e le
+    decine di test che eseguono un PBI con `git` sostituito hanno cominciato a
+    lasciare `pre-commit` e `post-commit` **nella radice del repository vero** —
+    `git rev-parse --git-path hooks` tornava la stringa vuota del doppio, e
+    `Path("")` è la cartella corrente. Con `.asdlc-fase` sarebbe stato peggio:
+    un albero lasciato in fase è un albero in cui la sessione dopo non scrive.
+
+    Un dubbio su dove si sta scrivendo si risolve non scrivendo.
+    """
+
+    def test_un_percorso_che_non_finisce_in_hooks_non_e_una_cartella_di_hook(self, monkeypatch):
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        assert runner.cartella_degli_hook() is None
+
+    def test_apri_la_fase_non_scrive_niente_senza_hook(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+
+        runner.apri_la_fase()
+
+        assert list(tmp_path.iterdir()) == []
