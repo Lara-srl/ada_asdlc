@@ -202,6 +202,14 @@ Esegui il PBI con queste regole non negoziabili:
   restrizione non c'è; (3) aggiungi la restrizione, che lo fa passare. Il commit intermedio
   in cui la cosa è visibile a chi non deve vederla vive dentro il branch e non si
   distribuisce: è il prezzo di una prova che vale.
+- **Una guardia nasce verde, e passa solo se morde.** Il test che presidia un comportamento
+  che c'è già — quello che il Critic ti chiede quando «nessun test lo presidia» — non può
+  essere rosso, e va scritto lo stesso: si committa da solo, in `TEST_ONLY`, senza
+  `--chiedi-impl`. Il gate lo rigira contro i **mutanti** delle righe che il branch ha
+  cambiato — la riga cancellata, `===` che diventa `!==`, `&&` che diventa `||` — e lo
+  lascia passare solo se almeno uno lo fa fallire. Una guardia che non guarda quelle
+  righe — un'asserzione vera comunque, un dato costruito perché il guasto non si veda —
+  ferma il giro come un nato verde qualsiasi.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
 - Se il PBI cambia un contratto, aggiorna la spec NELLO STESSO commit del codice.
 - Non lasciare modifiche non committate: ciò che non è committato non esiste.
