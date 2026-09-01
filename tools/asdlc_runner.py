@@ -1310,8 +1310,31 @@ class Mutante:
 # forma — il guasto più piccolo che un test può essere chiamato ad accorgersi.
 SCAMBI: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"==="), "!=="), (re.compile(r"!=="), "==="),
+    # Il doppio uguale che **non** è un pezzo del triplo: `===` letto anche come
+    # `==` darebbe `!===`, che non compila e non prova niente.
+    (re.compile(r"(?<![=!<>])==(?!=)"), "!="), (re.compile(r"(?<!=)!=(?!=)"), "=="),
     (re.compile(r"&&"), "||"), (re.compile(r"\|\|"), "&&"),
+    (re.compile(r"\band\b"), "or"), (re.compile(r"\bor\b"), "and"),
+    (re.compile(r"\bTrue\b"), "False"), (re.compile(r"\bFalse\b"), "True"),
+    (re.compile(r"\btrue\b"), "false"), (re.compile(r"\bfalse\b"), "true"),
+    # Il confronto di confine. Le frecce `=>` e `->` e gli shift `<<` `>>` hanno
+    # lo stesso segno e non decidono niente.
+    (re.compile(r"(?<![<=!>-])<(?![<=])"), "<="), (re.compile(r"(?<!<)<=(?!=)"), "<"),
+    (re.compile(r"(?<![>=!<-])>(?![>=])"), ">="), (re.compile(r"(?<!>)>=(?!=)"), ">"),
 ]
+
+# Ciò che non si cancella: una riga senza niente oltre la punteggiatura, un
+# commento, e una riga che **apre** — un blocco in Python, una parentesi o una
+# graffa in TypeScript. Toglierle rompe la sintassi e basta, e un guasto di forma
+# non è una prova che il test morda: è solo un test rigirato a vuoto.
+RE_COMMENTO = re.compile(r"^\s*(#|//|/\*|\*)")
+RE_APRE = re.compile(r"[:({\[]\s*$")
+
+
+def si_puo_cancellare(testo: str) -> bool:
+    return (re.search(r"[A-Za-z0-9]", testo) is not None
+            and RE_COMMENTO.match(testo) is None
+            and RE_APRE.search(testo) is None)
 
 
 def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
@@ -1327,7 +1350,7 @@ def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
     for numero, testo in enumerate(sorgente.splitlines(), start=1):
         if numero not in righe:
             continue
-        if re.search(r"[A-Za-z0-9]", testo):
+        if si_puo_cancellare(testo):
             mutanti.append(Mutante(numero, testo, ""))
         for regola, sostituto in SCAMBI:
             for trovato in regola.finditer(testo):
