@@ -2929,3 +2929,37 @@ class TestIlGiroSiApreInTestOnly:
             runner.esegui_pbi("PBI-333", set(), dry=False, con_pr=False)
 
         assert visto.get("aperta"), "il giro deve aprire la fase prima del Builder"
+
+
+class TestIlBuilderSaComeSiApreLaProduzione:
+    """Il lucchetto senza le istruzioni è una porta chiusa senza cartello.
+
+    Un agente che trova l'edit negato e non sa che esiste `--chiedi-impl` fa la
+    cosa che farebbe chiunque: ci riprova da un'altra strada — un heredoc da
+    Bash, `sed -i` — e finisce contro il `pre-commit` dopo aver speso il turno.
+    Il blocco deve costare secondi, non un giro, e la differenza è tutta scritta
+    qui dentro.
+    """
+
+    def _prompt(self):
+        return runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
+
+    def test_dice_il_nome_del_comando_che_apre_la_fase(self):
+        assert "--chiedi-impl" in self._prompt()
+
+    def test_dice_che_si_scrive_solo_il_minimo(self):
+        """La causa a monte di PBI-333: 494 righe di pagina con dentro un
+        comportamento che nessun rosso aveva chiesto. «Il codice che lo fa
+        passare» non è «solo il codice che lo fa passare»."""
+        prompt = self._prompt()
+        assert "solo il codice" in prompt or "il minimo" in prompt
+
+    def test_dice_come_far_nascere_un_modulo_senza_rompere_il_rosso(self):
+        """L'altra fermata, quella del 31/08: il primo test di un modulo che non
+        esiste non fallisce, esplode in raccolta. Lo scheletro vuoto prima."""
+        assert "scheletro" in self._prompt()
+
+    def test_non_promette_piu_un_numero_di_commit_scollegato_dai_criteri(self):
+        """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
+        aritmetica: due o tre coppie non coprono otto comportamenti."""
+        assert "3-5" not in self._prompt(), "il testo va a capo: il numero si cerca da solo"
