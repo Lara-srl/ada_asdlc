@@ -1958,6 +1958,55 @@ def chiedi_impl() -> int:
     return 0
 
 
+# Il `pre-commit` che il runner installa. Inerte fuori da un giro, come l'hook di
+# Claude Code e per la stessa ragione: sta in `.git/hooks`, che i worktree di
+# questo repository condividono, e non deve farsi sentire da chi non è in un giro.
+GUARDIA_DEL_COMMIT = """#!/bin/sh
+# Installato da tools/asdlc_runner.py (PBI-104): il commit non nasce fuori fase.
+exec python3 "$(git rev-parse --show-toplevel)/tools/asdlc_runner.py" --guardia-commit
+"""
+
+
+def installa_la_guardia_del_commit() -> bool:
+    """Mette il `pre-commit` al suo posto. `False` se ce n'era già uno.
+
+    Un `pre-commit` di qualcun altro non si calpesta: potrebbe essere un
+    formattatore, o la cura di qualcosa che non sappiamo. Chi lo trova occupato
+    lo legge e decide — il lucchetto perde il suo secondo livello e resta il
+    primo, che è meglio di un hook altrui cancellato in silenzio.
+    """
+    cartella = Path(git("rev-parse", "--git-path", "hooks"))
+    if not cartella.is_absolute():
+        cartella = REPO / cartella
+    cartella.mkdir(parents=True, exist_ok=True)
+    hook = cartella / "pre-commit"
+    if hook.exists():
+        return False
+    hook.write_text(GUARDIA_DEL_COMMIT, encoding="utf-8")
+    hook.chmod(0o755)
+    return True
+
+
+def guardia_del_commit() -> int:
+    """Il `pre-commit`: ciò che è in stage deve stare nella fase corrente.
+
+    Guarda lo **stage** e non il modo in cui ci è arrivato, ed è la differenza
+    che conta: `Edit`, `Write`, un heredoc da Bash, `sed -i` e una patch applicata
+    a mano finiscono tutti nello stesso posto, e qui valgono uguale.
+    """
+    fase = fase_corrente(REPO)
+    if fase is None:
+        return 0
+    ragioni = [r for percorso in git("diff", "--cached", "--name-only").splitlines()
+               if percorso and (r := guardia_di_fase(fase, percorso))]
+    if not ragioni:
+        return 0
+    print(f"Il commit non si fa: il giro è in {fase}.\n")
+    for ragione in ragioni:
+        print(f"  {ragione}\n")
+    return 1
+
+
 def stampa_il_gate_del_rosso(ref: str) -> int:
     """Il gate senza il giro intorno: `--gate-rosso [ref]`.
 
@@ -2013,6 +2062,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
                     help="non esegue niente: cammina origin/main..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
+    ap.add_argument("--guardia-commit", action="store_true",
+                    help="non esegue niente: il pre-commit del giro — ciò che è in stage "
+                         "deve stare nella fase corrente")
     ap.add_argument("--chiedi-impl", action="store_true",
                     help="non esegue un PBI: gira i test nati nell'albero e apre la fase "
                          "IMPL solo se li vede fallire")
@@ -2034,6 +2086,8 @@ def main() -> int:
         return registra(Path(a.registra))
     if a.riepilogo:
         return riepilogo(a.tariffa)
+    if a.guardia_commit:
+        return guardia_del_commit()
     if a.chiedi_impl:
         if aggiunto := venv_sul_path():
             print(f"venv del worktree sul PATH: {aggiunto}")
