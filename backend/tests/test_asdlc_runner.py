@@ -20,6 +20,7 @@ sarebbe un test che riscrive il repository in cui gira.
 
 import csv
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -2592,3 +2593,65 @@ class TestLaFaseSiLeggeDalWorktree:
 
     def test_senza_file_non_ce_fase(self, tmp_path):
         assert runner.fase_corrente(tmp_path) is None
+
+
+class TestLHookChiedeAlRunnerSeSiPuoScrivere:
+    """`--guardia-fase`: il ponte fra `PreToolUse` e la guardia.
+
+    Claude Code passa allo script un JSON su stdin (`tool_name`, `tool_input`,
+    `cwd`) e legge l'uscita: **solo `exit 2` blocca davvero**, e in
+    `bypassPermissions` — cioè `--dangerously-skip-permissions`, come il runner
+    lancia il Builder — il JSON con `permissionDecision: "deny"` non basta. Per
+    questo la ragione va su stderr e l'uscita è 2.
+
+    Il mestiere di classificare i percorsi resta in Python e non finisce in uno
+    script di shell: `e_file_di_produzione` è la stessa funzione con cui il gate
+    del rosso ferma un commit misto, e due copie della stessa regola divergono.
+    """
+
+    def _stdin(self, monkeypatch, **campi):
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": {}}
+        dato.update(campi)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(dato)))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-fase"])
+
+    def test_il_flag_esiste(self):
+        assert runner.costruisci_parser().parse_args(["--guardia-fase"]).guardia_fase
+
+    def test_blocca_con_2_e_scrive_la_ragione_su_stderr(self, monkeypatch, tmp_path, capsys):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        self._stdin(monkeypatch, cwd=str(tmp_path),
+                    tool_input={"file_path": str(tmp_path / "frontend/src/App.tsx")})
+
+        assert runner.main() == 2
+        assert "TEST_ONLY" in capsys.readouterr().err
+
+    def test_lascia_passare_il_test_e_non_dice_niente(self, monkeypatch, tmp_path, capsys):
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        self._stdin(monkeypatch, cwd=str(tmp_path),
+                    tool_input={"file_path": str(tmp_path / "frontend/src/App.test.tsx")})
+
+        assert runner.main() == 0
+        assert capsys.readouterr().err == ""
+
+    def test_uno_strumento_senza_percorso_non_lo_riguarda(self, monkeypatch, tmp_path):
+        """Il matcher è `Edit|Write`, ma la guardia non si fida del matcher."""
+        (tmp_path / runner.FILE_DELLA_FASE).write_text("TEST_ONLY\n")
+        self._stdin(monkeypatch, cwd=str(tmp_path), tool_name="Bash",
+                    tool_input={"command": "npm test"})
+
+        assert runner.main() == 0
+
+    def test_un_json_rotto_non_blocca_la_sessione(self, monkeypatch, capsys):
+        """Si sbaglia dalla parte del passaggio, ed è l'unico posto dove si fa.
+
+        Un hook che esce 2 su un guasto proprio blocca **ogni** scrittura di ogni
+        sessione del repository, e la cura sarebbe modificare un file — cioè
+        proprio ciò che ha appena vietato. Il confine duro non è qui: è il
+        `pre-commit`, che nessuna tool call aggira.
+        """
+        monkeypatch.setattr(sys, "stdin", io.StringIO("{non è json"))
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-fase"])
+
+        assert runner.main() == 0
+        assert "guardia" in capsys.readouterr().err
