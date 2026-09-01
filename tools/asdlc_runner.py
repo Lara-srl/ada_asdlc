@@ -143,11 +143,32 @@ Leggi, in quest'ordine:
 
 Esegui il PBI con queste regole non negoziabili:
 
-- **TDD**: scrivi PRIMA il test che fallisce, poi il codice che lo fa passare.
-- **Micro-commit**: committa dopo ogni pezzo che sta in piedi da solo — un test aggiunto,
-  una funzione che compila, un modulo che passa il lint. Un PBI produce tipicamente 3-5
-  commit. Non accumulare tutto in un commit finale: i commit sono i punti di ripristino,
-  e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa la PR.
+- **TDD, e il permesso di scrivere codice te lo dà il rosso.** Il giro nasce in fase
+  `TEST_ONLY`: i file di produzione sono in **sola lettura**, e ogni tentativo di
+  scriverli viene bloccato — da qualunque strumento, `Edit`, `Write` o una scrittura da
+  shell. Il ciclo di ogni comportamento è questo, e non ha scorciatoie:
+  1. scrivi il test del comportamento che ti serve, **solo quello**;
+  2. `python3 tools/asdlc_runner.py --chiedi-impl` — gira i test appena nati e apre la
+     fase `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e
+     non è questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
+  3. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
+     successivo per quanto ti sia già chiaro: ciò che scrivi adesso senza un rosso
+     davanti non potrai più dimostrarlo, e il criterio dopo ha diritto al suo ciclo;
+  4. committa — il commit riporta il giro in `TEST_ONLY`, e si ricomincia dal punto 1.
+  In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
+  il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
+  dillo con `STOP:`.
+- **Un modulo nuovo nasce vuoto, in un commit suo.** Il primo test di un file che non
+  esiste non fallisce: esplode in raccolta, e un errore di import non è un rosso — non
+  dimostra che il test morde, e `--chiedi-impl` lo rifiuta dicendolo. Fai prima lo
+  **scheletro** che compila e non fa niente — il componente che rende un contenitore
+  vuoto, la funzione che torna `None` — committalo, e da lì ogni rosso è un'asserzione
+  che fallisce. Uno scheletro generoso però si ritorce contro di te: se fa già quello
+  che il test chiede, il test passa e la fase non si apre.
+- **Micro-commit**: una coppia RED→GREEN **per criterio** della checklist del PBI. Un
+  PBI da otto criteri fa sedici commit, ed è giusto così — i commit sono i punti di
+  ripristino, e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa
+  la PR.
 - **Il messaggio di commit si legge senza il diff sotto gli occhi.** Formato
   `tipo(scope): descrizione imperativa` in italiano, corpo con i dettagli. Il soggetto dice
   **cosa cambia**, con un verbo e un oggetto concreti; il corpo dice **perché**, e cosa
