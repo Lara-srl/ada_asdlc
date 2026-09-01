@@ -1851,13 +1851,17 @@ class TestIlGateDelRossoCamminaICommit:
     """
 
     def test_un_test_nato_verde_ferma_e_dice_quale(self, repo_di_prova, tmp_path):
-        """Il caso di `f35abd1`: il codice era già in un commit precedente."""
+        """Il caso di `f35abd1`: il codice era già in un commit precedente.
+
+        E il test **non guarda niente** — `callable(somma)` è vero anche con un
+        `return` cancellato. Da PBI-105 un nato verde che morde passa: il caso che
+        ferma è questo, il verde che non prova niente."""
         repo_di_prova.commit("feat: la somma", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
         })
         sha = repo_di_prova.commit("test: la somma fa due", {
             "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
-                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+                tmp_path / "girato", "from app.somma import somma\n    assert callable(somma)"),
         })
 
         mancati = runner.gate_del_rosso()
@@ -2039,7 +2043,7 @@ class TestIlGateDelRossoCamminaICommit:
         sha = repo_di_prova.commit("test: la somma e la differenza (RED)", {
             "backend/tests/test_conti.py":
                 "from app.somma import somma\n\n\n"
-                "def test_la_somma_fa_due():\n    assert somma(1, 1) == 2\n\n\n"
+                "def test_la_somma_fa_due():\n    assert callable(somma)\n\n\n"
                 "def test_la_differenza_fa_zero():\n"
                 "    from app.differenza import differenza\n"
                 "    assert differenza(1, 1) == 0\n",
@@ -2092,7 +2096,7 @@ class TestIlGateDelRossoCamminaICommit:
         })
         repo_di_prova.commit("test: la somma fa due", {
             "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
-                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+                tmp_path / "girato", "from app.somma import somma\n    assert callable(somma)"),
         })
         prima = repo_di_prova._git("worktree", "list")
 
@@ -2114,7 +2118,7 @@ class TestIlGateDelRossoCamminaICommit:
             "backend/tests/test_somma.py":
                 "from app.somma import somma\n\n\n"
                 "class TestLaSomma:\n"
-                "    def test_fa_due(self):\n        assert somma(1, 1) == 2\n",
+                "    def test_fa_due(self):\n        assert callable(somma)\n",
         })
 
         mancati = runner.gate_del_rosso()
@@ -2959,6 +2963,16 @@ class TestIlBuilderSaComeSiApreLaProduzione:
         esiste non fallisce, esplode in raccolta. Lo scheletro vuoto prima."""
         assert "scheletro" in self._prompt()
 
+    def test_dice_che_una_guardia_nata_verde_passa_solo_se_morde(self):
+        """Il Critic ordina guardie su comportamenti che ci sono già, e il Builder
+        le scrive: nascono verdi per forza. Il prompt deve dire che è lecito, e
+        a che condizione — il gate le rigira contro i mutanti delle righe del
+        branch, e passa solo quella che se ne accorge (PBI-105)."""
+        prompt = self._prompt()
+        assert "guardia" in prompt
+        assert "morde" in prompt
+        assert "mutant" in prompt
+
     def test_non_promette_piu_un_numero_di_commit_scollegato_dai_criteri(self):
         """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
         aritmetica: due o tre coppie non coprono otto comportamenti."""
@@ -3146,3 +3160,382 @@ class TestIlBuilderGiraDoveGliHookScattano:
         trappola annotata per il Critic."""
         assert "--allowedTools" in runner.BUILDER
         assert runner.BUILDER.index("--allowedTools") < len(runner.BUILDER) - 2
+
+
+class TestIMutantiSiFannoDalleRigheCambiate:
+    """La quarta lettura del gate: `PBI-105`.
+
+    Un test nato verde non prova niente **se non morde**. La domanda giusta non è
+    «è mai stato rosso?» ma «se guasto il codice che copre, se ne accorge?» — e la
+    seconda si misura, mentre la prima è una prova di processo che due giri su
+    quattro ha ucciso lavoro buono.
+
+    I mutanti si fanno sulle **righe che il branch ha cambiato**, non su tutto il
+    file: è il codice che quel giro ha scritto, ed è l'unico di cui i suoi test
+    devono rispondere. La cancellazione della riga è l'operatore più forte e vale
+    in tutti e due i linguaggi; gli scambi servono dove togliere la riga non
+    cambia niente di osservabile.
+    """
+
+    def test_cancella_la_riga_cambiata(self):
+        sorgente = "def calcola():\n    x = 1\n    return x\n"
+        mutanti = runner.mutanti_del_sorgente(sorgente, {2})
+
+        assert ("    x = 1", "") in [(m.prima, m.dopo) for m in mutanti]
+
+    def test_scambia_gli_operatori_di_confronto(self):
+        sorgente = "  const senza = soglia.valore === null\n"
+        dopo = [m.dopo for m in runner.mutanti_del_sorgente(sorgente, {1})]
+
+        assert "  const senza = soglia.valore !== null" in dopo
+
+    def test_scambia_la_congiunzione(self):
+        dopo = [m.dopo for m in runner.mutanti_del_sorgente("  if (a && b) return\n", {1})]
+
+        assert "  if (a || b) return" in dopo
+
+    def test_non_muta_le_righe_che_il_branch_non_ha_toccato(self):
+        sorgente = "  const a = 1 === 2\n  const b = 3 === 4\n"
+        mutanti = runner.mutanti_del_sorgente(sorgente, {1})
+
+        assert all(m.riga == 1 for m in mutanti)
+
+    def test_una_riga_di_sola_parentesi_non_e_un_mutante(self):
+        """Cancellarla rompe la sintassi e basta: il file non compila, nessun test
+        gira, e un guasto di forma non è una prova che il test morda."""
+        assert runner.mutanti_del_sorgente("}\n", {1}) == []
+
+
+class TestGliScambiValgonoInTuttiEDueILinguaggi:
+    """Il gate giudica pytest e vitest con la stessa regola, e i mutanti devono
+    saper guastare tutti e due i lati: `==`/`and`/`True` in Python valgono quanto
+    `===`/`&&`/`true` in TypeScript. Il confronto d'ordine — `<` che diventa `<=` —
+    è il guasto di confine, quello che un test scritto sul caso «giusto» non vede.
+    """
+
+    def _dopo(self, riga: str) -> list[str]:
+        return [m.dopo for m in runner.mutanti_del_sorgente(riga + "\n", {1})]
+
+    def test_scambia_uguale_e_diverso_di_python(self):
+        """E `===` ha già il suo scambio: leggerlo anche come `==` darebbe `!===`,
+        che non compila e non prova niente."""
+        assert "    if a != b:" in self._dopo("    if a == b:")
+        assert "    if a == b:" in self._dopo("    if a != b:")
+        assert self._dopo("  const c = a === b") == ["", "  const c = a !== b"]
+
+    def test_scambia_and_e_or(self):
+        assert "    if a or b:" in self._dopo("    if a and b:")
+        assert "    if a and b:" in self._dopo("    if a or b:")
+
+    def test_scambia_vero_e_falso(self):
+        assert "    aperto = False" in self._dopo("    aperto = True")
+        assert "  const aperto = false" in self._dopo("  const aperto = true")
+
+    def test_scambia_il_confronto_di_confine(self):
+        assert "    if a <= b:" in self._dopo("    if a < b:")
+        assert "    if a < b:" in self._dopo("    if a <= b:")
+        assert "  if (a >= b) return" in self._dopo("  if (a > b) return")
+        assert "  if (a > b) return" in self._dopo("  if (a >= b) return")
+
+    def test_la_freccia_non_e_un_confronto(self):
+        """`=>` e `->` contengono un `>` che non decide niente."""
+        assert self._dopo("  const f = (x) => x") == [""]
+        assert self._dopo("def f() -> int:") == []
+
+    def test_una_riga_di_commento_non_si_cancella(self):
+        assert self._dopo("    # la somma") == []
+        assert self._dopo("  // la somma") == []
+
+    def test_una_riga_che_apre_un_blocco_non_si_cancella(self):
+        """Senza il `def` la riga dopo è un'indentazione senza padrone, e senza la
+        `{` il file non chiude: sono guasti di forma, e vanno solo a tempo perso."""
+        assert self._dopo("def somma(a, b):") == []
+        assert self._dopo("export function somma(a: number, b: number) {") == []
+        assert self._dopo("  const voci = NAV_ITEMS.filter(") == []
+
+
+class TestLeRigheCambiateSiLeggonoDalDiff:
+    """Quali righe si mutano: quelle di produzione che il branch ha cambiato **fino a
+    quel commit**, nella numerazione del file a quel commit — è lì che il test
+    nato verde viene rigirato, e un numero di riga preso altrove guasterebbe la
+    riga sbagliata."""
+
+    def test_le_righe_nuove_di_un_file_nuovo_e_quelle_toccate_di_uno_vecchio(
+        self, repo_di_prova
+    ):
+        vecchio = repo_di_prova.commit("feat: la differenza", {
+            "backend/app/differenza.py":
+                "def differenza(a, b):\n    return a - b\n\n\ndef zero():\n    return 0\n",
+        })
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        sha = repo_di_prova.commit("feat: la somma, e lo zero che diventa uno", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/app/differenza.py":
+                "def differenza(a, b):\n    return a - b\n\n\ndef zero():\n    return 1\n",
+        })
+
+        righe = runner.righe_cambiate("origin/main", sha)
+
+        assert righe == {"backend/app/somma.py": {1, 2},
+                         "backend/app/differenza.py": {6}}
+
+    def test_i_test_i_documenti_e_le_sole_cancellazioni_non_contano(self, repo_di_prova):
+        """Si muta la produzione: un test non è ciò che il test guarda, un `.md`
+        non gira, e una riga tolta non c'è più da guastare."""
+        vecchio = repo_di_prova.commit("feat: la somma, con una riga di troppo", {
+            "backend/app/somma.py": "def somma(a, b):\n    c = 0\n    return a + b\n",
+        })
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        sha = repo_di_prova.commit("refactor: togli la riga di troppo", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/tests/test_somma.py": "def test_x():\n    assert True\n",
+            "docs/somma.md": "# la somma\n",
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {}
+
+
+class TestIlTestNatoVerdePassaSeMorde:
+    """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
+
+    «Nato verde» è una prova di processo con un falso positivo sistematico: la
+    guardia che il Critic ordina su un comportamento che c'è già nasce verde per
+    forza, e su PBI-333 ha chiuso due giri su quattro. Prima di fermare, il gate
+    muta le righe di produzione che il branch ha cambiato e rigira **quel test**:
+    un mutante ucciso è la prova che il test guarda quelle righe.
+    """
+
+    def test_una_guardia_che_uccide_un_mutante_passa_e_il_gate_dice_quale(
+        self, repo_di_prova, tmp_path
+    ):
+        """Il caso di `9f952c0`: il test nasce verde, e cancellata la riga che
+        somma si accorge che il totale non c'è più.
+
+        Tre righe e non due: con `return a + b` da solo l'unico mutante è il `def`
+        vuoto, che non compila e non si prova — e una guardia che non ha mutanti
+        da uccidere non è il caso di questo test."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
+        })
+        sha = repo_di_prova.commit("test: la somma fa due", {
+            "backend/tests/test_somma.py": sorgente_che_lascia_un_segno(
+                tmp_path / "girato", "from app.somma import somma\n    assert somma(1, 1) == 2"),
+        })
+        morsi: list[dict[str, str]] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [m["commit"] for m in morsi] == [sha[:7]]
+        assert morsi[0]["test"] == "tests/test_somma.py::test_la_somma_fa_due"
+        assert "backend/app/somma.py:2" in morsi[0]["mutante"]
+        assert "totale = a + b" in morsi[0]["mutante"]
+        assert "riga cancellata" in morsi[0]["mutante"]
+
+    def test_una_guardia_che_non_uccide_nessun_mutante_ferma_e_dice_quanti_ne_ha_provati(
+        self, repo_di_prova
+    ):
+        """«Nato verde e non morde» è una lettura più forte di «il codice c'era
+        già»: dice che il test non guarda le righe che il branch ha scritto. Il
+        conto dei mutanti provati è ciò che permette a chi legge di crederci."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
+        })
+        sha = repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+        morsi: list[dict[str, str]] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+        assert "2 mutanti provati" in mancati[0]["esito"]
+
+    def test_senza_righe_da_mutare_la_lettura_lo_dice(self, repo_di_prova):
+        """Un `def` con il solo `return` ha un mutante solo, e non compila: zero
+        provati non è «nessuno lo fa fallire», è «non c'era niente da provare»."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+        })
+        repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert "nato verde" in mancati[0]["esito"]
+        assert "nessun mutante da provare" in mancati[0]["esito"]
+
+    def test_si_mutano_solo_i_file_del_linguaggio_del_test(self, repo_di_prova):
+        """Un test Python non morde un `.ts`: mutare l'altra metà del monolite è
+        tempo speso a rigirare un test che non può vedere niente — e un conto
+        gonfiato di mutanti che «non lo fanno fallire»."""
+        repo_di_prova.commit("feat: la somma, di qua e di là", {
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
+            "frontend/src/lib/somma.ts":
+                "export function somma(a: number, b: number) {\n"
+                "  const totale = a + b\n  return totale\n}\n",
+        })
+        repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert "2 mutanti provati" in mancati[0]["esito"], (
+            "le righe del .ts sono entrate nel conto di un test Python"
+        )
+
+    def test_il_file_mutato_torna_com_era_dopo_la_prova(self, repo_di_prova):
+        """L'ultimo mutante non deve restare nel worktree: il secondo test nato
+        verde dello stesso commit leggerebbe un file già guasto, e i suoi mutanti
+        nascerebbero da lì — o troverebbe rosso per una ragione che non è la sua."""
+        sorgente = "def somma(a, b):\n    totale = a + b\n    return totale\n"
+        repo_di_prova.commit("feat: la somma", {"backend/app/somma.py": sorgente})
+        sha = repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+        nuovi = runner.test_nuovi_del_commit(sha)
+
+        with runner.worktree_usa_e_getta(sha) as albero:
+            comandi, _ = runner.comandi_dei_test(albero, nuovi)
+            runner.quarta_lettura(albero, "origin/main", sha, comandi[0],
+                                  "tests/test_somma.py::test_la_somma_esiste")
+
+            assert (albero / "backend/app/somma.py").read_text() == sorgente
+
+
+class TestITestCheMordonoFinisconoNelRapporto:
+    """Un test nato verde che passa per la quarta lettura non sparisce: il
+    rapporto del giro dice **perché** è passato — commit, test, mutante — accanto
+    ai commit senza rosso. Chi rilegge il giro deve poter andare a quella riga e
+    vedere il guasto che il test ha sentito; e chi non ci crede deve poterlo
+    contestare col Protocollo di rifinitura di PBI-105.
+    """
+
+    MORSO = {"commit": "9f952c0",
+             "titolo": "test(analisi): presidia l'altra metà della regola del rail",
+             "test": "src/components/AppLayout.test.tsx -t su una pratica tiene accesa "
+                     "la sezione che la contiene",
+             "mutante": "frontend/src/lib/nav.ts:67  `a || b` → `a && b`"}
+
+    def _mondo(self, monkeypatch):
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p: runner.Verdetto("pass", "", "ok"))
+
+        def _gate(visti=None, morsi=None, **k):
+            morsi.append(dict(self.MORSO))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+
+    def test_il_morso_finisce_nellesito_e_a_schermo(self, monkeypatch, capsys):
+        self._mondo(monkeypatch)
+
+        esito = runner.esegui_pbi("PBI-105", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        assert esito.test_che_mordono == [self.MORSO]
+        a_schermo = capsys.readouterr().out
+        assert "9f952c0" in a_schermo and "morde" in a_schermo
+        assert "nav.ts:67" in a_schermo
+
+    def test_anche_il_gate_lanciato_da_solo_li_stampa(self, monkeypatch, capsys):
+        """`--gate-rosso` è il modo di rileggere un `fermato` e di provare un branch
+        chiuso: se non dice chi è passato per la quarta lettura, la prova sul caso
+        vero — `9f952c0` — non si può leggere da nessuna parte."""
+        def _gate(base, ref, morsi=None, **k):
+            morsi.append(dict(self.MORSO))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+
+        assert runner.stampa_il_gate_del_rosso("origin/main..pbi/pbi-333-giro4") == 0
+        a_schermo = capsys.readouterr().out
+        assert "9f952c0" in a_schermo and "morde" in a_schermo
+        assert "nav.ts:67" in a_schermo
+
+
+class TestIlMorsoEUnFallimentoPerAsserzione:
+    """Guardia nata verde su `falliti_per_asserzione` — e giudicata, come ogni
+    guardia, dalla quarta lettura di questo stesso branch.
+
+    Il lato pytest lo esercitano già le fixture `callable(somma)`; qui il lato
+    vitest, che legge dal json: il file che non si carica non ha esiti per test
+    e non è un morso, l'asserzione fallita lo è.
+    """
+
+    def _comando(self, rapporto):
+        return runner.ComandoDiProva(Path("/nessuna"), ["npm", "test"], "vitest",
+                                     {"morde": "x.test.ts -t morde"}, rapporto)
+
+    def test_il_file_che_vitest_non_carica_non_e_un_morso(self, tmp_path):
+        rapporto = tmp_path / "vitest.json"
+        rapporto.write_text(json.dumps({"testResults": [
+            {"status": "failed", "assertionResults": []}]}))
+
+        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == set()
+
+    def test_lasserzione_fallita_e_un_morso(self, tmp_path):
+        rapporto = tmp_path / "vitest.json"
+        rapporto.write_text(json.dumps({"testResults": [{"status": "failed", "assertionResults": [
+            {"title": "morde", "status": "failed"},
+            {"title": "non morde", "status": "passed"}]}]}))
+
+        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == {"morde"}
+
+    def test_in_pytest_conta_il_failed_e_non_lerror(self):
+        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python",
+                                        {"tests/test_x.py::test_a": "tests/test_x.py::test_a"})
+        uscita = ("tests/test_x.py::test_a FAILED\n"
+                  "tests/test_x.py::test_b ERROR\n"
+                  "tests/test_x.py::test_c PASSED\n")
+
+        assert runner.falliti_per_asserzione(comando, uscita) == {"tests/test_x.py::test_a"}
+
+
+class TestSiCancellaSoloDentroUnCorpo:
+    """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
+    la guardia ha ucciso era la cancellazione di `import { … } from '../lib/nav'`
+    in `AppLayout.tsx`. Non è un guasto di **comportamento**, è un guasto di
+    **esistenza**: senza quell'import ogni test che rende il componente fallisce,
+    compreso uno che non guarda niente. Lo stesso vale per un `export const` o
+    per una costante di modulo in Python. La riga a livello di modulo — senza
+    indentazione — dichiara; la riga dentro un corpo decide, ed è quella che si
+    cancella. Gli scambi restano dove sono, anche a livello di modulo.
+    """
+
+    def _dopo(self, riga: str) -> list[str]:
+        return [m.dopo for m in runner.mutanti_del_sorgente(riga + "\n", {1})]
+
+    def test_una_importazione_non_si_cancella(self):
+        assert self._dopo("import { navItemsForRole } from '../lib/nav'") == []
+        assert self._dopo("from app.somma import somma") == []
+
+    def test_una_dichiarazione_di_modulo_non_si_cancella_ma_si_scambia(self):
+        assert self._dopo("export const APERTO = true") == ["export const APERTO = false"]
+        assert self._dopo("SOGLIA_ALTA = 1 < 2") == ["SOGLIA_ALTA = 1 <= 2"]
+
+    def test_dentro_un_corpo_si_cancella(self):
+        assert "" in self._dopo("    totale = a + b")
+        assert "" in self._dopo("  const totale = a + b")
