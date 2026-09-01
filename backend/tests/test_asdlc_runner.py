@@ -2859,3 +2859,73 @@ class TestIlCommitNonNasceFuoriFase:
         hook.write_text("#!/bin/sh\n# di qualcun altro\n", encoding="utf-8")
         runner.installa_la_guardia_del_commit()
         assert "di qualcun altro" in hook.read_text()
+
+
+class TestOgniCommitRiportaAllaFaseDelTest:
+    """Il ciclo si chiude da sé, o il lucchetto vale una volta sola.
+
+    Il Builder fa molti criteri in una sessione, e fra un commit e l'altro il
+    runner non c'è: se `IMPL` restasse aperta dopo il primo permesso, il secondo
+    comportamento tornerebbe a nascere senza rosso e avremmo speso tutto questo
+    per un criterio solo. Chi vede ogni commit è git, quindi è git a riportare
+    la fase indietro — `post-commit`, subito dopo che il commit è nato.
+    """
+
+    def test_il_post_commit_riporta_in_test_only(self, repo_di_prova):
+        (repo_di_prova.radice / runner.FILE_DELLA_FASE).write_text(f"{runner.FASE_IMPL}\n")
+        runner.installa_il_ritorno_in_test_only()
+        hook = repo_di_prova.radice / ".git" / "hooks" / "post-commit"
+
+        assert hook.is_file() and os.access(hook, os.X_OK)
+        repo_di_prova.commit("feat: il minimo che fa passare il test",
+                             {"backend/app/foglio.py": "def calcola():\n    return 1\n"})
+
+        assert (repo_di_prova.radice / runner.FILE_DELLA_FASE).read_text().strip() == \
+            runner.FASE_TEST_ONLY
+
+    def test_fuori_da_un_giro_il_post_commit_non_crea_niente(self, repo_di_prova):
+        runner.installa_il_ritorno_in_test_only()
+        repo_di_prova.commit("chore: un commit di una persona", {"README.md": "ciao\n"})
+
+        assert not (repo_di_prova.radice / runner.FILE_DELLA_FASE).exists()
+
+
+class TestIlGiroSiApreInTestOnly:
+    """Il lucchetto si accende con il giro e si spegne con lui: un worktree
+    lasciato in fase è un worktree in cui la sessione dopo non può scrivere, e la
+    diagnosi costerebbe più del giro."""
+
+    def test_apri_la_fase_installa_gli_hook_e_scrive_test_only(self, repo_di_prova):
+        runner.apri_la_fase()
+
+        assert (repo_di_prova.radice / runner.FILE_DELLA_FASE).read_text().strip() == \
+            runner.FASE_TEST_ONLY
+        assert (repo_di_prova.radice / ".git" / "hooks" / "pre-commit").is_file()
+        assert (repo_di_prova.radice / ".git" / "hooks" / "post-commit").is_file()
+
+    def test_chiudi_la_fase_toglie_il_file(self, repo_di_prova):
+        runner.apri_la_fase()
+        runner.chiudi_la_fase()
+
+        assert not (repo_di_prova.radice / runner.FILE_DELLA_FASE).exists()
+
+    def test_chiudere_due_volte_non_e_un_errore(self, repo_di_prova):
+        runner.chiudi_la_fase()
+        runner.chiudi_la_fase()
+
+    def test_il_giro_apre_la_fase_e_la_chiude(self, tmp_path, monkeypatch):
+        """Il PBI non si esegue mai senza lucchetto: aprirlo è del runner."""
+        visto: dict[str, object] = {}
+        monkeypatch.setattr(runner, "trova_pbi", lambda pbi: tmp_path / "backlog" / f"{pbi}.md")
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        monkeypatch.setattr(runner, "crea_branch", lambda pbi: f"pbi/{pbi.lower()}")
+        monkeypatch.setattr(runner, "apri_la_fase", lambda: visto.__setitem__("aperta", True))
+        monkeypatch.setattr(runner, "chiudi_la_fase", lambda: visto.__setitem__("chiusa", True))
+        monkeypatch.setattr(runner, "gira_builder",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("basta")))
+
+        with pytest.raises(RuntimeError):
+            runner.esegui_pbi("PBI-333", set(), dry=False, con_pr=False)
+
+        assert visto.get("aperta"), "il giro deve aprire la fase prima del Builder"
