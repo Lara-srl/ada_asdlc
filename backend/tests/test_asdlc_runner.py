@@ -3384,3 +3384,23 @@ class TestIlTestNatoVerdePassaSeMorde:
         assert "2 mutanti provati" in mancati[0]["esito"], (
             "le righe del .ts sono entrate nel conto di un test Python"
         )
+
+    def test_il_file_mutato_torna_com_era_dopo_la_prova(self, repo_di_prova):
+        """L'ultimo mutante non deve restare nel worktree: il secondo test nato
+        verde dello stesso commit leggerebbe un file già guasto, e i suoi mutanti
+        nascerebbero da lì — o troverebbe rosso per una ragione che non è la sua."""
+        sorgente = "def somma(a, b):\n    totale = a + b\n    return totale\n"
+        repo_di_prova.commit("feat: la somma", {"backend/app/somma.py": sorgente})
+        sha = repo_di_prova.commit("test: la somma esiste", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_esiste():\n    assert callable(somma)\n",
+        })
+        nuovi = runner.test_nuovi_del_commit(sha)
+
+        with runner.worktree_usa_e_getta(sha) as albero:
+            comandi, _ = runner.comandi_dei_test(albero, nuovi)
+            runner.quarta_lettura(albero, "origin/main", sha, comandi[0],
+                                  "tests/test_somma.py::test_la_somma_esiste")
+
+            assert (albero / "backend/app/somma.py").read_text() == sorgente
