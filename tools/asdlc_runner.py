@@ -2006,11 +2006,29 @@ def installa_la_guardia_del_commit() -> bool:
     return installa_un_hook("pre-commit", GUARDIA_DEL_COMMIT)
 
 
+def cartella_degli_hook() -> Path | None:
+    """`.git/hooks` di questo albero, o `None` se non si riesce a dirlo.
+
+    Il controllo sulla forma del percorso non è paranoia: sotto i test `git` è
+    sostituito e torna la stringa vuota, `Path("")` è la cartella corrente, e i
+    due hook finivano nella radice del repository vero. Un dubbio su dove si sta
+    scrivendo si risolve non scrivendo.
+    """
+    try:
+        detto = git("rev-parse", "--git-path", "hooks")
+    except RuntimeError:
+        return None
+    if not detto or Path(detto).name != "hooks":
+        return None
+    cartella = Path(detto)
+    return cartella if cartella.is_absolute() else REPO / cartella
+
+
 def installa_un_hook(nome: str, corpo: str) -> bool:
     """Scrive un hook di git in `.git/hooks`, e `False` se ce n'era già uno."""
-    cartella = Path(git("rev-parse", "--git-path", "hooks"))
-    if not cartella.is_absolute():
-        cartella = REPO / cartella
+    cartella = cartella_degli_hook()
+    if cartella is None:
+        return False
     cartella.mkdir(parents=True, exist_ok=True)
     hook = cartella / nome
     if hook.exists():
@@ -2043,6 +2061,8 @@ def apri_la_fase() -> None:
     versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
     albero appena clonato non li avrebbe.
     """
+    if cartella_degli_hook() is None:
+        return  # non c'è un repository sotto: non c'è un giro da lucchettare
     installa_la_guardia_del_commit()
     installa_il_ritorno_in_test_only()
     (REPO / FILE_DELLA_FASE).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
