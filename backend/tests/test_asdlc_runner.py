@@ -3190,3 +3190,51 @@ class TestIMutantiSiFannoDalleRigheCambiate:
         """Cancellarla rompe la sintassi e basta: il file non compila, nessun test
         gira, e un guasto di forma non è una prova che il test morda."""
         assert runner.mutanti_del_sorgente("}\n", {1}) == []
+
+
+class TestGliScambiValgonoInTuttiEDueILinguaggi:
+    """Il gate giudica pytest e vitest con la stessa regola, e i mutanti devono
+    saper guastare tutti e due i lati: `==`/`and`/`True` in Python valgono quanto
+    `===`/`&&`/`true` in TypeScript. Il confronto d'ordine — `<` che diventa `<=` —
+    è il guasto di confine, quello che un test scritto sul caso «giusto» non vede.
+    """
+
+    def _dopo(self, riga: str) -> list[str]:
+        return [m.dopo for m in runner.mutanti_del_sorgente(riga + "\n", {1})]
+
+    def test_scambia_uguale_e_diverso_di_python(self):
+        """E `===` ha già il suo scambio: leggerlo anche come `==` darebbe `!===`,
+        che non compila e non prova niente."""
+        assert "    if a != b:" in self._dopo("    if a == b:")
+        assert "    if a == b:" in self._dopo("    if a != b:")
+        assert self._dopo("  const c = a === b") == ["", "  const c = a !== b"]
+
+    def test_scambia_and_e_or(self):
+        assert "    if a or b:" in self._dopo("    if a and b:")
+        assert "    if a and b:" in self._dopo("    if a or b:")
+
+    def test_scambia_vero_e_falso(self):
+        assert "    aperto = False" in self._dopo("    aperto = True")
+        assert "  const aperto = false" in self._dopo("  const aperto = true")
+
+    def test_scambia_il_confronto_di_confine(self):
+        assert "    if a <= b:" in self._dopo("    if a < b:")
+        assert "    if a < b:" in self._dopo("    if a <= b:")
+        assert "  if (a >= b) return" in self._dopo("  if (a > b) return")
+        assert "  if (a > b) return" in self._dopo("  if (a >= b) return")
+
+    def test_la_freccia_non_e_un_confronto(self):
+        """`=>` e `->` contengono un `>` che non decide niente."""
+        assert self._dopo("  const f = (x) => x") == [""]
+        assert self._dopo("def f() -> int:") == []
+
+    def test_una_riga_di_commento_non_si_cancella(self):
+        assert self._dopo("    # la somma") == []
+        assert self._dopo("  // la somma") == []
+
+    def test_una_riga_che_apre_un_blocco_non_si_cancella(self):
+        """Senza il `def` la riga dopo è un'indentazione senza padrone, e senza la
+        `{` il file non chiude: sono guasti di forma, e vanno solo a tempo perso."""
+        assert self._dopo("def somma(a, b):") == []
+        assert self._dopo("export function somma(a: number, b: number) {") == []
+        assert self._dopo("  const voci = NAV_ITEMS.filter(") == []
