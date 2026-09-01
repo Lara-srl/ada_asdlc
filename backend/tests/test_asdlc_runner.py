@@ -3107,3 +3107,42 @@ class TestIlPromptDiceDiCommittareIlRossoPrima:
         assert posto_del_commit < posto_della_richiesta, (
             "il prompt deve dire di committare il RED prima di chiedere il permesso"
         )
+
+
+class TestIlBuilderGiraDoveGliHookScattano:
+    """Misurato il 01/09: `--dangerously-skip-permissions` **non chiama gli hook**.
+
+    La documentazione di Claude Code dice il contrario — in `bypassPermissions`
+    *«hooks remain active and can block via exit 2»* — e su questa versione è
+    falso: l'hook non viene invocato affatto, in silenzio, che è il modo peggiore
+    di non funzionare. Provato su un repo apposta, quattro modalità:
+
+    | modalità                          | Bash | hook | scrittura fuori fase |
+    |-----------------------------------|------|------|----------------------|
+    | `--dangerously-skip-permissions`  | sì   | no   | **passa**            |
+    | `--permission-mode auto`          | sì   | no   | **passa**            |
+    | `--permission-mode dontAsk`       | no   | sì   | bloccata             |
+    | `acceptEdits`                     | no   | sì   | bloccata             |
+    | `acceptEdits` + `--allowedTools Bash` | sì | sì | bloccata             |
+
+    L'ultima riga è l'unica in cui il Builder può lavorare **e** il lucchetto
+    esiste: le modifiche ai file sono accettate senza chiedere, ma passano
+    dall'hook; `Bash` è permesso per nome, e senza quel permesso gira in una
+    sandbox che non scrive fuori dalla working directory.
+    """
+
+    def test_non_gira_nella_modalita_che_spegne_gli_hook(self):
+        assert "--dangerously-skip-permissions" not in runner.BUILDER, (
+            "in bypassPermissions l'hook di fase non viene chiamato: il lucchetto non c'è"
+        )
+
+    def test_gira_dove_gli_hook_scattano_e_bash_funziona(self):
+        assert "acceptEdits" in runner.BUILDER
+        assert "Bash" in runner.BUILDER
+
+    def test_allowedtools_non_e_in_coda(self):
+        """`--allowedTools` è variadico: in coda si mangia il prompt, che il
+        runner concatena subito dopo, e `-p` parte senza input. È la stessa
+        trappola annotata per il Critic."""
+        assert "--allowedTools" in runner.BUILDER
+        assert runner.BUILDER.index("--allowedTools") < len(runner.BUILDER) - 2
