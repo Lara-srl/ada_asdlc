@@ -166,7 +166,12 @@ Esegui il PBI con queste regole non negoziabili:
      successivo per quanto ti sia già chiaro: ciò che scrivi adesso senza un rosso
      davanti non potrai più dimostrarlo, e il criterio dopo ha diritto al suo ciclo;
   5. committa il `feat` o il `fix`, di sola produzione — il commit riporta il giro in
-     `TEST_ONLY`, e si ricomincia dal punto 1 col criterio dopo.
+     `TEST_ONLY`, e si ricomincia dal punto 1 col criterio dopo. **I commenti che quel
+     cambiamento rende falsi si correggono in questo stesso commit**: una frase che dice
+     ancora dove stava una casella spostata non ha comportamento, nessun test la può
+     nominare, e chiusa la produzione non c'è più un rosso che riapra quel file — il
+     giro 4 di PBI-335 (03/09/2026) si è fermato lì. Prima di committare, cerca nei
+     file dello Scope le righe che parlano di ciò che hai spostato o tolto.
   In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
   il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
   dillo con `STOP:`.
