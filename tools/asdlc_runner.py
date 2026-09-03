@@ -358,7 +358,14 @@ sempre: il `test (RED)` committato da solo, `--chiedi-impl` che apre la fase per
 vede fallire, e poi il `fix`. Sono **due** commit, mai uno: il rosso non può essere
 esistito in mezzo a un commit solo.
 
-Se il rosso non si ottiene in nessuno dei due modi, **non** riscrivere la storia per
+**Se il rilievo è un commento falso in un file di produzione** — una frase che manda a
+un posto che non c'è più: non c'è un rosso da osservare, e in `TEST_ONLY` quel file è
+chiuso. Non recitare un rosso e non spegnere un hook per passarci. Se in questo giro apri
+`IMPL` per un rilievo vero sullo stesso file, la correzione viaggia dentro quel `fix`;
+altrimenti lascia il rilievo aperto e nomina file e riga nella risposta: lo corregge
+chi mergia (PBI-104, 03/09/2026).
+
+Se il rosso non si ottiene in nessuno di questi modi, **non** riscrivere la storia per
 nasconderlo: scrivi nel commit perché non era osservabile e lascialo vedere.
 
 **Un rilievo non si chiude spegnendo ciò che lo ha trovato.** Cancellare un test, allargare
