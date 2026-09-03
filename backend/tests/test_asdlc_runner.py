@@ -510,6 +510,27 @@ class TestIlPromptDiRimedioSiReggeDaSolo:
         assert "test" in prompt.lower(), "il rimedio non si chiude spegnendo un test"
         assert "commit" in prompt.lower(), "un commit per rimedio, come nel resto del PBI"
 
+    def test_dice_cosa_fare_di_un_commento_falso_in_produzione(self):
+        """Il terzo caso, trovato dal giro 4 di PBI-335 (03/09/2026).
+
+        Il rilievo era due commenti sbagliati in `PratichePage.tsx` e in
+        `e2e/contract.ts`. Non è né «manca la guardia» né «il codice è
+        sbagliato»: un commento non ha comportamento, non c'è un rosso da
+        osservare e in `TEST_ONLY` quel file è chiuso. Il Builder ha rifiutato
+        le due scappatoie — un rosso recitato, un hook spento — e ha scritto la
+        domanda. Il prompt deve nominare il caso e dire la strada, perché al giro
+        dopo la stessa domanda tornerebbe uguale.
+        """
+        prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+        assert "commento falso" in prompt, (
+            "un rilievo di solo commento in un file di produzione non ha un rosso: "
+            "senza una strada scritta il Builder si ferma o imbroglia"
+        )
+        assert "chi mergia" in prompt, (
+            "se nel giro non si apre IMPL su quel file, la correzione la fa chi mergia: "
+            "il Builder lascia il rilievo aperto e nomina file e riga"
+        )
+
 
 class TestUnGiroSpesoACommittareNonEUnGateRosso:
     """PBI-208, notte del 24/08: `rosso` in dieci minuti **senza un gate eseguito**.
