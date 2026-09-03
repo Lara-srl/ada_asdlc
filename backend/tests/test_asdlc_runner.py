@@ -86,6 +86,20 @@ def git_finto(monkeypatch):
 class TestIlCriticPuoSospendere:
     """Un rilievo che aspetta una persona non è «non pronto»: è un'altra diagnosi."""
 
+    def test_un_commento_falso_non_fa_non_pronto_da_solo(self):
+        """Giro 4 di PBI-335 (03/09/2026): il Critic ha chiesto due commenti corretti.
+
+        Il Builder in `TEST_ONLY` non può toccarli, e non c'è un rosso che
+        apra quel file: un `NON PRONTO` per una frase manda il Builder a girare
+        su un rimedio che non può eseguire. È un terzo esito, né rilievo né
+        domanda: una nota per chi mergia, che non pesa sul verdetto.
+        """
+        prompt = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md").lower()
+        assert "note per chi mergia" in prompt, (
+            "un commento falso in un file di produzione si segnala sotto un titolo "
+            "suo, fuori dai rilievi numerati, e da solo non fa NON PRONTO"
+        )
+
     def test_riconosce_il_verdetto_sospeso_e_ne_prende_la_domanda(self, monkeypatch):
         uscita = (
             "**1. [processo] Il CHIEDI sulla migrazione è stato saltato**\n"
