@@ -1217,6 +1217,27 @@ class TestIlBranchLoPubblicaIlRunner:
         prompt = runner.PROMPT_BUILDER.lower()
         assert "assenza" in prompt and "restrizione" in prompt
 
+    def test_il_builder_corregge_i_commenti_nel_fix_che_li_rende_falsi(self):
+        """Il giro 4 di PBI-335 (03/09/2026) si è fermato su due commenti.
+
+        `PratichePage.tsx:1892` ed `e2e/contract.ts:109` mandavano ancora il N°
+        preventivo in accettazione, dopo che `4868355` l'aveva portato in
+        testata. Il Critic li ha chiesti corretti; il Builder, in `TEST_ONLY`,
+        non poteva: un commento non ha comportamento, nessun test lo nomina,
+        nessun rosso riapre quel file. Le uniche uscite erano un rosso recitato
+        o un hook spento, e ha fatto bene a non prenderle.
+
+        Il momento in cui quel commento si corregge esiste ed è uno solo: il
+        `fix` che lo rende falso, quando la produzione è ancora aperta. Il
+        prompt deve dirlo lì, al passo in cui il commit di produzione nasce.
+        """
+        prompt = runner.PROMPT_BUILDER.lower()
+        assert "commenti" in prompt and "rende falsi" in prompt, (
+            "il commento che un fix rende falso si corregge nello stesso commit del "
+            "fix: dopo, in TEST_ONLY, non c'è più un rosso che riapra quel file "
+            "(PBI-335 giro 4, 03/09/2026)"
+        )
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
