@@ -467,16 +467,37 @@ class TestIlPromptDiRimedioSiReggeDaSolo:
         insieme) — dopo che il Critic aveva chiesto proprio quei test. Ripetere
         «test-first» senza dire **come** è un ordine che non si può eseguire, e
         un ordine ineseguibile lo si smette di leggere.
+
+        Il **come** è cambiato. Il prompt ordinava di riportare il test davanti
+        al codice con un `git rebase` e di verificarlo rosso lì; il giro 6 di
+        PBI-333 si è chiuso `sospeso` proprio su quella domanda, e il 02/09/2026
+        Francesco ha deciso che **il riordino non vale come rosso osservato**
+        (`PBI-105`, misurato su un albero staccato identico byte per byte). La
+        contraddizione era interna alla macchina: `ADR-0021` chiede il rosso
+        prima, e questo prompt ordinava il gesto che lo fabbrica dopo. La strada
+        buona esiste ed è `ADR-0022`: il test resta in coda, si **dichiara** nato
+        verde, e a dire se guarda qualcosa sono i mutanti del gate.
         """
         prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
 
-        assert "rebase" in prompt, (
-            "senza il riordino il Builder non ha modo di rendere rosso un test "
-            "scritto su codice che c'è già: è l'unico gesto che glielo permette"
+        assert "rebase" not in prompt, (
+            "il riordino della storia non vale come rosso osservato (PBI-105, "
+            "02/09): ordinarlo qui rifabbrica a ogni revisione la contraddizione "
+            "con ADR-0021. Su questa strada l'unica cosa che il Builder spostava "
+            "era il test — se un giorno servisse un rebase dei soli messaggi, "
+            "questa asserzione si restringe apposta, non si cancella"
+        )
+        assert "nato verde" in prompt, (
+            "tolto il riordino, senza la dichiarazione il Builder non ha strada: "
+            "un test che nasce verde va detto tale, non spacciato per un RED"
+        )
+        assert "morde" in prompt, (
+            "a dire se quel test vale è la quarta lettura di ADR-0022 — i "
+            "mutanti delle righe del branch — non la posizione del suo commit"
         )
         assert "rosso" in prompt, (
-            "il criterio è il rosso a quel commit, non il riordino per sé: "
-            "un rebase che lascia il test verde non ha chiuso niente"
+            "il rosso resta dovuto quando il rilievo è che il codice è sbagliato: "
+            "lì il test fallisce davvero, e sono due commit"
         )
 
     def test_ripete_le_regole_che_il_rimedio_puo_violare(self):

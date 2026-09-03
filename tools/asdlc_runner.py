@@ -328,16 +328,33 @@ del resto del PBI (`tipo(scope): descrizione imperativa`, in italiano). Valgono 
 regole di prima: test-first, la spec nello stesso commit del codice che ne cambia il
 comportamento, niente modifiche non committate.
 
-**Qui «test-first» vuol dire riordinare la storia.** Il codice che il rilievo riguarda è
-già committato: un test scritto adesso nasce verde, e il gate del rosso lo ferma — a
-ragione, perché un test mai stato rosso non ha dimostrato di mordere. Quindi:
+**Qui «test-first» vuol dire dichiarare, non riordinare.** Il codice che il rilievo
+riguarda è già committato: un test scritto adesso nasce verde, e non c'è gesto che possa
+renderlo rosso davvero. Spostarlo indietro nella storia lascia un albero identico e un
+rosso recitato, e **non vale come rosso osservato** (deciso il 02/09/2026, misurato in
+`PBI-105`): non farlo. Le due strade sono queste, e la scelta la fa il rilievo.
 
-- il test che chiude un rilievo entra in storia **prima** del commit che lo fa passare:
-  scrivilo, spostalo lì con `git rebase`, e verifica che a quel commit sia **rosso**;
-- se il rimedio è anche una correzione di codice, sono **due** commit — `test (RED)` e poi
-  il `fix` — mai uno: il rosso non può essere esistito in mezzo a un commit solo;
-- se il rosso non si ottiene in nessun modo, **non** riscrivere la storia per nasconderlo:
-  scrivi nel commit perché non era osservabile e lascialo vedere.
+**Se il rilievo è che un comportamento non ha un test che lo presidia** — il codice è
+giusto, manca la guardia:
+
+- il test resta **in coda**, dove lo stai scrivendo. Si committa da solo, in `TEST_ONLY`,
+  senza `--chiedi-impl`: non c'è produzione da aprire, e i test nuovi passano già;
+- il messaggio lo **dichiara nato verde**, con la stessa parola che userà il gate, e dice
+  su quale comportamento monta la guardia. Non spacciarlo per un `(RED)`: il gate legge
+  il diff, e un rosso dichiarato che non c'è stato costa il giro;
+- a dire se quel test vale non sei tu, è il gate: lo rigira contro i **mutanti** delle
+  righe che il branch ha cambiato — la riga cancellata, `===` che diventa `!==`, `&&` che
+  diventa `||` — e lo lascia passare solo se almeno uno lo fa fallire (`ADR-0022`);
+- se non morde, il difetto è **nel test**: un'asserzione vera comunque, un dato costruito
+  perché il guasto non si veda. Riscrivilo perché guardi quelle righe.
+
+**Se il rilievo è che il codice è sbagliato**, il rosso c'è davvero e si chiede come
+sempre: il `test (RED)` committato da solo, `--chiedi-impl` che apre la fase perché lo
+vede fallire, e poi il `fix`. Sono **due** commit, mai uno: il rosso non può essere
+esistito in mezzo a un commit solo.
+
+Se il rosso non si ottiene in nessuno dei due modi, **non** riscrivere la storia per
+nasconderlo: scrivi nel commit perché non era osservabile e lascialo vedere.
 
 **Un rilievo non si chiude spegnendo ciò che lo ha trovato.** Cancellare un test, allargare
 una tolleranza o aggiungere uno `skip` fa passare il gate e disfa la cosa che il gate
