@@ -1764,7 +1764,7 @@ def crea_branch(pbi: str) -> str:
     disallineato.
     """
     git("fetch", "origin", "main")
-    branch = nome_libero(pbi, rami_su_origin(pbi))
+    branch = nome_libero(pbi, rami_su_origin(pbi) | rami_locali(pbi))
     git("switch", "-c", branch, "origin/main")
     return branch
 
@@ -1772,11 +1772,30 @@ def crea_branch(pbi: str) -> str:
 def rami_su_origin(pbi: str) -> set[str]:
     """I rami che `origin` ha già per questo PBI.
 
-    Si chiede al remoto e non al locale: il worktree del runner è appena stato
-    creato, e di un giro fallito tre giorni fa non sa niente.
+    Si chiede al remoto perché è l'unico posto in cui un giro fallito lascia
+    traccia per tutti: `chiudi()` pubblica su ogni stato che interrompe, e il
+    rilancio deve vedere quel nome occupato anche da un albero che non c'era.
     """
     fuori = git("ls-remote", "--heads", "origin", f"pbi/{pbi.lower()}*")
     return {r.split("refs/heads/")[-1].strip() for r in fuori.splitlines() if "refs/heads/" in r}
+
+
+def rami_locali(pbi: str) -> set[str]:
+    """E quelli che ha già il repository in cui `switch -c` sta per scrivere.
+
+    Difetto 29 di PBI-102, su PBI-335 la sera del 02/09/2026: il giro è morto in
+    **zero secondi** su *«esiste già un ramo denominato pbi/pbi-335»*, e su
+    `origin` quel ramo non c'era — mergiato e cancellato giorni prima. Era
+    rimasto in `ada-run`, col solo commit che aveva scritto il documento del PBI.
+
+    Chiedere solo al remoto reggeva su una premessa che `ada-run` non soddisfa:
+    *«il worktree è appena stato creato»*. È un albero di lunga vita, e colleziona
+    i rami di ogni sessione che ci ha lavorato dentro — comprese quelle che il
+    runner non ha mai visto. I rami sono del repository, non del worktree: li
+    vede anche un giro che gira in un albero staccato.
+    """
+    dentro = git("branch", "--list", f"pbi/{pbi.lower()}*", "--format=%(refname:short)")
+    return {r.strip() for r in dentro.splitlines() if r.strip()}
 
 
 def nome_libero(pbi: str, presi: set[str]) -> str:
@@ -1787,6 +1806,10 @@ def nome_libero(pbi: str, presi: set[str]) -> str:
     scriveva sopra una storia diversa e il push finale si prendeva un
     `non-fast-forward` a lavoro fatto. Difetto 16 di PBI-102, misurato su PBI-322
     la notte del 26→27/08.
+
+    `presi` sono i nomi che `switch -c` non può prendere, e arrivano da due posti:
+    `origin` e il repository locale. Uno solo dei due non basta — il difetto 29 è
+    stato esattamente questo.
 
     Il numero è del **giro**, non del PBI: dice quante volte ci si è provati, che
     è l'informazione che serve a chi apre la lista dei rami.

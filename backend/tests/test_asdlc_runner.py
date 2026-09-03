@@ -1125,6 +1125,34 @@ class TestIlBranchLoPubblicaIlRunner:
         assert runner.crea_branch("PBI-322") == "pbi/pbi-322-giro2"
         assert ("switch", "-c", "pbi/pbi-322-giro2", "origin/main") in chiamate
 
+    def test_crea_branch_conta_anche_i_rami_locali(self, monkeypatch):
+        """Difetto 29, misurato su PBI-335 la sera del 02/09/2026.
+
+        Il giro `20260902-220921` è morto in **zero secondi**, prima del Builder:
+        `git switch -c pbi/pbi-335 origin/main` → *«esiste già un ramo denominato
+        pbi/pbi-335»*. Su `origin` quel ramo non c'era — era stato mergiato e
+        cancellato giorni prima — ma in `ada-run` era rimasto il locale, con
+        dentro il solo commit che aveva scritto il documento del PBI.
+
+        `nome_libero()` chiede i nomi occupati a chi non può saperli tutti: il
+        remoto risponde per sé, e `switch -c` fallisce sul locale. La premessa
+        che reggeva la scelta — *«il worktree del runner è appena stato creato»* —
+        vale per un albero usa e getta, non per `ada-run`, che è di lunga vita e
+        colleziona i rami di ogni sessione che ci ha lavorato dentro.
+        """
+        def _git(*args: str) -> str:
+            if args[0] == "ls-remote":
+                return ""  # su origin è stato mergiato e cancellato
+            if args[0] == "branch":
+                return "pbi/pbi-335\n"  # ma nel worktree è rimasto
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        assert runner.crea_branch("PBI-335") == "pbi/pbi-335-giro2", (
+            "un nome che `switch -c` non può prendere è un nome occupato, "
+            "qualunque sia il ref che lo occupa"
+        )
+
     def test_il_push_del_proprio_branch_e_force_with_lease(self, git_finto):
         """Fra un giro e l'altro il branch si riscrive — ed è lecito. Un push
         semplice si prende il non-fast-forward che ha ucciso PBI-324."""
