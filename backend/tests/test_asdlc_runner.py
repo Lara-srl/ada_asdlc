@@ -1102,6 +1102,7 @@ class TestIlBranchLoPubblicaIlRunner:
 
         monkeypatch.setattr(runner, "git", _git)
         assert runner.crea_branch("PBI-322") == "pbi/pbi-322-giro2"
+        assert ("switch", "-c", "pbi/pbi-322-giro2", "origin/main") in chiamate
 
     def test_crea_branch_conta_anche_i_rami_locali(self, monkeypatch):
         """Difetto 29, misurato su PBI-335 la sera del 02/09/2026.
@@ -1130,7 +1131,6 @@ class TestIlBranchLoPubblicaIlRunner:
             "un nome che `switch -c` non può prendere è un nome occupato, "
             "qualunque sia il ref che lo occupa"
         )
-        assert ("switch", "-c", "pbi/pbi-322-giro2", "origin/main") in chiamate
 
     def test_il_push_del_proprio_branch_e_force_with_lease(self, git_finto):
         """Fra un giro e l'altro il branch si riscrive — ed è lecito. Un push
