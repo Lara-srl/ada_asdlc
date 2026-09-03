@@ -166,7 +166,12 @@ Esegui il PBI con queste regole non negoziabili:
      successivo per quanto ti sia già chiaro: ciò che scrivi adesso senza un rosso
      davanti non potrai più dimostrarlo, e il criterio dopo ha diritto al suo ciclo;
   5. committa il `feat` o il `fix`, di sola produzione — il commit riporta il giro in
-     `TEST_ONLY`, e si ricomincia dal punto 1 col criterio dopo.
+     `TEST_ONLY`, e si ricomincia dal punto 1 col criterio dopo. **I commenti che quel
+     cambiamento rende falsi si correggono in questo stesso commit**: una frase che dice
+     ancora dove stava una casella spostata non ha comportamento, nessun test la può
+     nominare, e chiusa la produzione non c'è più un rosso che riapra quel file — il
+     giro 4 di PBI-335 (03/09/2026) si è fermato lì. Prima di committare, cerca nei
+     file dello Scope le righe che parlano di ciò che hai spostato o tolto.
   In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
   il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
   dillo con `STOP:`.
@@ -306,6 +311,16 @@ Altrimenti elenca ogni violazione come
 e termina con la riga esatta:
 
     VERDETTO: NON PRONTO
+
+**Un commento falso in un file di produzione non fa `NON PRONTO` da solo.** Il Builder
+in `TEST_ONLY` non può toccarlo — un commento non ha comportamento, e nessun rosso apre
+quel file — e mandarlo a girare per una frase è un giro buttato (PBI-335, giro 4,
+03/09/2026). Segnalalo lo stesso, con file e riga, sotto il titolo
+
+    ## Note per chi mergia
+
+fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `PASS` e la nota
+va nel rapporto, dove chi mergia la legge.
 """
 
 PROMPT_RIMEDIO = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
@@ -353,7 +368,14 @@ sempre: il `test (RED)` committato da solo, `--chiedi-impl` che apre la fase per
 vede fallire, e poi il `fix`. Sono **due** commit, mai uno: il rosso non può essere
 esistito in mezzo a un commit solo.
 
-Se il rosso non si ottiene in nessuno dei due modi, **non** riscrivere la storia per
+**Se il rilievo è un commento falso in un file di produzione** — una frase che manda a
+un posto che non c'è più: non c'è un rosso da osservare, e in `TEST_ONLY` quel file è
+chiuso. Non recitare un rosso e non spegnere un hook per passarci. Se in questo giro apri
+`IMPL` per un rilievo vero sullo stesso file, la correzione viaggia dentro quel `fix`;
+altrimenti lascia il rilievo aperto e nomina file e riga nella risposta: lo corregge
+chi mergia (PBI-104, 03/09/2026).
+
+Se il rosso non si ottiene in nessuno di questi modi, **non** riscrivere la storia per
 nasconderlo: scrivi nel commit perché non era osservabile e lascialo vedere.
 
 **Un rilievo non si chiude spegnendo ciò che lo ha trovato.** Cancellare un test, allargare

@@ -86,6 +86,20 @@ def git_finto(monkeypatch):
 class TestIlCriticPuoSospendere:
     """Un rilievo che aspetta una persona non è «non pronto»: è un'altra diagnosi."""
 
+    def test_un_commento_falso_non_fa_non_pronto_da_solo(self):
+        """Giro 4 di PBI-335 (03/09/2026): il Critic ha chiesto due commenti corretti.
+
+        Il Builder in `TEST_ONLY` non può toccarli, e non c'è un rosso che
+        apra quel file: un `NON PRONTO` per una frase manda il Builder a girare
+        su un rimedio che non può eseguire. È un terzo esito, né rilievo né
+        domanda: una nota per chi mergia, che non pesa sul verdetto.
+        """
+        prompt = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md").lower()
+        assert "note per chi mergia" in prompt, (
+            "un commento falso in un file di produzione si segnala sotto un titolo "
+            "suo, fuori dai rilievi numerati, e da solo non fa NON PRONTO"
+        )
+
     def test_riconosce_il_verdetto_sospeso_e_ne_prende_la_domanda(self, monkeypatch):
         uscita = (
             "**1. [processo] Il CHIEDI sulla migrazione è stato saltato**\n"
@@ -509,6 +523,27 @@ class TestIlPromptDiRimedioSiReggeDaSolo:
         prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
         assert "test" in prompt.lower(), "il rimedio non si chiude spegnendo un test"
         assert "commit" in prompt.lower(), "un commit per rimedio, come nel resto del PBI"
+
+    def test_dice_cosa_fare_di_un_commento_falso_in_produzione(self):
+        """Il terzo caso, trovato dal giro 4 di PBI-335 (03/09/2026).
+
+        Il rilievo era due commenti sbagliati in `PratichePage.tsx` e in
+        `e2e/contract.ts`. Non è né «manca la guardia» né «il codice è
+        sbagliato»: un commento non ha comportamento, non c'è un rosso da
+        osservare e in `TEST_ONLY` quel file è chiuso. Il Builder ha rifiutato
+        le due scappatoie — un rosso recitato, un hook spento — e ha scritto la
+        domanda. Il prompt deve nominare il caso e dire la strada, perché al giro
+        dopo la stessa domanda tornerebbe uguale.
+        """
+        prompt = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+        assert "commento falso" in prompt, (
+            "un rilievo di solo commento in un file di produzione non ha un rosso: "
+            "senza una strada scritta il Builder si ferma o imbroglia"
+        )
+        assert "chi mergia" in prompt, (
+            "se nel giro non si apre IMPL su quel file, la correzione la fa chi mergia: "
+            "il Builder lascia il rilievo aperto e nomina file e riga"
+        )
 
 
 class TestUnGiroSpesoACommittareNonEUnGateRosso:
@@ -1216,6 +1251,27 @@ class TestIlBranchLoPubblicaIlRunner:
         """
         prompt = runner.PROMPT_BUILDER.lower()
         assert "assenza" in prompt and "restrizione" in prompt
+
+    def test_il_builder_corregge_i_commenti_nel_fix_che_li_rende_falsi(self):
+        """Il giro 4 di PBI-335 (03/09/2026) si è fermato su due commenti.
+
+        `PratichePage.tsx:1892` ed `e2e/contract.ts:109` mandavano ancora il N°
+        preventivo in accettazione, dopo che `4868355` l'aveva portato in
+        testata. Il Critic li ha chiesti corretti; il Builder, in `TEST_ONLY`,
+        non poteva: un commento non ha comportamento, nessun test lo nomina,
+        nessun rosso riapre quel file. Le uniche uscite erano un rosso recitato
+        o un hook spento, e ha fatto bene a non prenderle.
+
+        Il momento in cui quel commento si corregge esiste ed è uno solo: il
+        `fix` che lo rende falso, quando la produzione è ancora aperta. Il
+        prompt deve dirlo lì, al passo in cui il commit di produzione nasce.
+        """
+        prompt = runner.PROMPT_BUILDER.lower()
+        assert "commenti" in prompt and "rende falsi" in prompt, (
+            "il commento che un fix rende falso si corregge nello stesso commit del "
+            "fix: dopo, in TEST_ONLY, non c'è più un rosso che riapra quel file "
+            "(PBI-335 giro 4, 03/09/2026)"
+        )
 
 
 class TestUnGiroLasciaTracciaAppenaComincia:
