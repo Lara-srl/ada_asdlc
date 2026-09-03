@@ -311,6 +311,16 @@ Altrimenti elenca ogni violazione come
 e termina con la riga esatta:
 
     VERDETTO: NON PRONTO
+
+**Un commento falso in un file di produzione non fa `NON PRONTO` da solo.** Il Builder
+in `TEST_ONLY` non può toccarlo — un commento non ha comportamento, e nessun rosso apre
+quel file — e mandarlo a girare per una frase è un giro buttato (PBI-335, giro 4,
+03/09/2026). Segnalalo lo stesso, con file e riga, sotto il titolo
+
+    ## Note per chi mergia
+
+fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `PASS` e la nota
+va nel rapporto, dove chi mergia la legge.
 """
 
 PROMPT_RIMEDIO = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
