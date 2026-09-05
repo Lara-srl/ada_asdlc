@@ -543,6 +543,41 @@ def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
     assert "fetch" in log
 
 
+def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
+    """Il gesto subito dopo il pre-flight, che ha la stessa ragione di stare nel log.
+
+    Il runner esce non-zero prima di staccarsi in casi che capitano davvero: una
+    gara sul lucchetto dell'albero, il controllo d'igiene su un file sporco che
+    il pre-flight non rimette a posto, una voce di coda che nomina un PBI senza
+    file in `backlog/`. Senza leggere quel codice nel log resterebbe «lancia:
+    PBI-337» — il contrario di quel che è successo — il tick uscirebbe `0`, e al
+    tick dopo, non trovando nessun ramo su origin, si riproverebbe: un ciclo
+    ogni N minuti che non lascia mai una diagnosi.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+
+    def runner_rotto(cmd, cwd):
+        if cmd[0] == "gh":
+            return 0, "[]"
+        if "ls-remote" in cmd:
+            return 0, ""
+        if "asdlc_runner.py" in " ".join(cmd):
+            return 3, "AlberoOccupato: il lucchetto è di qualcun altro"
+        return 0, ""
+
+    monkeypatch.setattr(coda, "esegui", runner_rotto)
+
+    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    assert "non lanciato" in log, log
+    assert "uscita 3" in log, log
+    assert "AlberoOccupato" in log, log
+
+
 def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, capsys):
     """Checkout e worktree coincidono: il tick si ferma prima di guardare qualsiasi cosa.
 
