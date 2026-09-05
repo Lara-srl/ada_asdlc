@@ -22,6 +22,7 @@ import fcntl
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -325,6 +326,15 @@ PREFLIGHT = [
     ["git", "switch", "--detach", "origin/main"],
 ]
 
+# Quanto si aspetta, dopo che il comando del runner è tornato, prima di chiedere
+# all'albero se il giro è vivo. Il runner si stacca con un `fork` e il padre esce
+# `0` subito, quindi quando `esegui()` torna il figlio esiste **comunque** —
+# anche quello che sta per rifiutarsi. La domanda va fatta dopo che i rifiuti
+# hanno avuto il tempo di succedere, e succedono tutti in meno di un secondo: il
+# lucchetto, `agenti_estranei()`, i gate, il controllo d'igiene sul primo PBI. Un
+# giro vero invece dura un'ora, e passati quindici secondi è ancora lì.
+ATTESA_DEL_DISTACCO = 15.0
+
 
 def lancia(pbi: str, worktree: Path) -> None:
     """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
@@ -342,10 +352,19 @@ def lancia(pbi: str, worktree: Path) -> None:
     fetch` non prende `origin`, lo `switch --detach` finisce su un `origin/main`
     di ieri e il ramo nascerebbe su una base vecchia.
 
-    Anche il runner alza se esce male, e per la stessa ragione: prima di
-    staccarsi può rifiutarsi — una gara sul lucchetto dell'albero, il controllo
-    d'igiene su un file sporco, un PBI senza file in `backlog/` — e senza
-    leggere quel codice nel log resterebbe «lancia», con un riprova ogni tick.
+    Il codice d'uscita del runner copre ciò che succede **prima** del distacco, e
+    solo quello: `--e2e`, un argomento che argparse rifiuta, `python3` che su
+    questa macchina non c'è. Dopo non copre più niente, perché `stacca()` esce
+    dal padre con `os._exit(0)` prima del lucchetto, di `agenti_estranei()` e del
+    controllo d'igiene — e l'ordine è deliberato, il `flock` vive nell'open file
+    description e un padre che lo prendesse e poi forkasse se lo porterebbe via.
+    Così una gara sull'albero, un file sporco o un PBI senza file in `backlog/`
+    fanno uscire male il **figlio**, e quel codice finisce in `runs/<run>.log`.
+
+    Per quelli non si legge un codice: si guarda l'albero. Passata l'attesa del
+    distacco, o lì dentro c'è un giro vivo, o il giro non è partito — e allora si
+    alza, perché altrimenti nel log resterebbe «lancia», con un riprova a ogni
+    tick e nessuna diagnosi da nessuna parte.
     """
     for comando in PREFLIGHT:
         codice, uscita = esegui(comando, worktree)
@@ -358,6 +377,13 @@ def lancia(pbi: str, worktree: Path) -> None:
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
+        )
+    time.sleep(ATTESA_DEL_DISTACCO)
+    if not giro_in_corso(worktree):
+        raise Guasto(
+            f"il runner si è staccato e poi si è fermato su {pbi}: in {worktree} non "
+            "c'è nessun giro vivo. Il perché è nell'ultimo runs/*.log dell'albero — "
+            "una gara sul lucchetto, un file sporco, un PBI senza file in backlog/."
         )
 
 
