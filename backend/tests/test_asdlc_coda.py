@@ -92,3 +92,15 @@ def test_una_barriera_ferma_la_coda_e_le_voci_dopo_non_si_guardano():
     )
 
     assert decisione == coda.Barriera("la ripassata dell'import")
+
+
+def test_una_coda_tutta_mergiata_e_finita():
+    """Non c'è più niente da lanciare, e non è un guasto: è un lotto chiuso."""
+    decisione = coda.prossimo(
+        [coda.VocePbi("PBI-337"), coda.VocePbi("PBI-338")],
+        mergiati={"PBI-337", "PBI-338"},
+        rami=set(),
+        occupato=False,
+    )
+
+    assert decisione == coda.Finita()
