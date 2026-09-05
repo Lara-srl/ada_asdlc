@@ -26,6 +26,9 @@ from pathlib import Path
 
 # Dove il runner tiene il lucchetto del suo albero (`lucchetto()`, `NOME_LUCCHETTO`).
 LUCCHETTO = Path("runs") / ".runner.lock"
+# La cartella dei processi. È una costante e non un argomento perché la
+# attraversano tre chiamate di fila, e sotto i test si sostituisce qui.
+PROC = Path("/proc")
 
 
 @dataclass(frozen=True)
@@ -193,17 +196,48 @@ def giro_in_corso(worktree: Path) -> bool:
     dubbio non si lancia (PBI-350, punto 8).
     """
     file = worktree / LUCCHETTO
-    if not file.exists():
-        return False
+    if file.exists():
+        try:
+            with file.open("r+") as fd:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            return True
+    return runner_vivo(worktree)
+
+
+def runner_vivo(worktree: Path) -> bool:
+    """Un processo del runner che lavora in quell'albero, lucchetto o no.
+
+    È la rete sotto al lucchetto, e serve per il caso che è successo davvero:
+    una sessione avviata a mano, che il lucchetto del runner non lo prende e
+    nemmeno lo guarda. L'unico segnale comune ai due è **dove** lavorano, cioè
+    `/proc/<pid>/cwd`, ed è la stessa lettura di `agenti_estranei()`.
+
+    È un controllo Linux e non si scusa di esserlo: il tick gira sul PC di
+    sviluppo. Dove `/proc` non c'è la cartella non si legge e resta il lucchetto,
+    che è il controllo primario.
+    """
+    albero = worktree.resolve()
     try:
-        with file.open("r+") as fd:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return True
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        cartelle = list(PROC.iterdir())
     except OSError:
-        return True
+        return False
+    for cartella in cartelle:
+        if not cartella.name.isdigit():
+            continue
+        try:
+            dove = (cartella / "cwd").resolve()
+            comando = (cartella / "cmdline").read_bytes()
+        except OSError:
+            continue  # un processo che finisce mentre lo leggiamo, o di un altro utente
+        if dove != albero and albero not in dove.parents:
+            continue
+        if b"asdlc_runner" in comando:
+            return True
     return False
 
 
