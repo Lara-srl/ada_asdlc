@@ -533,3 +533,19 @@ def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
     assert uscita == 1
     log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
     assert "fetch" in log
+
+
+def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, capsys):
+    """Checkout e worktree coincidono: il tick si ferma prima di guardare qualsiasi cosa.
+
+    L'albero del runner cambia ramo a ogni giro. Un tick che leggesse il proprio
+    codice da lì si riscriverebbe a metà, e il pre-flight sposterebbe l'albero
+    sotto i piedi al processo che lo sta eseguendo.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    monkeypatch.setattr(coda, "esegui", nessun_comando)
+
+    uscita = coda.main(["--repo", str(repo), "--worktree", str(repo)])
+
+    assert uscita == 2
+    assert "--worktree" in capsys.readouterr().out
