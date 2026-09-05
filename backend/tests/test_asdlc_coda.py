@@ -301,3 +301,39 @@ def test_una_coda_illeggibile_non_produce_lancia(tmp_path, monkeypatch):
 
     assert isinstance(decisione, coda.Barriera)
     assert "CODA.md" in decisione.testo
+
+
+def test_un_pbi_con_una_domanda_aperta_si_lancia_lo_stesso(tmp_path, monkeypatch):
+    """Il ❓ avvisa, non blocca: mettere un PBI in coda è dichiararlo pronto.
+
+    Un grep cieco direbbe che PBI-340 non si può lanciare, e avrebbe torto: la
+    sua sezione ❓ è un protocollo di rifinitura già deciso. La distinzione non è
+    meccanizzabile, e il cancello vero è un altro — la coda la scrive Francesco.
+    Il tick stampa l'intestazione come avviso e lancia lo stesso (`ADR-0008`).
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-340\n")
+    (repo / "backlog" / "PBI-340-le-due-date-del-foglio.md").write_text(
+        "# PBI-340: le due date del foglio\n\n"
+        "## ❓ Da decidere, se le dodici colonne non ci stanno\n\n"
+        "La rifinitura sta qui.\n",
+        encoding="utf-8",
+    )
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(coda, "esegui", mondo())
+
+    assert coda.decidi(repo, albero) == coda.Lancia("PBI-340")
+    assert coda.avviso_domande(repo, "PBI-340") == (
+        "## ❓ Da decidere, se le dodici colonne non ci stanno"
+    )
+
+
+def test_un_pbi_senza_domande_non_produce_nessun_avviso(tmp_path):
+    """L'altro verso: senza ❓ non si inventa un avviso che nessuno ha scritto."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    (repo / "backlog" / "PBI-337-il-tipo-di-lavoro-eseguito.md").write_text(
+        "# PBI-337: il tipo di lavoro eseguito\n\n## Verifica\n\n- [ ] tutto chiaro\n",
+        encoding="utf-8",
+    )
+
+    assert coda.avviso_domande(repo, "PBI-337") == ""
