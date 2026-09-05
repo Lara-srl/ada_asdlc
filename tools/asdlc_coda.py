@@ -51,5 +51,10 @@ def prossimo(
     if occupato:
         return Occupato()
     for voce in voci:
+        # Un PBI in `main` è finito, e la sua voce è spenta: il ramo che si è
+        # lasciato dietro non conta più niente, perché un ramo su `origin` parla
+        # solo in assenza di merge.
+        if voce.pbi in mergiati:
+            continue
         return Lancia(voce.pbi)
     return None
