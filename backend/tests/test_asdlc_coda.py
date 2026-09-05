@@ -431,3 +431,28 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     assert uscita == 0
     assert ["python3", "tools/asdlc_runner.py", "PBI-337"] in visti
     assert "PBI-337" in capsys.readouterr().out
+
+
+def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatch, capsys):
+    """La prova sul comando che **non** parte.
+
+    Le domande al mondo restano — senza `gh` e senza `git ls-remote` non ci
+    sarebbe nessuna decisione da stampare — ma nessuno dei comandi che cambiano
+    lo stato viene eseguito: né il pre-flight, che sposta il worktree su un
+    altro ramo, né il runner.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    uscita = coda.main(
+        ["--repo", str(repo), "--worktree", str(albero), "--dry-run"]
+    )
+
+    assert uscita == 0
+    assert "PBI-337" in capsys.readouterr().out
+    eseguiti = [" ".join(cmd) for cmd in visti]
+    assert not [c for c in eseguiti if "asdlc_runner.py" in c], eseguiti
+    assert not [c for c in eseguiti if "switch" in c or "fetch" in c or "checkout" in c], eseguiti
