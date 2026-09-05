@@ -399,3 +399,35 @@ def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
         coda.lancia("PBI-337", albero)
 
     assert not any("asdlc_runner.py" in " ".join(cmd) for cmd in visti)
+
+
+def mondo_registrato(pr_mergiate=(), rami_su_origin=()):
+    """Come `mondo()`, ma tiene la lista dei comandi e dice di sì a tutti gli altri."""
+    visti = []
+
+    def esegui(cmd, cwd):
+        visti.append(cmd)
+        if cmd[0] == "gh":
+            return 0, json.dumps([{"title": t} for t in pr_mergiate])
+        if "ls-remote" in cmd:
+            return 0, "".join(
+                f"{'0' * 40}\trefs/heads/{r}\n" for r in rami_su_origin
+            )
+        return 0, ""
+
+    return visti, esegui
+
+
+def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys):
+    """Il giro intero, dalla riga di cron al runner: decide una cosa e la fa."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n- PBI-338\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert ["python3", "tools/asdlc_runner.py", "PBI-337"] in visti
+    assert "PBI-337" in capsys.readouterr().out
