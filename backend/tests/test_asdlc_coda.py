@@ -300,6 +300,35 @@ def test_un_gh_che_non_risponde_non_produce_lancia(tmp_path, monkeypatch):
     assert "gh" in decisione.testo
 
 
+def test_una_finestra_di_pr_mergiate_piena_non_produce_lancia(tmp_path, monkeypatch):
+    """Un elenco lungo quanto il limite può essere tagliato, e un elenco tagliato mente.
+
+    `gh pr list --limit N` non dice mai «non lo so»: una PR caduta fuori dalla
+    finestra semplicemente non c'è, e il tick la legge come «non mergiato». Per
+    una voce di coda il cui ramo su `origin` sia stato potato dopo il merge quel
+    silenzio diventa `Lancia`, cioè il rilancio di un PBI già in `main` — il
+    doppione che `test_la_testa_con_un_ramo_su_origin_e_senza_merge_si_attende`
+    impedisce, entrato dall'altra porta. È anche il rovescio esatto del guasto
+    che `pbi_mergiati()` evita leggendo il titolo invece del nome del ramo.
+
+    Non si allarga soltanto la finestra, perché una finestra grande resta una
+    finestra: quando è piena il tick non deduce niente, alza e va in `Barriera`.
+    Costa un tick, e la riga nel log dice cosa alzare.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    # Il limite intero, e nessuna di queste PR è quella della testa della coda:
+    # senza il controllo, PBI-337 risulterebbe non mergiato e si lancerebbe.
+    piene = [f"PBI-{n}: una PR mergiata mesi fa" for n in range(1000, 1000 + coda.LIMITE_PR)]
+    monkeypatch.setattr(coda, "esegui", mondo(pr_mergiate=piene))
+
+    decisione = coda.decidi(repo, albero)
+
+    assert isinstance(decisione, coda.Barriera), decisione
+    assert str(coda.LIMITE_PR) in decisione.testo, decisione.testo
+
+
 def test_una_coda_illeggibile_non_produce_lancia(tmp_path, monkeypatch):
     """Senza la coda non ci sono ordini, e senza ordini non si lancia niente."""
     repo = tmp_path / "repo"
