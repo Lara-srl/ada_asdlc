@@ -371,11 +371,17 @@ def main(argv: list[str] | None = None) -> int:
                     help="il checkout da cui si legge la coda e si interroga origin")
     ap.add_argument("--worktree", type=Path, default=WORKTREE_DEL_RUNNER,
                     help="l'albero in cui gira il runner")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="stampa la decisione senza eseguirla")
     a = ap.parse_args(argv)
 
     decisione = decidi(a.repo, a.worktree)
     print(racconta(decisione))
-    if isinstance(decisione, Lancia):
+    # Le domande al mondo le ha già fatte `decidi()`, ed è giusto così: senza
+    # `gh` non ci sarebbe nessuna decisione da leggere. Qui si ferma ciò che
+    # **cambia** lo stato — il pre-flight, che sposta il worktree su un altro
+    # ramo, e il runner.
+    if isinstance(decisione, Lancia) and not a.dry_run:
         lancia(decisione.pbi, a.worktree)
     return 0
 
