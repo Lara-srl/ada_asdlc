@@ -479,3 +479,29 @@ def test_ogni_tick_lascia_una_riga_nel_log(tmp_path, monkeypatch):
     assert len(righe) == 2
     oggi = datetime.date.today().isoformat()
     assert all(riga.startswith(oggi) and "PBI-337" in riga for riga in righe), righe
+
+
+def test_lavviso_delle_domande_esce_accanto_al_lancio(tmp_path, monkeypatch, capsys):
+    """Segnalare invece di bloccare: l'intestazione ❓ esce, e il PBI parte.
+
+    L'avviso deve finire dove qualcuno lo troverà — a schermo e nel log — perché
+    è tutto ciò che resta di una verifica che il tick non può fare al posto di
+    chi ha scritto la coda.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-340\n")
+    (repo / "backlog" / "PBI-340-le-due-date-del-foglio.md").write_text(
+        "# PBI-340: le due date del foglio\n\n"
+        "## ❓ Da decidere, se le dodici colonne non ci stanno\n",
+        encoding="utf-8",
+    )
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    _, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    coda.main(["--repo", str(repo), "--worktree", str(albero), "--dry-run"])
+
+    stampato = capsys.readouterr().out
+    assert "PBI-340" in stampato
+    assert "Da decidere, se le dodici colonne non ci stanno" in stampato
+    assert "Da decidere" in (repo / "runs" / "coda.log").read_text(encoding="utf-8")
