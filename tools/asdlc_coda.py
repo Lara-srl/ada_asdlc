@@ -17,6 +17,7 @@ sola cosa che i test guardano.
 """
 from __future__ import annotations
 
+import argparse
 import fcntl
 import json
 import re
@@ -24,6 +25,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+# I due percorsi di oggi, che sono i default degli argomenti: il checkout da cui
+# si legge la coda e si interroga `origin`, e il worktree in cui il runner
+# lavora. Sono diversi perché `ada-run` cambia ramo sotto i piedi a ogni giro.
+REPO = Path(__file__).resolve().parent.parent
+WORKTREE_DEL_RUNNER = Path.home() / "ada-run"
 # Dove il runner tiene il lucchetto del suo albero (`lucchetto()`, `NOME_LUCCHETTO`).
 LUCCHETTO = Path("runs") / ".runner.lock"
 # La cartella dei processi. È una costante e non un argomento perché la
@@ -340,3 +346,39 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
     esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
+
+
+def racconta(decisione: Decisione) -> str:
+    """La decisione in una riga, che è la forma in cui va a schermo e nel log."""
+    match decisione:
+        case Occupato():
+            return "occupato: un giro è già in corso, non tocco niente"
+        case Finita():
+            return "finita: in coda non resta niente da lanciare"
+        case Barriera(testo):
+            return f"barriera: {testo}"
+        case Attende(pbi):
+            return f"attende: {pbi} ha un ramo su origin e non è in main — tocca a un umano"
+        case Lancia(pbi):
+            return f"lancia: {pbi}"
+    return f"decisione senza nome: {decisione}"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Un tick: guarda, decide una cosa, la fa, e finisce."""
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--repo", type=Path, default=REPO,
+                    help="il checkout da cui si legge la coda e si interroga origin")
+    ap.add_argument("--worktree", type=Path, default=WORKTREE_DEL_RUNNER,
+                    help="l'albero in cui gira il runner")
+    a = ap.parse_args(argv)
+
+    decisione = decidi(a.repo, a.worktree)
+    print(racconta(decisione))
+    if isinstance(decisione, Lancia):
+        lancia(decisione.pbi, a.worktree)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
