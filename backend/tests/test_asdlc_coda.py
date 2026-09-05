@@ -41,3 +41,19 @@ def test_la_testa_della_coda_senza_ramo_su_origin_si_lancia():
     )
 
     assert decisione == coda.Lancia("PBI-337")
+
+
+def test_la_testa_gia_mergiata_si_consuma_e_tocca_alla_voce_dopo():
+    """È il gesto per cui il tick esiste: il merge del 337 fa partire il 338.
+
+    Il ramo che il 337 si è lasciato dietro non lo trattiene: un ramo su `origin`
+    parla solo **in assenza** di merge (PBI-350, punto 1).
+    """
+    decisione = coda.prossimo(
+        [coda.VocePbi("PBI-337"), coda.VocePbi("PBI-338")],
+        mergiati={"PBI-337"},
+        rami={"PBI-337"},
+        occupato=False,
+    )
+
+    assert decisione == coda.Lancia("PBI-338")
