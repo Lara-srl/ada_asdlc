@@ -9,6 +9,7 @@ carica il modulo dal suo percorso, come fa `test_importa_storico.py`.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -161,3 +162,56 @@ def test_la_coda_vera_si_legge():
     assert len(nomi) == len(set(nomi)), f"un PBI compare due volte in coda: {nomi}"
     for nome in nomi:
         assert list(REPO.glob(f"backlog/{nome}-*.md")), f"{nome} non ha un file in backlog/"
+
+
+def mondo(pr_mergiate=(), rami_su_origin=()):
+    """Un `esegui()` finto: `gh` e `git` rispondono nella forma in cui rispondono davvero.
+
+    Un comando non previsto fa fallire il test invece di rendere una risposta
+    vuota: qui si sta misurando *cosa* il tick chiede al mondo, e una risposta
+    di comodo nasconderebbe una domanda in più.
+    """
+
+    def esegui(cmd, cwd):
+        if cmd[0] == "gh":
+            return 0, json.dumps([{"title": t} for t in pr_mergiate])
+        if cmd[0] == "git":
+            return 0, "".join(
+                f"{'0' * 40}\trefs/heads/{r}\n" for r in rami_su_origin
+            )
+        raise AssertionError(f"comando non previsto: {cmd}")
+
+    return esegui
+
+
+def scrivi_coda(tmp_path, righe):
+    """Un finto checkout con dentro la sua `backlog/CODA.md`."""
+    repo = tmp_path / "repo"
+    (repo / "backlog").mkdir(parents=True)
+    (repo / "backlog" / "CODA.md").write_text(righe, encoding="utf-8")
+    return repo
+
+
+def test_la_decisione_si_compone_dalle_pr_mergiate_e_dai_rami_su_origin(
+    tmp_path, monkeypatch
+):
+    """Lo stato non sta su disco: lo raccontano `gh` e `git`.
+
+    Il merge si riconosce dal **titolo** della PR — la forma che `apri_pr()`
+    costruisce — perché regge sia al merge di commit sia allo squash, che il nome
+    del ramo lo perde. Il ramo si riconosce lo stesso col suffisso di un secondo
+    giro.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n- PBI-338\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(
+        coda,
+        "esegui",
+        mondo(
+            pr_mergiate=["PBI-337: il tipo di lavoro eseguito"],
+            rami_su_origin=["pbi/pbi-338-giro2"],
+        ),
+    )
+
+    assert coda.decidi(repo, albero) == coda.Attende("PBI-338")
