@@ -327,7 +327,16 @@ def lancia(pbi: str, worktree: Path) -> None:
     Il runner si stacca da sé in una sessione sua, quindi questa chiamata torna
     in pochi secondi e il tick finisce: un tick che aspettasse la fine del giro
     sarebbe il processo di un'ora che `cron` ritrova al giro dopo.
+
+    Una riga del pre-flight che fallisce alza, e il runner non parte: se `git
+    fetch` non prende `origin`, lo `switch --detach` finisce su un `origin/main`
+    di ieri e il ramo nascerebbe su una base vecchia.
     """
     for comando in PREFLIGHT:
-        esegui(comando, worktree)
+        codice, uscita = esegui(comando, worktree)
+        if codice != 0:
+            raise Guasto(
+                f"il pre-flight si è fermato su `{' '.join(comando)}` "
+                f"(uscita {codice}): {uscita.strip()[:200]}"
+            )
     esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
