@@ -151,19 +151,29 @@ RE_TITOLO_PR = re.compile(r"^\s*(PBI-\d+)\s*:")
 RE_RAMO_PBI = re.compile(r"refs/heads/pbi/pbi-(\d+)")
 
 
+class Guasto(RuntimeError):
+    """Il mondo non ha risposto: il tick non lancia, e scrive cosa è successo."""
+
+
 def pbi_mergiati(repo: Path) -> set[str]:
     """I PBI già in `main`, letti dai **titoli** delle PR mergiate.
 
     Dal titolo e non dal nome del ramo: lo squash il ramo lo perde, e un PBI
     entrato in `main` con uno squash resterebbe per sempre da lanciare.
     """
-    _, uscita = esegui(
+    codice, uscita = esegui(
         ["gh", "pr", "list", "--state", "merged", "--limit", "200", "--json", "title"],
         repo,
     )
+    if codice != 0:
+        raise Guasto(f"gh non risponde (uscita {codice}): {uscita.strip()[:200]}")
+    try:
+        elenco = json.loads(uscita)
+    except ValueError as illeggibile:
+        raise Guasto(f"gh ha risposto qualcosa che non è JSON: {illeggibile}") from None
     return {
         trovato.group(1)
-        for pr in json.loads(uscita)
+        for pr in elenco
         if (trovato := RE_TITOLO_PR.match(pr.get("title", "")))
     }
 
@@ -174,10 +184,12 @@ def pbi_con_ramo(repo: Path) -> set[str]:
     Si chiede al remoto perché è l'unico posto in cui un giro fallito lascia
     traccia per tutti, ed è la stessa lettura di `rami_su_origin()`.
     """
-    _, uscita = esegui(
+    codice, uscita = esegui(
         ["git", "-C", str(repo), "ls-remote", "--heads", "origin", "refs/heads/pbi/*"],
         repo,
     )
+    if codice != 0:
+        raise Guasto(f"git non parla con origin (uscita {codice}): {uscita.strip()[:200]}")
     return {f"PBI-{numero}" for numero in RE_RAMO_PBI.findall(uscita)}
 
 
@@ -252,8 +264,20 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
 
     Il giro in corso si guarda **prima** di ogni domanda al mondo: davanti a un
     albero occupato non c'è risposta di `gh` che cambi la decisione.
+
+    Fail-closed su tutto ciò che sta fuori: `gh` che non risponde, la coda che non
+    si legge, un `git` che alza. Un tick che sbaglia per eccesso di prudenza costa
+    dieci minuti fino al tick dopo; uno che lancia sul dubbio costa un giro e un
+    ramo da ripulire.
     """
     if giro_in_corso(worktree):
         return Occupato()
-    voci = leggi_voci((repo / "backlog" / "CODA.md").read_text(encoding="utf-8"))
-    return prossimo(voci, pbi_mergiati(repo), pbi_con_ramo(repo), occupato=False)
+    file_coda = repo / "backlog" / "CODA.md"
+    try:
+        voci = leggi_voci(file_coda.read_text(encoding="utf-8"))
+        mergiati, rami = pbi_mergiati(repo), pbi_con_ramo(repo)
+    except OSError as illeggibile:
+        return Barriera(f"la coda non si legge — {file_coda.name}: {illeggibile}")
+    except Guasto as guasto:
+        return Barriera(str(guasto))
+    return prossimo(voci, mergiati, rami, occupato=False)
