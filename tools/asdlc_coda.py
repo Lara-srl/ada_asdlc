@@ -406,7 +406,14 @@ def main(argv: list[str] | None = None) -> int:
     # **cambia** lo stato — il pre-flight, che sposta il worktree su un altro
     # ramo, e il runner.
     if isinstance(decisione, Lancia) and not a.dry_run:
-        lancia(decisione.pbi, a.worktree)
+        try:
+            lancia(decisione.pbi, a.worktree)
+        except Guasto as guasto:
+            # Da `cron` un'eccezione non la legge nessuno: nel log resterebbe la
+            # riga che dice «lancia», cioè il contrario di quel che è successo.
+            print(guasto)
+            scrivi_nel_log(a.repo, f"non lanciato: {guasto}")
+            return 1
     return 0
 
 
