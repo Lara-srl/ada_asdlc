@@ -17,6 +17,7 @@ sola cosa che i test guardano.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -69,6 +70,25 @@ class Lancia:
 
 
 Decisione = Occupato | Finita | Barriera | Attende | Lancia
+
+# Le due sole forme che sono una voce, e nient'altro della pagina lo è. Le regole
+# sono ancorate a tutta la riga di proposito: `backlog/CODA.md` è insieme il
+# documento e l'ingresso del programma, e la sua prosa **nomina** le voci — la
+# legenda in cima le cita fra apici inversi, la sezione «Fuori dalla coda» scrive
+# in grassetto i PBI che non ci sono. Una regola larga le prenderebbe per ordini.
+RE_PBI = re.compile(r"^-\s+(PBI-\d+)\s*$")
+RE_BARRIERA = re.compile(r"^-\s+‖\s*(.+?)\s*$")
+
+
+def leggi_voci(testo: str) -> list[Voce]:
+    """Le voci di `CODA.md`, nell'ordine del file. Tutto il resto è prosa."""
+    voci: list[Voce] = []
+    for riga in testo.splitlines():
+        if (pbi := RE_PBI.match(riga)) is not None:
+            voci.append(VocePbi(pbi.group(1)))
+        elif (barriera := RE_BARRIERA.match(riga)) is not None:
+            voci.append(VoceBarriera(barriera.group(1)))
+    return voci
 
 
 def prossimo(
