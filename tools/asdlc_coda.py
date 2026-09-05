@@ -17,8 +17,11 @@ sola cosa che i test guardano.
 """
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -119,3 +122,66 @@ def prossimo(
             return Attende(voce.pbi)
         return Lancia(voce.pbi)
     return Finita()
+
+
+def esegui(cmd: list[str], cwd: Path) -> tuple[int, str]:
+    """Il varco verso il mondo, e l'unico: è il punto che i test sostituiscono.
+
+    Un comando che non esiste torna `127` — la convenzione della shell — invece
+    di alzare: qui un guasto dello strumento deve diventare una decisione che lo
+    dichiara, non un traceback in un log che nessuno sta guardando.
+    """
+    try:
+        finito = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as guasto:
+        return 127, f"comando non eseguibile: {cmd[0]} — {guasto}"
+    return finito.returncode, finito.stdout + finito.stderr
+
+
+# Il titolo che `apri_pr()` costruisce, e il ramo che `crea_branch()` chiede a
+# `nome_libero()`: `pbi/pbi-338`, o `pbi/pbi-338-giro2` se il primo giro c'era già.
+RE_TITOLO_PR = re.compile(r"^\s*(PBI-\d+)\s*:")
+RE_RAMO_PBI = re.compile(r"refs/heads/pbi/pbi-(\d+)")
+
+
+def pbi_mergiati(repo: Path) -> set[str]:
+    """I PBI già in `main`, letti dai **titoli** delle PR mergiate.
+
+    Dal titolo e non dal nome del ramo: lo squash il ramo lo perde, e un PBI
+    entrato in `main` con uno squash resterebbe per sempre da lanciare.
+    """
+    _, uscita = esegui(
+        ["gh", "pr", "list", "--state", "merged", "--limit", "200", "--json", "title"],
+        repo,
+    )
+    return {
+        trovato.group(1)
+        for pr in json.loads(uscita)
+        if (trovato := RE_TITOLO_PR.match(pr.get("title", "")))
+    }
+
+
+def pbi_con_ramo(repo: Path) -> set[str]:
+    """I PBI per cui `origin` ha già un ramo, col suffisso di un secondo giro o senza.
+
+    Si chiede al remoto perché è l'unico posto in cui un giro fallito lascia
+    traccia per tutti, ed è la stessa lettura di `rami_su_origin()`.
+    """
+    _, uscita = esegui(
+        ["git", "-C", str(repo), "ls-remote", "--heads", "origin", "refs/heads/pbi/*"],
+        repo,
+    )
+    return {f"PBI-{numero}" for numero in RE_RAMO_PBI.findall(uscita)}
+
+
+def decidi(repo: Path, worktree: Path) -> Decisione:
+    """La decisione di questo tick, sullo stato che il mondo racconta adesso.
+
+    `repo` è il checkout principale, da cui si legge la coda e si interroga
+    `origin`; `worktree` è l'albero in cui il runner lavora. Sono due percorsi
+    diversi perché il tick non gira dentro l'albero che comanda: quello cambia
+    ramo sotto i piedi a ogni giro, e un programma che leggesse il proprio
+    codice da lì si riscriverebbe a metà tick.
+    """
+    voci = leggi_voci((repo / "backlog" / "CODA.md").read_text(encoding="utf-8"))
+    return prossimo(voci, pbi_mergiati(repo), pbi_con_ramo(repo), occupato=False)
