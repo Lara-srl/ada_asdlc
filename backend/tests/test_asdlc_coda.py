@@ -361,6 +361,31 @@ def registratore():
     return visti, esegui
 
 
+def runner_che_prende_lalbero(albero, esegui):
+    """Un `esegui()` che, sul comando del runner, si comporta come il runner vero.
+
+    Il runner si stacca in un figlio, e il figlio prende il `flock` su
+    `runs/.runner.lock` e lo tiene per tutto il giro. È l'unico segno visibile
+    da fuori che distingue un runner al lavoro da uno che si è rifiutato subito
+    dopo il fork, quando il padre è già uscito `0`.
+
+    Rende anche la lista dei file aperti, perché il lucchetto va rilasciato: è
+    un `flock` dell'open file description, e vive finché il test non lo chiude.
+    """
+    tenuti = []
+
+    def si_stacca(cmd, cwd):
+        esito = esegui(cmd, cwd)
+        if "asdlc_runner.py" in " ".join(cmd):
+            (albero / "runs").mkdir(exist_ok=True)
+            aperto = (albero / "runs" / ".runner.lock").open("w")
+            fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            tenuti.append(aperto)
+        return esito
+
+    return si_stacca, tenuti
+
+
 def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch):
     """Il pre-flight è quello del lancio a mano, perché è lo stesso lancio.
 
@@ -372,7 +397,9 @@ def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch)
     albero = tmp_path / "albero"
     albero.mkdir()
     visti, esegui = registratore()
-    monkeypatch.setattr(coda, "esegui", esegui)
+    si_stacca, tenuti = runner_che_prende_lalbero(albero, esegui)
+    monkeypatch.setattr(coda, "esegui", si_stacca)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
 
     coda.lancia("PBI-337", albero)
 
@@ -383,6 +410,8 @@ def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch)
         ["python3", "tools/asdlc_runner.py", "PBI-337"],
     ]
     assert {cwd for _, cwd in visti} == {albero}
+    for aperto in tenuti:
+        aperto.close()
 
 
 def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
@@ -433,13 +462,17 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     albero = tmp_path / "albero"
     albero.mkdir()
     visti, esegui = mondo_registrato()
-    monkeypatch.setattr(coda, "esegui", esegui)
+    si_stacca, tenuti = runner_che_prende_lalbero(albero, esegui)
+    monkeypatch.setattr(coda, "esegui", si_stacca)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
 
     uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 0
     assert ["python3", "tools/asdlc_runner.py", "PBI-337"] in visti
     assert "PBI-337" in capsys.readouterr().out
+    for aperto in tenuti:
+        aperto.close()
 
 
 def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatch, capsys):
@@ -546,36 +579,76 @@ def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
 def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
     """Il gesto subito dopo il pre-flight, che ha la stessa ragione di stare nel log.
 
-    Il runner esce non-zero prima di staccarsi in casi che capitano davvero: una
-    gara sul lucchetto dell'albero, il controllo d'igiene su un file sporco che
-    il pre-flight non rimette a posto, una voce di coda che nomina un PBI senza
-    file in `backlog/`. Senza leggere quel codice nel log resterebbe «lancia:
-    PBI-337» — il contrario di quel che è successo — il tick uscirebbe `0`, e al
-    tick dopo, non trovando nessun ramo su origin, si riproverebbe: un ciclo
-    ogni N minuti che non lascia mai una diagnosi.
+    Il codice d'uscita del runner copre ciò che succede **prima** del distacco, e
+    solo quello: `--e2e`, che il runner rifiuta con `2`; un argomento che argparse
+    non riconosce; `python3` che su quella macchina non c'è, e allora `esegui()`
+    rende `127` per la convenzione della shell. Sono i casi di questo test.
+
+    Senza leggere quel codice nel log resterebbe «lancia: PBI-337» — il contrario
+    di quel che è successo — il tick uscirebbe `0`, e al tick dopo, non trovando
+    nessun ramo su origin, si riproverebbe: un ciclo ogni N minuti che non lascia
+    mai una diagnosi. Per i rifiuti che vengono **dopo** il distacco il codice non
+    dice più niente, ed è l'altro test.
     """
     repo = scrivi_coda(tmp_path, "- PBI-337\n")
     albero = tmp_path / "albero"
     albero.mkdir()
 
-    def runner_rotto(cmd, cwd):
+    def python_che_non_ce(cmd, cwd):
         if cmd[0] == "gh":
             return 0, "[]"
         if "ls-remote" in cmd:
             return 0, ""
         if "asdlc_runner.py" in " ".join(cmd):
-            return 3, "AlberoOccupato: il lucchetto è di qualcun altro"
+            return 127, "comando non eseguibile: python3 — [Errno 2] No such file"
         return 0, ""
 
-    monkeypatch.setattr(coda, "esegui", runner_rotto)
+    monkeypatch.setattr(coda, "esegui", python_che_non_ce)
 
     uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
     log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
     assert "non lanciato" in log, log
-    assert "uscita 3" in log, log
-    assert "AlberoOccupato" in log, log
+    assert "uscita 127" in log, log
+    assert "python3" in log, log
+
+
+def test_un_runner_fermatosi_dopo_il_distacco_non_conta_come_lanciato(
+    tmp_path, monkeypatch
+):
+    """Il codice d'uscita non copre i rifiuti che vengono dopo il fork: l'albero sì.
+
+    `stacca()` esce dal padre con `os._exit(0)` **prima** del lucchetto, prima di
+    `agenti_estranei()` e prima del controllo d'igiene (`asdlc_runner.py:2624`,
+    `:2630`, `:2638`), e l'ordine è deliberato — il `flock` vive nell'open file
+    description, e un padre che lo prendesse e poi forkasse se lo porterebbe via.
+    Quindi una gara sul lucchetto dell'albero, un file sporco o un PBI senza file
+    in `backlog/` fanno uscire male il **figlio**: quel codice finisce in
+    `runs/<run>.log` e non arriva a nessuno, mentre il tick legge lo `0` del padre.
+
+    Sotto `cron` è il caso più probabile di tutti, ed è quello che riaprirebbe il
+    ciclo che il test qui sopra dichiara chiuso: «lancia: PBI-337», uscita `0`, e
+    al tick dopo — nessun ramo su origin, nessun merge — si riprova.
+
+    Quello che si guarda quindi non è il codice del padre, è l'albero: passato il
+    tempo del distacco, o lì dentro c'è un giro vivo, o il giro non è partito.
+    Qui il finto runner rende `0` e non prende niente, come il figlio che si è
+    già arreso.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    _, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    assert "non lanciato" in log, log
+    assert "PBI-337" in log, log
 
 
 def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, capsys):
