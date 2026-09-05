@@ -193,6 +193,28 @@ def pbi_con_ramo(repo: Path) -> set[str]:
     return {f"PBI-{numero}" for numero in RE_RAMO_PBI.findall(uscita)}
 
 
+# L'intestazione di una sezione di domande dentro un PBI.
+RE_DOMANDE = re.compile(r"^#+[^\S\n]*❓.*$", re.MULTILINE)
+
+
+def avviso_domande(repo: Path, pbi: str) -> str:
+    """L'intestazione della sezione `❓` di quel PBI, o `""` se non ce n'è.
+
+    È un **avviso**, e la differenza è tutta lì: un grep cieco direbbe che
+    PBI-340 non si può lanciare, e avrebbe torto — la sua sezione `❓` è un
+    protocollo di rifinitura già deciso, mentre quella di PBI-349 era una
+    domanda aperta. I due si distinguono leggendoli, e il cancello vero è
+    altrove: mettere un PBI in coda è dichiarare che le sue domande sono
+    chiuse. Il tick non rifà quella verifica perché non può — la stampa e
+    lancia lo stesso (`ADR-0008`).
+    """
+    for file in sorted((repo / "backlog").glob(f"{pbi}-*.md")):
+        trovato = RE_DOMANDE.search(file.read_text(encoding="utf-8"))
+        if trovato is not None:
+            return trovato.group(0).strip()
+    return ""
+
+
 def giro_in_corso(worktree: Path) -> bool:
     """C'è già un runner al lavoro in quell'albero?
 
