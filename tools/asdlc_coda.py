@@ -303,3 +303,31 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     except Guasto as guasto:
         return Barriera(str(guasto))
     return prossimo(voci, mergiati, rami, occupato=False)
+
+
+# Il pre-flight del lancio a mano, nell'ordine in cui va fatto. Il registro dei
+# tempi si rimette a posto per primo: il controllo d'igiene del runner guarda
+# tutto l'albero senza eccezioni, e `runs/tempi.csv` sporco fermerebbe il giro
+# prima di cominciare.
+PREFLIGHT = [
+    ["git", "checkout", "--", "runs/tempi.csv"],
+    ["git", "fetch", "origin"],
+    ["git", "switch", "--detach", "origin/main"],
+]
+
+
+def lancia(pbi: str, worktree: Path) -> None:
+    """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
+
+    È lo stesso lancio che si fa a mano, e le sue tre righe vivevano in una
+    memoria di sessione: qui diventano codice versionato — la stessa correzione
+    che il 25/08 ha fatto rientrare nel runner ciò che stava in `ada-notte.sh`,
+    fuori dal repository, dove nessuno lo vedeva.
+
+    Il runner si stacca da sé in una sessione sua, quindi questa chiamata torna
+    in pochi secondi e il tick finisce: un tick che aspettasse la fine del giro
+    sarebbe il processo di un'ora che `cron` ritrova al giro dopo.
+    """
+    for comando in PREFLIGHT:
+        esegui(comando, worktree)
+    esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
