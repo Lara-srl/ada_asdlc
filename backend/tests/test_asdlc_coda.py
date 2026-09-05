@@ -1,8 +1,16 @@
 """Il tick della coda dei PBI (`backlog/PBI-350`).
 
-Qui si guarda la **decisione**, non l'effetto: `prossimo()` è una funzione pura —
-voci dentro, un esito fuori — e nessuno di questi test avvia un giro. Un test che
-lancia il runner non è un test, è una notte.
+Tre gruppi, dal centro verso fuori:
+
+- **La decisione** — `prossimo()` è una funzione pura, voci dentro e un esito
+  fuori, ed è dove stanno i cinque casi del PBI: occupato, attende, barriera,
+  lancia, finita.
+- **La lettura del mondo** — `leggi_voci()` su `CODA.md`, e `decidi()`, che
+  compone la coda con ciò che `gh` e `git` raccontano. Qui `esegui()` è
+  sostituito: nessuno di questi test parla davvero con GitHub.
+- **Gli effetti** — `lancia()` e `main()`, guardati dai comandi che *devono*
+  partire e da quelli che non devono. Nessun test avvia un giro: un test che
+  lancia il runner non è un test, è una notte.
 
 `tools/` non è un pacchetto installato e non deve diventarlo per un test: si
 carica il modulo dal suo percorso, come fa `test_importa_storico.py`.
