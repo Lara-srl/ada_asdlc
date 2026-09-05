@@ -391,6 +391,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="stampa la decisione senza eseguirla")
     a = ap.parse_args(argv)
 
+    if a.repo.resolve() == a.worktree.resolve():
+        print(f"Non parto: --repo e --worktree sono lo stesso albero ({a.repo}).\n"
+              "Il tick non gira dentro l'albero che comanda: quello cambia ramo a ogni "
+              "giro, e il pre-flight lo sposterebbe sotto i piedi al processo che lo sta "
+              "eseguendo. Lancialo dal checkout principale, con --worktree sull'albero "
+              "del runner.")
+        return 2
+
     decisione = decidi(a.repo, a.worktree)
     riga = racconta(decisione)
     # L'avviso accompagna il lancio e non lo trattiene: la sezione ❓ di un PBI
