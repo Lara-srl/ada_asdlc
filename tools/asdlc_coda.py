@@ -166,14 +166,29 @@ class Guasto(RuntimeError):
     """Il mondo non ha risposto: il tick non lancia, e scrive cosa è successo."""
 
 
+# Quante PR mergiate si chiedono a `gh` in un colpo. Larga di proposito — al
+# 06/09/2026 le PR mergiate del repository sono 186 — perché il tick non ha un
+# cursore per scelta: rifà la domanda da zero a ogni giro, e una finestra stretta
+# la riempirebbe subito.
+LIMITE_PR = 1000
+
+
 def pbi_mergiati(repo: Path) -> set[str]:
     """I PBI già in `main`, letti dai **titoli** delle PR mergiate.
 
     Dal titolo e non dal nome del ramo: lo squash il ramo lo perde, e un PBI
     entrato in `main` con uno squash resterebbe per sempre da lanciare.
+
+    L'elenco pieno è un guasto e non un dato. `gh` non risponde mai «non lo so»:
+    una PR fuori dalla finestra semplicemente non c'è, e qui diventerebbe «non
+    mergiato» — che su una voce il cui ramo è stato potato dopo il merge vuol
+    dire `Lancia`, cioè il rilancio di un PBI già in `main`. È lo stesso guasto
+    che si evita leggendo il titolo, col segno rovesciato, e allargare la
+    finestra non lo toglie: una finestra grande resta una finestra.
     """
     codice, uscita = esegui(
-        ["gh", "pr", "list", "--state", "merged", "--limit", "200", "--json", "title"],
+        ["gh", "pr", "list", "--state", "merged",
+         "--limit", str(LIMITE_PR), "--json", "title"],
         repo,
     )
     if codice != 0:
@@ -182,6 +197,13 @@ def pbi_mergiati(repo: Path) -> set[str]:
         elenco = json.loads(uscita)
     except ValueError as illeggibile:
         raise Guasto(f"gh ha risposto qualcosa che non è JSON: {illeggibile}") from None
+    if len(elenco) >= LIMITE_PR:
+        raise Guasto(
+            f"gh ha reso {len(elenco)} PR mergiate, cioè tutta la finestra di "
+            f"{LIMITE_PR} che gli è stata chiesta: l'elenco può essere tagliato, e un "
+            "PBI già in main che non ci compaia si rilancerebbe. Alza LIMITE_PR in "
+            "tools/asdlc_coda.py."
+        )
     return {
         trovato.group(1)
         for pr in elenco
