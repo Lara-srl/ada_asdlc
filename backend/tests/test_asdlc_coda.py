@@ -505,3 +505,31 @@ def test_lavviso_delle_domande_esce_accanto_al_lancio(tmp_path, monkeypatch, cap
     assert "PBI-340" in stampato
     assert "Da decidere, se le dodici colonne non ci stanno" in stampato
     assert "Da decidere" in (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+
+
+def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
+    """Il pre-flight che si rompe deve lasciare una diagnosi, non un traceback.
+
+    Da cron l'eccezione non la legge nessuno: quello che resta è il log, e lì
+    «non ho lanciato» senza il perché costa il tempo di rifare il giro a mano.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+
+    def fetch_rotto(cmd, cwd):
+        if cmd[0] == "gh":
+            return 0, "[]"
+        if "ls-remote" in cmd:
+            return 0, ""
+        if cmd[:2] == ["git", "fetch"]:
+            return 1, "could not resolve host github.com"
+        return 0, ""
+
+    monkeypatch.setattr(coda, "esegui", fetch_rotto)
+
+    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    assert "fetch" in log
