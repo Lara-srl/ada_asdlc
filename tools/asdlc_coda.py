@@ -23,6 +23,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 # I due percorsi di oggi, che sono i default degli argomenti: il checkout da cui
@@ -30,6 +31,9 @@ from pathlib import Path
 # lavora. Sono diversi perché `ada-run` cambia ramo sotto i piedi a ogni giro.
 REPO = Path(__file__).resolve().parent.parent
 WORKTREE_DEL_RUNNER = Path.home() / "ada-run"
+# Il log del tick. Sotto `runs/`, dove `*.log` è già ignorato da git: un file
+# non ignorato in quella cartella renderebbe sporco il giro che sta per partire.
+LOG = Path("runs") / "coda.log"
 # Dove il runner tiene il lucchetto del suo albero (`lucchetto()`, `NOME_LUCCHETTO`).
 LUCCHETTO = Path("runs") / ".runner.lock"
 # La cartella dei processi. È una costante e non un argomento perché la
@@ -364,6 +368,18 @@ def racconta(decisione: Decisione) -> str:
     return f"decisione senza nome: {decisione}"
 
 
+def scrivi_nel_log(repo: Path, riga: str) -> None:
+    """Una riga in coda a `runs/coda.log`, con l'ora davanti.
+
+    Il tick gira senza nessuno davanti: senza questa riga, l'unico modo di
+    sapere perché la coda è ferma sarebbe rifare il giro a mano.
+    """
+    file = repo / LOG
+    file.parent.mkdir(exist_ok=True)
+    with file.open("a", encoding="utf-8") as log:
+        log.write(f"{datetime.now().isoformat(timespec='seconds')}  {riga}\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Un tick: guarda, decide una cosa, la fa, e finisce."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -376,7 +392,9 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     decisione = decidi(a.repo, a.worktree)
-    print(racconta(decisione))
+    riga = racconta(decisione)
+    print(riga)
+    scrivi_nel_log(a.repo, riga)
     # Le domande al mondo le ha già fatte `decidi()`, ed è giusto così: senza
     # `gh` non ci sarebbe nessuna decisione da leggere. Qui si ferma ciò che
     # **cambia** lo stato — il pre-flight, che sposta il worktree su un altro
