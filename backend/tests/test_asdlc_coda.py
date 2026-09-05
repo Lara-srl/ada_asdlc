@@ -32,3 +32,12 @@ def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
     )
 
     assert decisione == coda.Occupato()
+
+
+def test_la_testa_della_coda_senza_ramo_su_origin_si_lancia():
+    """Nessun giro in corso, il PBI in testa non è mai partito: si lancia."""
+    decisione = coda.prossimo(
+        [coda.VocePbi("PBI-337")], mergiati=set(), rami=set(), occupato=False
+    )
+
+    assert decisione == coda.Lancia("PBI-337")
