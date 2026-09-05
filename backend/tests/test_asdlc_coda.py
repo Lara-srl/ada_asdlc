@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 
 _spec = importlib.util.spec_from_file_location("asdlc_coda", REPO / "tools" / "asdlc_coda.py")
@@ -372,3 +374,28 @@ def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch)
         ["python3", "tools/asdlc_runner.py", "PBI-337"],
     ]
     assert {cwd for _, cwd in visti} == {albero}
+
+
+def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
+    """Se `git fetch` non prende origin, lo switch andrebbe su un main di ieri.
+
+    Il giro partirebbe lo stesso, e produrrebbe un ramo costruito su una base
+    vecchia: un guasto del pre-flight ferma il lancio e dice quale comando è
+    andato storto.
+    """
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti = []
+
+    def fetch_rotto(cmd, cwd):
+        visti.append(cmd)
+        if cmd[:2] == ["git", "fetch"]:
+            return 1, "could not resolve host github.com"
+        return 0, ""
+
+    monkeypatch.setattr(coda, "esegui", fetch_rotto)
+
+    with pytest.raises(coda.Guasto, match="fetch"):
+        coda.lancia("PBI-337", albero)
+
+    assert not any("asdlc_runner.py" in " ".join(cmd) for cmd in visti)
