@@ -10,6 +10,7 @@ carica il modulo dal suo percorso, come fa `test_importa_storico.py`.
 
 import fcntl
 import importlib.util
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -456,3 +457,25 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     eseguiti = [" ".join(cmd) for cmd in visti]
     assert not [c for c in eseguiti if "asdlc_runner.py" in c], eseguiti
     assert not [c for c in eseguiti if "switch" in c or "fetch" in c or "checkout" in c], eseguiti
+
+
+def test_ogni_tick_lascia_una_riga_nel_log(tmp_path, monkeypatch):
+    """Il tick gira senza nessuno davanti: ciò che ha deciso deve restare scritto.
+
+    Una riga per giro, in coda alle altre — due tick, due righe — con l'ora
+    davanti, perché in un log di cron una decisione senza quando non si colloca.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    _, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+    argomenti = ["--repo", str(repo), "--worktree", str(albero), "--dry-run"]
+
+    coda.main(argomenti)
+    coda.main(argomenti)
+
+    righe = (repo / "runs" / "coda.log").read_text(encoding="utf-8").splitlines()
+    assert len(righe) == 2
+    oggi = datetime.date.today().isoformat()
+    assert all(riga.startswith(oggi) and "PBI-337" in riga for riga in righe), righe
