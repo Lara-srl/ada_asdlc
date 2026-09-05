@@ -28,8 +28,25 @@ class VocePbi:
 
 
 @dataclass(frozen=True)
+class VoceBarriera:
+    """Una riga `- ‖ testo` della coda: un gesto umano che deve venire prima."""
+
+    testo: str
+
+
+Voce = VocePbi | VoceBarriera
+
+
+@dataclass(frozen=True)
 class Occupato:
     """Un giro è già in corso: il tick finisce senza toccare niente."""
+
+
+@dataclass(frozen=True)
+class Barriera:
+    """La coda si ferma qui, e questo è ciò che aspetta."""
+
+    testo: str
 
 
 @dataclass(frozen=True)
@@ -47,8 +64,8 @@ class Lancia:
 
 
 def prossimo(
-    voci: list[VocePbi], mergiati: set[str], rami: set[str], occupato: bool
-) -> Occupato | Attende | Lancia | None:
+    voci: list[Voce], mergiati: set[str], rami: set[str], occupato: bool
+) -> Occupato | Barriera | Attende | Lancia | None:
     """Cosa fare adesso, dato lo stato del mondo.
 
     Il controllo del giro in corso sta **prima** di tutto: un albero, un agente.
@@ -58,6 +75,10 @@ def prossimo(
     if occupato:
         return Occupato()
     for voce in voci:
+        # La barriera ferma il giro dove sta: ciò che aspetta è un gesto umano, e
+        # nessuna voce dietro di lei può scavalcarlo.
+        if isinstance(voce, VoceBarriera):
+            return Barriera(voce.testo)
         # Un PBI in `main` è finito, e la sua voce è spenta: il ramo che si è
         # lasciato dietro non conta più niente, perché un ramo su `origin` parla
         # solo in assenza di merge.
