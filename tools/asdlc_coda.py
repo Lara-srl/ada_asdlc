@@ -341,6 +341,11 @@ def lancia(pbi: str, worktree: Path) -> None:
     Una riga del pre-flight che fallisce alza, e il runner non parte: se `git
     fetch` non prende `origin`, lo `switch --detach` finisce su un `origin/main`
     di ieri e il ramo nascerebbe su una base vecchia.
+
+    Anche il runner alza se esce male, e per la stessa ragione: prima di
+    staccarsi può rifiutarsi — una gara sul lucchetto dell'albero, il controllo
+    d'igiene su un file sporco, un PBI senza file in `backlog/` — e senza
+    leggere quel codice nel log resterebbe «lancia», con un riprova ogni tick.
     """
     for comando in PREFLIGHT:
         codice, uscita = esegui(comando, worktree)
@@ -349,7 +354,11 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
+    codice, uscita = esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
+    if codice != 0:
+        raise Guasto(
+            f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
+        )
 
 
 def racconta(decisione: Decisione) -> str:
