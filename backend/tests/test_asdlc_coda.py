@@ -104,3 +104,60 @@ def test_una_coda_tutta_mergiata_e_finita():
     )
 
     assert decisione == coda.Finita()
+
+
+CODA_FINTA = """# La coda dei PBI
+
+L'ordine in cui i PBI vanno lanciati.
+
+**Come si legge una riga**
+
+- `- PBI-337` — un PBI da lanciare.
+- `- ‖ testo` — una **barriera**: un gesto umano.
+
+## La coda
+
+- PBI-337
+
+⚠️ Una riga di prosa fra una voce e l'altra, che spiega perché quest'ordine.
+
+- ‖ la ripassata dell'import
+- PBI-338
+
+## Fuori dalla coda
+
+- **PBI-349** — ⏸ sospeso: non rientra finché la decisione non c'è.
+"""
+
+
+def test_le_voci_escono_nellordine_del_file_e_la_prosa_resta_fuori():
+    """Il documento è anche l'ingresso del programma, e intorno alle voci c'è prosa.
+
+    Le righe insidiose sono quelle che *nominano* la forma di una voce senza
+    esserlo — la legenda in cima e la sezione «Fuori dalla coda», dove PBI-349 è
+    scritto in grassetto perché è sospeso.
+    """
+    voci = coda.leggi_voci(CODA_FINTA)
+
+    assert voci == [
+        coda.VocePbi("PBI-337"),
+        coda.VoceBarriera("la ripassata dell'import"),
+        coda.VocePbi("PBI-338"),
+    ]
+
+
+def test_la_coda_vera_si_legge():
+    """Il collaudo su `backlog/CODA.md`, che è il file che il tick eseguirà.
+
+    Le asserzioni sono sulle proprietà e non sul contenuto: la coda la riscrive
+    Francesco quando vuole, e un test che si rompe a ogni riordino verrebbe
+    spento. Che ogni voce abbia il suo PBI in `backlog/` invece resta vero
+    sempre, ed è ciò che morde se una riga di prosa diventasse una voce.
+    """
+    voci = coda.leggi_voci((REPO / "backlog" / "CODA.md").read_text(encoding="utf-8"))
+
+    assert voci, "CODA.md non ha nessuna voce: il tick non avrebbe niente da eseguire"
+    nomi = [v.pbi for v in voci if isinstance(v, coda.VocePbi)]
+    assert len(nomi) == len(set(nomi)), f"un PBI compare due volte in coda: {nomi}"
+    for nome in nomi:
+        assert list(REPO.glob(f"backlog/{nome}-*.md")), f"{nome} non ha un file in backlog/"
