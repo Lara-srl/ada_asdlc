@@ -75,3 +75,20 @@ def test_la_testa_con_un_ramo_su_origin_e_senza_merge_si_attende():
     )
 
     assert decisione == coda.Attende("PBI-337")
+
+
+def test_una_barriera_ferma_la_coda_e_le_voci_dopo_non_si_guardano():
+    """Il PBI dietro la barriera sarebbe lanciabile, e non si lancia.
+
+    Una riga `‖` non è un PBI: è un gesto umano che deve venire prima. Senza
+    questo esito la prima voce non-PBI della coda diventerebbe un PBI
+    inesistente lanciato di notte.
+    """
+    decisione = coda.prossimo(
+        [coda.VoceBarriera("la ripassata dell'import"), coda.VocePbi("PBI-337")],
+        mergiati=set(),
+        rami=set(),
+        occupato=False,
+    )
+
+    assert decisione == coda.Barriera("la ripassata dell'import")
