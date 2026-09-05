@@ -33,6 +33,13 @@ class Occupato:
 
 
 @dataclass(frozen=True)
+class Attende:
+    """Il giro di questo PBI c'è già stato e si è fermato: tocca a un umano."""
+
+    pbi: str
+
+
+@dataclass(frozen=True)
 class Lancia:
     """C'è un PBI pronto da far partire, ed è questo."""
 
@@ -41,7 +48,7 @@ class Lancia:
 
 def prossimo(
     voci: list[VocePbi], mergiati: set[str], rami: set[str], occupato: bool
-) -> Occupato | Lancia | None:
+) -> Occupato | Attende | Lancia | None:
     """Cosa fare adesso, dato lo stato del mondo.
 
     Il controllo del giro in corso sta **prima** di tutto: un albero, un agente.
@@ -56,5 +63,10 @@ def prossimo(
         # solo in assenza di merge.
         if voce.pbi in mergiati:
             continue
+        # Il runner pubblica il ramo su ogni stato che interrompe (`chiudi()`):
+        # un ramo senza merge è un giro già fatto e fermo, e ciò che manca è un
+        # gesto umano. Rilanciarlo darebbe due rami sullo stesso PBI.
+        if voce.pbi in rami:
+            return Attende(voce.pbi)
         return Lancia(voce.pbi)
     return None
