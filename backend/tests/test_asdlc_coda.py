@@ -240,3 +240,27 @@ def test_il_lucchetto_tenuto_nel_worktree_ferma_il_tick(tmp_path, monkeypatch):
         fcntl.flock(tenuto, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
         assert coda.decidi(repo, albero) == coda.Occupato()
+
+
+def test_un_runner_vivo_nellalbero_ferma_il_tick_anche_senza_lucchetto(
+    tmp_path, monkeypatch
+):
+    """La rete sotto al lucchetto: chi lavora lì si vede da `/proc`.
+
+    Il lucchetto lo prende il runner; una sessione avviata a mano no, e nemmeno
+    un giro più vecchio del lucchetto. L'unico segnale comune ai due è **dove**
+    lavorano, ed è la stessa lettura di `agenti_estranei()`.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    finto_proc = tmp_path / "proc"
+    (finto_proc / "4242").mkdir(parents=True)
+    (finto_proc / "4242" / "cwd").symlink_to(albero)
+    (finto_proc / "4242" / "cmdline").write_bytes(
+        b"python3\x00tools/asdlc_runner.py\x00PBI-337\x00"
+    )
+    monkeypatch.setattr(coda, "PROC", finto_proc)
+    monkeypatch.setattr(coda, "esegui", nessun_comando)
+
+    assert coda.decidi(repo, albero) == coda.Occupato()
