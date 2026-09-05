@@ -17,11 +17,15 @@ sola cosa che i test guardano.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+# Dove il runner tiene il lucchetto del suo albero (`lucchetto()`, `NOME_LUCCHETTO`).
+LUCCHETTO = Path("runs") / ".runner.lock"
 
 
 @dataclass(frozen=True)
@@ -174,6 +178,35 @@ def pbi_con_ramo(repo: Path) -> set[str]:
     return {f"PBI-{numero}" for numero in RE_RAMO_PBI.findall(uscita)}
 
 
+def giro_in_corso(worktree: Path) -> bool:
+    """C'è già un runner al lavoro in quell'albero?
+
+    Si guarda se il lucchetto è **tenuto**, non se il file c'è: `lucchetto()` lo
+    apre e ci mette sopra un `flock`, ma non lo cancella all'uscita, quindi il
+    file sopravvive a ogni giro. Letto come presenza, il primo giro della storia
+    spegnerebbe la coda per sempre — che è il modo più silenzioso di non fare
+    niente. Il `flock` invece è dell'open file description: il kernel lo rilascia
+    quando il processo muore, comunque muoia, ed è esattamente la domanda «c'è
+    qualcuno adesso».
+
+    Un lucchetto che non si riesce nemmeno ad aprire conta come tenuto: nel
+    dubbio non si lancia (PBI-350, punto 8).
+    """
+    file = worktree / LUCCHETTO
+    if not file.exists():
+        return False
+    try:
+        with file.open("r+") as fd:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        return True
+    return False
+
+
 def decidi(repo: Path, worktree: Path) -> Decisione:
     """La decisione di questo tick, sullo stato che il mondo racconta adesso.
 
@@ -182,6 +215,11 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     diversi perché il tick non gira dentro l'albero che comanda: quello cambia
     ramo sotto i piedi a ogni giro, e un programma che leggesse il proprio
     codice da lì si riscriverebbe a metà tick.
+
+    Il giro in corso si guarda **prima** di ogni domanda al mondo: davanti a un
+    albero occupato non c'è risposta di `gh` che cambi la decisione.
     """
+    if giro_in_corso(worktree):
+        return Occupato()
     voci = leggi_voci((repo / "backlog" / "CODA.md").read_text(encoding="utf-8"))
     return prossimo(voci, pbi_mergiati(repo), pbi_con_ramo(repo), occupato=False)
