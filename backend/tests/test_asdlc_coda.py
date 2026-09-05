@@ -337,3 +337,38 @@ def test_un_pbi_senza_domande_non_produce_nessun_avviso(tmp_path):
     )
 
     assert coda.avviso_domande(repo, "PBI-337") == ""
+
+
+def registratore():
+    """Un `esegui()` che dice di sì a tutto e tiene la lista di ciò che ha visto."""
+    visti = []
+
+    def esegui(cmd, cwd):
+        visti.append((cmd, cwd))
+        return 0, ""
+
+    return visti, esegui
+
+
+def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch):
+    """Il pre-flight è quello del lancio a mano, perché è lo stesso lancio.
+
+    Il registro dei tempi si rimette a posto — il controllo d'igiene del runner
+    non lo esclude, e un albero sporco ferma il giro — poi si prende `origin` e
+    ci si stacca sopra, e solo allora parte il runner. Tre righe che vivevano in
+    una memoria di sessione, e qui diventano codice versionato.
+    """
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = registratore()
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    coda.lancia("PBI-337", albero)
+
+    assert [cmd for cmd, _ in visti] == [
+        ["git", "checkout", "--", "runs/tempi.csv"],
+        ["git", "fetch", "origin"],
+        ["git", "switch", "--detach", "origin/main"],
+        ["python3", "tools/asdlc_runner.py", "PBI-337"],
+    ]
+    assert {cwd for _, cwd in visti} == {albero}
