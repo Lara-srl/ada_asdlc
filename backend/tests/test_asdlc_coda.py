@@ -57,3 +57,21 @@ def test_la_testa_gia_mergiata_si_consuma_e_tocca_alla_voce_dopo():
     )
 
     assert decisione == coda.Lancia("PBI-338")
+
+
+def test_la_testa_con_un_ramo_su_origin_e_senza_merge_si_attende():
+    """Il giro c'è già stato e non è finito in `main`: tocca a un umano.
+
+    `chiudi()` pubblica su ogni stato che interrompe, quindi un ramo su `origin`
+    senza merge è un giro fermo — mai un giro da rifare. È il test che impedisce
+    il doppione: rilanciarlo di notte darebbe due rami sullo stesso PBI e il
+    lavoro fermo resterebbe fermo.
+    """
+    decisione = coda.prossimo(
+        [coda.VocePbi("PBI-337"), coda.VocePbi("PBI-338")],
+        mergiati=set(),
+        rami={"PBI-337"},
+        occupato=False,
+    )
+
+    assert decisione == coda.Attende("PBI-337")
