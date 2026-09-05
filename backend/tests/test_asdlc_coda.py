@@ -264,3 +264,40 @@ def test_un_runner_vivo_nellalbero_ferma_il_tick_anche_senza_lucchetto(
     monkeypatch.setattr(coda, "esegui", nessun_comando)
 
     assert coda.decidi(repo, albero) == coda.Occupato()
+
+
+def test_un_gh_che_non_risponde_non_produce_lancia(tmp_path, monkeypatch):
+    """Nel dubbio non si lancia, e si scrive perché.
+
+    Un tick che sbaglia per eccesso di prudenza costa dieci minuti fino al tick
+    dopo; uno che lancia sul dubbio costa un giro e un ramo da ripulire.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+
+    def gh_rotto(cmd, cwd):
+        if cmd[0] == "gh":
+            return 1, "could not connect to github.com"
+        return 0, ""
+
+    monkeypatch.setattr(coda, "esegui", gh_rotto)
+
+    decisione = coda.decidi(repo, albero)
+
+    assert isinstance(decisione, coda.Barriera)
+    assert "gh" in decisione.testo
+
+
+def test_una_coda_illeggibile_non_produce_lancia(tmp_path, monkeypatch):
+    """Senza la coda non ci sono ordini, e senza ordini non si lancia niente."""
+    repo = tmp_path / "repo"
+    (repo / "backlog").mkdir(parents=True)  # e nessun CODA.md dentro
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(coda, "esegui", mondo())
+
+    decisione = coda.decidi(repo, albero)
+
+    assert isinstance(decisione, coda.Barriera)
+    assert "CODA.md" in decisione.testo
