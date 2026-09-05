@@ -393,6 +393,12 @@ def main(argv: list[str] | None = None) -> int:
 
     decisione = decidi(a.repo, a.worktree)
     riga = racconta(decisione)
+    # L'avviso accompagna il lancio e non lo trattiene: la sezione ❓ di un PBI
+    # in coda è quasi sempre un protocollo di rifinitura già deciso, e chi lo
+    # ha messo in coda ha già dichiarato chiuse le sue domande. Qui si osserva
+    # e si segnala (`ADR-0008`).
+    if isinstance(decisione, Lancia) and (avviso := avviso_domande(a.repo, decisione.pbi)):
+        riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
     print(riga)
     scrivi_nel_log(a.repo, riga)
     # Le domande al mondo le ha già fatte `decidi()`, ed è giusto così: senza
