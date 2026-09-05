@@ -43,6 +43,11 @@ class Occupato:
 
 
 @dataclass(frozen=True)
+class Finita:
+    """La coda è tutta in `main`: non c'è più niente da lanciare."""
+
+
+@dataclass(frozen=True)
 class Barriera:
     """La coda si ferma qui, e questo è ciò che aspetta."""
 
@@ -63,9 +68,12 @@ class Lancia:
     pbi: str
 
 
+Decisione = Occupato | Finita | Barriera | Attende | Lancia
+
+
 def prossimo(
     voci: list[Voce], mergiati: set[str], rami: set[str], occupato: bool
-) -> Occupato | Barriera | Attende | Lancia | None:
+) -> Decisione:
     """Cosa fare adesso, dato lo stato del mondo.
 
     Il controllo del giro in corso sta **prima** di tutto: un albero, un agente.
@@ -90,4 +98,4 @@ def prossimo(
         if voce.pbi in rami:
             return Attende(voce.pbi)
         return Lancia(voce.pbi)
-    return None
+    return Finita()
