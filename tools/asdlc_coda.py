@@ -32,9 +32,16 @@ class Occupato:
     """Un giro è già in corso: il tick finisce senza toccare niente."""
 
 
+@dataclass(frozen=True)
+class Lancia:
+    """C'è un PBI pronto da far partire, ed è questo."""
+
+    pbi: str
+
+
 def prossimo(
     voci: list[VocePbi], mergiati: set[str], rami: set[str], occupato: bool
-) -> Occupato | None:
+) -> Occupato | Lancia | None:
     """Cosa fare adesso, dato lo stato del mondo.
 
     Il controllo del giro in corso sta **prima** di tutto: un albero, un agente.
@@ -43,4 +50,6 @@ def prossimo(
     """
     if occupato:
         return Occupato()
+    for voce in voci:
+        return Lancia(voce.pbi)
     return None
