@@ -8,6 +8,7 @@ lancia il runner non è un test, è una notte.
 carica il modulo dal suo percorso, come fa `test_importa_storico.py`.
 """
 
+import fcntl
 import importlib.util
 import json
 import sys
@@ -215,3 +216,27 @@ def test_la_decisione_si_compone_dalle_pr_mergiate_e_dai_rami_su_origin(
     )
 
     assert coda.decidi(repo, albero) == coda.Attende("PBI-338")
+
+
+def nessun_comando(cmd, cwd):
+    raise AssertionError(f"il tick non doveva chiedere niente al mondo: {cmd}")
+
+
+def test_il_lucchetto_tenuto_nel_worktree_ferma_il_tick(tmp_path, monkeypatch):
+    """Il lucchetto del runner è la prova che qualcuno sta già lavorando lì.
+
+    `esegui()` qui fa fallire il test se viene chiamato: davanti a un giro in
+    corso il tick non deve nemmeno interrogare `gh`, perché qualunque risposta
+    porterebbe a un secondo agente sullo stesso albero.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    (albero / "runs").mkdir(parents=True)
+    lucchetto = albero / "runs" / ".runner.lock"
+    lucchetto.touch()
+    monkeypatch.setattr(coda, "esegui", nessun_comando)
+
+    with lucchetto.open("r+") as tenuto:
+        fcntl.flock(tenuto, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        assert coda.decidi(repo, albero) == coda.Occupato()
