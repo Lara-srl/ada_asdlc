@@ -219,6 +219,24 @@ Esegui il PBI con queste regole non negoziabili:
 - Se il PBI cambia un contratto, aggiorna la spec NELLO STESSO commit del codice.
 - Non lasciare modifiche non committate: ciò che non è committato non esiste.
 - Non toccare .github/workflows/ (il push verrebbe rifiutato dal token).
+- **Dipendenze mancanti: installa, non modificare l'ambiente.** Se vedi errori come
+  "Failed to resolve import X", "ModuleNotFoundError", "Cannot find module":
+  1. Verifica se X è in `package.json` o `requirements.txt`
+  2. Se c'è ma manca in `node_modules`/`.venv`: esegui `npm install` o `pip install -r requirements.txt`
+  3. Se non c'è E serve al PBI: aggiungilo al file delle dipendenze e installa
+  **NON modificare MAI** per "far passare i test": `conftest.py`, `vite.config.ts`,
+  `pytest.ini`, `tsconfig.json`, `eslint.config.js`. Il problema è l'ambiente (dipendenze
+  non installate), non la configurazione. **NON cambiare il test environment**
+  (es. jsdom→happy-dom) per errori di dipendenze.
+- **Non bypassare i gate con trucchi.** Vietato:
+  - `--no-verify` per saltare i pre-commit hook
+  - Modificare `PATH` o altre variabili d'ambiente nei file di test
+  - Aggiungere fixture che manipolano `os.environ` per "far funzionare" i test
+  - Disattivare test, marcare `skip`, allargare tolleranze per far passare il gate
+  - Modificare asserzioni per renderle meno stringenti
+  Se un gate è rosso, la causa è nel **codice di dominio**, non nell'infrastruttura di
+  test. L'unica eccezione: se il gate fallisce per un bug nel gate stesso, fermati e
+  scrivi `STOP:` con la diagnosi.
 - **Non pubblicare niente**: nessun `git push`, nessun `gh pr create`. Al branch e alla PR
   ci pensa il runner, quando il Critic ha finito. Un branch pushato a metà giro è una
   promessa fatta su lavoro che nessuno ha ancora accettato — su PBI-324 quella promessa è
