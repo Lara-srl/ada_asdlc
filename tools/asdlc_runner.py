@@ -1706,7 +1706,7 @@ VERDETTI = {"VERDETTO: PASS": "pass",
             "VERDETTO: SOSPESO": "sospeso"}
 
 
-def revisione_critica(pbi_path: Path) -> Verdetto:
+def revisione_critica(pbi_path: Path, run_id: str = "") -> Verdetto:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
     print("    critic … ", end="", flush=True)
     try:
@@ -1714,7 +1714,7 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     except ValueError:
         percorso = pbi_path
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-    prompt_file = LOG_DIR / f"{RUN_ID}_critic_prompt.txt"
+    prompt_file = LOG_DIR / f"{run_id}_critic_prompt.txt"
     prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
     _, out = esegui(CRITIC + [f"@{prompt_file}"], REPO)
 
@@ -1922,7 +1922,7 @@ def trova_pbi(pbi: str) -> Path | None:
 
 
 def esegui_pbi(
-    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
+    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True, run_id: str = ""
 ) -> Esito:
     pbi_path = trova_pbi(pbi)
     if pbi_path is None:
@@ -2010,7 +2010,7 @@ def esegui_pbi(
         while gate_falliti < MAX_TENTATIVI:
             print(f"  builder — giro {e.tentativi + igiene + 1}")
             # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-            prompt_file = LOG_DIR / f"{RUN_ID}_builder_prompt.txt"
+            prompt_file = LOG_DIR / f"{run_id}_builder_prompt.txt"
             prompt_file.write_text(prompt, encoding="utf-8")
             cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [f"@{prompt_file}"]
             primo_del_giro = False
@@ -2105,7 +2105,7 @@ def esegui_pbi(
             break
 
         with misura(e, "critic"):
-            verdetto = revisione_critica(pbi_path)
+            verdetto = revisione_critica(pbi_path, run_id)
         rapporto = verdetto.rapporto
         e.rapporto_critic = rapporto[-6000:]
         if verdetto.esito == "pass":
@@ -2687,7 +2687,7 @@ def main() -> int:
         for pbi in a.pbi:
             try:
                 e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
-                               con_critic=not a.senza_critic)
+                               con_critic=not a.senza_critic, run_id=run)
             except Exception as exc:  # noqa: BLE001 — qui si cattura per non perdere il resto
                 # Un guasto dentro un PBI è un esito di **quel** PBI. Prima usciva
                 # da `main()` col traceback e si portava via la sequenza intera, e
