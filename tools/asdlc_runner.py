@@ -1706,7 +1706,7 @@ VERDETTI = {"VERDETTO: PASS": "pass",
             "VERDETTO: SOSPESO": "sospeso"}
 
 
-def revisione_critica(pbi_path: Path, run_id: str = "") -> Verdetto:
+def revisione_critica(pbi_path: Path, *, run_id: str = "") -> Verdetto:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
     print("    critic … ", end="", flush=True)
     try:
@@ -2105,7 +2105,7 @@ def esegui_pbi(
             break
 
         with misura(e, "critic"):
-            verdetto = revisione_critica(pbi_path, run_id)
+            verdetto = revisione_critica(pbi_path, run_id=run_id)
         rapporto = verdetto.rapporto
         e.rapporto_critic = rapporto[-6000:]
         if verdetto.esito == "pass":
