@@ -1713,7 +1713,10 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
         percorso = pbi_path.relative_to(REPO)
     except ValueError:
         percorso = pbi_path
-    _, out = esegui(CRITIC + [PROMPT_CRITIC.format(pbi_path=percorso)], REPO)
+    # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
+    prompt_file = LOG_DIR / f"{RUN_ID}_critic_prompt.txt"
+    prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
+    _, out = esegui(CRITIC + [f"@{prompt_file}"], REPO)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
@@ -2006,7 +2009,10 @@ def esegui_pbi(
         gate_falliti = igiene = 0
         while gate_falliti < MAX_TENTATIVI:
             print(f"  builder — giro {e.tentativi + igiene + 1}")
-            cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [prompt]
+            # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
+            prompt_file = LOG_DIR / f"{RUN_ID}_builder_prompt.txt"
+            prompt_file.write_text(prompt, encoding="utf-8")
+            cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [f"@{prompt_file}"]
             primo_del_giro = False
             with misura(e, "builder"):
                 _, out = esegui(cmd, REPO)
