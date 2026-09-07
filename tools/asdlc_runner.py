@@ -330,10 +330,14 @@ e termina con la riga esatta:
 
     VERDETTO: NON PRONTO
 
-**Un commento falso in un file di produzione non fa `NON PRONTO` da solo.** Il Builder
-in `TEST_ONLY` non può toccarlo — un commento non ha comportamento, e nessun rosso apre
-quel file — e mandarlo a girare per una frase è un giro buttato (PBI-335, giro 4,
-03/09/2026). Segnalalo lo stesso, con file e riga, sotto il titolo
+**Un commento falso non fa `NON PRONTO` da solo**, né in produzione né in un file di test.
+Un commento non ha comportamento — nessun rosso lo produce, nessuna asserzione
+cambia — e spendere un giro intero, Builder e gate e Critic, per una frase è un giro
+buttato ovunque quella frase stia (PBI-335, giro 4, 03/09/2026; PBI-342, giro 5,
+07/09/2026, chiuso `non convergente` proprio così, con quattro giri di rilievi di
+comportamento alle spalle). In produzione c'è una ragione in più, non l'unica: il
+Builder in `TEST_ONLY` quel file non può nemmeno aprirlo. Segnalalo lo stesso, con file
+e riga, sotto il titolo
 
     ## Note per chi mergia
 
@@ -386,12 +390,13 @@ sempre: il `test (RED)` committato da solo, `--chiedi-impl` che apre la fase per
 vede fallire, e poi il `fix`. Sono **due** commit, mai uno: il rosso non può essere
 esistito in mezzo a un commit solo.
 
-**Se il rilievo è un commento falso in un file di produzione** — una frase che manda a
-un posto che non c'è più: non c'è un rosso da osservare, e in `TEST_ONLY` quel file è
-chiuso. Non recitare un rosso e non spegnere un hook per passarci. Se in questo giro apri
-`IMPL` per un rilievo vero sullo stesso file, la correzione viaggia dentro quel `fix`;
-altrimenti lascia il rilievo aperto e nomina file e riga nella risposta: lo corregge
-chi mergia (PBI-104, 03/09/2026).
+**Se il rilievo è un commento falso** — una frase che manda a un posto che non c'è più —
+non c'è un rosso da osservare: un commento non ha comportamento. Non recitare un rosso e
+non spegnere un hook per passarci. Se sta in un file di test, correggilo in questo giro e
+scrivi nel commit perché il rosso non c'era. Se sta in produzione, in `TEST_ONLY` quel
+file è chiuso: se nel giro apri `IMPL` per un rilievo vero sullo stesso file la correzione
+viaggia dentro quel `fix`; altrimenti lascia il rilievo aperto e nomina file e riga nella
+risposta, e lo corregge chi mergia (PBI-104, 03/09/2026).
 
 Se il rosso non si ottiene in nessuno di questi modi, **non** riscrivere la storia per
 nasconderlo: scrivi nel commit perché non era osservabile e lascialo vedere.

@@ -100,6 +100,29 @@ class TestIlCriticPuoSospendere:
             "suo, fuori dai rilievi numerati, e da solo non fa NON PRONTO"
         )
 
+    def test_l_esenzione_del_commento_falso_non_guarda_dove_sta_il_file(self):
+        """PBI-342, giro 5 (07/09/2026): l'esenzione dice il luogo, non la ragione.
+
+        Il Critic ha trovato un commento falso in `AnalisiPage.test.tsx` e ha
+        escluso l'esenzione con l'argomento giusto per la regola scritta — «è un
+        file di test» — chiudendo il giro su `non convergente` per una frase,
+        dopo quattro giri che avevano chiuso rilievi di comportamento. Ma la
+        ragione dell'esenzione non è dove sta il file: è che un commento non ha
+        comportamento, nessun rosso lo produce e spendere un giro intero —
+        Builder, gate e Critic — per una frase è un giro buttato ovunque stia.
+        """
+        critic = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md")
+        rimedio = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+        for nome, prompt in (("PROMPT_CRITIC", critic), ("PROMPT_RIMEDIO", rimedio)):
+            assert "commento falso in un file di produzione" not in prompt, (
+                f"{nome} restringe l'esenzione alla produzione: un commento falso in un "
+                "file di test costa lo stesso giro, e la regola lo lascia bloccare"
+            )
+            assert "in un file di test" in prompt, (
+                f"{nome} deve nominare il caso del file di test, o chi legge la regola "
+                "la applica alla lettera e il caso torna"
+            )
+
     def test_riconosce_il_verdetto_sospeso_e_ne_prende_la_domanda(self, monkeypatch):
         uscita = (
             "**1. [processo] Il CHIEDI sulla migrazione è stato saltato**\n"
