@@ -180,10 +180,14 @@ def test_la_coda_vera_si_legge():
     Francesco quando vuole, e un test che si rompe a ogni riordino verrebbe
     spento. Che ogni voce abbia il suo PBI in `backlog/` invece resta vero
     sempre, ed è ciò che morde se una riga di prosa diventasse una voce.
+
+    Che le voci ci **siano** invece non è una proprietà: una coda vuota è un
+    lotto chiuso, non un guasto, e il tick che ci arriva dice `Finita` — è
+    misurato in `test_una_coda_senza_nemmeno_una_voce_e_finita`. Pretenderlo qui
+    trasformava la fine di un lotto in una CI rossa (PR #209).
     """
     voci = coda.leggi_voci((REPO / "backlog" / "CODA.md").read_text(encoding="utf-8"))
 
-    assert voci, "CODA.md non ha nessuna voce: il tick non avrebbe niente da eseguire"
     nomi = [v.pbi for v in voci if isinstance(v, coda.VocePbi)]
     assert len(nomi) == len(set(nomi)), f"un PBI compare due volte in coda: {nomi}"
     for nome in nomi:
