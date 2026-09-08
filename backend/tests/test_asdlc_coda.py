@@ -119,6 +119,20 @@ def test_una_coda_tutta_mergiata_e_finita():
     assert decisione == coda.Finita()
 
 
+def test_una_coda_senza_nemmeno_una_voce_e_finita():
+    """Il lotto chiuso: `CODA.md` non ha più righe, e il tick non lancia niente.
+
+    Dall'08/09 è lo stato vero del file — Fase 3 e Fase 4 sono ferme su una
+    decisione commerciale, non su un vincolo tecnico — e va misurato qui, perché
+    è la sola lettura in cui un `Finita` mancante diventerebbe un `None` passato
+    a `chiudi()` di notte. Nasce verde e morde: cancellata l'ultima riga di
+    `prossimo()` il test cade (`ADR-0022`).
+    """
+    decisione = coda.prossimo([], mergiati=set(), rami=set(), occupato=False)
+
+    assert decisione == coda.Finita()
+
+
 CODA_FINTA = """# La coda dei PBI
 
 L'ordine in cui i PBI vanno lanciati.
