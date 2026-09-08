@@ -119,6 +119,20 @@ def test_una_coda_tutta_mergiata_e_finita():
     assert decisione == coda.Finita()
 
 
+def test_una_coda_senza_nemmeno_una_voce_e_finita():
+    """Il lotto chiuso: `CODA.md` non ha più righe, e il tick non lancia niente.
+
+    Dall'08/09 è lo stato vero del file — Fase 3 e Fase 4 sono ferme su una
+    decisione commerciale, non su un vincolo tecnico — e va misurato qui, perché
+    è la sola lettura in cui un `Finita` mancante diventerebbe un `None` passato
+    a `chiudi()` di notte. Nasce verde e morde: cancellata l'ultima riga di
+    `prossimo()` il test cade (`ADR-0022`).
+    """
+    decisione = coda.prossimo([], mergiati=set(), rami=set(), occupato=False)
+
+    assert decisione == coda.Finita()
+
+
 CODA_FINTA = """# La coda dei PBI
 
 L'ordine in cui i PBI vanno lanciati.
@@ -166,10 +180,14 @@ def test_la_coda_vera_si_legge():
     Francesco quando vuole, e un test che si rompe a ogni riordino verrebbe
     spento. Che ogni voce abbia il suo PBI in `backlog/` invece resta vero
     sempre, ed è ciò che morde se una riga di prosa diventasse una voce.
+
+    Che le voci ci **siano** invece non è una proprietà: una coda vuota è un
+    lotto chiuso, non un guasto, e il tick che ci arriva dice `Finita` — è
+    misurato in `test_una_coda_senza_nemmeno_una_voce_e_finita`. Pretenderlo qui
+    trasformava la fine di un lotto in una CI rossa (PR #209).
     """
     voci = coda.leggi_voci((REPO / "backlog" / "CODA.md").read_text(encoding="utf-8"))
 
-    assert voci, "CODA.md non ha nessuna voce: il tick non avrebbe niente da eseguire"
     nomi = [v.pbi for v in voci if isinstance(v, coda.VocePbi)]
     assert len(nomi) == len(set(nomi)), f"un PBI compare due volte in coda: {nomi}"
     for nome in nomi:
