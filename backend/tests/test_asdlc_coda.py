@@ -249,9 +249,9 @@ def test_la_decisione_si_compone_dalle_pr_mergiate_e_dai_rami_su_origin(
     """Lo stato non sta su disco: lo raccontano `gh` e `git`.
 
     Il merge si riconosce dal **titolo** della PR — la forma che `apri_pr()`
-    costruisce — perché regge sia al merge di commit sia allo squash, che il nome
-    del ramo lo perde. Il ramo si riconosce lo stesso col suffisso di un secondo
-    giro.
+    costruisce — che qui è l'unico dei due segnali disponibile: di questa PR non
+    si sa altro. Il ramo su `origin` si riconosce lo stesso col suffisso di un
+    secondo giro.
     """
     repo = scrivi_coda(tmp_path, "- PBI-337\n- PBI-338\n")
     albero = tmp_path / "albero"
@@ -493,8 +493,10 @@ def test_una_finestra_di_pr_mergiate_piena_non_produce_lancia(tmp_path, monkeypa
     una voce di coda il cui ramo su `origin` sia stato potato dopo il merge quel
     silenzio diventa `Lancia`, cioè il rilancio di un PBI già in `main` — il
     doppione che `test_la_testa_con_un_ramo_su_origin_e_senza_merge_si_attende`
-    impedisce, entrato dall'altra porta. È anche il rovescio esatto del guasto
-    che `pbi_mergiati()` evita leggendo il titolo invece del nome del ramo.
+    impedisce, entrato dall'altra porta. È la finestra delle PR, e ha il suo
+    gemello nella finestra dei file di una PR, dove il silenzio si risolve
+    dalla parte opposta (`test_un_elenco_di_file_muto_o_al_limite_conta_come_pbi_speso`):
+    lì non sapere significa «speso», qui significa fermarsi.
 
     Non si allarga soltanto la finestra, perché una finestra grande resta una
     finestra: quando è piena il tick non deduce niente, alza e va in `Barriera`.
