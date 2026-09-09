@@ -173,22 +173,41 @@ class Guasto(RuntimeError):
 LIMITE_PR = 1000
 
 
-def pbi_mergiati(repo: Path) -> set[str]:
-    """I PBI già in `main`, letti dai **titoli** delle PR mergiate.
+def tocca_codice(pr: dict) -> bool:
+    """La PR ha cambiato qualcosa **fuori** da `backlog/`?
 
-    Dal titolo e non dal nome del ramo: lo squash il ramo lo perde, e un PBI
-    entrato in `main` con uno squash resterebbe per sempre da lanciare.
+    È la domanda che distingue la PR che *accoda* un PBI da quella che lo *fa*:
+    la prima scrive il file del PBI e la sua riga in `CODA.md`, e non tocca
+    nient'altro. Il titolo le due specie non le distingue, e il 09/09 la #215 ha
+    spento la voce di PBI-352 nell'istante in cui la scriveva.
+
+    Un elenco di file che manca si legge come **sì**, cioè come la PR che spende
+    il PBI: è il fail-closed di PBI-350 col segno tenuto dalla parte giusta —
+    non rilanciare un PBI che potrebbe già essere in `main`.
+    """
+    percorsi = pr.get("files") or []
+    if not percorsi:
+        return True
+    return any(not f.get("path", "").startswith("backlog/") for f in percorsi)
+
+
+def pbi_mergiati(repo: Path) -> set[str]:
+    """I PBI già in `main`: quelli che una PR mergiata **nomina e ha implementato**.
+
+    Due condizioni, e la seconda è quella che il solo titolo non dava: la PR
+    nomina il PBI, e ha cambiato qualcosa fuori da `backlog/` (`tocca_codice()`).
+    Il titolo da solo dice che una PR *parla* di un PBI, non che lo fa — e la PR
+    che lo accoda ne parla per prima.
 
     L'elenco pieno è un guasto e non un dato. `gh` non risponde mai «non lo so»:
     una PR fuori dalla finestra semplicemente non c'è, e qui diventerebbe «non
     mergiato» — che su una voce il cui ramo è stato potato dopo il merge vuol
-    dire `Lancia`, cioè il rilancio di un PBI già in `main`. È lo stesso guasto
-    che si evita leggendo il titolo, col segno rovesciato, e allargare la
+    dire `Lancia`, cioè il rilancio di un PBI già in `main`. Allargare la
     finestra non lo toglie: una finestra grande resta una finestra.
     """
     codice, uscita = esegui(
         ["gh", "pr", "list", "--state", "merged",
-         "--limit", str(LIMITE_PR), "--json", "title"],
+         "--limit", str(LIMITE_PR), "--json", "title,files"],
         repo,
     )
     if codice != 0:
@@ -207,7 +226,7 @@ def pbi_mergiati(repo: Path) -> set[str]:
     return {
         trovato.group(1)
         for pr in elenco
-        if (trovato := RE_TITOLO_PR.match(pr.get("title", "")))
+        if (trovato := RE_TITOLO_PR.match(pr.get("title", ""))) and tocca_codice(pr)
     }
 
 
