@@ -358,6 +358,33 @@ def test_il_ramo_col_suffisso_di_giro_nomina_lo_stesso_pbi(tmp_path, monkeypatch
     assert coda.decidi(repo, albero) == coda.Finita()
 
 
+def test_il_titolo_spegne_il_pbi_anche_da_un_ramo_che_non_e_pbi(tmp_path, monkeypatch):
+    """Il caso #158: PBI-104 implementato a mano dal ramo `ci/il-rosso-si-chiede-prima`.
+
+    È la ragione per cui il titolo resta uno dei due segnali invece di lasciare
+    il posto al solo ramo. In questo repository si è implementato a mano da rami
+    non `pbi/` più di una volta — #158, #138 (PBI-102), #65 (PBI-209) — e una
+    regola sul nome del ramo non lo sa: le darebbe per da fare, cioè
+    rilancerebbe un PBI già in `main`, che costa un giro, un ramo e un conflitto.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-104\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(
+        coda,
+        "esegui",
+        mondo(pr_mergiate=[
+            pr_mergiata(
+                titolo="PBI-104: il rosso si chiede prima",
+                ramo="ci/il-rosso-si-chiede-prima",
+                files=["tools/asdlc_runner.py", "decisions/ADR-0021.md"],
+            )
+        ]),
+    )
+
+    assert coda.decidi(repo, albero) == coda.Finita()
+
+
 def nessun_comando(cmd, cwd):
     raise AssertionError(f"il tick non doveva chiedere niente al mondo: {cmd}")
 
