@@ -158,9 +158,10 @@ def esegui(cmd: list[str], cwd: Path) -> tuple[int, str]:
 
 # I due modi in cui una PR nomina il suo PBI: il titolo che `apri_pr()` costruisce
 # e il ramo che `crea_branch()` chiede a `nome_libero()`. Il secondo copre i giri
-# intitolati con la convenzione vecchia, `feat(scope): PBI-XXX — …`.
+# intitolati con la convenzione vecchia, `feat(scope): PBI-XXX — …`, e arriva col
+# suffisso del giro (`pbi/pbi-338-giro3`) quando un primo giro c'era già.
 RE_TITOLO_PR = re.compile(r"^\s*(PBI-\d+)\s*:")
-RE_RAMO_PR = re.compile(r"^pbi/pbi-(\d+)$")
+RE_RAMO_PR = re.compile(r"^pbi/pbi-(\d+)")
 # Lo stesso ramo letto da `git ls-remote`, che lo rende col prefisso dei ref.
 RE_RAMO_PBI = re.compile(r"refs/heads/pbi/pbi-(\d+)")
 
