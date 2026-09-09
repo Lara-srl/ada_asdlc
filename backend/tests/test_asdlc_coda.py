@@ -385,6 +385,35 @@ def test_il_titolo_spegne_il_pbi_anche_da_un_ramo_che_non_e_pbi(tmp_path, monkey
     assert coda.decidi(repo, albero) == coda.Finita()
 
 
+def test_un_elenco_di_file_muto_o_al_limite_conta_come_pbi_speso(tmp_path, monkeypatch):
+    """Le tre risposte da cui non si capisce cosa la PR abbia toccato, e il verso della prudenza.
+
+    `gh pr list --json files` rende **al più 100 file per PR**: una PR grossa i
+    cui primi cento stessero tutti in `backlog/` si leggerebbe «documentale».
+    Insieme al campo che manca e alla PR senza file sono i tre silenzi, e per
+    tutti e tre il PBI si considera **speso**.
+
+    Il segno è quello: un falso negativo rilancia un PBI già in `main` e costa un
+    giro, un ramo e un conflitto; un falso positivo costa i dieci minuti fino al
+    tick dopo. È lo stesso fail-closed di PBI-350 col segno tenuto dalla parte
+    giusta.
+    """
+    cento = [f"backlog/PBI-{n}-un-file-documentale.md" for n in range(100)]
+    for caso, files in [("assente", None), ("vuoto", []), ("al-limite", cento)]:
+        repo = scrivi_coda(tmp_path / caso, "- PBI-352\n")
+        albero = tmp_path / caso / "albero"
+        albero.mkdir()
+        monkeypatch.setattr(
+            coda,
+            "esegui",
+            mondo(pr_mergiate=[
+                pr_mergiata(titolo="PBI-352: il cruscotto si stringe a cinque", files=files)
+            ]),
+        )
+
+        assert coda.decidi(repo, albero) == coda.Finita(), caso
+
+
 def nessun_comando(cmd, cwd):
     raise AssertionError(f"il tick non doveva chiedere niente al mondo: {cmd}")
 
