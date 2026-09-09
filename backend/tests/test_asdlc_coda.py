@@ -327,6 +327,37 @@ def test_il_ramo_del_runner_spegne_il_pbi_anche_col_titolo_senza_prefisso(
     assert coda.decidi(repo, albero) == coda.Finita()
 
 
+def test_il_ramo_col_suffisso_di_giro_nomina_lo_stesso_pbi(tmp_path, monkeypatch):
+    """`pbi/pbi-338-giro3` è PBI-338, e `pbi/pbi-337-giro8` è PBI-337.
+
+    Il suffisso lo mette `nome_libero()` quando un primo giro c'era già, ed è la
+    forma in cui finisce in `main` ogni PBI ripreso dopo una fermata — cioè
+    proprio quelli su cui sbagliare costa un rilancio. `pbi_con_ramo()` il
+    suffisso lo tollera già dal ref: qui si tollera dal record della PR.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n- PBI-338\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(
+        coda,
+        "esegui",
+        mondo(pr_mergiate=[
+            pr_mergiata(
+                titolo="feat(officina): PBI-337 — il tipo di lavoro eseguito",
+                ramo="pbi/pbi-337-giro8",
+                files=["backend/app/routers/officina.py"],
+            ),
+            pr_mergiata(
+                titolo="feat(officina): PBI-338 — la riga di ricambio",
+                ramo="pbi/pbi-338-giro3",
+                files=["frontend/src/pages/FoglioPage.tsx"],
+            ),
+        ]),
+    )
+
+    assert coda.decidi(repo, albero) == coda.Finita()
+
+
 def nessun_comando(cmd, cwd):
     raise AssertionError(f"il tick non doveva chiedere niente al mondo: {cmd}")
 
