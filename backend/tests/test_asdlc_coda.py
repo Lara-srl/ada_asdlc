@@ -297,6 +297,36 @@ def test_una_pr_che_tocca_solo_backlog_non_spegne_il_pbi_che_nomina(tmp_path, mo
     assert coda.decidi(repo, albero) == coda.Lancia("PBI-352")
 
 
+def test_il_ramo_del_runner_spegne_il_pbi_anche_col_titolo_senza_prefisso(
+    tmp_path, monkeypatch
+):
+    """L'altro modo di nominare un PBI: il ramo `pbi/pbi-XXX` da cui la PR viene.
+
+    Sono i diciannove giri intitolati con la convenzione vecchia — `feat(scope):
+    PBI-XXX — …` — tutti in `main` e tutti che il solo titolo dà per da fare. Il
+    `headRefName` regge alla potatura del ramo: verificato il 09/09 su #207 e
+    #206, rami cancellati da `origin` e nome ancora reso da `gh`. Il timore che
+    aveva fatto scartare il ramo — «lo squash il ramo lo perde» — vale per git,
+    non per il record della PR.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-327\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(
+        coda,
+        "esegui",
+        mondo(pr_mergiate=[
+            pr_mergiata(
+                titolo="feat(officina): PBI-327 — il tipo di lavoro eseguito",
+                ramo="pbi/pbi-327",
+                files=["backend/app/routers/officina.py"],
+            )
+        ]),
+    )
+
+    assert coda.decidi(repo, albero) == coda.Finita()
+
+
 def nessun_comando(cmd, cwd):
     raise AssertionError(f"il tick non doveva chiedere niente al mondo: {cmd}")
 
