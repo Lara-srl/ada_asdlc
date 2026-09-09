@@ -156,9 +156,12 @@ def esegui(cmd: list[str], cwd: Path) -> tuple[int, str]:
     return finito.returncode, finito.stdout + finito.stderr
 
 
-# Il titolo che `apri_pr()` costruisce, e il ramo che `crea_branch()` chiede a
-# `nome_libero()`: `pbi/pbi-338`, o `pbi/pbi-338-giro2` se il primo giro c'era già.
+# I due modi in cui una PR nomina il suo PBI: il titolo che `apri_pr()` costruisce
+# e il ramo che `crea_branch()` chiede a `nome_libero()`. Il secondo copre i giri
+# intitolati con la convenzione vecchia, `feat(scope): PBI-XXX — …`.
 RE_TITOLO_PR = re.compile(r"^\s*(PBI-\d+)\s*:")
+RE_RAMO_PR = re.compile(r"^pbi/pbi-(\d+)$")
+# Lo stesso ramo letto da `git ls-remote`, che lo rende col prefisso dei ref.
 RE_RAMO_PBI = re.compile(r"refs/heads/pbi/pbi-(\d+)")
 
 
@@ -171,6 +174,25 @@ class Guasto(RuntimeError):
 # cursore per scelta: rifà la domanda da zero a ogni giro, e una finestra stretta
 # la riempirebbe subito.
 LIMITE_PR = 1000
+
+
+def pbi_nominato(pr: dict) -> str | None:
+    """Il PBI che la PR nomina — nel titolo o nel nome del ramo — o `None`.
+
+    I due sono in *or* perché sono due modi di dire la stessa cosa, e ciascuno
+    copre ciò che l'altro perde: il titolo prende le implementazioni fatte a mano
+    da rami che non sono `pbi/` (#158, PBI-104 da `ci/`), il ramo prende i giri
+    del runner intitolati con la convenzione vecchia, `feat(scope): PBI-XXX — …`.
+
+    Il ramo si legge dal record della PR e non da git: `headRefName` regge alla
+    potatura del ramo — verificato il 09/09 su #207 e #206 — mentre lo squash in
+    git il ramo lo perde davvero, ed è per quello che era stato scartato.
+    """
+    if (dal_titolo := RE_TITOLO_PR.match(pr.get("title", ""))) is not None:
+        return dal_titolo.group(1)
+    if (dal_ramo := RE_RAMO_PR.match(pr.get("headRefName", ""))) is not None:
+        return f"PBI-{dal_ramo.group(1)}"
+    return None
 
 
 def tocca_codice(pr: dict) -> bool:
@@ -194,10 +216,10 @@ def tocca_codice(pr: dict) -> bool:
 def pbi_mergiati(repo: Path) -> set[str]:
     """I PBI già in `main`: quelli che una PR mergiata **nomina e ha implementato**.
 
-    Due condizioni, e la seconda è quella che il solo titolo non dava: la PR
-    nomina il PBI, e ha cambiato qualcosa fuori da `backlog/` (`tocca_codice()`).
-    Il titolo da solo dice che una PR *parla* di un PBI, non che lo fa — e la PR
-    che lo accoda ne parla per prima.
+    Due condizioni: la PR nomina il PBI — nel titolo o nel ramo, `pbi_nominato()`
+    — e ha cambiato qualcosa fuori da `backlog/` (`tocca_codice()`). Il titolo da
+    solo dice che una PR *parla* di un PBI, non che lo fa, e la PR che lo accoda
+    ne parla per prima.
 
     L'elenco pieno è un guasto e non un dato. `gh` non risponde mai «non lo so»:
     una PR fuori dalla finestra semplicemente non c'è, e qui diventerebbe «non
@@ -207,7 +229,7 @@ def pbi_mergiati(repo: Path) -> set[str]:
     """
     codice, uscita = esegui(
         ["gh", "pr", "list", "--state", "merged",
-         "--limit", str(LIMITE_PR), "--json", "title,files"],
+         "--limit", str(LIMITE_PR), "--json", "title,headRefName,files"],
         repo,
     )
     if codice != 0:
@@ -224,9 +246,9 @@ def pbi_mergiati(repo: Path) -> set[str]:
             "tools/asdlc_coda.py."
         )
     return {
-        trovato.group(1)
+        nome
         for pr in elenco
-        if (trovato := RE_TITOLO_PR.match(pr.get("title", ""))) and tocca_codice(pr)
+        if (nome := pbi_nominato(pr)) is not None and tocca_codice(pr)
     }
 
 
