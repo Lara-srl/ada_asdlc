@@ -106,9 +106,13 @@ con davanti una riga `PATH=/home/laisdev/.nvm/versions/node/v20.20.2/bin:/usr/bi
 
 Non reimplementare: importa. Funzioni pronte (misurate/lette il 07/09):
 - `leggi_voci(testo)` → le voci della coda.
-- `pbi_mergiati(repo) -> set[str]` → i PBI **in main**, letti dai **titoli** delle PR
-  mergiate (`gh pr list --state merged`, regex `^\s*(PBI-\d+)\s*:`). Finestra `LIMITE_PR=1000`;
-  se piena, **alza un `Guasto`** invece di rischiare un rilancio (non indovina).
+- `pbi_mergiati(repo) -> set[str]` → i PBI **in main**: quelli che una PR mergiata **nomina e
+  ha implementato** (`gh pr list --state merged --json title,headRefName,files`). Nomina =
+  titolo `^\s*(PBI-\d+)\s*:` **oppure** ramo `^pbi/pbi-(\d+)`; ha implementato = ha toccato
+  qualcosa fuori da `backlog/` (PBI-353: il titolo da solo non distingue la PR che *accoda*
+  un PBI da quella che lo *fa*). Finestra `LIMITE_PR=1000`; se piena, **alza un `Guasto`**
+  invece di rischiare un rilancio (non indovina). L'elenco dei file è tagliato a
+  `LIMITE_FILE=100` da `gh`: vuoto, assente o al limite conta come **speso**.
 - `pbi_con_ramo(repo) -> set[str]` → i PBI con un ramo su origin (`git ls-remote --heads
   origin refs/heads/pbi/*`, regex `refs/heads/pbi/pbi-(\d+)`).
 - `giro_in_corso(worktree) -> bool` → `flock` sul lucchetto **+** `runner_vivo`.
