@@ -194,17 +194,38 @@ def test_la_coda_vera_si_legge():
         assert list(REPO.glob(f"backlog/{nome}-*.md")), f"{nome} non ha un file in backlog/"
 
 
+def pr_mergiata(titolo="", ramo="", files=None):
+    """Una PR mergiata, nella forma in cui `gh pr list --json` la rende.
+
+    `files=None` è la PR che quel campo non ce l'ha affatto — il caso in cui `gh`
+    non lo rende — ed è diverso da `files=[]`, la PR che non tocca nessun file.
+    Una stringa al posto del record è la sola PR di cui interessa il titolo.
+    """
+    record = {"title": titolo, "headRefName": ramo}
+    if files is not None:
+        record["files"] = [{"path": percorso} for percorso in files]
+    return record
+
+
 def mondo(pr_mergiate=(), rami_su_origin=()):
     """Un `esegui()` finto: `gh` e `git` rispondono nella forma in cui rispondono davvero.
 
     Un comando non previsto fa fallire il test invece di rendere una risposta
     vuota: qui si sta misurando *cosa* il tick chiede al mondo, e una risposta
-    di comodo nasconderebbe una domanda in più.
+    di comodo nasconderebbe una domanda in più. Per la stessa ragione di `gh`
+    escono **solo i campi chiesti** in `--json`: un campo che il tick legge senza
+    chiederlo non arriverebbe mai, e qui si vede.
     """
 
     def esegui(cmd, cwd):
         if cmd[0] == "gh":
-            return 0, json.dumps([{"title": t} for t in pr_mergiate])
+            chiesti = cmd[cmd.index("--json") + 1].split(",")
+            return 0, json.dumps([
+                {campo: valore
+                 for campo, valore in (pr if isinstance(pr, dict) else {"title": pr}).items()
+                 if campo in chiesti}
+                for pr in pr_mergiate
+            ])
         if cmd[0] == "git":
             return 0, "".join(
                 f"{'0' * 40}\trefs/heads/{r}\n" for r in rami_su_origin
@@ -245,6 +266,35 @@ def test_la_decisione_si_compone_dalle_pr_mergiate_e_dai_rami_su_origin(
     )
 
     assert coda.decidi(repo, albero) == coda.Attende("PBI-338")
+
+
+def test_una_pr_che_tocca_solo_backlog_non_spegne_il_pbi_che_nomina(tmp_path, monkeypatch):
+    """Il caso della PR #215, ed è il difetto che apre PBI-353.
+
+    Il 09/09 la PR che *scriveva* PBI-352 — il file in `backlog/` e la sua riga
+    in `CODA.md` — si intitolava `PBI-352: …`, e al proprio merge ha spento la
+    voce che stava scrivendo. La coda è rimasta ferma sette ore dicendo `finita`,
+    che è la parola con cui il tick dice che va tutto bene.
+
+    Una PR che tocca **solo** `backlog/` è un documento su un PBI, non il PBI: il
+    lavoro non c'è in `main` e la voce resta da lanciare.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-352\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(
+        coda,
+        "esegui",
+        mondo(pr_mergiate=[
+            pr_mergiata(
+                titolo="PBI-352: il cruscotto si stringe a cinque — e la riga in coda",
+                ramo="docs/il-cruscotto-si-stringe-a-cinque",
+                files=["backlog/PBI-352-il-cruscotto-si-stringe.md", "backlog/CODA.md"],
+            )
+        ]),
+    )
+
+    assert coda.decidi(repo, albero) == coda.Lancia("PBI-352")
 
 
 def nessun_comando(cmd, cwd):
