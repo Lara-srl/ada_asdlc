@@ -176,6 +176,12 @@ class Guasto(RuntimeError):
 # la riempirebbe subito.
 LIMITE_PR = 1000
 
+# Quanti file per PR rende `gh pr list --json files`. Non è una scelta nostra e
+# non si alza: è il tetto dell'API, e una PR che lo raggiunge ha un elenco che
+# può essere tagliato. Vale come limite e non come misura, quindi il confronto è
+# `>=`: un elenco più lungo sarebbe già arrivato tagliato a cento.
+LIMITE_FILE = 100
+
 
 def pbi_nominato(pr: dict) -> str | None:
     """Il PBI che la PR nomina — nel titolo o nel nome del ramo — o `None`.
@@ -204,12 +210,14 @@ def tocca_codice(pr: dict) -> bool:
     nient'altro. Il titolo le due specie non le distingue, e il 09/09 la #215 ha
     spento la voce di PBI-352 nell'istante in cui la scriveva.
 
-    Un elenco di file che manca si legge come **sì**, cioè come la PR che spende
-    il PBI: è il fail-closed di PBI-350 col segno tenuto dalla parte giusta —
+    Un elenco che non dice cosa la PR ha toccato si legge come **sì**, cioè come
+    la PR che spende il PBI. Sono tre silenzi: il campo che `gh` non rende, la PR
+    senza file, e l'elenco lungo esattamente `LIMITE_FILE`, che può essere
+    tagliato. È il fail-closed di PBI-350 col segno tenuto dalla parte giusta —
     non rilanciare un PBI che potrebbe già essere in `main`.
     """
     percorsi = pr.get("files") or []
-    if not percorsi:
+    if not percorsi or len(percorsi) >= LIMITE_FILE:
         return True
     return any(not f.get("path", "").startswith("backlog/") for f in percorsi)
 
