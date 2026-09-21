@@ -194,6 +194,28 @@ def test_asdlc_local_toml_sovrascrive_ambiente_e_worktree_chiave_per_chiave(tmp_
     assert con.git.base == "origin/master", "le altre sezioni non le tocca"
 
 
+@pytest.mark.parametrize("sezione", [
+    '[[gate]]\nnome = "pytest"\ncomando = ["pytest"]\n',
+    '[soglie]\nrevisioni = 9\n',
+    '[git]\nbase = "origin/mio"\n',
+])
+def test_una_sezione_diversa_nel_locale_e_un_errore_che_lo_dice(tmp_path, sezione):
+    """I gate, le soglie e il ramo sono del progetto: una macchina che li
+    cambiasse da un file gitignored girerebbe un altro metodo con lo stesso
+    nome, e nessuna PR lo mostrerebbe."""
+    scrivi_toml(tmp_path)
+    scrivi_toml(tmp_path, sezione, nome="asdlc.local.toml")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(tmp_path)
+
+    assert "asdlc.local.toml" in str(fermata.value)
+    assert sezione.split("]")[0].strip("[") in str(fermata.value), "nomina la sezione"
+    assert "[ambiente]" in str(fermata.value) and "[worktree]" in str(fermata.value), (
+        "e dice quali sono le due che può sovrascrivere"
+    )
+
+
 def test_il_lettore_usa_solo_la_libreria_standard():
     """È ciò che rende il runner copiabile senza un `pip install`: la
     precondizione 2 di `ADR-0017`, che la Fase 2 di `SCAFFOLDING.md` dimostrerà
