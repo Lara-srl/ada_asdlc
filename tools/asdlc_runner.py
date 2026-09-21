@@ -52,6 +52,7 @@ from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from fnmatch import fnmatch
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -1903,7 +1904,7 @@ def rami_su_origin(pbi: str) -> set[str]:
     traccia per tutti: `chiudi()` pubblica su ogni stato che interrompe, e il
     rilancio deve vedere quel nome occupato anche da un albero che non c'era.
     """
-    fuori = git("ls-remote", "--heads", REMOTO, f"pbi/{pbi.lower()}*")
+    fuori = git("ls-remote", "--heads", REMOTO, f"{ramo_del_pbi(pbi)}*")
     return {r.split("refs/heads/")[-1].strip() for r in fuori.splitlines() if "refs/heads/" in r}
 
 
@@ -1921,8 +1922,20 @@ def rami_locali(pbi: str) -> set[str]:
     runner non ha mai visto. I rami sono del repository, non del worktree: li
     vede anche un giro che gira in un albero staccato.
     """
-    dentro = git("branch", "--list", f"pbi/{pbi.lower()}*", "--format=%(refname:short)")
+    dentro = git("branch", "--list", f"{ramo_del_pbi(pbi)}*", "--format=%(refname:short)")
     return {r.strip() for r in dentro.splitlines() if r.strip()}
+
+
+def ramo_del_pbi(pbi: str) -> str:
+    """`pbi/pbi-322` da `PBI-322`: `[git].prefisso_ramo` più il numero, letto
+    dal modello `[backlog].id`. È **l'unico** posto in cui la forma del ramo si
+    compone, e `asdlc_coda.py` la rilegge dalla stessa configurazione: prima le
+    due forme stavano in cinque punti, e PBI-353 ne ha corrette tre insieme
+    mentre la quarta teneva ferma la coda per sette ore."""
+    numero = CFG.backlog.numero(pbi)
+    if numero is None:
+        raise ValueError(f"{pbi} non è un id secondo `[backlog].id = {CFG.backlog.id!r}`")
+    return CFG.git.ramo_del_pbi(numero)
 
 
 def nome_libero(pbi: str, presi: set[str]) -> str:
@@ -1941,7 +1954,7 @@ def nome_libero(pbi: str, presi: set[str]) -> str:
     Il numero è del **giro**, non del PBI: dice quante volte ci si è provati, che
     è l'informazione che serve a chi apre la lista dei rami.
     """
-    base = f"pbi/{pbi.lower()}"
+    base = ramo_del_pbi(pbi)
     if base not in presi:
         return base
     n = 2
@@ -1992,16 +2005,19 @@ def trova_pbi(pbi: str) -> Path | None:
     un fetch che non parte non è una ragione per non fare un PBI che si ha già
     in casa. È l'unico caso in cui l'albero decide, ed è dichiarato a schermo.
     """
+    numero = CFG.backlog.numero(pbi)
+    if numero is None:
+        return None  # non è un id di questo progetto: `[backlog].id` dice la forma
+    forma = CFG.backlog.glob_del_file(numero)
     try:
         git("fetch", REMOTO, RAMO_PRINCIPALE)
         voci = git("ls-tree", "--name-only", BASE, f"{BACKLOG}/").splitlines()
     except RuntimeError as exc:
         print(f"    ⚠️  {BASE} non raggiungibile ({str(exc)[:120]}): "
               f"cerco {pbi} nell'albero estratto")
-        return next(REPO.glob(f"{BACKLOG}/{pbi}-*.md"), None)
+        return next(REPO.glob(f"{BACKLOG}/{forma}"), None)
 
-    nome = next((v.strip() for v in voci
-                 if Path(v.strip()).name.startswith(f"{pbi}-") and v.strip().endswith(".md")), None)
+    nome = next((v.strip() for v in voci if fnmatch(Path(v.strip()).name, forma)), None)
     return REPO / nome if nome else None
 
 

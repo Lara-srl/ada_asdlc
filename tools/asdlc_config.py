@@ -13,6 +13,7 @@ perso l'uso di `git commit`, perché l'hook esegue il runner a ogni commit.
 """
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,23 @@ class Git:
         """`main`, da `origin/main`: il ramo verso cui si apre la PR."""
         return self.base.partition("/")[2]
 
+    def ramo_del_pbi(self, numero: str) -> str:
+        """`pbi/pbi-358` dal numero: il prefisso e basta, il suffisso del giro
+        lo aggiunge chi trova il nome occupato."""
+        return f"{self.prefisso_ramo}{numero}"
+
+
+# I segnaposto dei modelli, e ciò che ciascuno accetta: `{n}` un numero, `{slug}`
+# il resto del nome senza salire di cartella. Da qui il lettore deriva le regex
+# e i glob, così chi forka scrive il modello e non una regex.
+SEGNAPOSTO = {"{n}": r"(?P<n>\d+)", "{slug}": r"(?P<slug>[^/]+)"}
+
+
+def regex_del_modello(modello: str) -> re.Pattern[str]:
+    """`PBI-{n}` → `PBI-(?P<n>\\d+)`, col resto scappato alla lettera."""
+    pezzi = re.split("(" + "|".join(re.escape(s) for s in SEGNAPOSTO) + ")", modello)
+    return re.compile("".join(SEGNAPOSTO.get(p, re.escape(p)) for p in pezzi))
+
 
 @dataclass(frozen=True)
 class Backlog:
@@ -62,6 +80,19 @@ class Backlog:
     coda: str
     id: str    # modello dell'id, `PBI-{n}`
     file: str  # modello del nome file, `PBI-{n}-{slug}.md`
+
+    def numero(self, pbi: str) -> str | None:
+        """`358` da `PBI-358`, o `None` se non è un id di questo progetto."""
+        trovato = regex_del_modello(self.id).fullmatch(pbi)
+        return trovato.group("n") if trovato else None
+
+    def id_di(self, numero: str) -> str:
+        return self.id.replace("{n}", numero)
+
+    def glob_del_file(self, numero: str) -> str:
+        """`PBI-358-*.md` dal numero: il nome file con lo slug libero, per `glob`
+        e `fnmatch`."""
+        return self.file.replace("{n}", numero).replace("{slug}", "*")
 
 
 @dataclass(frozen=True)
