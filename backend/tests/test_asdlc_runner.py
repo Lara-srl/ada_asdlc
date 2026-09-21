@@ -3978,3 +3978,52 @@ class TestLIdEIlNomeFileDelPbiStannoInUnPostoSolo:
         assert ("ls-remote", "--heads", "origin", "us/us-7*") in git_finto
         assert ("branch", "--list", "us/us-7*", "--format=%(refname:short)") in git_finto
         assert ("switch", "-c", "us/us-7", "origin/main") in git_finto
+
+
+class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
+    """La valvola del livello 4 rinviato (decisione 7): un progetto il cui runner
+    di test il gate non sa leggere tiene gli altri due gate — degradato, ma
+    ancora ASDLC. Un gate che si indebolisce in silenzio è la prima cosa che
+    `AUTOMAZIONE.md` vieta, quindi spento **lo si scrive**."""
+
+    def _giro(self, monkeypatch, con_critic=True):
+        chiamati: list[str] = []
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: chiamati.append("gate") or [])
+        monkeypatch.setattr(runner, "gate_del_rosso",
+                            lambda **k: chiamati.append("rosso") or [])
+        monkeypatch.setattr(
+            runner, "revisione_critica",
+            lambda p: chiamati.append("critic") or runner.Verdetto("pass", "", "PASS"))
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False,
+                                  con_critic=con_critic)
+        return esito, chiamati
+
+    def test_spento_non_gira_gli_altri_due_si_e_la_nota_lo_dice(
+        self, configura, git_finto, monkeypatch, capsys
+    ):
+        esito, chiamati = self._giro(monkeypatch)
+        assert chiamati == ["gate", "rosso", "critic"], "acceso, oggi, gira"
+        assert "spento" not in esito.nota
+
+        configura(toml_di_prova(gate_del_rosso=False))
+        esito, chiamati = self._giro(monkeypatch)
+
+        assert esito.stato == "fatto"
+        assert chiamati == ["gate", "critic"]
+        assert "gate del rosso spento da asdlc.toml" in esito.nota
+        uscita = capsys.readouterr().out
+        assert "gate del rosso" in uscita and "spento" in uscita, "e lo dice anche a schermo"
+
+    def test_la_dichiarazione_convive_con_quella_del_critic_saltato(
+        self, configura, git_finto, monkeypatch
+    ):
+        """Due gate su tre tolti, due frasi nella nota: chi legge `tempi.csv`
+        deve sapere che quel giro ne ha avuto **uno**."""
+        configura(toml_di_prova(gate_del_rosso=False))
+
+        esito, chiamati = self._giro(monkeypatch, con_critic=False)
+
+        assert chiamati == ["gate"]
+        assert "gate del rosso spento da asdlc.toml" in esito.nota
+        assert "critic saltato" in esito.nota
