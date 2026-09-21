@@ -67,6 +67,7 @@ import asdlc_config  # noqa: E402
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
 # sono relativi a `REPO`, e la ragione di ogni valore sta accanto a dove si legge.
 CFG: asdlc_config.Config
+GATE_DEL_ROSSO_ATTIVO: bool  # `[gate_del_rosso].attivo` — la valvola del livello 4
 BASE: str                # `[git].base` — `origin/main`: da cui si nasce e su cui si misura
 REMOTO: str              # `origin`, da `BASE`
 RAMO_PRINCIPALE: str     # `main`, da `BASE`: verso cui si apre la PR
@@ -157,8 +158,11 @@ def configura(cfg: asdlc_config.Config) -> None:
     global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
+    global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
     GATE = [Gate(g.nome, list(g.comando), cwd=g.cwd) for g in cfg.gate]
+    # `false` spegne la seconda domanda del Quality Gate — e il giro lo scrive.
+    GATE_DEL_ROSSO_ATTIVO = cfg.gate_del_rosso.attivo
 
     # Il ramo di base: da dove nasce ogni branch, e contro cui misurano il conteggio
     # dei commit, il gate del rosso e il diff che il Critic legge.
@@ -1122,6 +1126,9 @@ ESITI_MANCATI = {
 }
 MISTO = ("test e produzione nello stesso commit: il rosso non può essere esistito "
          "in mezzo a un commit solo, e basta il diff per dirlo")
+# Ciò che la nota del giro dice quando `[gate_del_rosso].attivo = false`: chi
+# rilegge `runs/tempi.csv` deve sapere che quel giro ha avuto un gate in meno.
+NOTA_ROSSO_SPENTO = "gate del rosso spento da asdlc.toml"
 
 
 def commit_da_esaminare(base: str, ref: str, visti: set[str]) -> list[str]:
@@ -2058,6 +2065,11 @@ def esegui_pbi(
         except (RuntimeError, ValueError):
             return e.commit  # un conteggio mancato non cancella quello di prima
 
+    def dichiara(testo: str) -> None:
+        """Una cosa che il giro dice di sé nella nota — un gate in meno — e che
+        deve restare leggibile in `runs/tempi.csv` qualunque sia l'esito."""
+        e.nota = " · ".join(t for t in (e.nota, testo) if t)
+
     def chiudi(stato: str, nota: str = "") -> Esito:
         # Il conteggio sta **qui** e non dopo il giro dei gate: ogni uscita
         # anticipata — lo `STOP` del Builder, l'albero che resta sporco — scriveva
@@ -2069,7 +2081,9 @@ def esegui_pbi(
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
         if nota:
-            e.nota = nota
+            # La diagnosi davanti, e dietro ciò che il giro aveva già dichiarato di
+            # sé — un gate spento, il Critic saltato: la fermata non lo cancella.
+            e.nota = " · ".join(t for t in (nota, e.nota) if t)
         # Un giro che si ferma ha comunque prodotto commit, e lasciarli solo nel
         # worktree vuol dire non farli guardare a nessuno: su PBI-320 sono rimasti
         # lì, su PBI-322 li ha salvati a mano una persona prima di chiudere il
@@ -2161,18 +2175,29 @@ def esegui_pbi(
         # Sta qui e non prima: finché i quattro sono rossi il lavoro non è finito, e
         # non ha senso chiedere di un ciclo che potrebbe non essere ancora chiuso.
         print("    gate del rosso … ", end="", flush=True)
-        t_rosso = time.monotonic()
         morsi: list[dict[str, str]] = []
-        try:
-            with misura(e, "gate"):
-                senza_rosso = gate_del_rosso(visti=visti, morsi=morsi)
-        except GuastoDelGate as guasto:
-            # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
-            # accusa nessun commit, perché il gate non ne ha guardato nessuno.
-            print(f"GUASTO ({hms(time.monotonic() - t_rosso)})")
-            print(f"    ── gate del rosso ──\n{guasto}")
-            return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
-        print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
+        senza_rosso: list[dict[str, str]] = []
+        if not GATE_DEL_ROSSO_ATTIVO:
+            # La valvola del livello 4 rinviato (PBI-358, decisione 7): un progetto
+            # il cui runner di test il gate non sa leggere tiene gli altri due gate.
+            # Degradato, ma ancora ASDLC — e lo **dichiara**, a schermo e nella nota
+            # che va nel rapporto e in `runs/tempi.csv`: un gate che si indebolisce
+            # in silenzio è la prima cosa che `AUTOMAZIONE.md` vieta.
+            print("spento (asdlc.toml)")
+            if NOTA_ROSSO_SPENTO not in e.nota:
+                dichiara(NOTA_ROSSO_SPENTO)
+        else:
+            t_rosso = time.monotonic()
+            try:
+                with misura(e, "gate"):
+                    senza_rosso = gate_del_rosso(visti=visti, morsi=morsi)
+            except GuastoDelGate as guasto:
+                # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
+                # accusa nessun commit, perché il gate non ne ha guardato nessuno.
+                print(f"GUASTO ({hms(time.monotonic() - t_rosso)})")
+                print(f"    ── gate del rosso ──\n{guasto}")
+                return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
+            print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
         # I nati verdi che mordono si scrivono **prima** dell'eventuale fermata: sono
         # passati, e il rapporto lo dice anche quando un altro commit ferma il giro.
         e.test_che_mordono += morsi
@@ -2202,7 +2227,7 @@ def esegui_pbi(
         # deve sapere che quel giro ha avuto due gate su tre, non tre.
         if not con_critic:
             e.critic_saltato = True
-            e.nota = "critic saltato (--senza-critic): revisione umana alla PR"
+            dichiara("critic saltato (--senza-critic): revisione umana alla PR")
             print("    critic … saltato (--senza-critic)")
             break
 
