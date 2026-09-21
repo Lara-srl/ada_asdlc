@@ -45,6 +45,16 @@ class Git:
     base: str           # `origin/main`: il ramo da cui si nasce e su cui si misura
     prefisso_ramo: str  # `pbi/pbi-`: il ramo del PBI è il prefisso più il numero
 
+    @property
+    def remoto(self) -> str:
+        """`origin`, da `origin/main`: a chi si chiede il fetch."""
+        return self.base.partition("/")[0]
+
+    @property
+    def ramo(self) -> str:
+        """`main`, da `origin/main`: il ramo verso cui si apre la PR."""
+        return self.base.partition("/")[2]
+
 
 @dataclass(frozen=True)
 class Backlog:

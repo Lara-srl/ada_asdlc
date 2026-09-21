@@ -66,6 +66,9 @@ import asdlc_config  # noqa: E402
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
 # sono relativi a `REPO`, e la ragione di ogni valore sta accanto a dove si legge.
 CFG: asdlc_config.Config
+BASE: str                # `[git].base` — `origin/main`: da cui si nasce e su cui si misura
+REMOTO: str              # `origin`, da `BASE`
+RAMO_PRINCIPALE: str     # `main`, da `BASE`: verso cui si apre la PR
 LOG_DIR: Path            # `[registro].cartella` — `runs/`
 CSV_TEMPI: Path          # `[registro].tempi` — `runs/tempi.csv`
 BACKLOG: str             # `[backlog].cartella`
@@ -152,8 +155,20 @@ def configura(cfg: asdlc_config.Config) -> None:
     """
     global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI
+    global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
     CFG = cfg
     GATE = [Gate(g.nome, list(g.comando), cwd=g.cwd) for g in cfg.gate]
+
+    # Il ramo di base: da dove nasce ogni branch, e contro cui misurano il conteggio
+    # dei commit, il gate del rosso e il diff che il Critic legge.
+    BASE, REMOTO, RAMO_PRINCIPALE = cfg.git.base, cfg.git.remoto, cfg.git.ramo
+    # I prompt che nominano il ramo lo prendono da qui, e non da una riga scritta a
+    # mano: un prompt che dice all'agente un ramo diverso da quello su cui il gate
+    # misura è una bugia che costa un giro. `{pbi_path}` e `{rapporto}` restano a
+    # chi chiama, che li riempie a ogni giro.
+    PROMPT_CRITIC = MODELLO_CRITIC.format(base=BASE, pbi_path="{pbi_path}")
+    PROMPT_RIMEDIO = MODELLO_RIMEDIO.format(base=BASE, pbi_path="{pbi_path}",
+                                            rapporto="{rapporto}")
 
     # Il registro dei giri: i rapporti, i log, i prompt, il lucchetto, e il CSV
     # dei tempi su cui si fattura. Relativo a `REPO`, come ogni percorso del TOML.
@@ -193,14 +208,6 @@ def configura(cfg: asdlc_config.Config) -> None:
     # «il PBI non era pronto»: vero e fuorviante insieme.
     MAX_REVISIONI = cfg.soglie.revisioni
 
-
-# `asdlc.toml` è obbligatorio, e un file che manca o non si legge ferma qui con
-# un messaggio e non con un traceback: lo legge chi ha appena perso l'uso di
-# `git commit`, perché il `pre-commit` esegue questo file a ogni commit.
-try:
-    configura(asdlc_config.carica(REPO))
-except asdlc_config.ErroreDiConfigurazione as guasto:
-    sys.exit(f"asdlc_runner: {guasto}")
 
 PROMPT_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
 
@@ -332,7 +339,10 @@ corregge il codice. Non disattivare test, non marcare skip, non allargare toller
 Committa la correzione con un commit suo. Termina con FATTO: oppure STOP: come prima.
 """
 
-PROMPT_CRITIC = """Sei un **Critic Agent** e fai una revisione avversariale secondo ASDLC.
+# I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
+# `PROMPT_RIMEDIO` nascono in `configura()`, col ramo di `asdlc.toml` al posto di
+# `{base}` e `{pbi_path}` / `{rapporto}` lasciati a chi chiama.
+MODELLO_CRITIC = """Sei un **Critic Agent** e fai una revisione avversariale secondo ASDLC.
 
 Il tuo ruolo è scettico per costruzione: respingi il codice che viola la spec o i confini
 di AGENTS.md **anche se funziona e anche se i test passano**. Preferisci un falso positivo
@@ -344,8 +354,8 @@ a un falso negativo. Non sei qui per essere utile: sei qui per trovare ciò che 
 - le spec e gli ADR che il PBI cita
 
 ## Artefatto da giudicare
-Il diff del branch corrente: `git diff origin/main...HEAD`
-I commit: `git log --oneline origin/main..HEAD`
+Il diff del branch corrente: `git diff {base}...HEAD`
+I commit: `git log --oneline {base}..HEAD`
 
 ## Cosa controllare, in quest'ordine
 1. **Criteri di verifica del PBI**: uno per uno, spuntato o no.
@@ -405,14 +415,14 @@ fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `PASS` 
 va nel rapporto, dove chi mergia la legge.
 """
 
-PROMPT_RIMEDIO = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
+MODELLO_RIMEDIO = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
 
 Un giro precedente ha scritto del codice e il Critic lo ha respinto. **La sessione è
 nuova: quello che sai è solo ciò che leggi qui sotto.** Rileggi, in quest'ordine:
 
 1. AGENTS.md — confini di giudizio e toolchain
 2. {pbi_path} — il PBI: direttiva, scope, verifica, protocollo di rifinitura
-3. `git log --oneline origin/main..HEAD` e `git diff origin/main...HEAD` — il lavoro già
+3. `git log --oneline {base}..HEAD` e `git diff {base}...HEAD` — il lavoro già
    fatto, che è tuo anche se non lo ricordi: non rifarlo e non disfarlo
 4. le spec e gli ADR che il PBI e il rapporto citano
 
@@ -469,6 +479,18 @@ caso qui sotto.
 Se ritieni che una violazione sia infondata, NON ignorarla: spiega perché nella risposta e
 lasciala aperta. Termina con FATTO: oppure STOP: come prima.
 """
+
+PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
+PROMPT_RIMEDIO: str  # idem, da `MODELLO_RIMEDIO`
+
+# `asdlc.toml` è obbligatorio, e un file che manca o non si legge ferma qui con
+# un messaggio e non con un traceback: lo legge chi ha appena perso l'uso di
+# `git commit`, perché il `pre-commit` esegue questo file a ogni commit. Sta
+# dopo i modelli dei prompt perché li riempie.
+try:
+    configura(asdlc_config.carica(REPO))
+except asdlc_config.ErroreDiConfigurazione as guasto:
+    sys.exit(f"asdlc_runner: {guasto}")
 
 
 @dataclass
@@ -1672,8 +1694,7 @@ def voce_mancata(sha: str, titolo: str, test: list[str], esito: str, coda: str) 
             "test": ", ".join(test[:TEST_IN_ELENCO]) + (f" e altri {resto}" if resto > 0 else "")}
 
 
-def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo],
-                      base: str = "origin/main",
+def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                       morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso.
 
@@ -1726,10 +1747,13 @@ def lettura_del_verde(provati: int) -> str:
             f"righe che il branch ha cambiato non lo fanno fallire")
 
 
-def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
+def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
                    visti: set[str] | None = None,
                    morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     """I commit del branch in cui un test è nato senza essere mai stato rosso.
+
+    `base` è il ramo di `asdlc.toml` se non è detto: un default scritto nella
+    firma si congelerebbe all'import, e un TOML di prova non lo muoverebbe.
 
     Lista vuota = il gate passa. `visti` è l'insieme dei commit già guardati e viene
     **riempito**: il gate sta dentro un ciclo che può ripetersi cinque volte, e
@@ -1741,6 +1765,7 @@ def gate_del_rosso(base: str = "origin/main", ref: str = "HEAD",
     test, esito — perché la lettura la fa una persona, e una persona decide meglio
     su tre casi che su uno.
     """
+    base = base if base is not None else BASE
     visti = visti if visti is not None else set()
     mancati: list[dict[str, str]] = []
     for sha in commit_da_esaminare(base, ref, visti):
@@ -1828,7 +1853,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     code, out = esegui(
         ["gh", "pr", "create",
          "--title", f"{pbi}: {pbi_path.stem.split('-', 2)[-1].replace('-', ' ')}",
-         "--body", corpo, "--base", "main", "--head", branch],
+         "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
         REPO, timeout=300,
     )
     if code != 0:
@@ -1847,7 +1872,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
 
 
 def crea_branch(pbi: str) -> str:
-    """Il branch del PBI, sempre da `origin/main` fresco.
+    """Il branch del PBI, sempre dal ramo di base fresco — `BASE`, `origin/main`.
 
     ``git switch -c`` parte da dove si trova, e dove si trova è il branch del PBI
     precedente: due PBI nella stessa invocazione producevano branch **impilati**,
@@ -1855,7 +1880,7 @@ def crea_branch(pbi: str) -> str:
     `ada-notte.sh` esiste come ciclo esterno invece di passare i PBI al runner in
     un colpo solo.
 
-    Si ramifica **da `origin/main`**, senza estrarre il `main` locale. Non è un
+    Si ramifica **dal ramo remoto**, senza estrarre il `main` locale. Non è un
     dettaglio di stile: il runner gira nel worktree `ada-run`, e un branch si può
     estrarre in un worktree solo. `main` sta quasi sempre estratto nel repository
     principale, quindi `git switch main` là dentro fallirebbe con *«already used
@@ -1865,9 +1890,9 @@ def crea_branch(pbi: str) -> str:
     non c'è un `main` locale da allineare, quindi non c'è il caso in cui è
     disallineato.
     """
-    git("fetch", "origin", "main")
+    git("fetch", REMOTO, RAMO_PRINCIPALE)
     branch = nome_libero(pbi, rami_su_origin(pbi) | rami_locali(pbi))
-    git("switch", "-c", branch, "origin/main")
+    git("switch", "-c", branch, BASE)
     return branch
 
 
@@ -1878,7 +1903,7 @@ def rami_su_origin(pbi: str) -> set[str]:
     traccia per tutti: `chiudi()` pubblica su ogni stato che interrompe, e il
     rilancio deve vedere quel nome occupato anche da un albero che non c'era.
     """
-    fuori = git("ls-remote", "--heads", "origin", f"pbi/{pbi.lower()}*")
+    fuori = git("ls-remote", "--heads", REMOTO, f"pbi/{pbi.lower()}*")
     return {r.split("refs/heads/")[-1].strip() for r in fuori.splitlines() if "refs/heads/" in r}
 
 
@@ -1940,7 +1965,7 @@ def pubblica(branch: str) -> bool:
     restano nel worktree.
     """
     try:
-        git("push", "--force-with-lease", "-u", "origin", branch)
+        git("push", "--force-with-lease", "-u", REMOTO, branch)
         return True
     except RuntimeError as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
@@ -1950,11 +1975,11 @@ def pubblica(branch: str) -> bool:
 
 
 def trova_pbi(pbi: str) -> Path | None:
-    """Il file del PBI come lo vede `origin/main`, non come lo vede il worktree.
+    """Il file del PBI come lo vede il ramo di base, non come lo vede il worktree.
 
     Il runner gira in `ada-run`, un albero che resta fermo al commit su cui
     qualcuno l'ha messo l'ultima volta. Il branch invece nasce **sempre** da
-    `origin/main` (`crea_branch`): un PBI mergiato dopo quell'ultimo `switch` c'è
+    `BASE` (`crea_branch`): un PBI mergiato dopo quell'ultimo `switch` c'è
     dove il lavoro si farà e non c'è dove lo si cercava. Il giro chiudeva
     «saltato (PBI inesistente)» — venti secondi, nessun commit, e il file sotto
     il naso. Difetto 7 di PBI-102, ricaduto due volte.
@@ -1968,10 +1993,10 @@ def trova_pbi(pbi: str) -> Path | None:
     in casa. È l'unico caso in cui l'albero decide, ed è dichiarato a schermo.
     """
     try:
-        git("fetch", "origin", "main")
-        voci = git("ls-tree", "--name-only", "origin/main", f"{BACKLOG}/").splitlines()
+        git("fetch", REMOTO, RAMO_PRINCIPALE)
+        voci = git("ls-tree", "--name-only", BASE, f"{BACKLOG}/").splitlines()
     except RuntimeError as exc:
-        print(f"    ⚠️  origin/main non raggiungibile ({str(exc)[:120]}): "
+        print(f"    ⚠️  {BASE} non raggiungibile ({str(exc)[:120]}): "
               f"cerco {pbi} nell'albero estratto")
         return next(REPO.glob(f"{BACKLOG}/{pbi}-*.md"), None)
 
@@ -1985,7 +2010,7 @@ def esegui_pbi(
 ) -> Esito:
     pbi_path = trova_pbi(pbi)
     if pbi_path is None:
-        return Esito(pbi, "saltato", nota="PBI inesistente in backlog/ su origin/main")
+        return Esito(pbi, "saltato", nota=f"PBI inesistente in {BACKLOG}/ su {BASE}")
 
     print(f"\n=== {pbi} — {pbi_path.name}")
     prompt = PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
@@ -2008,11 +2033,12 @@ def esegui_pbi(
     apri_la_fase()
 
     def conta_commit() -> int:
-        """`origin/main..HEAD` e non `main..HEAD`: da quando il main locale del
-        worktree non si estrae più, resta indietro di giorni e conterebbe come
-        commit del PBI tutto ciò che main ha ricevuto nel frattempo."""
+        """`BASE..HEAD` — il ramo remoto — e non `main..HEAD`: da quando il main
+        locale del worktree non si estrae più, resta indietro di giorni e
+        conterebbe come commit del PBI tutto ciò che main ha ricevuto nel
+        frattempo."""
         try:
-            return int(git("rev-list", "--count", "origin/main..HEAD") or 0)
+            return int(git("rev-list", "--count", f"{BASE}..HEAD") or 0)
         except (RuntimeError, ValueError):
             return e.commit  # un conteggio mancato non cancella quello di prima
 
@@ -2192,7 +2218,7 @@ def esegui_pbi(
         )
 
     print(f"    commit sul branch: {e.commit} · "
-          f"file: {git('diff', '--name-only', 'origin/main...HEAD')}")
+          f"file: {git('diff', '--name-only', f'{BASE}...HEAD')}")
     chiudi("fatto")
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
@@ -2402,16 +2428,16 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     rendeva cieca la richiesta. Lo ha trovato il Builder al primo giro vero, il
     01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita.
 
-    L'ultimo commit e basta, non tutto `origin/main..HEAD`: dopo tre criteri i
-    test dei primi due sono verdi, e la richiesta verrebbe rifiutata per «nato
-    verde» su lavoro che il suo rosso l'aveva già avuto.
+    L'ultimo commit e basta, non tutto `BASE..HEAD`: dopo tre criteri i test dei
+    primi due sono verdi, e la richiesta verrebbe rifiutata per «nato verde» su
+    lavoro che il suo rosso l'aveva già avuto.
     """
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
-    if git("rev-list", "--count", "origin/main..HEAD") == "0":
-        # Il branch nasce da `origin/main`, quindi al primo `--chiedi-impl` di ogni
-        # giro HEAD **è** origin/main: se lì l'ultimo commit fosse di soli test, il
+    if git("rev-list", "--count", f"{BASE}..HEAD") == "0":
+        # Il branch nasce da `BASE`, quindi al primo `--chiedi-impl` di ogni giro
+        # HEAD **è** il ramo di base: se lì l'ultimo commit fosse di soli test, il
         # Builder otterrebbe la produzione aperta senza aver scritto una riga.
         return []
     file = file_del_commit("HEAD")
@@ -2588,11 +2614,11 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
     mezz'ora di Builder.
     """
     # `BASE..REF` oltre al solo `REF`: un branch già mergiato non ha più commit
-    # fuori da `origin/main`, ed è lì che sta la prova sul caso vero — `pbi/pbi-330`
+    # fuori dal ramo di base, ed è lì che sta la prova sul caso vero — `pbi/pbi-330`
     # è entrato in main mentre PBI-103 lo usava come banco di prova.
     base, separatore, solo_ref = ref.partition("..")
     if not separatore:
-        base, solo_ref = "origin/main", ref
+        base, solo_ref = BASE, ref
     morsi: list[dict[str, str]] = []
     try:
         mancati = gate_del_rosso(base=base, ref=solo_ref, morsi=morsi)
@@ -2639,7 +2665,7 @@ def costruisci_parser() -> argparse.ArgumentParser:
                     help="non esegue niente: piega i rapporti runs/*.json in runs/tempi.csv. "
                          "Si lancia su main dopo il merge (ADR-0020)")
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
-                    help="non esegue niente: cammina origin/main..REF e dice in quali "
+                    help=f"non esegue niente: cammina {BASE}..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
     ap.add_argument("--guardia-commit", action="store_true",
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
