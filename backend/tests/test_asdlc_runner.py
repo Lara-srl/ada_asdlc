@@ -3839,3 +3839,96 @@ class TestLeSoglieEIPercorsiVengonoDaAsdlcToml:
         runner.trova_pbi("PBI-102")
 
         assert ("ls-tree", "--name-only", "origin/main", "storie/") in git_finto
+
+
+class TestIlRamoDiBaseVieneDaAsdlcToml:
+    """Undici letture eseguite di `origin/main`, più le righe dei prompt che lo
+    dicono all'agente: con `[git] base = "origin/master"` lo seguono tutte, e
+    nessuna resta indietro — un gate che misura su un ramo e un prompt che ne
+    nomina un altro è una bugia che costa un giro (decisione 6)."""
+
+    @pytest.fixture
+    def su_master(self, configura):
+        configura(toml_di_prova(base="origin/master"))
+
+    def test_crea_branch_ramifica_dal_ramo_del_toml(self, su_master, git_finto):
+        assert runner.crea_branch("PBI-102") == "pbi/pbi-102"
+        assert ("fetch", "origin", "master") in git_finto
+        assert ("switch", "-c", "pbi/pbi-102", "origin/master") in git_finto
+
+    def test_trova_pbi_cerca_il_file_sul_ramo_del_toml(self, su_master, git_finto):
+        runner.trova_pbi("PBI-102")
+
+        assert ("fetch", "origin", "master") in git_finto
+        assert ("ls-tree", "--name-only", "origin/master", "backlog/") in git_finto
+
+    def test_un_giro_intero_non_nomina_mai_origin_main(self, su_master, git_finto, monkeypatch):
+        """Il conteggio dei commit, l'elenco dei file e il gate del rosso: sono
+        le letture dentro `esegui_pbi`, e si guardano da fuori tutte insieme."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "PASS"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        assert ("rev-list", "--count", "origin/master..HEAD") in git_finto
+        assert ("rev-list", "--reverse", "origin/master..HEAD") in git_finto
+        assert ("diff", "--name-only", "origin/master...HEAD") in git_finto
+        assert not [c for c in git_finto if any("origin/main" in arg for arg in c)], (
+            "una lettura è rimasta sul ramo scritto a mano"
+        )
+
+    def test_un_pbi_che_non_c_e_lo_dice_col_ramo_del_toml(self, su_master, git_finto):
+        esito = runner.esegui_pbi("PBI-999", attivi=set(), dry=True, con_pr=False)
+
+        assert esito.stato == "saltato"
+        assert "origin/master" in esito.nota
+
+    def test_il_gate_del_rosso_parte_dal_ramo_del_toml(self, su_master, monkeypatch):
+        visto: dict[str, str] = {}
+        monkeypatch.setattr(
+            runner, "commit_da_esaminare",
+            lambda base, ref, visti: visto.update(base=base, ref=ref) or [])
+
+        assert runner.gate_del_rosso() == []
+        assert visto == {"base": "origin/master", "ref": "HEAD"}
+
+    def test_gate_rosso_a_mano_parte_dal_ramo_del_toml(self, su_master, monkeypatch):
+        visto: dict[str, str] = {}
+        monkeypatch.setattr(
+            runner, "gate_del_rosso",
+            lambda base, ref, **k: visto.update(base=base, ref=ref) or [])
+
+        assert runner.stampa_il_gate_del_rosso("pbi/pbi-330") == 0
+        assert visto == {"base": "origin/master", "ref": "pbi/pbi-330"}
+
+    def test_chiedi_impl_conta_i_commit_dal_ramo_del_toml(self, su_master, git_finto, monkeypatch):
+        monkeypatch.setattr(runner, "test_nuovi_dellalbero", lambda: [])
+
+        runner.test_nuovi_da_aprire()
+
+        assert ("rev-list", "--count", "origin/master..HEAD") in git_finto
+
+    def test_la_pr_si_apre_verso_il_ramo_del_toml(self, su_master, monkeypatch):
+        comandi: list[list[str]] = []
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda cmd, cwd, timeout=0: comandi.append(cmd) or (0, "https://x/pull/1\n"))
+
+        runner.apri_pr("PBI-212", runner.REPO / "backlog" / "PBI-212-x.md",
+                       "pbi/pbi-212", runner.Esito("PBI-212", "fatto"))
+
+        assert ["--base", "master"] == comandi[0][comandi[0].index("--base"):][:2]
+
+    def test_i_prompt_del_critic_e_del_rimedio_nominano_il_ramo_del_toml(self, su_master):
+        critic = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md")
+        rimedio = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+        aiuto = runner.costruisci_parser().format_help()
+
+        for nome, testo in (("PROMPT_CRITIC", critic), ("PROMPT_RIMEDIO", rimedio),
+                            ("--help", aiuto)):
+            assert "origin/master" in testo, f"{nome} non nomina il ramo del TOML"
+            assert "origin/main" not in testo, f"{nome} nomina ancora il ramo scritto a mano"
