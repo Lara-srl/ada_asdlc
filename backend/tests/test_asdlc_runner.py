@@ -3712,3 +3712,89 @@ class TestSiCancellaSoloDentroUnCorpo:
     def test_dentro_un_corpo_si_cancella(self):
         assert "" in self._dopo("    totale = a + b")
         assert "" in self._dopo("  const totale = a + b")
+
+
+# --- Le costanti nascono da asdlc.toml (PBI-358) ------------------------------
+#
+# Le stesse due forme dell'id di un PBI erano scritte a mano in cinque punti fra
+# runner e tick, e undici letture eseguite dicevano `origin/main` una per una:
+# PBI-353 ne ha corrette tre insieme, e la coda è rimasta ferma sette ore perché
+# la quarta diceva un'altra cosa. Da qui i valori li porta `asdlc.toml`, letto da
+# `tools/asdlc_config.py`, e le costanti di modulo restano nomi di modulo: i 36
+# `monkeypatch.setattr` di questo file devono mordere ancora.
+
+
+def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
+                  cartella="backlog", coda="backlog/CODA.md",
+                  id="PBI-{n}", file="PBI-{n}-{slug}.md",
+                  registro="runs", tempi="tempi.csv",
+                  venv="backend/.venv", prestiti=("data", "frontend/node_modules"),
+                  tentativi=3, igiene=3, revisioni=4, gate_del_rosso=True,
+                  gate=(("pytest", ("pytest", "-q"), "backend", ()),)) -> str:
+    """Un `asdlc.toml` coi valori di oggi, e ogni test nomina solo ciò che cambia.
+    Un gate è `(nome, comando, cwd, solo_se_tocca)`."""
+    def elenco(voci):
+        return "[" + ", ".join(f'"{v}"' for v in voci) + "]"
+
+    testo = (
+        f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
+        f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda}"\nid = "{id}"\nfile = "{file}"\n\n'
+        f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
+        f'[ambiente]\nvenv = "{venv}"\nprestiti = {elenco(prestiti)}\n\n'
+        f'[worktree]\npercorso = "~/ada-run"\n\n'
+        f'[soglie]\ntentativi = {tentativi}\nigiene = {igiene}\nrevisioni = {revisioni}\n\n'
+        f'[gate_del_rosso]\nattivo = {"true" if gate_del_rosso else "false"}\n'
+    )
+    for nome, comando, cwd, solo_se_tocca in gate:
+        testo += f'\n[[gate]]\nnome = "{nome}"\ncomando = {elenco(comando)}\ncwd = "{cwd}"\n'
+        if solo_se_tocca:
+            testo += f"solo_se_tocca = {elenco(solo_se_tocca)}\n"
+    return testo
+
+
+@pytest.fixture
+def configura(tmp_path):
+    """Scrive un `asdlc.toml` di prova, lo applica al runner e alla fine rimette
+    quello del repository. Il `monkeypatch` di un singolo nome non basterebbe:
+    qui si prova che dal file arrivino **tutti** i nomi insieme."""
+    di_prima = []
+
+    def _applica(testo: str):
+        (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
+        if not di_prima:
+            di_prima.append(runner.CFG)
+        runner.configura(runner.asdlc_config.carica(tmp_path))
+        return runner.CFG
+
+    yield _applica
+    if di_prima:
+        runner.configura(di_prima[0])
+
+
+class TestIGateVengonoDaAsdlcToml:
+    def test_i_quattro_gate_di_oggi_nome_per_nome_e_cwd_per_cwd(self):
+        """Nessun numero cambia in questo giro (decisione 5): il TOML del
+        repository dichiara i gate di prima, alla lettera."""
+        assert [(g.nome, list(g.comando), g.cwd) for g in runner.GATE] == [
+            ("pytest", ["pytest", "-q"], "backend"),
+            ("tsc", ["npm", "run", "build"], "frontend"),
+            ("eslint", ["npm", "run", "lint"], "frontend"),
+            ("vitest", ["npm", "test"], "frontend"),
+        ]
+        assert [g.nome for g in runner.GATE] == [g.nome for g in runner.CFG.gate], (
+            "i gate del runner sono quelli letti da asdlc.toml, non una lista sua"
+        )
+
+    def test_con_un_toml_a_due_gate_gira_gate_ne_gira_due(self, configura, monkeypatch):
+        configura(toml_di_prova(gate=(
+            ("pytest", ("pytest", "-q"), "backend", ()),
+            ("mypy", ("mypy", "."), "src", ()),
+        )))
+        girati: list[tuple[str, Path]] = []
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda cmd, cwd, timeout=0: girati.append((cmd[0], cwd)) or (0, ""),
+        )
+
+        assert runner.gira_gate(set()) == []
+        assert girati == [("pytest", runner.REPO / "backend"), ("mypy", runner.REPO / "src")]
