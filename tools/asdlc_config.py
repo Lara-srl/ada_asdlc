@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 NOME_FILE = "asdlc.toml"
+# I percorsi di macchina, gitignored. Facoltativo: nel worktree del runner non c'è.
+NOME_FILE_LOCALE = "asdlc.local.toml"
 
 
 class ErroreDiConfigurazione(ValueError):
@@ -90,8 +92,22 @@ class Config:
 
 
 def carica(repo: Path) -> Config:
-    """La configurazione letta da `repo / asdlc.toml`."""
-    return interpreta(leggi_toml(repo / NOME_FILE), NOME_FILE)
+    """La configurazione letta da `repo / asdlc.toml`, con sopra le sovrascritture
+    di `asdlc.local.toml` se c'è."""
+    dati = leggi_toml(repo / NOME_FILE)
+    locale = repo / NOME_FILE_LOCALE
+    if locale.exists():
+        dati = sovrascrivi(dati, leggi_toml(locale))
+    return interpreta(dati, NOME_FILE)
+
+
+def sovrascrivi(dati: dict, locali: dict) -> dict:
+    """`dati` con sopra le sezioni di `locali`, chiave per chiave: una sezione
+    locale che dice solo il venv non cancella i prestiti."""
+    uniti = dict(dati)
+    for sezione, valori in locali.items():
+        uniti[sezione] = {**dati.get(sezione, {}), **valori}
+    return uniti
 
 
 def leggi_toml(file: Path) -> dict:
