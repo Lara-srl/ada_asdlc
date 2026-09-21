@@ -172,6 +172,28 @@ def test_un_toml_malformato_si_ferma_nominando_il_file(tmp_path):
     assert "asdlc.toml" in str(fermata.value)
 
 
+def test_asdlc_local_toml_sovrascrive_ambiente_e_worktree_chiave_per_chiave(tmp_path):
+    """I percorsi di macchina stanno nel file gitignored, non in quello versionato.
+
+    Assente non è un errore: gitignored vuol dire che nel worktree del runner non
+    c'è, e se fosse obbligatorio il primo giro dopo il merge non partirebbe
+    (decisione 3). Presente, sovrascrive chiave per chiave: un `[ambiente]`
+    locale che dice solo il venv non cancella i prestiti, o ogni macchina
+    dovrebbe ricopiarsi la sezione intera per cambiare una riga."""
+    scrivi_toml(tmp_path)
+    senza = asdlc_config.carica(tmp_path)
+    scrivi_toml(tmp_path, '[ambiente]\nvenv = "/opt/venv"\n\n[worktree]\npercorso = "/tmp/altro-run"\n',
+                nome="asdlc.local.toml")
+    con = asdlc_config.carica(tmp_path)
+
+    assert senza.ambiente.venv == ".venv"
+    assert senza.worktree.percorso == Path.home() / "prova-run"
+    assert con.ambiente.venv == "/opt/venv"
+    assert con.ambiente.prestiti == ("dati",), "ciò che il locale non dice resta"
+    assert con.worktree.percorso == Path("/tmp/altro-run")
+    assert con.git.base == "origin/master", "le altre sezioni non le tocca"
+
+
 def test_il_lettore_usa_solo_la_libreria_standard():
     """È ciò che rende il runner copiabile senza un `pip install`: la
     precondizione 2 di `ADR-0017`, che la Fase 2 di `SCAFFOLDING.md` dimostrerà
