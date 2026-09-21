@@ -3798,3 +3798,44 @@ class TestIGateVengonoDaAsdlcToml:
 
         assert runner.gira_gate(set()) == []
         assert girati == [("pytest", runner.REPO / "backend"), ("mypy", runner.REPO / "src")]
+
+
+class TestLeSoglieEIPercorsiVengonoDaAsdlcToml:
+    """Nessun numero cambia in questo giro (decisione 5): prima di applicare il
+    TOML di prova, ogni test guarda che il valore di oggi sia quello di ieri."""
+
+    def test_le_soglie_seguono_il_toml(self, configura):
+        """Il TOML porta il numero; la ragione — PBI-201, sei revisioni, i due
+        difetti peggiori usciti al quarto e al quinto giro — resta nel sorgente."""
+        assert (runner.MAX_TENTATIVI, runner.MAX_IGIENE, runner.MAX_REVISIONI) == (3, 3, 4)
+
+        configura(toml_di_prova(tentativi=2, igiene=5, revisioni=7))
+
+        assert (runner.MAX_TENTATIVI, runner.MAX_IGIENE, runner.MAX_REVISIONI) == (2, 5, 7)
+
+    def test_i_prestiti_e_il_registro_seguono_il_toml(self, configura):
+        assert runner.PRESTITI == ("data", "frontend/node_modules")
+        assert runner.CSV_TEMPI == runner.REPO / "runs" / "tempi.csv"
+
+        configura(toml_di_prova(prestiti=("dati",), registro="giri", tempi="ore.csv"))
+
+        assert runner.PRESTITI == ("dati",)
+        assert runner.LOG_DIR == runner.REPO / "giri"
+        assert runner.CSV_TEMPI == runner.REPO / "giri" / "ore.csv"
+
+    def test_il_venv_segue_il_toml(self, configura, tmp_path, monkeypatch):
+        configura(toml_di_prova(venv="altro/.venv"))
+        bin_venv = tmp_path / "altro" / ".venv" / "bin"
+        bin_venv.mkdir(parents=True)
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        assert runner.venv_sul_path() == str(bin_venv)
+
+    def test_la_cartella_del_backlog_segue_il_toml(self, configura, git_finto):
+        """`trova_pbi` chiede a `origin/main` l'elenco di **quella** cartella."""
+        configura(toml_di_prova(cartella="storie"))
+
+        runner.trova_pbi("PBI-102")
+
+        assert ("ls-tree", "--name-only", "origin/main", "storie/") in git_finto
