@@ -55,6 +55,14 @@ from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+# `tools/` non è un pacchetto e non deve diventarlo: il runner si lancia per
+# percorso, e sotto i test si carica con `importlib` da `backend/tests/`. Il
+# lettore della configurazione sta accanto a questo file, e si importa da lì.
+if str(REPO / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO / "tools"))
+import asdlc_config  # noqa: E402
+
 LOG_DIR = REPO / "runs"
 CSV_TEMPI = LOG_DIR / "tempi.csv"
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
@@ -130,17 +138,36 @@ class Gate:
     solo_se: str | None = None  # flag che lo accende (es. "e2e")
 
 
-GATE: list[Gate] = [
-    Gate("pytest", ["pytest", "-q"], cwd="backend"),
-    Gate("tsc", ["npm", "run", "build"], cwd="frontend"),
-    Gate("eslint", ["npm", "run", "lint"], cwd="frontend"),
-    Gate("vitest", ["npm", "test"], cwd="frontend"),
-    # Niente e2e qui: `npm run e2e` da un worktree punta a localhost:8081, che è
-    # lo stack del checkout principale — cioè `main`, non il branch che si sta
-    # costruendo. Lo stack andrebbe rialzato a ogni giro del Builder, e questo non
-    # lo fa. Gli E2E li fa la CI sulla PR, che lo stack lo costruisce dal branch
-    # (`ADR-0009`, difetto 13 di PBI-102).
-]
+# I gate li dichiara `asdlc.toml`, sezione `[[gate]]`: pytest da `backend`, poi
+# tsc, eslint e vitest da `frontend`. Niente e2e: `npm run e2e` da un worktree
+# punta a localhost:8081, che è lo stack del checkout principale — cioè `main`,
+# non il branch che si sta costruendo. Lo stack andrebbe rialzato a ogni giro
+# del Builder, e questo non lo fa. Gli E2E li fa la CI sulla PR, che lo stack lo
+# costruisce dal branch (`ADR-0009`, difetto 13 di PBI-102).
+GATE: list[Gate] = []
+
+
+def configura(cfg: asdlc_config.Config) -> None:
+    """Le costanti di modulo, dalla configurazione. Si chiama una volta,
+    all'import, e i test la richiamano con un `asdlc.toml` di prova.
+
+    Restano **nomi di modulo** e non attributi di un oggetto: 36 punti dei test
+    fanno `monkeypatch.setattr(runner, …)` su queste costanti, e spostarle
+    dentro un oggetto costruito in `main()` li romperebbe tutti (PBI-358,
+    decisione 1). Il guadagno — un posto solo — è lo stesso.
+    """
+    global CFG, GATE
+    CFG = cfg
+    GATE = [Gate(g.nome, list(g.comando), cwd=g.cwd) for g in cfg.gate]
+
+
+# `asdlc.toml` è obbligatorio, e un file che manca o non si legge ferma qui con
+# un messaggio e non con un traceback: lo legge chi ha appena perso l'uso di
+# `git commit`, perché il `pre-commit` esegue questo file a ogni commit.
+try:
+    configura(asdlc_config.carica(REPO))
+except asdlc_config.ErroreDiConfigurazione as guasto:
+    sys.exit(f"asdlc_runner: {guasto}")
 
 PROMPT_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
 
