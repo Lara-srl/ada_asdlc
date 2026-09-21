@@ -63,8 +63,14 @@ if str(REPO / "tools") not in sys.path:
     sys.path.insert(0, str(REPO / "tools"))
 import asdlc_config  # noqa: E402
 
-LOG_DIR = REPO / "runs"
-CSV_TEMPI = LOG_DIR / "tempi.csv"
+# Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
+# sono relativi a `REPO`, e la ragione di ogni valore sta accanto a dove si legge.
+CFG: asdlc_config.Config
+LOG_DIR: Path            # `[registro].cartella` — `runs/`
+CSV_TEMPI: Path          # `[registro].tempi` — `runs/tempi.csv`
+BACKLOG: str             # `[backlog].cartella`
+VENV: str                # `[ambiente].venv`
+PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
 # **nome** del file e non il suo percorso: la cartella è `LOG_DIR`, e un percorso
 # calcolato qui la congelerebbe all'import — chi sposta `LOG_DIR` (i test di
@@ -94,23 +100,11 @@ BUILDER = ["claude", "-p", "--allowedTools", "Bash", "--permission-mode", "accep
 # deve mai essere l'ultimo. Il Builder non ne soffre perché i suoi flag sono booleani.
 CRITIC = ["claude", "-p", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)", "--model", "opus"]
 
-MAX_TENTATIVI = 3   # gate rossi: oltre, il problema non è che l'agente non ci ha provato
-# Giri spesi a **chiedere un commit**, contati a parte. Non sono la stessa cosa di un gate
-# rosso — quello è «hai sbagliato una riga», questo è «il lavoro c'è ma non è durevole» —
-# e sommarli è costato a PBI-208 tutti e tre i tentativi senza che un gate girasse mai:
-# `git commit -am` non prende i file non tracciati, e la pagina che l'agente aveva scritto
-# è rimasta fuori da ogni commit. Un tetto ci vuole lo stesso: un Builder che non riesce a
-# committare non migliora girando, e senza numero girerebbe finché non finisce la notte.
-MAX_IGIENE = 3
-# Backstop, non criterio. Il criterio giusto è «smetti quando un giro non produce più
-# niente di bloccante», e il Critic quel segnale lo emette già da sé — distingue una
-# violazione da un «non è una violazione, ma va detto». È il runner a non leggerlo
-# (PBI-102). Finché non lo legge, serve un numero, e questo è tarato su una misura:
-# PBI-201 ha richiesto sei revisioni, e i due difetti peggiori — il criterio centrale
-# che si skippava su ogni runner, una decisione autocertificata da chi ne beneficiava —
-# sono usciti al quarto e al quinto giro. Con 2 il runner avrebbe chiuso prima di
-# vederli, dichiarando «il PBI non era pronto»: vero e fuorviante insieme.
-MAX_REVISIONI = 4
+# Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
+# il numero; la ragione di ognuno sta lì accanto, dove chi lo cambia la legge.
+MAX_TENTATIVI: int
+MAX_IGIENE: int
+MAX_REVISIONI: int
 
 # Gli stati dopo i quali non si prosegue. `sospeso` sta qui insieme a `fermato`
 # per la stessa ragione — sono tutti e due «fermo su una domanda» — e la domanda
@@ -156,9 +150,48 @@ def configura(cfg: asdlc_config.Config) -> None:
     dentro un oggetto costruito in `main()` li romperebbe tutti (PBI-358,
     decisione 1). Il guadagno — un posto solo — è lo stesso.
     """
-    global CFG, GATE
+    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI
+    global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI
     CFG = cfg
     GATE = [Gate(g.nome, list(g.comando), cwd=g.cwd) for g in cfg.gate]
+
+    # Il registro dei giri: i rapporti, i log, i prompt, il lucchetto, e il CSV
+    # dei tempi su cui si fattura. Relativo a `REPO`, come ogni percorso del TOML.
+    LOG_DIR = REPO / cfg.registro.cartella
+    CSV_TEMPI = LOG_DIR / cfg.registro.tempi
+    # La cartella dei PBI, che `trova_pbi` chiede al ramo di base.
+    BACKLOG = cfg.backlog.cartella
+    # Il venv da mettere sul PATH prima dei gate (`venv_sul_path`), relativo a `REPO`.
+    VENV = cfg.ambiente.venv
+    # Ciò che il worktree usa e getta non ha perché è gitignored, e senza cui i test
+    # non girano: si presta dall'albero del giro con un link. `data/` è il foglio
+    # vero, che la CI non ha e questa macchina sì; `node_modules` è mezzo minuto di
+    # `npm ci` per ogni commit da guardare. Sono le dipendenze di **oggi** e non
+    # quelle di quel commit: se un test di allora chiedesse un pacchetto che oggi
+    # non c'è più, il gate lo leggerebbe come rosso — che è il verso giusto in cui
+    # sbagliare.
+    PRESTITI = cfg.ambiente.prestiti
+
+    # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
+    MAX_TENTATIVI = cfg.soglie.tentativi
+    # Giri spesi a **chiedere un commit**, contati a parte. Non sono la stessa cosa
+    # di un gate rosso — quello è «hai sbagliato una riga», questo è «il lavoro c'è
+    # ma non è durevole» — e sommarli è costato a PBI-208 tutti e tre i tentativi
+    # senza che un gate girasse mai: `git commit -am` non prende i file non
+    # tracciati, e la pagina che l'agente aveva scritto è rimasta fuori da ogni
+    # commit. Un tetto ci vuole lo stesso: un Builder che non riesce a committare
+    # non migliora girando, e senza numero girerebbe finché non finisce la notte.
+    MAX_IGIENE = cfg.soglie.igiene
+    # Backstop, non criterio. Il criterio giusto è «smetti quando un giro non
+    # produce più niente di bloccante», e il Critic quel segnale lo emette già da
+    # sé — distingue una violazione da un «non è una violazione, ma va detto». È il
+    # runner a non leggerlo (PBI-102). Finché non lo legge, serve un numero, e
+    # questo è tarato su una misura: PBI-201 ha richiesto sei revisioni, e i due
+    # difetti peggiori — il criterio centrale che si skippava su ogni runner, una
+    # decisione autocertificata da chi ne beneficiava — sono usciti al quarto e al
+    # quinto giro. Con 2 il runner avrebbe chiuso prima di vederli, dichiarando
+    # «il PBI non era pronto»: vero e fuorviante insieme.
+    MAX_REVISIONI = cfg.soglie.revisioni
 
 
 # `asdlc.toml` è obbligatorio, e un file che manca o non si legge ferma qui con
@@ -550,7 +583,8 @@ def chiudi_rapporto(run: str, esiti: list[Esito]) -> Path:
 
 
 def venv_sul_path() -> str | None:
-    """Mette `backend/.venv/bin` in testa al `PATH`, se c'è e non c'è già.
+    """Mette il `bin` del venv — `[ambiente].venv`, `backend/.venv` — in testa al
+    `PATH`, se c'è e non c'è già.
 
     `backend/requirements.txt` è il file del runtime: `pytest` non c'è, e i gate
     girano col venv del worktree. Finora quel `PATH` andava scritto a mano prima
@@ -563,7 +597,7 @@ def venv_sul_path() -> str | None:
     Torna il percorso aggiunto, o `None` se non c'era niente da fare — così chi
     lancia lo legge a schermo invece di doverlo dedurre.
     """
-    bin_venv = REPO / "backend" / ".venv" / "bin"
+    bin_venv = REPO / VENV / "bin"
     if not bin_venv.is_dir():
         return None
     if str(bin_venv) in os.environ.get("PATH", "").split(os.pathsep):
@@ -1053,14 +1087,6 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
 
-
-# Ciò che il worktree usa e getta non ha perché è gitignored, e senza cui i test non
-# girano: si presta dall'albero del giro con un link. `data/` è il foglio vero, che
-# la CI non ha e questa macchina sì; `node_modules` è mezzo minuto di `npm ci` per
-# ogni commit da guardare. Sono le dipendenze di **oggi** e non quelle di quel
-# commit: se un test di allora chiedesse un pacchetto che oggi non c'è più, il gate
-# lo leggerebbe come rosso — che è il verso giusto in cui sbagliare.
-PRESTITI = ("data", "frontend/node_modules")
 
 # Le tre letture che **non** sono un rosso osservato, con la ragione che le
 # distingue. `nato verde` e `rosso non osservabile` sono due cose diverse: la prima
@@ -1943,11 +1969,11 @@ def trova_pbi(pbi: str) -> Path | None:
     """
     try:
         git("fetch", "origin", "main")
-        voci = git("ls-tree", "--name-only", "origin/main", "backlog/").splitlines()
+        voci = git("ls-tree", "--name-only", "origin/main", f"{BACKLOG}/").splitlines()
     except RuntimeError as exc:
         print(f"    ⚠️  origin/main non raggiungibile ({str(exc)[:120]}): "
               f"cerco {pbi} nell'albero estratto")
-        return next(REPO.glob(f"backlog/{pbi}-*.md"), None)
+        return next(REPO.glob(f"{BACKLOG}/{pbi}-*.md"), None)
 
     nome = next((v.strip() for v in voci
                  if Path(v.strip()).name.startswith(f"{pbi}-") and v.strip().endswith(".md")), None)
