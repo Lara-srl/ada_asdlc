@@ -40,6 +40,138 @@ def clear_event_bus():
     return None
 
 
+# Un `asdlc.toml` di prova, completo e piccolo: due gate e valori che non sono
+# quelli del repository, così un test che leggesse per sbaglio il file vero se
+# ne accorgerebbe.
+TOML_DI_PROVA = """\
+[git]
+base = "origin/master"
+prefisso_ramo = "us/us-"
+
+[backlog]
+cartella = "storie"
+coda = "storie/CODA.md"
+id = "US-{n}"
+file = "US-{n}-{slug}.md"
+
+[registro]
+cartella = "giri"
+tempi = "ore.csv"
+
+[ambiente]
+venv = ".venv"
+prestiti = ["dati"]
+
+[worktree]
+percorso = "~/prova-run"
+
+[soglie]
+tentativi = 2
+igiene = 5
+revisioni = 7
+
+[gate_del_rosso]
+attivo = true
+
+[[gate]]
+nome = "pytest"
+comando = ["pytest", "-q"]
+
+[[gate]]
+nome = "mypy"
+comando = ["mypy", "."]
+cwd = "src"
+solo_se_tocca = ["src/", "pyproject.toml"]
+"""
+
+
+def scrivi_toml(cartella: Path, testo: str = TOML_DI_PROVA, nome: str = "asdlc.toml") -> Path:
+    (cartella / nome).write_text(testo, encoding="utf-8")
+    return cartella
+
+
+def test_carica_un_toml_e_torna_i_campi_tipizzati(tmp_path):
+    """Non un dizionario: attributi con un nome, così `cfg.soglie.revisioni` si
+    legge e si sbaglia a tempo di lettura del file, non a metà giro."""
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path))
+
+    assert cfg.git.base == "origin/master"
+    assert cfg.git.prefisso_ramo == "us/us-"
+    assert (cfg.backlog.cartella, cfg.backlog.coda) == ("storie", "storie/CODA.md")
+    assert (cfg.backlog.id, cfg.backlog.file) == ("US-{n}", "US-{n}-{slug}.md")
+    assert (cfg.registro.cartella, cfg.registro.tempi) == ("giri", "ore.csv")
+    assert cfg.ambiente.venv == ".venv"
+    assert cfg.ambiente.prestiti == ("dati",)
+    assert cfg.worktree.percorso == Path.home() / "prova-run", "la tilde si espande"
+    assert (cfg.soglie.tentativi, cfg.soglie.igiene, cfg.soglie.revisioni) == (2, 5, 7)
+    assert cfg.gate_del_rosso.attivo is True
+    assert [(g.nome, list(g.comando), g.cwd, list(g.solo_se_tocca)) for g in cfg.gate] == [
+        ("pytest", ["pytest", "-q"], ".", []),
+        ("mypy", ["mypy", "."], "src", ["src/", "pyproject.toml"]),
+    ], "cwd vale `.` e solo_se_tocca è vuoto quando non sono scritti"
+
+
+def test_l_asdlc_toml_del_repository_si_carica():
+    """Il file vero, non uno di prova: è quello che il runner leggerà al prossimo
+    giro, e un errore lì ferma `git commit` a chi lo sta usando (decisione 4)."""
+    cfg = asdlc_config.carica(REPO)
+
+    assert cfg.git.base == "origin/main"
+    assert cfg.soglie.revisioni == 4
+    assert cfg.gate_del_rosso.attivo is True
+
+
+def test_un_file_assente_si_ferma_nominando_il_file(tmp_path):
+    """Nessun default silenzioso: un runner che partisse senza `asdlc.toml`
+    passerebbe per la ragione sbagliata (decisione 3)."""
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(tmp_path)
+
+    assert "asdlc.toml" in str(fermata.value)
+    assert str(tmp_path) in str(fermata.value), "dove lo ha cercato"
+
+
+def test_una_chiave_mancante_si_ferma_nominando_file_e_chiave(tmp_path):
+    """Non un `KeyError`: quel messaggio lo legge chi ha appena perso l'uso di
+    `git commit`, perché l'hook esegue il runner a ogni commit."""
+    senza_base = TOML_DI_PROVA.replace('base = "origin/master"\n', "")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, senza_base))
+
+    assert "asdlc.toml" in str(fermata.value)
+    assert "[git].base" in str(fermata.value)
+
+
+def test_una_sezione_mancante_si_ferma_nominando_la_sezione(tmp_path):
+    senza_soglie = TOML_DI_PROVA.replace(
+        "[soglie]\ntentativi = 2\nigiene = 5\nrevisioni = 7\n", ""
+    )
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, senza_soglie))
+
+    assert "[soglie]" in str(fermata.value)
+
+
+def test_un_valore_del_tipo_sbagliato_si_ferma_nominando_la_chiave(tmp_path):
+    """`revisioni = "7"` è una stringa: un `range("7" + 1)` a metà giro sarebbe
+    un traceback, e a quel punto il Builder ha già lavorato un'ora."""
+    stringa = TOML_DI_PROVA.replace("revisioni = 7", 'revisioni = "7"')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, stringa))
+
+    assert "[soglie].revisioni" in str(fermata.value)
+
+
+def test_un_toml_malformato_si_ferma_nominando_il_file(tmp_path):
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, "[git\nbase = \n"))
+
+    assert "asdlc.toml" in str(fermata.value)
+
+
 def test_il_lettore_usa_solo_la_libreria_standard():
     """È ciò che rende il runner copiabile senza un `pip install`: la
     precondizione 2 di `ADR-0017`, che la Fase 2 di `SCAFFOLDING.md` dimostrerà
