@@ -22,21 +22,40 @@ import fcntl
 import json
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-# I due percorsi di oggi, che sono i default degli argomenti: il checkout da cui
-# si legge la coda e si interroga `origin`, e il worktree in cui il runner
-# lavora. Sono diversi perché `ada-run` cambia ramo sotto i piedi a ogni giro.
+# Il checkout da cui si legge la coda e si interroga `origin`: la radice di questo
+# file, e l'unico percorso che non sta in `asdlc.toml` — un percorso assoluto in
+# un file versionato è il difetto che la configurazione toglie.
 REPO = Path(__file__).resolve().parent.parent
-WORKTREE_DEL_RUNNER = Path.home() / "ada-run"
+
+# `tools/` non è un pacchetto: il lettore della configurazione sta accanto a
+# questo file e si importa da lì, come fa il runner.
+if str(REPO / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO / "tools"))
+import asdlc_config  # noqa: E402
+
+# Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
+# file che legge il runner, quindi il tick e il runner non possono più dire due
+# forme diverse dello stesso id (PBI-353).
+CFG: asdlc_config.Config
+# Il worktree in cui il runner lavora, default di `--worktree`. È diverso dal
+# checkout perché `ada-run` cambia ramo sotto i piedi a ogni giro.
+WORKTREE_DEL_RUNNER: Path      # `[worktree].percorso`
 # Il log del tick. Sotto `runs/`, dove `*.log` è già ignorato da git: un file
 # non ignorato in quella cartella renderebbe sporco il giro che sta per partire.
-LOG = Path("runs") / "coda.log"
+LOG: Path                      # `[registro].cartella` / coda.log
 # Dove il runner tiene il lucchetto del suo albero (`lucchetto()`, `NOME_LUCCHETTO`).
-LUCCHETTO = Path("runs") / ".runner.lock"
+LUCCHETTO: Path                # `[registro].cartella` / .runner.lock
+BACKLOG: str                   # `[backlog].cartella`
+CODA: Path                     # `[backlog].coda`, relativo al checkout
+BASE: str                      # `[git].base`
+REMOTO: str                    # `origin`, da `BASE`
+PREFISSO_RAMO: str             # `[git].prefisso_ramo`
 # La cartella dei processi. È una costante e non un argomento perché la
 # attraversano tre chiamate di fila, e sotto i test si sostituisce qui.
 PROC = Path("/proc")
@@ -97,7 +116,8 @@ Decisione = Occupato | Finita | Barriera | Attende | Lancia
 # documento e l'ingresso del programma, e la sua prosa **nomina** le voci — la
 # legenda in cima le cita fra apici inversi, la sezione «Fuori dalla coda» scrive
 # in grassetto i PBI che non ci sono. Una regola larga le prenderebbe per ordini.
-RE_PBI = re.compile(r"^-\s+(PBI-\d+)\s*$")
+# La forma dell'id viene dal modello `[backlog].id`, in `configura()`.
+RE_PBI: re.Pattern[str]
 RE_BARRIERA = re.compile(r"^-\s+‖\s*(.+?)\s*$")
 
 
@@ -159,11 +179,40 @@ def esegui(cmd: list[str], cwd: Path) -> tuple[int, str]:
 # I due modi in cui una PR nomina il suo PBI: il titolo che `apri_pr()` costruisce
 # e il ramo che `crea_branch()` chiede a `nome_libero()`. Il secondo copre i giri
 # intitolati con la convenzione vecchia, `feat(scope): PBI-XXX — …`, e arriva col
-# suffisso del giro (`pbi/pbi-338-giro3`) quando un primo giro c'era già.
-RE_TITOLO_PR = re.compile(r"^\s*(PBI-\d+)\s*:")
-RE_RAMO_PR = re.compile(r"^pbi/pbi-(\d+)")
+# suffisso del giro (`pbi/pbi-338-giro3`) quando un primo giro c'era già. Le tre
+# regole nascono in `configura()` dal modello dell'id e dal prefisso del ramo.
+RE_TITOLO_PR: re.Pattern[str]
+RE_RAMO_PR: re.Pattern[str]
 # Lo stesso ramo letto da `git ls-remote`, che lo rende col prefisso dei ref.
-RE_RAMO_PBI = re.compile(r"refs/heads/pbi/pbi-(\d+)")
+RE_RAMO_PBI: re.Pattern[str]
+
+
+def configura(cfg: asdlc_config.Config) -> None:
+    """Le costanti di modulo, dalla configurazione: una volta all'import, e i
+    test la richiamano con un `asdlc.toml` di prova. Restano nomi di modulo per
+    la stessa ragione del runner — è ciò che i test sostituiscono."""
+    global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
+    global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI
+    CFG = cfg
+    WORKTREE_DEL_RUNNER = cfg.worktree.percorso
+    LOG = Path(cfg.registro.cartella) / "coda.log"
+    LUCCHETTO = Path(cfg.registro.cartella) / ".runner.lock"
+    BACKLOG = cfg.backlog.cartella
+    CODA = Path(cfg.backlog.coda)
+    BASE, REMOTO = cfg.git.base, cfg.git.remoto
+    PREFISSO_RAMO = cfg.git.prefisso_ramo
+    id_pbi = asdlc_config.regex_del_modello(cfg.backlog.id).pattern
+    ramo = re.escape(PREFISSO_RAMO) + r"(\d+)"
+    RE_PBI = re.compile(rf"^-\s+({id_pbi})\s*$")
+    RE_TITOLO_PR = re.compile(rf"^\s*({id_pbi})\s*:")
+    RE_RAMO_PR = re.compile(rf"^{ramo}")
+    RE_RAMO_PBI = re.compile(rf"refs/heads/{ramo}")
+
+
+try:
+    configura(asdlc_config.carica(REPO))
+except asdlc_config.ErroreDiConfigurazione as guasto:
+    sys.exit(f"asdlc_coda: {guasto}")
 
 
 class Guasto(RuntimeError):
@@ -198,7 +247,7 @@ def pbi_nominato(pr: dict) -> str | None:
     if (dal_titolo := RE_TITOLO_PR.match(pr.get("title", ""))) is not None:
         return dal_titolo.group(1)
     if (dal_ramo := RE_RAMO_PR.match(pr.get("headRefName", ""))) is not None:
-        return f"PBI-{dal_ramo.group(1)}"
+        return CFG.backlog.id_di(dal_ramo.group(1))
     return None
 
 
@@ -219,7 +268,7 @@ def tocca_codice(pr: dict) -> bool:
     percorsi = pr.get("files") or []
     if not percorsi or len(percorsi) >= LIMITE_FILE:
         return True
-    return any(not f.get("path", "").startswith("backlog/") for f in percorsi)
+    return any(not f.get("path", "").startswith(f"{BACKLOG}/") for f in percorsi)
 
 
 def pbi_mergiati(repo: Path) -> set[str]:
@@ -267,13 +316,15 @@ def pbi_con_ramo(repo: Path) -> set[str]:
     Si chiede al remoto perché è l'unico posto in cui un giro fallito lascia
     traccia per tutti, ed è la stessa lettura di `rami_su_origin()`.
     """
+    # La cartella del prefisso e basta — `refs/heads/pbi/*` — e non tutti i rami.
+    cartella = PREFISSO_RAMO.rpartition("/")[0]
     codice, uscita = esegui(
-        ["git", "-C", str(repo), "ls-remote", "--heads", "origin", "refs/heads/pbi/*"],
+        ["git", "-C", str(repo), "ls-remote", "--heads", REMOTO, f"refs/heads/{cartella}/*"],
         repo,
     )
     if codice != 0:
-        raise Guasto(f"git non parla con origin (uscita {codice}): {uscita.strip()[:200]}")
-    return {f"PBI-{numero}" for numero in RE_RAMO_PBI.findall(uscita)}
+        raise Guasto(f"git non parla con {REMOTO} (uscita {codice}): {uscita.strip()[:200]}")
+    return {CFG.backlog.id_di(numero) for numero in RE_RAMO_PBI.findall(uscita)}
 
 
 # L'intestazione di una sezione di domande dentro un PBI.
@@ -291,7 +342,10 @@ def avviso_domande(repo: Path, pbi: str) -> str:
     chiuse. Il tick non rifà quella verifica perché non può — la stampa e
     lancia lo stesso (`ADR-0008`).
     """
-    for file in sorted((repo / "backlog").glob(f"{pbi}-*.md")):
+    numero = CFG.backlog.numero(pbi)
+    if numero is None:
+        return ""
+    for file in sorted((repo / BACKLOG).glob(CFG.backlog.glob_del_file(numero))):
         trovato = RE_DOMANDE.search(file.read_text(encoding="utf-8"))
         if trovato is not None:
             return trovato.group(0).strip()
@@ -377,7 +431,7 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     """
     if giro_in_corso(worktree):
         return Occupato()
-    file_coda = repo / "backlog" / "CODA.md"
+    file_coda = repo / CODA
     try:
         voci = leggi_voci(file_coda.read_text(encoding="utf-8"))
         mergiati, rami = pbi_mergiati(repo), pbi_con_ramo(repo)
@@ -388,15 +442,22 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     return prossimo(voci, mergiati, rami, occupato=False)
 
 
-# Il pre-flight del lancio a mano, nell'ordine in cui va fatto. Il registro dei
-# tempi si rimette a posto per primo: il controllo d'igiene del runner guarda
-# tutto l'albero senza eccezioni, e `runs/tempi.csv` sporco fermerebbe il giro
-# prima di cominciare.
-PREFLIGHT = [
-    ["git", "checkout", "--", "runs/tempi.csv"],
-    ["git", "fetch", "origin"],
-    ["git", "switch", "--detach", "origin/main"],
-]
+def preflight() -> list[list[str]]:
+    """Il pre-flight del lancio a mano, nell'ordine in cui va fatto.
+
+    Il registro dei tempi si rimette a posto per primo: il controllo d'igiene
+    del runner guarda tutto l'albero senza eccezioni, e `runs/tempi.csv` sporco
+    fermerebbe il giro prima di cominciare. Ci si stacca sul ramo di base di
+    `asdlc.toml`, lo stesso da cui il runner ramifica: su un altro, il branch
+    nascerebbe da una base vecchia. Una funzione e non una costante, perché il
+    ramo e il registro si leggono quando si lancia, non all'import.
+    """
+    return [
+        ["git", "checkout", "--", f"{CFG.registro.cartella}/{CFG.registro.tempi}"],
+        ["git", "fetch", REMOTO],
+        ["git", "switch", "--detach", BASE],
+    ]
+
 
 # Quanto si aspetta, dopo che il comando del runner è tornato, prima di chiedere
 # all'albero se il giro è vivo. Il runner si stacca con un `fork` e il padre esce
@@ -438,7 +499,7 @@ def lancia(pbi: str, worktree: Path) -> None:
     alza, perché altrimenti nel log resterebbe «lancia», con un riprova a ogni
     tick e nessuna diagnosi da nessuna parte.
     """
-    for comando in PREFLIGHT:
+    for comando in preflight():
         codice, uscita = esegui(comando, worktree)
         if codice != 0:
             raise Guasto(
