@@ -20,6 +20,10 @@ from pathlib import Path
 NOME_FILE = "asdlc.toml"
 # I percorsi di macchina, gitignored. Facoltativo: nel worktree del runner non c'è.
 NOME_FILE_LOCALE = "asdlc.local.toml"
+# Le sole sezioni che il file locale può sovrascrivere: i gate, le soglie e il
+# ramo sono del progetto, e una macchina che li cambiasse da un file gitignored
+# girerebbe un altro metodo con lo stesso nome, senza che una PR lo mostri.
+SEZIONI_LOCALI = ("ambiente", "worktree")
 
 
 class ErroreDiConfigurazione(ValueError):
@@ -97,15 +101,21 @@ def carica(repo: Path) -> Config:
     dati = leggi_toml(repo / NOME_FILE)
     locale = repo / NOME_FILE_LOCALE
     if locale.exists():
-        dati = sovrascrivi(dati, leggi_toml(locale))
+        dati = sovrascrivi(dati, leggi_toml(locale), NOME_FILE_LOCALE)
     return interpreta(dati, NOME_FILE)
 
 
-def sovrascrivi(dati: dict, locali: dict) -> dict:
+def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
     """`dati` con sopra le sezioni di `locali`, chiave per chiave: una sezione
-    locale che dice solo il venv non cancella i prestiti."""
+    locale che dice solo il venv non cancella i prestiti. Una sezione fuori da
+    `SEZIONI_LOCALI` si ferma, e dice quali sono le due ammesse."""
     uniti = dict(dati)
     for sezione, valori in locali.items():
+        if sezione not in SEZIONI_LOCALI:
+            ammesse = " e ".join(f"[{s}]" for s in SEZIONI_LOCALI)
+            raise ErroreDiConfigurazione(
+                f"{file}: `[{sezione}]` non si sovrascrive da qui — il file locale "
+                f"porta solo {ammesse}; il resto è del progetto e sta in {NOME_FILE}")
         uniti[sezione] = {**dati.get(sezione, {}), **valori}
     return uniti
 
