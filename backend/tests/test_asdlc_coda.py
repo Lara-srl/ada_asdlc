@@ -910,18 +910,19 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
 
 @pytest.fixture
 def configura(tmp_path):
-    """Applica un TOML di prova al tick e alla fine rimette quello del repository."""
-    di_prima = []
+    """Parte dal solo `asdlc.toml` versionato — senza `asdlc.local.toml`, che
+    sulla macchina di chi lo scrive cambia `[worktree]` di proposito — applica un
+    TOML di prova al tick e alla fine rimette la configurazione di macchina."""
+    config = coda.asdlc_config
+    di_prima = coda.CFG
+    coda.configura(config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE))
 
     def _applica(testo: str):
         (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
-        if not di_prima:
-            di_prima.append(coda.CFG)
-        coda.configura(coda.asdlc_config.carica(tmp_path))
+        coda.configura(config.carica(tmp_path))
 
     yield _applica
-    if di_prima:
-        coda.configura(di_prima[0])
+    coda.configura(di_prima)
 
 
 STORIE = dict(id="US-{n}", file="US-{n}-{slug}.md", prefisso_ramo="us/us-",

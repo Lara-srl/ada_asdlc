@@ -3752,23 +3752,32 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
     return testo
 
 
+def toml_versionato(config):
+    """Il solo `asdlc.toml` del repository, **senza** `asdlc.local.toml`.
+
+    All'import il modulo applica anche il file locale, che sulla macchina di chi
+    lo scrive cambia `[ambiente]` e `[worktree]` di proposito: un test che
+    guardasse lì il «valore di ieri» sarebbe rosso su codice giusto, e verde
+    solo dove il file non c'è — in CI, e nel worktree del runner."""
+    return config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE)
+
+
 @pytest.fixture
 def configura(tmp_path):
-    """Scrive un `asdlc.toml` di prova, lo applica al runner e alla fine rimette
-    quello del repository. Il `monkeypatch` di un singolo nome non basterebbe:
-    qui si prova che dal file arrivino **tutti** i nomi insieme."""
-    di_prima = []
+    """Parte dal solo `asdlc.toml` versionato, scrive un TOML di prova, lo applica
+    al runner e alla fine rimette la configurazione di macchina. Il `monkeypatch`
+    di un singolo nome non basterebbe: qui si prova che dal file arrivino
+    **tutti** i nomi insieme."""
+    di_prima = runner.CFG
+    runner.configura(toml_versionato(runner.asdlc_config))
 
     def _applica(testo: str):
         (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
-        if not di_prima:
-            di_prima.append(runner.CFG)
         runner.configura(runner.asdlc_config.carica(tmp_path))
         return runner.CFG
 
     yield _applica
-    if di_prima:
-        runner.configura(di_prima[0])
+    runner.configura(di_prima)
 
 
 class TestIGateVengonoDaAsdlcToml:
