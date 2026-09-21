@@ -3932,3 +3932,49 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
                             ("--help", aiuto)):
             assert "origin/master" in testo, f"{nome} non nomina il ramo del TOML"
             assert "origin/main" not in testo, f"{nome} nomina ancora il ramo scritto a mano"
+
+
+class TestLIdEIlNomeFileDelPbiStannoInUnPostoSolo:
+    """`[backlog].id` e `.file` sono modelli — `PBI-{n}`, `PBI-{n}-{slug}.md` —
+    e `[git].prefisso_ramo` il prefisso del ramo: chi forka scrive il suo
+    modello, e le forme che il runner deriva cambiano tutte insieme. Prima di
+    applicare il modello di prova ogni test guarda che con quello di oggi le
+    forme siano quelle di ieri."""
+
+    def test_trova_pbi_riconosce_il_file_dal_modello(self, configura, monkeypatch, tmp_path):
+        configura(toml_di_prova(id="US-{n}", file="US-{n}-{slug}.md"))
+
+        def _git(*args):
+            if args[:2] == ("ls-tree", "--name-only"):
+                return "backlog/US-7-somma.md\nbacklog/US-70-altro.md\nbacklog/PBI-7-vecchio.md\n"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+
+        assert runner.trova_pbi("US-7") == runner.REPO / "backlog" / "US-7-somma.md"
+        assert runner.trova_pbi("PBI-7") is None, "non è un id di questo progetto"
+
+        # E il ripiego sull'albero estratto, quando `origin` non risponde.
+        (tmp_path / "backlog").mkdir()
+        (tmp_path / "backlog" / "US-7-somma.md").write_text("# US-7\n", encoding="utf-8")
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+
+        def _git_muto(*args):
+            raise RuntimeError("origin non risponde")
+
+        monkeypatch.setattr(runner, "git", _git_muto)
+
+        assert runner.trova_pbi("US-7") == tmp_path / "backlog" / "US-7-somma.md"
+
+    def test_il_ramo_del_pbi_segue_il_prefisso(self, configura, git_finto):
+        assert runner.nome_libero("PBI-322", set()) == "pbi/pbi-322"
+        assert runner.nome_libero("PBI-322", {"pbi/pbi-322"}) == "pbi/pbi-322-giro2"
+
+        configura(toml_di_prova(id="US-{n}", file="US-{n}-{slug}.md", prefisso_ramo="us/us-"))
+
+        assert runner.nome_libero("US-7", set()) == "us/us-7"
+        assert runner.nome_libero("US-7", {"us/us-7"}) == "us/us-7-giro2"
+        assert runner.crea_branch("US-7") == "us/us-7"
+        assert ("ls-remote", "--heads", "origin", "us/us-7*") in git_finto
+        assert ("branch", "--list", "us/us-7*", "--format=%(refname:short)") in git_finto
+        assert ("switch", "-c", "us/us-7", "origin/main") in git_finto
