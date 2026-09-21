@@ -881,3 +881,143 @@ def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, caps
 
     assert uscita == 2
     assert "--worktree" in capsys.readouterr().out
+
+
+# --- Le costanti del tick nascono da asdlc.toml (PBI-358) ----------------------
+#
+# Le regex delle voci, dei titoli e dei rami delle PR dicevano la forma dell'id
+# del PBI a mano, come `trova_pbi` nel runner: quattro copie della stessa cosa,
+# e PBI-353 ne ha corrette tre insieme mentre la quarta teneva ferma la coda per
+# sette ore. Da qui il tick e il runner leggono lo **stesso** file.
+
+
+def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
+                  cartella="backlog", coda_md="backlog/CODA.md",
+                  id="PBI-{n}", file="PBI-{n}-{slug}.md",
+                  registro="runs", tempi="tempi.csv", worktree="~/ada-run") -> str:
+    """Un `asdlc.toml` coi valori di oggi: ogni test nomina solo ciò che cambia."""
+    return (
+        f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
+        f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda_md}"\nid = "{id}"\nfile = "{file}"\n\n'
+        f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
+        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\n\n'
+        f'[worktree]\npercorso = "{worktree}"\n\n'
+        '[soglie]\ntentativi = 3\nigiene = 3\nrevisioni = 4\n\n'
+        '[gate_del_rosso]\nattivo = true\n\n'
+        '[[gate]]\nnome = "pytest"\ncomando = ["pytest", "-q"]\ncwd = "backend"\n'
+    )
+
+
+@pytest.fixture
+def configura(tmp_path):
+    """Applica un TOML di prova al tick e alla fine rimette quello del repository."""
+    di_prima = []
+
+    def _applica(testo: str):
+        (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
+        if not di_prima:
+            di_prima.append(coda.CFG)
+        coda.configura(coda.asdlc_config.carica(tmp_path))
+
+    yield _applica
+    if di_prima:
+        coda.configura(di_prima[0])
+
+
+STORIE = dict(id="US-{n}", file="US-{n}-{slug}.md", prefisso_ramo="us/us-",
+              cartella="storie", coda_md="storie/CODA.md")
+
+
+def test_le_voci_della_coda_seguono_il_modello_dell_id(configura):
+    assert coda.leggi_voci("- PBI-7\n- US-7\n") == [coda.VocePbi("PBI-7")]
+
+    configura(toml_di_prova(**STORIE))
+
+    assert coda.leggi_voci("- PBI-7\n- US-7\n") == [coda.VocePbi("US-7")], (
+        "con l'altro modello `- PBI-7` è prosa, come lo era `- US-7`"
+    )
+
+
+def test_il_pbi_nominato_da_una_pr_segue_il_modello_e_il_prefisso(configura):
+    assert coda.pbi_nominato(pr_mergiata(titolo="PBI-7: x")) == "PBI-7"
+    assert coda.pbi_nominato(pr_mergiata(titolo="feat: x", ramo="pbi/pbi-7-giro2")) == "PBI-7"
+
+    configura(toml_di_prova(**STORIE))
+
+    assert coda.pbi_nominato(pr_mergiata(titolo="US-7: x")) == "US-7"
+    assert coda.pbi_nominato(pr_mergiata(titolo="feat: x", ramo="us/us-7-giro2")) == "US-7"
+    assert coda.pbi_nominato(pr_mergiata(titolo="PBI-7: x", ramo="pbi/pbi-7")) is None
+
+
+def test_i_rami_su_origin_si_chiedono_e_si_leggono_col_prefisso(configura, tmp_path, monkeypatch):
+    configura(toml_di_prova(**STORIE))
+    chiesti = []
+
+    def esegui(cmd, cwd):
+        chiesti.append(cmd)
+        return 0, ("0" * 40 + "\trefs/heads/us/us-7\n" + "0" * 40 + "\trefs/heads/pbi/pbi-8\n")
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    assert coda.pbi_con_ramo(tmp_path) == {"US-7"}
+    assert chiesti[0][-1] == "refs/heads/us/*", "si chiede a origin la sola cartella del prefisso"
+
+
+def test_tocca_codice_guarda_la_cartella_del_backlog_del_toml(configura):
+    assert coda.tocca_codice(pr_mergiata(files=["backlog/PBI-7-x.md"])) is False
+
+    configura(toml_di_prova(**STORIE))
+
+    assert coda.tocca_codice(pr_mergiata(files=["storie/US-7-x.md", "storie/CODA.md"])) is False
+    assert coda.tocca_codice(pr_mergiata(files=["backlog/PBI-7-x.md"])) is True
+
+
+def test_la_coda_e_l_avviso_delle_domande_si_leggono_dalla_cartella_del_toml(
+    configura, tmp_path, monkeypatch
+):
+    configura(toml_di_prova(**STORIE))
+    repo = tmp_path / "repo"
+    (repo / "storie").mkdir(parents=True)
+    (repo / "storie" / "CODA.md").write_text("- US-7\n", encoding="utf-8")
+    (repo / "storie" / "US-7-la-somma.md").write_text(
+        "# US-7\n\n## ❓ Aperta\n", encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(coda, "esegui", mondo())
+
+    assert coda.decidi(repo, albero) == coda.Lancia("US-7")
+    assert coda.avviso_domande(repo, "US-7") == "## ❓ Aperta"
+
+
+def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura):
+    assert coda.WORKTREE_DEL_RUNNER == Path.home() / "ada-run"
+    assert coda.LOG == Path("runs") / "coda.log"
+    assert coda.LUCCHETTO == Path("runs") / ".runner.lock"
+
+    configura(toml_di_prova(registro="giri", worktree="/tmp/altro-run"))
+
+    assert coda.WORKTREE_DEL_RUNNER == Path("/tmp/altro-run")
+    assert coda.LOG == Path("giri") / "coda.log"
+    assert coda.LUCCHETTO == Path("giri") / ".runner.lock"
+
+
+def test_il_preflight_si_stacca_sul_ramo_del_toml(configura, tmp_path, monkeypatch):
+    """Lo stesso ramo da cui il runner ramifica: un pre-flight che si staccasse
+    su un altro `origin/main` farebbe nascere il branch su una base vecchia."""
+    configura(toml_di_prova(base="origin/master", tempi="ore.csv"))
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = registratore()
+    si_stacca, tenuti = runner_che_prende_lalbero(albero, esegui)
+    monkeypatch.setattr(coda, "esegui", si_stacca)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    coda.lancia("PBI-337", albero)
+
+    assert [cmd for cmd, _ in visti][:3] == [
+        ["git", "checkout", "--", "runs/ore.csv"],
+        ["git", "fetch", "origin"],
+        ["git", "switch", "--detach", "origin/master"],
+    ]
+    for aperto in tenuti:
+        aperto.close()
