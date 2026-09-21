@@ -129,12 +129,9 @@ COLONNE_CSV = [
 ]
 
 
-@dataclass
-class Gate:
-    nome: str
-    comando: list[str]
-    cwd: str = "."
-    solo_se: str | None = None  # flag che lo accende (es. "e2e")
+# Un gate è quello di `asdlc.toml`: nome, comando, `cwd` relativa a `REPO`, e
+# `solo_se_tocca` — i percorsi che lo accendono (`acceso()`).
+Gate = asdlc_config.Gate
 
 
 # I gate li dichiara `asdlc.toml`, sezione `[[gate]]`: pytest da `backend`, poi
@@ -160,7 +157,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
     global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
-    GATE = [Gate(g.nome, list(g.comando), cwd=g.cwd) for g in cfg.gate]
+    GATE = list(cfg.gate)
     # `false` spegne la seconda domanda del Quality Gate — e il giro lo scrive.
     GATE_DEL_ROSSO_ATTIVO = cfg.gate_del_rosso.attivo
 
@@ -633,18 +630,38 @@ def venv_sul_path() -> str | None:
     return str(bin_venv)
 
 
+def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
+    """Se il gate gira: sempre, senza `solo_se_tocca`; con, se è fra i nomi
+    accesi a prescindere o se il diff del branch tocca uno dei suoi percorsi.
+
+    Era `Gate.solo_se`, un flag che nessuno accendeva più (`--e2e` esce prima):
+    `[[gate]].solo_se_tocca` gli dà la semantica che serve davvero — un gate che
+    costa e che vale solo se il branch ha toccato ciò che guarda. Il primo
+    consumatore è il gate `asdlc` della Fase 2 di `SCAFFOLDING.md`.
+    """
+    if not g.solo_se_tocca or g.nome in attivi:
+        return True
+    return any(t.startswith(p) for p in g.solo_se_tocca for t in toccati)
+
+
+def file_toccati() -> set[str]:
+    """I file che il branch ha cambiato rispetto al ramo di base, `BASE...HEAD`
+    come per i mutanti: un `main` andato avanti nel frattempo non entra."""
+    return {p for p in git("diff", "--name-only", f"{BASE}...HEAD").splitlines() if p}
+
+
 def gate_mancanti(attivi: set[str]) -> list[str]:
     """I gate accesi il cui comando non esiste su questa macchina.
 
     `backend/requirements.txt` è il file del runtime e `pytest` non c'è: un
     worktree nuovo nasce senza il gate più importante, e senza questo controllo
     lo scopre dopo mezz'ora di Builder, su un gate rosso che sembra un errore del
-    codice (difetto 21). Si guardano solo i gate accesi: `--e2e` spento non deve
-    pretendere lo stack Playwright.
+    codice (difetto 21). Si guardano solo i gate accesi a prescindere dal diff:
+    prima del primo PBI il diff non c'è ancora, e un gate condizionato non deve
+    pretendere il suo strumento su un giro che forse non lo tocca.
     """
     return [g.nome for g in GATE
-            if (g.solo_se is None or g.solo_se in attivi)
-            and shutil.which(g.comando[0]) is None]
+            if acceso(g, attivi, set()) and shutil.which(g.comando[0]) is None]
 
 
 def log_del_giro(run: str) -> Path:
@@ -820,10 +837,16 @@ def git(*args: str) -> str:
 
 
 def gira_gate(attivi: set[str]) -> list[tuple[str, str]]:
-    """Gate rossi con la coda del loro output. Lista vuota = tutto verde."""
+    """Gate rossi con la coda del loro output. Lista vuota = tutto verde.
+
+    `attivi` sono i nomi dei gate accesi a prescindere dal diff — oggi nessuno.
+    Il diff si chiede a git solo se un gate ha `solo_se_tocca`: gli altri non
+    ne hanno bisogno, e un `git diff` a vuoto è una chiamata in più da finta.
+    """
     rossi: list[tuple[str, str]] = []
+    toccati = file_toccati() if any(g.solo_se_tocca for g in GATE) else set()
     for g in GATE:
-        if g.solo_se and g.solo_se not in attivi:
+        if not acceso(g, attivi, toccati):
             continue
         print(f"    gate {g.nome} … ", end="", flush=True)
         t0 = time.monotonic()
