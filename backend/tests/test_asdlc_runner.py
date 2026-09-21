@@ -4027,3 +4027,45 @@ class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
         assert chiamati == ["gate"]
         assert "gate del rosso spento da asdlc.toml" in esito.nota
         assert "critic saltato" in esito.nota
+
+
+class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
+    """`[[gate]].solo_se_tocca` risuscita `Gate.solo_se` (decisione 8), che era
+    codice morto: `attivi` era sempre vuoto. La semantica che serve è «accendi
+    questo gate se il diff `base...HEAD` tocca uno di questi percorsi»; un gate
+    senza il campo è sempre acceso, che è il comportamento di oggi per tutti e
+    quattro. Il primo consumatore vero è il gate `asdlc` della Fase 2."""
+
+    def _gate_girati(self, configura, monkeypatch, toccati: list[str]) -> list[str]:
+        configura(toml_di_prova(gate=(
+            ("pytest", ("pytest", "-q"), "backend", ()),
+            ("asdlc", ("pytest", "-q", "tools/tests"), ".", ("tools/", "asdlc.toml")),
+        )))
+        girati: list[str] = []
+        monkeypatch.setattr(
+            runner, "esegui", lambda cmd, cwd, timeout=0: girati.append(cmd[-1]) or (0, ""))
+
+        def _git(*args):
+            assert args == ("diff", "--name-only", "origin/main...HEAD"), args
+            return "\n".join(toccati)
+
+        monkeypatch.setattr(runner, "git", _git)
+        runner.gira_gate(set())
+        return girati
+
+    def test_acceso_se_tocca_spento_altrimenti_e_senza_il_campo_sempre_acceso(
+        self, configura, monkeypatch
+    ):
+        assert self._gate_girati(configura, monkeypatch, ["backend/app/x.py"]) == ["-q"], (
+            "il diff non tocca tools/ né asdlc.toml: il gate asdlc resta spento"
+        )
+        assert self._gate_girati(
+            configura, monkeypatch, ["backend/app/x.py", "tools/asdlc_runner.py"]
+        ) == ["-q", "tools/tests"], "tocca tools/: si accende, dopo il gate sempre acceso"
+        assert self._gate_girati(configura, monkeypatch, ["asdlc.toml"]) == ["-q", "tools/tests"]
+        assert self._gate_girati(configura, monkeypatch, []) == ["-q"], (
+            "un gate senza il campo gira anche su un diff vuoto"
+        )
+
+    def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
+        assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], []]
