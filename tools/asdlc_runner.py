@@ -1076,8 +1076,14 @@ class VoceDiCommit(NamedTuple):
 
 
 def file_del_commit(sha: str) -> list[VoceDiCommit]:
-    """Le voci di ogni file toccato dal commit, rename compresi."""
-    righe = git("show", "--format=", "--name-status", sha).splitlines()
+    """Le voci di ogni file toccato dal commit, rename compresi.
+
+    `-M` è scritto nel comando e non lasciato al default: `diff.renames` è vero
+    da git 2.9, ma resta configurazione della macchina, e su un repository che la
+    spegne il rename tornerebbe a leggersi come un file aggiunto più uno
+    cancellato — senza che nessuno se ne accorga.
+    """
+    righe = git("show", "--format=", "--name-status", "-M", sha).splitlines()
     voci: list[VoceDiCommit] = []
     for riga in righe:
         campi = riga.split("\t")
@@ -1127,7 +1133,7 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
             continue
         lati = [percorso] if voce.vecchio is None else [voce.vecchio, percorso]
         aggiunti, tolti = nomi_dei_test(
-            git("show", "--format=", "--unified=0", sha, "--", *lati), linguaggio
+            git("show", "--format=", "--unified=0", "-M", sha, "--", *lati), linguaggio
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
