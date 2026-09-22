@@ -1815,6 +1815,7 @@ class TestLUrlDellaPrSiRiconoscePerForma:
     """
 
     def _crea_pr(self, monkeypatch, uscita: str) -> str:
+        monkeypatch.setattr(runner, "git", lambda *a: "")
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita))
         return runner.apri_pr(
@@ -4371,7 +4372,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
 
         assert ("rev-list", "--count", "origin/master..HEAD") in git_finto
 
-    def test_la_pr_si_apre_verso_il_ramo_del_toml(self, su_master, monkeypatch):
+    def test_la_pr_si_apre_verso_il_ramo_del_toml(self, su_master, git_finto, monkeypatch):
         comandi: list[list[str]] = []
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(
