@@ -1975,6 +1975,9 @@ class RepoDiProva:
         self._git("commit", "-q", "-m", messaggio)
         return self._git("rev-parse", "HEAD")
 
+    def configura(self, chiave: str, valore: str) -> None:
+        self._git("config", chiave, valore)
+
     def sposta(self, da: str, a: str) -> None:
         """Un `git mv` vero, lasciato **in stage** e non committato.
 
@@ -2055,6 +2058,20 @@ class TestUnTestTraslocatoNonNasce:
              TRE_TEST + "\n\ndef test_quattro():\n    assert True\n"})
 
         assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_quattro"]
+
+    def test_il_conteggio_non_dipende_dal_gitconfig(self, repo_di_prova):
+        """`diff.renames` è vero per default da git 2.9, ma resta configurazione
+        della macchina: un repository che lo spegne rimetterebbe il gate a contare
+        le nascite di un trasloco, e nessuno lo verrebbe a sapere. `-M` scritto nel
+        comando toglie la domanda, ed è l'unico modo di provarlo — con git vero e
+        con quella configurazione addosso."""
+        repo_di_prova.configura("diff.renames", "false")
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
+
+        assert runner.test_nuovi_del_commit(sha) == []
 
 
 class TestIlGateDelRossoCamminaICommit:
