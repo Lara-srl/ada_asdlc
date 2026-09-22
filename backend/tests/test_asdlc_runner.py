@@ -1479,6 +1479,33 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         assert esito.stato == "fermato"
         assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota
 
+    def test_se_origin_non_risponde_la_pr_non_si_apre_e_il_giro_non_alza(self, monkeypatch):
+        """Il push è riuscito, poi `ls-remote` fallisce — rete che cade, token scaduto.
+        Cosa ci sia su origin non si sa: è ancora una promessa non verificata, ma
+        un'eccezione qui farebbe registrare `rosso` con zero commit un giro già
+        pubblicato, cioè le perdite che i difetti 10 e 17 avevano chiuso."""
+        self._git(monkeypatch, head=self.HEAD, ref=self.HEAD)
+        finto = runner.git
+
+        def _g(*args: str) -> str:
+            if args[:1] == ("ls-remote",):
+                raise RuntimeError("git ls-remote origin → fatal: unable to access")
+            return finto(*args)
+
+        monkeypatch.setattr(runner, "git", _g)
+        comandi: list[list[str]] = []
+        monkeypatch.setattr(runner, "esegui", lambda cmd, cwd, timeout=0:
+                            comandi.append(cmd) or (0, "https://x/pull/237\n"))
+        esito = runner.Esito("PBI-358", "fatto")
+
+        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+
+        assert pr == ""
+        assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
+        assert esito.stato == "fermato"
+        assert "non verificabile" in esito.nota
+        assert self.HEAD in esito.nota
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
