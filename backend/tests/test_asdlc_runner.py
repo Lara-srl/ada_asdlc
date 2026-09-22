@@ -2098,15 +2098,21 @@ class TestUnTestTraslocatoNonNasce:
 
 
 class TestUnRenameDaUnFileNonDiTestFaNascere:
-    """Il lato vecchio vale solo se era **a sua volta** un file di test.
+    """Il lato vecchio vale solo se da lì i test **sarebbero nati**.
 
     «Un test traslocato non è un test scritto» regge perché il permesso l'aveva
     già chiesto il commit che l'ha creato — ma un `note.txt` non ha mai chiesto
     niente: i test dentro non sono mai stati rossi, e nel lucchetto *ex ante* un
     `.txt` non è né test né produzione, quindi in `TEST_ONLY` si scrive senza che
     nessuno lo fermi. Se qui il rename li facesse tacere, l'agente esaminato
-    sceglierebbe quali suoi test vengono esaminati — la forma che `ADR-0022` ha
-    già scartato rifiutando il tag `(GUARD)`.
+    sceglierebbe quali suoi test vengono esaminati — la forma che `ADR-0021` ha
+    scartato col tag `(GUARD)` (§Alternative considerate) e che `ADR-0022`
+    conferma.
+
+    E «era un file di test» non si chiede a `e_file_di_test` da sola: dice `True`
+    anche per un `note.txt` sotto `tests/` e per gli `e2e/`, da cui nessuna riga
+    è mai nata. La domanda è quella che il ciclo delle nascite fa sul lato nuovo,
+    `linguaggio_del_test` compresa — i tre casi qui sotto sono le sue tre facce.
 
     È la regressione simmetrica del difetto 31: là il trasloco faceva nascere
     tutto, qui non farebbe nascere niente.
