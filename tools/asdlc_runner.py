@@ -1942,11 +1942,27 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     strada buona: un ramo pubblicato prima che il Critic abbia parlato è una
     promessa fatta su lavoro che nessuno ha ancora accettato, e su PBI-324 quella
     promessa è stata riscossa con un merge di un terzo del lavoro (difetto 18).
+
+    E la PR si apre solo se su `origin` c'è **`HEAD`**, cioè ciò che i gate hanno
+    misurato: lo si chiede al remoto con `ls-remote`, non a un remote-tracking.
+    Su PBI-358 (difetto 30) il push è riuscito e ha mandato un ref fermo
+    diciannove commit indietro, e la PR #237 è nata su un `(RED)` con il giro
+    `fatto`. Se i due sha non coincidono il giro chiude `fermato` e li nomina.
     """
     if not pubblica(branch):
         # L'esito resta quello che era: un push mancato non disfa il giro, ma la
         # riga del registro lo deve dire — il log da solo non lo guarda nessuno.
         e.nota = " · ".join(t for t in (e.nota, NON_PUBBLICATO) if t)
+        return ""
+    head = git("rev-parse", "HEAD")
+    fuori = git("ls-remote", REMOTO, f"refs/heads/{branch}").split()
+    su_origin = fuori[0] if fuori else ""
+    if su_origin != head:
+        diagnosi = (f"PR non aperta: su {REMOTO} {branch} è {su_origin or 'assente'}, "
+                    f"i gate hanno misurato HEAD {head}")
+        print(f"    ⚠️  {diagnosi}")
+        e.stato = "fermato"
+        e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
         return ""
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
