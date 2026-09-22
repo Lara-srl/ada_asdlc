@@ -1396,6 +1396,38 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         assert "non pubblicato" not in out
         assert "rimasto indietro" in out and self.ETICHETTA[:12] in out
 
+    def test_il_lease_rifiuta_un_remoto_andato_avanti_anche_da_head(self, tmp_path,
+                                                                    monkeypatch, capsys):
+        """Decisione 3: il lease è la cura del difetto 18 e resta. Con git vero: un
+        altro clone scrive sul ramo, noi committiamo da HEAD staccato senza aver
+        visto quel commit, e il push si deve rifiutare invece di forzare."""
+        def sh(cwd: Path, *args: str) -> str:
+            p = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                                "-c", "init.defaultBranch=main", *args],
+                               cwd=cwd, capture_output=True, text=True, check=True)
+            return p.stdout.strip()
+
+        remoto, noi, altri = tmp_path / "remoto.git", tmp_path / "noi", tmp_path / "altri"
+        sh(tmp_path, "init", "-q", "--bare", str(remoto))
+        sh(tmp_path, "clone", "-q", str(remoto), str(noi))
+        sh(noi, "commit", "-q", "--allow-empty", "-m", "base")
+        sh(noi, "switch", "-q", "-c", "pbi/pbi-358")
+        sh(noi, "push", "-q", "-u", "origin", "pbi/pbi-358")
+        sh(tmp_path, "clone", "-q", "-b", "pbi/pbi-358", str(remoto), str(altri))
+        sh(altri, "commit", "-q", "--allow-empty", "-m", "di qualcun altro")
+        sh(altri, "push", "-q", "origin", "pbi/pbi-358")
+        loro = sh(altri, "rev-parse", "HEAD")
+        sh(noi, "switch", "-q", "--detach")
+        sh(noi, "commit", "-q", "--allow-empty", "-m", "del giro")
+
+        monkeypatch.setattr(runner, "REPO", noi)
+
+        assert runner.pubblica("pbi/pbi-358") is False
+        assert sh(noi, "ls-remote", "origin", "refs/heads/pbi/pbi-358").split()[0] == loro, (
+            "il commit di qualcun altro resta su origin: il lease non si scavalca"
+        )
+        assert "non pubblicato" in capsys.readouterr().out
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
