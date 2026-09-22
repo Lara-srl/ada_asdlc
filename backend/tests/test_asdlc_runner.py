@@ -2042,6 +2042,20 @@ class TestUnTestTraslocatoNonNasce:
 
         assert runner.test_nuovi_del_commit(sha) == []
 
+    def test_un_rename_con_modifiche_fa_nascere_i_soli_test_aggiunti(self, repo_di_prova):
+        """Il file spostato **e** ritoccato non vuole un ramo suo: con tutti e due
+        i lati nel comando il diff porta le sole righe cambiate, e nasce quello
+        che quelle righe introducono davvero — uno, non quattro."""
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit(
+            "test: i test traslocano, e il quarto caso si aggiunge (RED)",
+            {"tools/tests/test_tre.py":
+             TRE_TEST + "\n\ndef test_quattro():\n    assert True\n"})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_quattro"]
+
 
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
