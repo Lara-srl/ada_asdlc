@@ -1948,18 +1948,27 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     Su PBI-358 (difetto 30) il push è riuscito e ha mandato un ref fermo
     diciannove commit indietro, e la PR #237 è nata su un `(RED)` con il giro
     `fatto`. Se i due sha non coincidono il giro chiude `fermato` e li nomina.
+    Se il remoto non risponde, cosa ci sia sopra non si sa: è la stessa promessa
+    non verificata, e chiude allo stesso modo — **senza alzare**, perché
+    un'eccezione qui registrerebbe `rosso` e zero commit un giro già pubblicato.
     """
     if not pubblica(branch):
         # L'esito resta quello che era: un push mancato non disfa il giro, ma la
         # riga del registro lo deve dire — il log da solo non lo guarda nessuno.
         e.nota = " · ".join(t for t in (e.nota, NON_PUBBLICATO) if t)
         return ""
-    head = git("rev-parse", "HEAD")
-    fuori = git("ls-remote", REMOTO, f"refs/heads/{branch}").split()
-    su_origin = fuori[0] if fuori else ""
-    if su_origin != head:
-        diagnosi = (f"PR non aperta: su {REMOTO} {branch} è {su_origin or 'assente'}, "
-                    f"i gate hanno misurato HEAD {head}")
+    head = su_origin = None
+    try:
+        head = git("rev-parse", "HEAD")
+        fuori = git("ls-remote", REMOTO, f"refs/heads/{branch}").split()
+        su_origin = fuori[0] if fuori else ""
+    except RuntimeError as exc:
+        print(f"    ⚠️  {REMOTO} non verificabile: {str(exc)[:200]}")
+    if su_origin is None or su_origin != head:
+        visto = ("non verificabile" if su_origin is None
+                 else su_origin or "assente")
+        diagnosi = (f"PR non aperta: su {REMOTO} {branch} è {visto}, "
+                    f"i gate hanno misurato HEAD {head or 'illeggibile'}")
         print(f"    ⚠️  {diagnosi}")
         e.stato = "fermato"
         e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
