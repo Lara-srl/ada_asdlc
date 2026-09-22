@@ -1428,6 +1428,40 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         )
         assert "non pubblicato" in capsys.readouterr().out
 
+    def _giro_col_push_che_fallisce(self, monkeypatch, verdetto: str) -> "runner.Esito":
+        def _g(*args: str) -> str:
+            if args[:1] == ("push",):
+                raise RuntimeError("git push → ! [rejected] pbi/pbi-102 (stale info)")
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
+        return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+    def test_un_push_fallito_a_giro_fatto_lo_scrive_nella_nota_e_non_cambia_lesito(
+            self, monkeypatch):
+        """Decisione 4: cambia cosa si manda, non cosa si fa quando non arriva. Il log
+        lo diceva già; la nota è la riga che si guarda in `runs/tempi.csv`."""
+        esito = self._giro_col_push_che_fallisce(monkeypatch, "pass")
+
+        assert esito.stato == "fatto"
+        assert esito.pr == ""
+        assert esito.commit == 3, "i commit restano nel worktree, e si contano"
+        assert "non pubblicato" in esito.nota
+
+    def test_un_push_fallito_a_giro_sospeso_lo_scrive_nella_nota(self, monkeypatch):
+        esito = self._giro_col_push_che_fallisce(monkeypatch, "sospeso")
+
+        assert esito.stato == "sospeso"
+        assert "non pubblicato" in esito.nota
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
