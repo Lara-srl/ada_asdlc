@@ -3712,3 +3712,369 @@ class TestSiCancellaSoloDentroUnCorpo:
     def test_dentro_un_corpo_si_cancella(self):
         assert "" in self._dopo("    totale = a + b")
         assert "" in self._dopo("  const totale = a + b")
+
+
+# --- Le costanti nascono da asdlc.toml (PBI-358) ------------------------------
+#
+# Le stesse due forme dell'id di un PBI erano scritte a mano in cinque punti fra
+# runner e tick, e undici letture eseguite dicevano `origin/main` una per una:
+# PBI-353 ne ha corrette tre insieme, e la coda è rimasta ferma sette ore perché
+# la quarta diceva un'altra cosa. Da qui i valori li porta `asdlc.toml`, letto da
+# `tools/asdlc_config.py`, e le costanti di modulo restano nomi di modulo: i 36
+# `monkeypatch.setattr` di questo file devono mordere ancora.
+
+
+def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
+                  cartella="backlog", coda="backlog/CODA.md",
+                  id="PBI-{n}", file="PBI-{n}-{slug}.md",
+                  registro="runs", tempi="tempi.csv",
+                  venv="backend/.venv", prestiti=("data", "frontend/node_modules"),
+                  tentativi=3, igiene=3, revisioni=4, gate_del_rosso=True,
+                  gate=(("pytest", ("pytest", "-q"), "backend", ()),)) -> str:
+    """Un `asdlc.toml` coi valori di oggi, e ogni test nomina solo ciò che cambia.
+    Un gate è `(nome, comando, cwd, solo_se_tocca)`."""
+    def elenco(voci):
+        return "[" + ", ".join(f'"{v}"' for v in voci) + "]"
+
+    testo = (
+        f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
+        f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda}"\nid = "{id}"\nfile = "{file}"\n\n'
+        f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
+        f'[ambiente]\nvenv = "{venv}"\nprestiti = {elenco(prestiti)}\n\n'
+        f'[worktree]\npercorso = "~/ada-run"\n\n'
+        f'[soglie]\ntentativi = {tentativi}\nigiene = {igiene}\nrevisioni = {revisioni}\n\n'
+        f'[gate_del_rosso]\nattivo = {"true" if gate_del_rosso else "false"}\n'
+    )
+    for nome, comando, cwd, solo_se_tocca in gate:
+        testo += f'\n[[gate]]\nnome = "{nome}"\ncomando = {elenco(comando)}\ncwd = "{cwd}"\n'
+        if solo_se_tocca:
+            testo += f"solo_se_tocca = {elenco(solo_se_tocca)}\n"
+    return testo
+
+
+def toml_versionato(config):
+    """Il solo `asdlc.toml` del repository, **senza** `asdlc.local.toml`.
+
+    All'import il modulo applica anche il file locale, che sulla macchina di chi
+    lo scrive cambia `[ambiente]` e `[worktree]` di proposito: un test che
+    guardasse lì il «valore di ieri» sarebbe rosso su codice giusto, e verde
+    solo dove il file non c'è — in CI, e nel worktree del runner."""
+    return config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE)
+
+
+@pytest.fixture
+def configura(tmp_path):
+    """Parte dal solo `asdlc.toml` versionato, scrive un TOML di prova, lo applica
+    al runner e alla fine rimette la configurazione di macchina. Il `monkeypatch`
+    di un singolo nome non basterebbe: qui si prova che dal file arrivino
+    **tutti** i nomi insieme."""
+    di_prima = runner.CFG
+    runner.configura(toml_versionato(runner.asdlc_config))
+
+    def _applica(testo: str):
+        (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
+        runner.configura(runner.asdlc_config.carica(tmp_path))
+        return runner.CFG
+
+    yield _applica
+    runner.configura(di_prima)
+
+
+class TestIGateVengonoDaAsdlcToml:
+    def test_i_quattro_gate_di_oggi_nome_per_nome_e_cwd_per_cwd(self):
+        """Nessun numero cambia in questo giro (decisione 5): il TOML del
+        repository dichiara i gate di prima, alla lettera."""
+        assert [(g.nome, list(g.comando), g.cwd) for g in runner.GATE] == [
+            ("pytest", ["pytest", "-q"], "backend"),
+            ("tsc", ["npm", "run", "build"], "frontend"),
+            ("eslint", ["npm", "run", "lint"], "frontend"),
+            ("vitest", ["npm", "test"], "frontend"),
+        ]
+        assert [g.nome for g in runner.GATE] == [g.nome for g in runner.CFG.gate], (
+            "i gate del runner sono quelli letti da asdlc.toml, non una lista sua"
+        )
+
+    def test_con_un_toml_a_due_gate_gira_gate_ne_gira_due(self, configura, monkeypatch):
+        configura(toml_di_prova(gate=(
+            ("pytest", ("pytest", "-q"), "backend", ()),
+            ("mypy", ("mypy", "."), "src", ()),
+        )))
+        girati: list[tuple[str, Path]] = []
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda cmd, cwd, timeout=0: girati.append((cmd[0], cwd)) or (0, ""),
+        )
+
+        assert runner.gira_gate(set()) == []
+        assert girati == [("pytest", runner.REPO / "backend"), ("mypy", runner.REPO / "src")]
+
+
+class TestLeSoglieEIPercorsiVengonoDaAsdlcToml:
+    """Nessun numero cambia in questo giro (decisione 5): prima di applicare il
+    TOML di prova, ogni test guarda che il valore di oggi sia quello di ieri."""
+
+    def test_le_soglie_seguono_il_toml(self, configura):
+        """Il TOML porta il numero; la ragione — PBI-201, sei revisioni, i due
+        difetti peggiori usciti al quarto e al quinto giro — resta nel sorgente."""
+        assert (runner.MAX_TENTATIVI, runner.MAX_IGIENE, runner.MAX_REVISIONI) == (3, 3, 4)
+
+        configura(toml_di_prova(tentativi=2, igiene=5, revisioni=7))
+
+        assert (runner.MAX_TENTATIVI, runner.MAX_IGIENE, runner.MAX_REVISIONI) == (2, 5, 7)
+
+    def test_i_prestiti_e_il_registro_seguono_il_toml(self, configura):
+        assert runner.PRESTITI == ("data", "frontend/node_modules")
+        assert runner.CSV_TEMPI == runner.REPO / "runs" / "tempi.csv"
+
+        configura(toml_di_prova(prestiti=("dati",), registro="giri", tempi="ore.csv"))
+
+        assert runner.PRESTITI == ("dati",)
+        assert runner.LOG_DIR == runner.REPO / "giri"
+        assert runner.CSV_TEMPI == runner.REPO / "giri" / "ore.csv"
+
+    def test_il_venv_segue_il_toml(self, configura, tmp_path, monkeypatch):
+        configura(toml_di_prova(venv="altro/.venv"))
+        bin_venv = tmp_path / "altro" / ".venv" / "bin"
+        bin_venv.mkdir(parents=True)
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        assert runner.venv_sul_path() == str(bin_venv)
+
+    def test_la_cartella_del_backlog_segue_il_toml(self, configura, git_finto):
+        """`trova_pbi` chiede a `origin/main` l'elenco di **quella** cartella."""
+        configura(toml_di_prova(cartella="storie"))
+
+        runner.trova_pbi("PBI-102")
+
+        assert ("ls-tree", "--name-only", "origin/main", "storie/") in git_finto
+
+
+class TestIlRamoDiBaseVieneDaAsdlcToml:
+    """Undici letture eseguite di `origin/main`, più le righe dei prompt che lo
+    dicono all'agente: con `[git] base = "origin/master"` lo seguono tutte, e
+    nessuna resta indietro — un gate che misura su un ramo e un prompt che ne
+    nomina un altro è una bugia che costa un giro (decisione 6)."""
+
+    @pytest.fixture
+    def su_master(self, configura):
+        configura(toml_di_prova(base="origin/master"))
+
+    def test_crea_branch_ramifica_dal_ramo_del_toml(self, su_master, git_finto):
+        assert runner.crea_branch("PBI-102") == "pbi/pbi-102"
+        assert ("fetch", "origin", "master") in git_finto
+        assert ("switch", "-c", "pbi/pbi-102", "origin/master") in git_finto
+
+    def test_trova_pbi_cerca_il_file_sul_ramo_del_toml(self, su_master, git_finto):
+        runner.trova_pbi("PBI-102")
+
+        assert ("fetch", "origin", "master") in git_finto
+        assert ("ls-tree", "--name-only", "origin/master", "backlog/") in git_finto
+
+    def test_un_giro_intero_non_nomina_mai_origin_main(self, su_master, git_finto, monkeypatch):
+        """Il conteggio dei commit, l'elenco dei file e il gate del rosso: sono
+        le letture dentro `esegui_pbi`, e si guardano da fuori tutte insieme."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "PASS"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        assert ("rev-list", "--count", "origin/master..HEAD") in git_finto
+        assert ("rev-list", "--reverse", "origin/master..HEAD") in git_finto
+        assert ("diff", "--name-only", "origin/master...HEAD") in git_finto
+        assert not [c for c in git_finto if any("origin/main" in arg for arg in c)], (
+            "una lettura è rimasta sul ramo scritto a mano"
+        )
+
+    def test_un_pbi_che_non_c_e_lo_dice_col_ramo_del_toml(self, su_master, git_finto):
+        esito = runner.esegui_pbi("PBI-999", attivi=set(), dry=True, con_pr=False)
+
+        assert esito.stato == "saltato"
+        assert "origin/master" in esito.nota
+
+    def test_il_gate_del_rosso_parte_dal_ramo_del_toml(self, su_master, monkeypatch):
+        visto: dict[str, str] = {}
+        monkeypatch.setattr(
+            runner, "commit_da_esaminare",
+            lambda base, ref, visti: visto.update(base=base, ref=ref) or [])
+
+        assert runner.gate_del_rosso() == []
+        assert visto == {"base": "origin/master", "ref": "HEAD"}
+
+    def test_gate_rosso_a_mano_parte_dal_ramo_del_toml(self, su_master, monkeypatch):
+        visto: dict[str, str] = {}
+        monkeypatch.setattr(
+            runner, "gate_del_rosso",
+            lambda base, ref, **k: visto.update(base=base, ref=ref) or [])
+
+        assert runner.stampa_il_gate_del_rosso("pbi/pbi-330") == 0
+        assert visto == {"base": "origin/master", "ref": "pbi/pbi-330"}
+
+    def test_chiedi_impl_conta_i_commit_dal_ramo_del_toml(self, su_master, git_finto, monkeypatch):
+        monkeypatch.setattr(runner, "test_nuovi_dellalbero", lambda: [])
+
+        runner.test_nuovi_da_aprire()
+
+        assert ("rev-list", "--count", "origin/master..HEAD") in git_finto
+
+    def test_la_pr_si_apre_verso_il_ramo_del_toml(self, su_master, monkeypatch):
+        comandi: list[list[str]] = []
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(
+            runner, "esegui",
+            lambda cmd, cwd, timeout=0: comandi.append(cmd) or (0, "https://x/pull/1\n"))
+
+        runner.apri_pr("PBI-212", runner.REPO / "backlog" / "PBI-212-x.md",
+                       "pbi/pbi-212", runner.Esito("PBI-212", "fatto"))
+
+        assert ["--base", "master"] == comandi[0][comandi[0].index("--base"):][:2]
+
+    def test_i_prompt_del_critic_e_del_rimedio_nominano_il_ramo_del_toml(self, su_master):
+        critic = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md")
+        rimedio = runner.PROMPT_RIMEDIO.format(rapporto="x", pbi_path="backlog/x.md")
+        aiuto = runner.costruisci_parser().format_help()
+
+        for nome, testo in (("PROMPT_CRITIC", critic), ("PROMPT_RIMEDIO", rimedio),
+                            ("--help", aiuto)):
+            assert "origin/master" in testo, f"{nome} non nomina il ramo del TOML"
+            assert "origin/main" not in testo, f"{nome} nomina ancora il ramo scritto a mano"
+
+
+class TestLIdEIlNomeFileDelPbiStannoInUnPostoSolo:
+    """`[backlog].id` e `.file` sono modelli — `PBI-{n}`, `PBI-{n}-{slug}.md` —
+    e `[git].prefisso_ramo` il prefisso del ramo: chi forka scrive il suo
+    modello, e le forme che il runner deriva cambiano tutte insieme. Prima di
+    applicare il modello di prova ogni test guarda che con quello di oggi le
+    forme siano quelle di ieri."""
+
+    def test_trova_pbi_riconosce_il_file_dal_modello(self, configura, monkeypatch, tmp_path):
+        configura(toml_di_prova(id="US-{n}", file="US-{n}-{slug}.md"))
+
+        def _git(*args):
+            if args[:2] == ("ls-tree", "--name-only"):
+                return "backlog/US-7-somma.md\nbacklog/US-70-altro.md\nbacklog/PBI-7-vecchio.md\n"
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+
+        assert runner.trova_pbi("US-7") == runner.REPO / "backlog" / "US-7-somma.md"
+        assert runner.trova_pbi("PBI-7") is None, "non è un id di questo progetto"
+
+        # E il ripiego sull'albero estratto, quando `origin` non risponde.
+        (tmp_path / "backlog").mkdir()
+        (tmp_path / "backlog" / "US-7-somma.md").write_text("# US-7\n", encoding="utf-8")
+        monkeypatch.setattr(runner, "REPO", tmp_path)
+
+        def _git_muto(*args):
+            raise RuntimeError("origin non risponde")
+
+        monkeypatch.setattr(runner, "git", _git_muto)
+
+        assert runner.trova_pbi("US-7") == tmp_path / "backlog" / "US-7-somma.md"
+
+    def test_il_ramo_del_pbi_segue_il_prefisso(self, configura, git_finto):
+        assert runner.nome_libero("PBI-322", set()) == "pbi/pbi-322"
+        assert runner.nome_libero("PBI-322", {"pbi/pbi-322"}) == "pbi/pbi-322-giro2"
+
+        configura(toml_di_prova(id="US-{n}", file="US-{n}-{slug}.md", prefisso_ramo="us/us-"))
+
+        assert runner.nome_libero("US-7", set()) == "us/us-7"
+        assert runner.nome_libero("US-7", {"us/us-7"}) == "us/us-7-giro2"
+        assert runner.crea_branch("US-7") == "us/us-7"
+        assert ("ls-remote", "--heads", "origin", "us/us-7*") in git_finto
+        assert ("branch", "--list", "us/us-7*", "--format=%(refname:short)") in git_finto
+        assert ("switch", "-c", "us/us-7", "origin/main") in git_finto
+
+
+class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
+    """La valvola del livello 4 rinviato (decisione 7): un progetto il cui runner
+    di test il gate non sa leggere tiene gli altri due gate — degradato, ma
+    ancora ASDLC. Un gate che si indebolisce in silenzio è la prima cosa che
+    `AUTOMAZIONE.md` vieta, quindi spento **lo si scrive**."""
+
+    def _giro(self, monkeypatch, con_critic=True):
+        chiamati: list[str] = []
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: chiamati.append("gate") or [])
+        monkeypatch.setattr(runner, "gate_del_rosso",
+                            lambda **k: chiamati.append("rosso") or [])
+        monkeypatch.setattr(
+            runner, "revisione_critica",
+            lambda p: chiamati.append("critic") or runner.Verdetto("pass", "", "PASS"))
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False,
+                                  con_critic=con_critic)
+        return esito, chiamati
+
+    def test_spento_non_gira_gli_altri_due_si_e_la_nota_lo_dice(
+        self, configura, git_finto, monkeypatch, capsys
+    ):
+        esito, chiamati = self._giro(monkeypatch)
+        assert chiamati == ["gate", "rosso", "critic"], "acceso, oggi, gira"
+        assert "spento" not in esito.nota
+
+        configura(toml_di_prova(gate_del_rosso=False))
+        esito, chiamati = self._giro(monkeypatch)
+
+        assert esito.stato == "fatto"
+        assert chiamati == ["gate", "critic"]
+        assert "gate del rosso spento da asdlc.toml" in esito.nota
+        uscita = capsys.readouterr().out
+        assert "gate del rosso" in uscita and "spento" in uscita, "e lo dice anche a schermo"
+
+    def test_la_dichiarazione_convive_con_quella_del_critic_saltato(
+        self, configura, git_finto, monkeypatch
+    ):
+        """Due gate su tre tolti, due frasi nella nota: chi legge `tempi.csv`
+        deve sapere che quel giro ne ha avuto **uno**."""
+        configura(toml_di_prova(gate_del_rosso=False))
+
+        esito, chiamati = self._giro(monkeypatch, con_critic=False)
+
+        assert chiamati == ["gate"]
+        assert "gate del rosso spento da asdlc.toml" in esito.nota
+        assert "critic saltato" in esito.nota
+
+
+class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
+    """`[[gate]].solo_se_tocca` risuscita `Gate.solo_se` (decisione 8), che era
+    codice morto: `attivi` era sempre vuoto. La semantica che serve è «accendi
+    questo gate se il diff `base...HEAD` tocca uno di questi percorsi»; un gate
+    senza il campo è sempre acceso, che è il comportamento di oggi per tutti e
+    quattro. Il primo consumatore vero è il gate `asdlc` della Fase 2."""
+
+    def _gate_girati(self, configura, monkeypatch, toccati: list[str]) -> list[str]:
+        configura(toml_di_prova(gate=(
+            ("pytest", ("pytest", "-q"), "backend", ()),
+            ("asdlc", ("pytest", "-q", "tools/tests"), ".", ("tools/", "asdlc.toml")),
+        )))
+        girati: list[str] = []
+        monkeypatch.setattr(
+            runner, "esegui", lambda cmd, cwd, timeout=0: girati.append(cmd[-1]) or (0, ""))
+
+        def _git(*args):
+            assert args == ("diff", "--name-only", "origin/main...HEAD"), args
+            return "\n".join(toccati)
+
+        monkeypatch.setattr(runner, "git", _git)
+        runner.gira_gate(set())
+        return girati
+
+    def test_acceso_se_tocca_spento_altrimenti_e_senza_il_campo_sempre_acceso(
+        self, configura, monkeypatch
+    ):
+        assert self._gate_girati(configura, monkeypatch, ["backend/app/x.py"]) == ["-q"], (
+            "il diff non tocca tools/ né asdlc.toml: il gate asdlc resta spento"
+        )
+        assert self._gate_girati(
+            configura, monkeypatch, ["backend/app/x.py", "tools/asdlc_runner.py"]
+        ) == ["-q", "tools/tests"], "tocca tools/: si accende, dopo il gate sempre acceso"
+        assert self._gate_girati(configura, monkeypatch, ["asdlc.toml"]) == ["-q", "tools/tests"]
+        assert self._gate_girati(configura, monkeypatch, []) == ["-q"], (
+            "un gate senza il campo gira anche su un diff vuoto"
+        )
+
+    def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
+        assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], []]
