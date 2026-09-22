@@ -2045,6 +2045,16 @@ class TestUnTestTraslocatoNonNasce:
 
         assert runner.test_nuovi_del_commit(sha) == []
 
+    def test_un_git_mv_in_stage_non_fa_nascere_niente_nellalbero(self, repo_di_prova):
+        """Il lucchetto *ex ante* legge l'albero di lavoro, e leggeva il `git mv`
+        con lo stesso difetto: chiedeva un rosso per tre test che esistono già, e
+        fermava il trasloco prima ancora che diventasse un commit."""
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+
+        assert runner.test_nuovi_dellalbero() == []
+
     def test_un_rename_con_modifiche_fa_nascere_i_soli_test_aggiunti(self, repo_di_prova):
         """Il file spostato **e** ritoccato non vuole un ramo suo: con tutti e due
         i lati nel comando il diff porta le sole righe cambiate, e nasce quello
