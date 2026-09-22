@@ -1373,6 +1373,29 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
 
         assert stato["origin"] == stato["HEAD"] == stato["refs/heads/pbi/pbi-358"] == self.HEAD
 
+    def test_un_ref_che_non_si_riallinea_non_annulla_la_pubblicazione(self, monkeypatch,
+                                                                       capsys):
+        """Protocollo di rifinitura di PBI-362: il ramo estratto in un terzo worktree
+        fa rifiutare `branch -f`. HEAD è già su origin — il criterio che conta — e
+        l'etichetta vecchia si dichiara invece di far sembrare fallito il push."""
+        chiamate = self._git(monkeypatch, head=self.HEAD, ref=self.ETICHETTA)
+        finto = runner.git
+
+        def _g(*args: str) -> str:
+            if args[:2] == ("branch", "-f"):
+                raise RuntimeError("git branch -f → fatal: impossibile forzare "
+                                   "l'aggiornamento del ramo usato dal worktree /tmp/terzo")
+            return finto(*args)
+
+        monkeypatch.setattr(runner, "git", _g)
+
+        assert runner.pubblica("pbi/pbi-358") is True
+        assert ("push", "--force-with-lease", "-u", "origin",
+                "HEAD:refs/heads/pbi/pbi-358") in chiamate
+        out = capsys.readouterr().out
+        assert "non pubblicato" not in out
+        assert "rimasto indietro" in out and self.ETICHETTA[:12] in out
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
