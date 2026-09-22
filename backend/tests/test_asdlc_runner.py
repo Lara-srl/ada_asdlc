@@ -1297,6 +1297,48 @@ class TestIlBranchLoPubblicaIlRunner:
         )
 
 
+class TestSuOriginFinisceCioCheIGateHannoMisurato:
+    """Difetto 30 di PBI-102, misurato su PBI-358 la notte del 21→22/09/2026.
+
+    Il pre-flight rieseguito otto secondi dopo il lancio ha staccato HEAD dal ramo
+    che `crea_branch` aveva appena creato: i 24 commit del giro sono nati staccati,
+    e `pubblica()` — che mandava il **ref** del ramo — ha messo su `origin` un
+    commit fermo diciannove commit indietro, la cui punta era un `(RED)`. Gate,
+    gate del rosso e Critic avevano guardato `HEAD`; nessuno guardava il remoto.
+    """
+
+    HEAD = "c0ffee0000000000000000000000000000000024"
+    ETICHETTA = "bbec6a4000000000000000000000000000000005"
+
+    def _git(self, monkeypatch, *, head: str, ref: str, su_origin: str = ""):
+        """Un git che risponde ai soli sha che contano, e registra il resto."""
+        chiamate: list[tuple[str, ...]] = []
+
+        def _g(*args: str) -> str:
+            chiamate.append(args)
+            if args == ("rev-parse", "HEAD"):
+                return head
+            if args[:1] == ("rev-parse",):
+                return ref
+            if args[:1] == ("ls-remote",):
+                return f"{su_origin}\trefs/heads/pbi/pbi-358" if su_origin else ""
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+        return chiamate
+
+    def test_con_head_staccato_si_pubblica_head_e_non_letichetta(self, monkeypatch):
+        """Il ref del ramo indietro di diciannove commit, come su PBI-358: sul remoto
+        deve finire il commit che i gate hanno misurato."""
+        chiamate = self._git(monkeypatch, head=self.HEAD, ref=self.ETICHETTA)
+
+        assert runner.pubblica("pbi/pbi-358") is True
+
+        push = [c for c in chiamate if c[0] == "push"]
+        assert push == [("push", "--force-with-lease", "-u", "origin",
+                         "HEAD:refs/heads/pbi/pbi-358")]
+
+
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
 
