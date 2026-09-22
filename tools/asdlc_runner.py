@@ -2089,13 +2089,18 @@ def pubblica(branch: str) -> bool:
     `HEAD` è ciò che gate, gate del rosso e Critic hanno guardato, e il worktree
     del runner è staccato per progetto — su PBI-358 il ref era rimasto diciannove
     commit indietro, ed è quello che è finito su `origin`. Quando coincidono il
-    comando resta quello di sempre.
+    comando resta quello di sempre. Dopo il push da `HEAD` il ref locale si
+    riallinea con `branch -f`: in un albero staccato nessuno lo sposta, e il giro
+    dopo troverebbe un ramo locale che dice una cosa e un remoto che ne dice
+    un'altra. Con `HEAD` attaccato non serve, ed è bene: `branch -f` rifiuta di
+    muovere un ramo estratto.
     """
     try:
         if git("rev-parse", "HEAD") == git("rev-parse", f"refs/heads/{branch}"):
             git("push", "--force-with-lease", "-u", REMOTO, branch)
         else:
             git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
+            git("branch", "-f", branch, "HEAD")
         return True
     except RuntimeError as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
