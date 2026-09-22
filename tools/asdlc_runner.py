@@ -1113,6 +1113,11 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
     Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
     caso del file di test riscritto per intero, e senza questa sottrazione il gate
     farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
+
+    Il diff di un rename si chiede nominando **tutti e due** i lati. Con il solo
+    nome nuovo git non applica il rename detection — per riconoscere una copia
+    deve vedere da dove arriva — e il file risulta interamente aggiunto: da lì il
+    gate leggeva una nascita per ogni test dentro un file semplicemente spostato.
     """
     nuovi: list[TestNuovo] = []
     for voce in (file if file is not None else file_del_commit(sha)):
@@ -1120,8 +1125,9 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
+        lati = [percorso] if voce.vecchio is None else [voce.vecchio, percorso]
         aggiunti, tolti = nomi_dei_test(
-            git("show", "--format=", "--unified=0", sha, "--", percorso), linguaggio
+            git("show", "--format=", "--unified=0", sha, "--", *lati), linguaggio
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
