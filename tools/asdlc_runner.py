@@ -1102,6 +1102,31 @@ def file_del_commit(sha: str) -> list[VoceDiCommit]:
     return voci_del_name_status(git("show", "--format=", "--name-status", "-M", sha))
 
 
+def lati_del_diff(voce: VoceDiCommit) -> list[str]:
+    """I pathspec con cui chiedere il diff di questa voce.
+
+    Il lato vecchio entra solo se era **a sua volta** un file di test. È la
+    condizione che regge tutto il resto: un test traslocato non nasce perché il
+    permesso l'aveva già chiesto il commit che l'ha creato, e un file che test
+    non era non l'ha mai chiesto. Un `git mv note.txt backend/tests/test_x.py` è
+    un rename al 100% di similarità — sui due lati il diff non porta righe — e
+    senza questa guardia i test dentro entrerebbero nella suite con zero
+    nascite: il lucchetto *ex ante* non li ferma, perché un `.txt` non è né test
+    né produzione e in `TEST_ONLY` si scrive. Sarebbe l'agente esaminato a
+    scegliere quali suoi test vengono esaminati.
+
+    Col solo nome nuovo git non applica il rename detection e il file risulta
+    interamente aggiunto: è esattamente la lettura che serve qui.
+
+    Una funzione sola per il commit e per l'albero di lavoro, come
+    `voci_del_name_status`: due copie di questa regola divergerebbero alla prima
+    correzione, e il lucchetto fermerebbe ciò che il gate lascia passare.
+    """
+    if voce.vecchio and e_file_di_test(voce.vecchio):
+        return [voce.vecchio, voce.percorso]
+    return [voce.percorso]
+
+
 def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
     """I nomi di test aggiunti e quelli cancellati, dalle righe del diff."""
     regola = RE_TEST_PY if linguaggio == "python" else RE_TEST_JS
@@ -1140,9 +1165,9 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
-        lati = [percorso] if voce.vecchio is None else [voce.vecchio, percorso]
         aggiunti, tolti = nomi_dei_test(
-            git("show", "--format=", "--unified=0", "-M", sha, "--", *lati), linguaggio
+            git("show", "--format=", "--unified=0", "-M", sha, "--",
+                *lati_del_diff(voce)), linguaggio
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -1176,8 +1201,7 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
-            lati = [percorso] if voce.vecchio is None else [voce.vecchio, percorso]
-            diff = git("diff", "HEAD", "-M", "--unified=0", "--", *lati)
+            diff = git("diff", "HEAD", "-M", "--unified=0", "--", *lati_del_diff(voce))
         aggiunti, tolti = nomi_dei_test(diff, linguaggio)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
