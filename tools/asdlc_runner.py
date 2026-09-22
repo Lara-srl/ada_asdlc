@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -1060,14 +1061,29 @@ def linguaggio_del_test(percorso: str) -> str | None:
     return None
 
 
-def file_del_commit(sha: str) -> list[tuple[str, str]]:
-    """`(stato, percorso)` per ogni file toccato. Su un rename vale il nome nuovo."""
+class VoceDiCommit(NamedTuple):
+    """Un file toccato da un commit. Su un rename `percorso` è il nome nuovo e
+    `vecchio` quello da cui arriva; altrove `vecchio` è `None`.
+
+    Il nome vecchio non è decorazione: il diff di un file traslocato si chiede a
+    git nominando **tutti e due** i lati, perché con un pathspec solo il rename
+    detection non si applica e il file risulta interamente aggiunto.
+    """
+
+    stato: str
+    percorso: str
+    vecchio: str | None
+
+
+def file_del_commit(sha: str) -> list[VoceDiCommit]:
+    """Le voci di ogni file toccato dal commit, rename compresi."""
     righe = git("show", "--format=", "--name-status", sha).splitlines()
-    voci: list[tuple[str, str]] = []
+    voci: list[VoceDiCommit] = []
     for riga in righe:
         campi = riga.split("\t")
         if len(campi) >= 2 and campi[0]:
-            voci.append((campi[0], campi[-1].strip()))
+            vecchio = campi[1].strip() if campi[0].startswith("R") and len(campi) >= 3 else None
+            voci.append(VoceDiCommit(campi[0], campi[-1].strip(), vecchio))
     return voci
 
 
@@ -1091,7 +1107,7 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
     return aggiunti, tolti
 
 
-def test_nuovi_del_commit(sha: str, file: list[tuple[str, str]] | None = None) -> list[TestNuovo]:
+def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> list[TestNuovo]:
     """I test che **nascono** in questo commit.
 
     Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
@@ -1099,7 +1115,8 @@ def test_nuovi_del_commit(sha: str, file: list[tuple[str, str]] | None = None) -
     farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
     """
     nuovi: list[TestNuovo] = []
-    for _, percorso in (file if file is not None else file_del_commit(sha)):
+    for voce in (file if file is not None else file_del_commit(sha)):
+        percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
@@ -1806,7 +1823,7 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
         if not nuovi:
             continue  # un refactor non porta test nuovi, e la regola morde su quelli
         titolo = git("show", "--no-patch", "--format=%s", sha)
-        produzione = [p for _, p in file if e_file_di_produzione(p)]
+        produzione = [v.percorso for v in file if e_file_di_produzione(v.percorso)]
         if produzione:
             mancati.append(voce_mancata(sha, titolo, etichette_al_commit(sha, nuovi),
                                         MISTO, ", ".join(produzione[:10])))
@@ -2505,7 +2522,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
         # Builder otterrebbe la produzione aperta senza aver scritto una riga.
         return []
     file = file_del_commit("HEAD")
-    if any(e_file_di_produzione(percorso) for _, percorso in file):
+    if any(e_file_di_produzione(v.percorso) for v in file):
         return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
     return test_nuovi_del_commit("HEAD", file)
 
