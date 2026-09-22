@@ -1792,6 +1792,37 @@ def git_del_commit(monkeypatch, name_status: str, diff: dict[str, str]):
     monkeypatch.setattr(runner, "git", _git)
 
 
+class TestFileDelCommitPortaIlNomeVecchio:
+    """Un rename ha due nomi, e chi legge il commit ha bisogno di tutti e due.
+
+    Il diff di un file traslocato si chiede a git nominando i due lati: con un
+    pathspec solo il rename detection non si applica, e il file risulta
+    interamente aggiunto (difetto 31 di PBI-102). Il nome vecchio lo sa solo
+    `git show --name-status`, che finora lo scartava prendendo l'ultimo campo.
+    """
+
+    def test_un_rename_porta_anche_il_nome_vecchio(self, monkeypatch):
+        git_del_commit(
+            monkeypatch,
+            "R100\tbackend/tests/test_somma.py\ttools/tests/test_somma.py",
+            {},
+        )
+
+        assert runner.file_del_commit("abc1234") == [
+            ("R100", "tools/tests/test_somma.py", "backend/tests/test_somma.py")
+        ]
+
+    @pytest.mark.parametrize("stato", ["A", "M", "D"])
+    def test_un_file_aggiunto_modificato_o_cancellato_non_ha_un_nome_vecchio(
+            self, monkeypatch, stato):
+        """Le tre letture di sempre non cambiano: un solo nome, e `None` accanto."""
+        git_del_commit(monkeypatch, f"{stato}\tbackend/tests/test_somma.py", {})
+
+        assert runner.file_del_commit("abc1234") == [
+            (stato, "backend/tests/test_somma.py", None)
+        ]
+
+
 class TestITestNuoviSiLeggonoDalDiff:
     """Quali test **nascono** in questo commit: né quelli che c'erano, né quelli
     che il commit sposta da un file all'altro."""
