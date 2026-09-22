@@ -2093,20 +2093,27 @@ def pubblica(branch: str) -> bool:
     riallinea con `branch -f`: in un albero staccato nessuno lo sposta, e il giro
     dopo troverebbe un ramo locale che dice una cosa e un remoto che ne dice
     un'altra. Con `HEAD` attaccato non serve, ed è bene: `branch -f` rifiuta di
-    muovere un ramo estratto.
+    muovere un ramo estratto. Se lo rifiuta lo stesso — il ramo estratto in un
+    terzo worktree — il push è comunque riuscito, e l'etichetta rimasta indietro
+    si dichiara nel log invece di far sembrare fallita la pubblicazione.
     """
     try:
-        if git("rev-parse", "HEAD") == git("rev-parse", f"refs/heads/{branch}"):
+        etichetta = git("rev-parse", f"refs/heads/{branch}")
+        if git("rev-parse", "HEAD") == etichetta:
             git("push", "--force-with-lease", "-u", REMOTO, branch)
-        else:
-            git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
-            git("branch", "-f", branch, "HEAD")
-        return True
+            return True
+        git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
     except RuntimeError as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
         print(f"       i commit restano in locale su {branch}: `git push` a mano quando "
               f"hai guardato cosa c'è sul remoto.")
         return False
+    try:
+        git("branch", "-f", branch, "HEAD")
+    except RuntimeError as exc:
+        print(f"    ⚠️  HEAD pubblicato, ma il ref locale {branch} è rimasto indietro a "
+              f"{etichetta[:12]}: {str(exc)[:200]}")
+    return True
 
 
 def trova_pbi(pbi: str) -> Path | None:
