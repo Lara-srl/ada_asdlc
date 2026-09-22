@@ -2084,9 +2084,18 @@ def pubblica(branch: str) -> bool:
     E **non alza**: un push che fallisce è una brutta notizia, non una ragione per
     buttare via l'ora precedente. Chi legge il log la trova scritta, e i commit
     restano nel worktree.
+
+    Si manda **`HEAD`**, non il ref del ramo, quando i due divergono (difetto 30):
+    `HEAD` è ciò che gate, gate del rosso e Critic hanno guardato, e il worktree
+    del runner è staccato per progetto — su PBI-358 il ref era rimasto diciannove
+    commit indietro, ed è quello che è finito su `origin`. Quando coincidono il
+    comando resta quello di sempre.
     """
     try:
-        git("push", "--force-with-lease", "-u", REMOTO, branch)
+        if git("rev-parse", "HEAD") == git("rev-parse", f"refs/heads/{branch}"):
+            git("push", "--force-with-lease", "-u", REMOTO, branch)
+        else:
+            git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
         return True
     except RuntimeError as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
