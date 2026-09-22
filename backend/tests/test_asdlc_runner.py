@@ -2094,6 +2094,40 @@ class TestUnTestTraslocatoNonNasce:
         assert runner.test_nuovi_del_commit(sha) == []
 
 
+class TestUnRenameDaUnFileNonDiTestFaNascere:
+    """Il lato vecchio vale solo se era **a sua volta** un file di test.
+
+    «Un test traslocato non è un test scritto» regge perché il permesso l'aveva
+    già chiesto il commit che l'ha creato — ma un `note.txt` non ha mai chiesto
+    niente: i test dentro non sono mai stati rossi, e nel lucchetto *ex ante* un
+    `.txt` non è né test né produzione, quindi in `TEST_ONLY` si scrive senza che
+    nessuno lo fermi. Se qui il rename li facesse tacere, l'agente esaminato
+    sceglierebbe quali suoi test vengono esaminati — la forma che `ADR-0022` ha
+    già scartato rifiutando il tag `(GUARD)`.
+
+    È la regressione simmetrica del difetto 31: là il trasloco faceva nascere
+    tutto, qui non farebbe nascere niente.
+    """
+
+    def test_un_commit_che_rinomina_un_non_test_in_test_fa_nascere_i_suoi_test(
+            self, repo_di_prova):
+        repo_di_prova.commit("chore: gli appunti", {"note.txt": TRE_TEST})
+        repo_di_prova.sposta("note.txt", "backend/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("test: gli appunti diventano test")
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_nellalbero_un_git_mv_da_un_non_test_fa_nascere_i_suoi_test(self, repo_di_prova):
+        """Il lucchetto legge l'albero, e deve chiedere il rosso di questi tre:
+        sono nati qui, e `git mv` non è il gesto che li esenta."""
+        repo_di_prova.commit("chore: gli appunti", {"note.txt": TRE_TEST})
+        repo_di_prova.sposta("note.txt", "backend/tests/test_tre.py")
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
+            "test_uno", "test_due", "test_tre"]
+
+
 class TestNascitaECancellazioneRestanoQuelleDiPrima:
     """I due casi che col rename non c'entrano, sulle due letture che il gate fa
     a ogni commit di ogni giro: il commit e l'albero di lavoro.
