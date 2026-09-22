@@ -1338,6 +1338,19 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         assert push == [("push", "--force-with-lease", "-u", "origin",
                          "HEAD:refs/heads/pbi/pbi-358")]
 
+    def test_con_head_attaccato_il_push_resta_quello_di_sempre(self, monkeypatch):
+        """Il caso normale: HEAD e il ref sono lo stesso commit. Stesso comando,
+        stesso lease, stesso esito — è il caso che non deve regredire."""
+        chiamate = self._git(monkeypatch, head=self.HEAD, ref=self.HEAD)
+
+        assert runner.pubblica("pbi/pbi-358") is True
+
+        push = [c for c in chiamate if c[0] == "push"]
+        assert push == [("push", "--force-with-lease", "-u", "origin", "pbi/pbi-358")]
+        assert not any(c[:1] == ("branch",) for c in chiamate), (
+            "con HEAD attaccato non c'è un ref da riallineare: `branch -f` rifiuterebbe"
+        )
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
