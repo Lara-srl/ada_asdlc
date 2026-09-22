@@ -2212,10 +2212,17 @@ class TestNascitaECancellazioneRestanoQuelleDiPrima:
 
     Un file di test davvero nuovo fa nascere i suoi test; uno cancellato non ne
     fa nascere nessuno e non alza. Nascono verdi — è il comportamento di sempre —
-    e mordono la **cancellazione** delle righe che questo branch introduce: senza
-    la scelta dei pathspec, o senza la lettura del `--name-status`, tutti e
-    quattro cadono. La lettura del rename la presidiano invece i test del
-    trasloco, che qui sopra restano rossi finché la scelta non c'è.
+    e presidiano il ciclo delle nascite, `nomi_dei_test` compresa, che questo
+    branch ha riscritto tutt'attorno senza doverlo cambiare.
+
+    Quanto mordono, però, va detto per quel che è, e al giro 3 il Critic ha
+    trovato che qui c'era scritto di più: nessuno dei quattro casi contiene un
+    rename, quindi `lati_del_diff` torna già `[voce.percorso]` per tutti e la
+    scelta dei pathspec non può farli cadere — misurato, quel mutante li lascia
+    passare tutti e quattro. Del `--name-status` cade il solo caso del file in
+    stage: i due che asseriscono `[]` sopravvivono a qualunque mutazione che
+    riduca le nascite. La lettura del rename la presidiano i test del trasloco,
+    che qui sopra restano rossi finché la scelta non c'è.
     """
 
     def test_un_file_di_test_nuovo_fa_nascere_i_suoi_test(self, repo_di_prova):
