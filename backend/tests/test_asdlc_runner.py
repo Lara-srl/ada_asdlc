@@ -1351,6 +1351,28 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
             "con HEAD attaccato non c'è un ref da riallineare: `branch -f` rifiuterebbe"
         )
 
+    def test_dopo_la_pubblicazione_ramo_locale_head_e_remoto_coincidono(self, monkeypatch):
+        """Un ref lasciato indietro mentre il remoto va avanti è la stessa ambiguità
+        spostata di un metro: la pagherebbe il giro dopo in `nome_libero`."""
+        stato = {"HEAD": self.HEAD, "refs/heads/pbi/pbi-358": self.ETICHETTA, "origin": ""}
+
+        def _g(*args: str) -> str:
+            if args[:1] == ("rev-parse",):
+                return stato[args[1]]
+            if args[:1] == ("push",):
+                sorgente = args[-1].split(":")[0]
+                stato["origin"] = stato["HEAD" if sorgente == "HEAD"
+                                        else f"refs/heads/{sorgente}"]
+            if args[:2] == ("branch", "-f"):
+                stato[f"refs/heads/{args[2]}"] = stato[args[3]]
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+
+        assert runner.pubblica("pbi/pbi-358") is True
+
+        assert stato["origin"] == stato["HEAD"] == stato["refs/heads/pbi/pbi-358"] == self.HEAD
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
