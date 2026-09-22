@@ -2031,6 +2031,9 @@ TRE_TEST = ("def test_uno():\n    assert True\n\n\n"
             "def test_due():\n    assert True\n\n\n"
             "def test_tre():\n    assert True\n")
 
+DUE_CASI_VITEST = ("it('il primo', () => { expect(1).toBe(1) })\n"
+                   "it('il secondo', () => { expect(2).toBe(2) })\n")
+
 
 class TestUnTestTraslocatoNonNasce:
     """Difetto 31 di PBI-102: il `git mv` di un file di test contava una nascita
@@ -2126,6 +2129,52 @@ class TestUnRenameDaUnFileNonDiTestFaNascere:
 
         assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
             "test_uno", "test_due", "test_tre"]
+
+    def test_un_note_txt_gia_dentro_tests_non_esenta_i_test_che_ne_nascono(
+            self, repo_di_prova):
+        """«Era a sua volta un file di test» non si chiede a `e_file_di_test`:
+        quella dice `True` per **qualunque** percorso sotto `tests/`, estensione
+        compresa. Un `backend/tests/note.txt` è «un file di test» per la regola
+        della cartella, ma `linguaggio_del_test` gli torna `None`, e il ciclo che
+        conta le nascite salta proprio su quel `None`: da lì non è mai nata una
+        riga e nessun rosso è mai stato chiesto. Fidarsi di quel `True` rimette
+        in piedi il buco del giro 1, spostato di una cartella — e il lucchetto
+        non lo chiude, perché un `.txt` non è produzione e in `TEST_ONLY` si
+        scrive.
+
+        La condizione giusta è la stessa che il ciclo chiede sul lato nuovo:
+        esentare il vecchio se e solo se da lì i test sarebbero stati contati.
+        """
+        repo_di_prova.commit("chore: gli appunti", {"backend/tests/note.txt": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/note.txt", "backend/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("test: gli appunti diventano test")
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_nellalbero_un_note_txt_gia_dentro_tests_fa_nascere_i_suoi_test(
+            self, repo_di_prova):
+        """La stessa lettura sull'albero: il lucchetto *ex ante* deve chiedere il
+        rosso di questi tre prima che il commit esista, o il gate li troverà nati
+        verdi quando l'ora è spesa."""
+        repo_di_prova.commit("chore: gli appunti", {"backend/tests/note.txt": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/note.txt", "backend/tests/test_tre.py")
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_un_e2e_spostato_sotto_vitest_fa_nascere_i_suoi_casi(self, repo_di_prova):
+        """Lo stesso `None` dall'altra parte: `e2e/giro.spec.ts` è un file di test
+        per `e_file_di_test`, ma `linguaggio_del_test` lo esclude per scelta —
+        quel rosso il runner non lo può osservare, e quel gate è della CI sulla PR
+        (`ADR-0009`). Nessuno l'ha mai chiesto, dunque. Spostato dove vitest lo
+        esegue davvero, i suoi casi nascono lì, e il rosso si chiede adesso."""
+        repo_di_prova.commit("chore: il giro e2e", {"e2e/giro.spec.ts": DUE_CASI_VITEST})
+        repo_di_prova.sposta("e2e/giro.spec.ts", "frontend/src/giro.test.ts")
+        sha = repo_di_prova.commit_dello_stage("test: il giro diventa un test di vitest")
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "il primo", "il secondo"]
 
 
 class TestNascitaECancellazioneRestanoQuelleDiPrima:
