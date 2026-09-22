@@ -1105,15 +1105,23 @@ def file_del_commit(sha: str) -> list[VoceDiCommit]:
 def lati_del_diff(voce: VoceDiCommit) -> list[str]:
     """I pathspec con cui chiedere il diff di questa voce.
 
-    Il lato vecchio entra solo se era **a sua volta** un file di test. È la
-    condizione che regge tutto il resto: un test traslocato non nasce perché il
-    permesso l'aveva già chiesto il commit che l'ha creato, e un file che test
-    non era non l'ha mai chiesto. Un `git mv note.txt backend/tests/test_x.py` è
+    Il lato vecchio entra solo se da lì i test **sarebbero stati contati**: è la
+    condizione esatta che il ciclo delle nascite chiede sul lato nuovo, ed è ciò
+    che regge tutto il resto. Un test traslocato non nasce perché il permesso
+    l'aveva già chiesto il commit che l'ha creato; un file da cui non è mai nata
+    una riga non l'ha mai chiesto. Un `git mv note.txt backend/tests/test_x.py` è
     un rename al 100% di similarità — sui due lati il diff non porta righe — e
     senza questa guardia i test dentro entrerebbero nella suite con zero
     nascite: il lucchetto *ex ante* non li ferma, perché un `.txt` non è né test
     né produzione e in `TEST_ONLY` si scrive. Sarebbe l'agente esaminato a
     scegliere quali suoi test vengono esaminati.
+
+    `e_file_di_test` da sola non basta a dirlo, e chiederle solo quella è il
+    buco che il giro 2 ha lasciato aperto: dice `True` per qualunque percorso
+    sotto `tests/` — `backend/tests/note.txt` compreso — e per gli `e2e/`, cioè
+    per file a cui `linguaggio_del_test` torna `None` e da cui il ciclo delle
+    nascite non ha mai letto un nome. Le due domande insieme sono la simmetria
+    con «il permesso l'aveva già chiesto il commit che l'ha creato».
 
     Col solo nome nuovo git non applica il rename detection e il file risulta
     interamente aggiunto: è esattamente la lettura che serve qui.
@@ -1122,7 +1130,8 @@ def lati_del_diff(voce: VoceDiCommit) -> list[str]:
     `voci_del_name_status`: due copie di questa regola divergerebbero alla prima
     correzione, e il lucchetto fermerebbe ciò che il gate lascia passare.
     """
-    if voce.vecchio and e_file_di_test(voce.vecchio):
+    if (voce.vecchio and e_file_di_test(voce.vecchio)
+            and linguaggio_del_test(voce.vecchio) is not None):
         return [voce.vecchio, voce.percorso]
     return [voce.percorso]
 
