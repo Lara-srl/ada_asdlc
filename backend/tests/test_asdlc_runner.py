@@ -1462,6 +1462,23 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         assert esito.stato == "sospeso"
         assert "non pubblicato" in esito.nota
 
+    def test_se_su_origin_non_ce_head_la_pr_non_si_apre(self, monkeypatch):
+        """Decisione 5. Il push finge di riuscire e non manda niente: su origin resta
+        l'etichetta vecchia, come la PR #237 di PBI-358. Aprire la PR lì sopra è
+        la promessa su commit che nessun gate ha visto."""
+        self._git(monkeypatch, head=self.HEAD, ref=self.HEAD, su_origin=self.ETICHETTA)
+        comandi: list[list[str]] = []
+        monkeypatch.setattr(runner, "esegui", lambda cmd, cwd, timeout=0:
+                            comandi.append(cmd) or (0, "https://x/pull/237\n"))
+        esito = runner.Esito("PBI-358", "fatto")
+
+        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+
+        assert pr == ""
+        assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
+        assert esito.stato == "fermato"
+        assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota
+
 
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
