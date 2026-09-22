@@ -2096,6 +2096,29 @@ class TestUnTestTraslocatoNonNasce:
 
         assert runner.test_nuovi_del_commit(sha) == []
 
+    def test_nellalbero_il_conteggio_non_dipende_dal_gitconfig(self, repo_di_prova):
+        """La stessa configurazione addosso all'albero di lavoro, dove il
+        lucchetto *ex ante* guarda — e dove il difetto si presenta al contrario.
+
+        Col `-M` del `--name-status` cancellato e `diff.renames` spento, il
+        `git mv` in stage arriva come `D` + `A`: la voce `A` porta il file per
+        intero, il lucchetto conta tre nascite e ferma il trasloco chiedendo un
+        rosso per test che esistono da un altro commit. Nel gate il difetto
+        faceva passare troppo, qui blocca — e in silenzio, perché sulla macchina
+        che ha `diff.renames` al suo default git riconosce il rename di suo e
+        tutta la suite resta verde.
+
+        Nasce verde, e questa è la riga che presidia: `tools/asdlc_runner.py`
+        `:1200`, dove `-M` sta scritto per non dipendere dal `.gitconfig` di chi
+        lancia il runner.
+        """
+        repo_di_prova.configura("diff.renames", "false")
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+
+        assert runner.test_nuovi_dellalbero() == []
+
 
 class TestUnRenameDaUnFileNonDiTestFaNascere:
     """Il lato vecchio vale solo se da lì i test **sarebbero nati**.
