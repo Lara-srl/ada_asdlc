@@ -1075,6 +1075,22 @@ class VoceDiCommit(NamedTuple):
     vecchio: str | None
 
 
+def voci_del_name_status(testo: str) -> list[VoceDiCommit]:
+    """Le voci di un `--name-status`, da `git show` come da `git diff`.
+
+    Una lettura sola per il commit e per l'albero di lavoro: il lucchetto *ex
+    ante* e il gate del rosso devono vedere lo stesso rename, o il primo ferma un
+    trasloco che il secondo lascia passare.
+    """
+    voci: list[VoceDiCommit] = []
+    for riga in testo.splitlines():
+        campi = riga.split("\t")
+        if len(campi) >= 2 and campi[0]:
+            vecchio = campi[1].strip() if campi[0].startswith("R") and len(campi) >= 3 else None
+            voci.append(VoceDiCommit(campi[0], campi[-1].strip(), vecchio))
+    return voci
+
+
 def file_del_commit(sha: str) -> list[VoceDiCommit]:
     """Le voci di ogni file toccato dal commit, rename compresi.
 
@@ -1083,14 +1099,7 @@ def file_del_commit(sha: str) -> list[VoceDiCommit]:
     spegne il rename tornerebbe a leggersi come un file aggiunto più uno
     cancellato — senza che nessuno se ne accorga.
     """
-    righe = git("show", "--format=", "--name-status", "-M", sha).splitlines()
-    voci: list[VoceDiCommit] = []
-    for riga in righe:
-        campi = riga.split("\t")
-        if len(campi) >= 2 and campi[0]:
-            vecchio = campi[1].strip() if campi[0].startswith("R") and len(campi) >= 3 else None
-            voci.append(VoceDiCommit(campi[0], campi[-1].strip(), vecchio))
-    return voci
+    return voci_del_name_status(git("show", "--format=", "--name-status", "-M", sha))
 
 
 def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
@@ -1149,19 +1158,26 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
     appena creato, e il primo test di un modulo nuovo è il caso più comune di
     tutti. Per quelli il diff è il file intero, che è esattamente ciò che sono.
+
+    I tracciati si leggono da un `--name-status`, non da un `--name-only`: senza
+    lo stato il `git mv` in stage arriva qui come un percorso nuovo e basta, e il
+    lucchetto chiede un rosso per test che esistono già da un altro commit.
     """
-    tracciati = [p for p in git("diff", "HEAD", "--name-only").splitlines() if p]
-    non_tracciati = [p for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p]
+    tracciati = voci_del_name_status(git("diff", "HEAD", "-M", "--name-status"))
+    non_tracciati = [VoceDiCommit("A", p, None)
+                     for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p]
     nuovi: list[TestNuovo] = []
-    for percorso in tracciati + non_tracciati:
+    for voce in tracciati + non_tracciati:
+        percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
-        if percorso in non_tracciati:
+        if voce in non_tracciati:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
-            diff = git("diff", "HEAD", "--unified=0", "--", percorso)
+            lati = [percorso] if voce.vecchio is None else [voce.vecchio, percorso]
+            diff = git("diff", "HEAD", "-M", "--unified=0", "--", *lati)
         aggiunti, tolti = nomi_dei_test(diff, linguaggio)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
