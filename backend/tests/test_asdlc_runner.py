@@ -1792,6 +1792,37 @@ def git_del_commit(monkeypatch, name_status: str, diff: dict[str, str]):
     monkeypatch.setattr(runner, "git", _git)
 
 
+class TestFileDelCommitPortaIlNomeVecchio:
+    """Un rename ha due nomi, e chi legge il commit ha bisogno di tutti e due.
+
+    Il diff di un file traslocato si chiede a git nominando i due lati: con un
+    pathspec solo il rename detection non si applica, e il file risulta
+    interamente aggiunto (difetto 31 di PBI-102). Il nome vecchio lo sa solo
+    `git show --name-status`, che finora lo scartava prendendo l'ultimo campo.
+    """
+
+    def test_un_rename_porta_anche_il_nome_vecchio(self, monkeypatch):
+        git_del_commit(
+            monkeypatch,
+            "R100\tbackend/tests/test_somma.py\ttools/tests/test_somma.py",
+            {},
+        )
+
+        assert runner.file_del_commit("abc1234") == [
+            ("R100", "tools/tests/test_somma.py", "backend/tests/test_somma.py")
+        ]
+
+    @pytest.mark.parametrize("stato", ["A", "M", "D"])
+    def test_un_file_aggiunto_modificato_o_cancellato_non_ha_un_nome_vecchio(
+            self, monkeypatch, stato):
+        """Le tre letture di sempre non cambiano: un solo nome, e `None` accanto."""
+        git_del_commit(monkeypatch, f"{stato}\tbackend/tests/test_somma.py", {})
+
+        assert runner.file_del_commit("abc1234") == [
+            (stato, "backend/tests/test_somma.py", None)
+        ]
+
+
 class TestITestNuoviSiLeggonoDalDiff:
     """Quali test **nascono** in questo commit: né quelli che c'erano, né quelli
     che il commit sposta da un file all'altro."""
@@ -1944,6 +1975,33 @@ class RepoDiProva:
         self._git("commit", "-q", "-m", messaggio)
         return self._git("rev-parse", "HEAD")
 
+    def configura(self, chiave: str, valore: str) -> None:
+        self._git("config", chiave, valore)
+
+    def sposta(self, da: str, a: str) -> None:
+        """Un `git mv` vero, lasciato **in stage** e non committato.
+
+        Il rename lo produce git, non il test: un `write` nel file nuovo più un
+        `unlink` del vecchio darebbe a git le stesse due facce, ma è il comando
+        che il repository riceve davvero, e la prova deve partire da lì.
+        """
+        (self.radice / a).parent.mkdir(parents=True, exist_ok=True)
+        self._git("mv", da, a)
+
+    def commit_dello_stage(self, messaggio: str) -> str:
+        self._git("commit", "-q", "-m", messaggio)
+        return self._git("rev-parse", "HEAD")
+
+    def cancella(self, percorso: str) -> None:
+        """Un `git rm` vero, lasciato in stage come `sposta`."""
+        self._git("rm", "-q", percorso)
+
+    def metti_in_stage(self, percorso: str, contenuto: str) -> None:
+        f = self.radice / percorso
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(contenuto, encoding="utf-8")
+        self._git("add", percorso)
+
 
 @pytest.fixture
 def repo_di_prova(tmp_path, monkeypatch):
@@ -1967,6 +2025,233 @@ def sorgente_che_lascia_un_segno(marcatore: Path, corpo: str) -> str:
         f"    Path({str(marcatore)!r}).write_text('eseguito')\n"
         f"    {corpo}\n"
     )
+
+
+TRE_TEST = ("def test_uno():\n    assert True\n\n\n"
+            "def test_due():\n    assert True\n\n\n"
+            "def test_tre():\n    assert True\n")
+
+DUE_CASI_VITEST = ("it('il primo', () => { expect(1).toBe(1) })\n"
+                   "it('il secondo', () => { expect(2).toBe(2) })\n")
+
+
+class TestUnTestTraslocatoNonNasce:
+    """Difetto 31 di PBI-102: il `git mv` di un file di test contava una nascita
+    per ogni test che c'era dentro.
+
+    Su PBI-360, spostare `test_asdlc_runner.py` in `tools/tests/` ne avrebbe
+    fatti nascere **303** in un colpo, tutti da far passare per la quarta lettura
+    di ADR-0022, e il giro si è fermato lì dopo 4m39s e zero commit. Un test
+    traslocato non è un test scritto: il permesso di scrivere produzione l'aveva
+    già chiesto il commit che l'ha creato — ADR-0021 riguarda il **nascere**, non
+    il cambiare riga di un file.
+
+    Qui git non si finge: il rename lo rileva git, e un doppio deciderebbe al suo
+    posto proprio la cosa in discussione.
+    """
+
+    def test_un_commit_di_solo_trasloco_non_fa_nascere_niente(self, repo_di_prova):
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_un_git_mv_in_stage_non_fa_nascere_niente_nellalbero(self, repo_di_prova):
+        """Il lucchetto *ex ante* legge l'albero di lavoro, e leggeva il `git mv`
+        con lo stesso difetto: chiedeva un rosso per tre test che esistono già, e
+        fermava il trasloco prima ancora che diventasse un commit."""
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+
+        assert runner.test_nuovi_dellalbero() == []
+
+    def test_un_rename_con_modifiche_fa_nascere_i_soli_test_aggiunti(self, repo_di_prova):
+        """Il file spostato **e** ritoccato non vuole un ramo suo: con tutti e due
+        i lati nel comando il diff porta le sole righe cambiate, e nasce quello
+        che quelle righe introducono davvero — uno, non quattro."""
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit(
+            "test: i test traslocano, e il quarto caso si aggiunge (RED)",
+            {"tools/tests/test_tre.py":
+             TRE_TEST + "\n\ndef test_quattro():\n    assert True\n"})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_quattro"]
+
+    def test_il_conteggio_non_dipende_dal_gitconfig(self, repo_di_prova):
+        """`diff.renames` è vero per default da git 2.9, ma resta configurazione
+        della macchina: un repository che lo spegne rimetterebbe il gate a contare
+        le nascite di un trasloco, e nessuno lo verrebbe a sapere. `-M` scritto nel
+        comando toglie la domanda, ed è l'unico modo di provarlo — con git vero e
+        con quella configurazione addosso."""
+        repo_di_prova.configura("diff.renames", "false")
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_nellalbero_il_conteggio_non_dipende_dal_gitconfig(self, repo_di_prova):
+        """La stessa configurazione addosso all'albero di lavoro, dove il
+        lucchetto *ex ante* guarda — e dove il difetto si presenta al contrario.
+
+        Col `-M` del `--name-status` cancellato e `diff.renames` spento, il
+        `git mv` in stage arriva come `D` + `A`: la voce `A` porta il file per
+        intero, il lucchetto conta tre nascite e ferma il trasloco chiedendo un
+        rosso per test che esistono da un altro commit. Nel gate il difetto
+        faceva passare troppo, qui blocca — e in silenzio, perché sulla macchina
+        che ha `diff.renames` al suo default git riconosce il rename di suo e
+        tutta la suite resta verde.
+
+        Nasce verde, e questa è la riga che presidia: `tools/asdlc_runner.py`
+        `:1200`, dove `-M` sta scritto per non dipendere dal `.gitconfig` di chi
+        lancia il runner.
+        """
+        repo_di_prova.configura("diff.renames", "false")
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+
+        assert runner.test_nuovi_dellalbero() == []
+
+
+class TestUnRenameDaUnFileNonDiTestFaNascere:
+    """Il lato vecchio vale solo se da lì i test **sarebbero nati**.
+
+    «Un test traslocato non è un test scritto» regge perché il permesso l'aveva
+    già chiesto il commit che l'ha creato — ma un `note.txt` non ha mai chiesto
+    niente: i test dentro non sono mai stati rossi, e nel lucchetto *ex ante* un
+    `.txt` non è né test né produzione, quindi in `TEST_ONLY` si scrive senza che
+    nessuno lo fermi. Se qui il rename li facesse tacere, l'agente esaminato
+    sceglierebbe quali suoi test vengono esaminati — la forma che `ADR-0021` ha
+    scartato col tag `(GUARD)` (§Alternative considerate) e che `ADR-0022`
+    conferma.
+
+    E «era un file di test» non si chiede a `e_file_di_test` da sola: dice `True`
+    anche per un `note.txt` sotto `tests/` e per gli `e2e/`, da cui nessuna riga
+    è mai nata. La domanda è quella che il ciclo delle nascite fa sul lato nuovo,
+    `linguaggio_del_test` compresa — i tre casi qui sotto sono le sue tre facce.
+
+    È la regressione simmetrica del difetto 31: là il trasloco faceva nascere
+    tutto, qui non farebbe nascere niente.
+    """
+
+    def test_un_commit_che_rinomina_un_non_test_in_test_fa_nascere_i_suoi_test(
+            self, repo_di_prova):
+        repo_di_prova.commit("chore: gli appunti", {"note.txt": TRE_TEST})
+        repo_di_prova.sposta("note.txt", "backend/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("test: gli appunti diventano test")
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_nellalbero_un_git_mv_da_un_non_test_fa_nascere_i_suoi_test(self, repo_di_prova):
+        """Il lucchetto legge l'albero, e deve chiedere il rosso di questi tre:
+        sono nati qui, e `git mv` non è il gesto che li esenta."""
+        repo_di_prova.commit("chore: gli appunti", {"note.txt": TRE_TEST})
+        repo_di_prova.sposta("note.txt", "backend/tests/test_tre.py")
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_un_note_txt_gia_dentro_tests_non_esenta_i_test_che_ne_nascono(
+            self, repo_di_prova):
+        """«Era a sua volta un file di test» non si chiede a `e_file_di_test`:
+        quella dice `True` per **qualunque** percorso sotto `tests/`, estensione
+        compresa. Un `backend/tests/note.txt` è «un file di test» per la regola
+        della cartella, ma `linguaggio_del_test` gli torna `None`, e il ciclo che
+        conta le nascite salta proprio su quel `None`: da lì non è mai nata una
+        riga e nessun rosso è mai stato chiesto. Fidarsi di quel `True` rimette
+        in piedi il buco del giro 1, spostato di una cartella — e il lucchetto
+        non lo chiude, perché un `.txt` non è produzione e in `TEST_ONLY` si
+        scrive.
+
+        La condizione giusta è la stessa che il ciclo chiede sul lato nuovo:
+        esentare il vecchio se e solo se da lì i test sarebbero stati contati.
+        """
+        repo_di_prova.commit("chore: gli appunti", {"backend/tests/note.txt": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/note.txt", "backend/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("test: gli appunti diventano test")
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_nellalbero_un_note_txt_gia_dentro_tests_fa_nascere_i_suoi_test(
+            self, repo_di_prova):
+        """La stessa lettura sull'albero: il lucchetto *ex ante* deve chiedere il
+        rosso di questi tre prima che il commit esista, o il gate li troverà nati
+        verdi quando l'ora è spesa."""
+        repo_di_prova.commit("chore: gli appunti", {"backend/tests/note.txt": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/note.txt", "backend/tests/test_tre.py")
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_un_e2e_spostato_sotto_vitest_fa_nascere_i_suoi_casi(self, repo_di_prova):
+        """Lo stesso `None` dall'altra parte: `e2e/giro.spec.ts` è un file di test
+        per `e_file_di_test`, ma `linguaggio_del_test` lo esclude per scelta —
+        quel rosso il runner non lo può osservare, e quel gate è della CI sulla PR
+        (`ADR-0009`). Nessuno l'ha mai chiesto, dunque. Spostato dove vitest lo
+        esegue davvero, i suoi casi nascono lì, e il rosso si chiede adesso."""
+        repo_di_prova.commit("chore: il giro e2e", {"e2e/giro.spec.ts": DUE_CASI_VITEST})
+        repo_di_prova.sposta("e2e/giro.spec.ts", "frontend/src/giro.test.ts")
+        sha = repo_di_prova.commit_dello_stage("test: il giro diventa un test di vitest")
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "il primo", "il secondo"]
+
+
+class TestNascitaECancellazioneRestanoQuelleDiPrima:
+    """I due casi che col rename non c'entrano, sulle due letture che il gate fa
+    a ogni commit di ogni giro: il commit e l'albero di lavoro.
+
+    Un file di test davvero nuovo fa nascere i suoi test; uno cancellato non ne
+    fa nascere nessuno e non alza. Nascono verdi — è il comportamento di sempre —
+    e presidiano il ciclo delle nascite, `nomi_dei_test` compresa, che questo
+    branch ha riscritto tutt'attorno senza doverlo cambiare.
+
+    Quanto mordono, però, va detto per quel che è, e al giro 3 il Critic ha
+    trovato che qui c'era scritto di più: nessuno dei quattro casi contiene un
+    rename, quindi `lati_del_diff` torna già `[voce.percorso]` per tutti e la
+    scelta dei pathspec non può farli cadere — misurato, quel mutante li lascia
+    passare tutti e quattro. Del `--name-status` cade il solo caso del file in
+    stage: i due che asseriscono `[]` sopravvivono a qualunque mutazione che
+    riduca le nascite. La lettura del rename la presidiano i test del trasloco,
+    che qui sopra restano rossi finché la scelta non c'è.
+    """
+
+    def test_un_file_di_test_nuovo_fa_nascere_i_suoi_test(self, repo_di_prova):
+        sha = repo_di_prova.commit("test: i tre casi (RED)",
+                                   {"backend/tests/test_tre.py": TRE_TEST})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_un_file_di_test_cancellato_non_fa_nascere_niente(self, repo_di_prova):
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.cancella("backend/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("chore: i tre casi non servono più")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_nellalbero_un_file_di_test_in_stage_fa_nascere_i_suoi_test(self, repo_di_prova):
+        repo_di_prova.metti_in_stage("backend/tests/test_tre.py", TRE_TEST)
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_nellalbero_un_file_di_test_cancellato_non_fa_nascere_niente(self, repo_di_prova):
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.cancella("backend/tests/test_tre.py")
+
+        assert runner.test_nuovi_dellalbero() == []
 
 
 class TestIlGateDelRossoCamminaICommit:

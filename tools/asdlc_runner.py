@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -1060,15 +1061,79 @@ def linguaggio_del_test(percorso: str) -> str | None:
     return None
 
 
-def file_del_commit(sha: str) -> list[tuple[str, str]]:
-    """`(stato, percorso)` per ogni file toccato. Su un rename vale il nome nuovo."""
-    righe = git("show", "--format=", "--name-status", sha).splitlines()
-    voci: list[tuple[str, str]] = []
-    for riga in righe:
+class VoceDiCommit(NamedTuple):
+    """Un file toccato da un commit. Su un rename `percorso` è il nome nuovo e
+    `vecchio` quello da cui arriva; altrove `vecchio` è `None`.
+
+    Il nome vecchio non è decorazione: il diff di un file traslocato si chiede a
+    git nominando **tutti e due** i lati, perché con un pathspec solo il rename
+    detection non si applica e il file risulta interamente aggiunto.
+    """
+
+    stato: str
+    percorso: str
+    vecchio: str | None
+
+
+def voci_del_name_status(testo: str) -> list[VoceDiCommit]:
+    """Le voci di un `--name-status`, da `git show` come da `git diff`.
+
+    Una lettura sola per il commit e per l'albero di lavoro: il lucchetto *ex
+    ante* e il gate del rosso devono vedere lo stesso rename, o il primo ferma un
+    trasloco che il secondo lascia passare.
+    """
+    voci: list[VoceDiCommit] = []
+    for riga in testo.splitlines():
         campi = riga.split("\t")
         if len(campi) >= 2 and campi[0]:
-            voci.append((campi[0], campi[-1].strip()))
+            vecchio = campi[1].strip() if campi[0].startswith("R") and len(campi) >= 3 else None
+            voci.append(VoceDiCommit(campi[0], campi[-1].strip(), vecchio))
     return voci
+
+
+def file_del_commit(sha: str) -> list[VoceDiCommit]:
+    """Le voci di ogni file toccato dal commit, rename compresi.
+
+    `-M` è scritto nel comando e non lasciato al default: `diff.renames` è vero
+    da git 2.9, ma resta configurazione della macchina, e su un repository che la
+    spegne il rename tornerebbe a leggersi come un file aggiunto più uno
+    cancellato — senza che nessuno se ne accorga.
+    """
+    return voci_del_name_status(git("show", "--format=", "--name-status", "-M", sha))
+
+
+def lati_del_diff(voce: VoceDiCommit) -> list[str]:
+    """I pathspec con cui chiedere il diff di questa voce.
+
+    Il lato vecchio entra solo se da lì i test **sarebbero stati contati**: è la
+    condizione esatta che il ciclo delle nascite chiede sul lato nuovo, ed è ciò
+    che regge tutto il resto. Un test traslocato non nasce perché il permesso
+    l'aveva già chiesto il commit che l'ha creato; un file da cui non è mai nata
+    una riga non l'ha mai chiesto. Un `git mv note.txt backend/tests/test_x.py` è
+    un rename al 100% di similarità — sui due lati il diff non porta righe — e
+    senza questa guardia i test dentro entrerebbero nella suite con zero
+    nascite: il lucchetto *ex ante* non li ferma, perché un `.txt` non è né test
+    né produzione e in `TEST_ONLY` si scrive. Sarebbe l'agente esaminato a
+    scegliere quali suoi test vengono esaminati.
+
+    `e_file_di_test` da sola non basta a dirlo, e chiederle solo quella è il
+    buco che il giro 2 ha lasciato aperto: dice `True` per qualunque percorso
+    sotto `tests/` — `backend/tests/note.txt` compreso — e per gli `e2e/`, cioè
+    per file a cui `linguaggio_del_test` torna `None` e da cui il ciclo delle
+    nascite non ha mai letto un nome. Le due domande insieme sono la simmetria
+    con «il permesso l'aveva già chiesto il commit che l'ha creato».
+
+    Col solo nome nuovo git non applica il rename detection e il file risulta
+    interamente aggiunto: è esattamente la lettura che serve qui.
+
+    Una funzione sola per il commit e per l'albero di lavoro, come
+    `voci_del_name_status`: due copie di questa regola divergerebbero alla prima
+    correzione, e il lucchetto fermerebbe ciò che il gate lascia passare.
+    """
+    if (voce.vecchio and e_file_di_test(voce.vecchio)
+            and linguaggio_del_test(voce.vecchio) is not None):
+        return [voce.vecchio, voce.percorso]
+    return [voce.percorso]
 
 
 def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
@@ -1091,20 +1156,27 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
     return aggiunti, tolti
 
 
-def test_nuovi_del_commit(sha: str, file: list[tuple[str, str]] | None = None) -> list[TestNuovo]:
+def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> list[TestNuovo]:
     """I test che **nascono** in questo commit.
 
     Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
     caso del file di test riscritto per intero, e senza questa sottrazione il gate
     farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
+
+    Il diff di un rename si chiede nominando **tutti e due** i lati. Con il solo
+    nome nuovo git non applica il rename detection — per riconoscere una copia
+    deve vedere da dove arriva — e il file risulta interamente aggiunto: da lì il
+    gate leggeva una nascita per ogni test dentro un file semplicemente spostato.
     """
     nuovi: list[TestNuovo] = []
-    for _, percorso in (file if file is not None else file_del_commit(sha)):
+    for voce in (file if file is not None else file_del_commit(sha)):
+        percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
         aggiunti, tolti = nomi_dei_test(
-            git("show", "--format=", "--unified=0", sha, "--", percorso), linguaggio
+            git("show", "--format=", "--unified=0", "-M", sha, "--",
+                *lati_del_diff(voce)), linguaggio
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -1120,19 +1192,25 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
     appena creato, e il primo test di un modulo nuovo è il caso più comune di
     tutti. Per quelli il diff è il file intero, che è esattamente ciò che sono.
+
+    I tracciati si leggono da un `--name-status`, non da un `--name-only`: senza
+    lo stato il `git mv` in stage arriva qui come un percorso nuovo e basta, e il
+    lucchetto chiede un rosso per test che esistono già da un altro commit.
     """
-    tracciati = [p for p in git("diff", "HEAD", "--name-only").splitlines() if p]
-    non_tracciati = [p for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p]
+    tracciati = voci_del_name_status(git("diff", "HEAD", "-M", "--name-status"))
+    non_tracciati = [VoceDiCommit("A", p, None)
+                     for p in git("ls-files", "--others", "--exclude-standard").splitlines() if p]
     nuovi: list[TestNuovo] = []
-    for percorso in tracciati + non_tracciati:
+    for voce in tracciati + non_tracciati:
+        percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio is None:
             continue
-        if percorso in non_tracciati:
+        if voce in non_tracciati:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
-            diff = git("diff", "HEAD", "--unified=0", "--", percorso)
+            diff = git("diff", "HEAD", "-M", "--unified=0", "--", *lati_del_diff(voce))
         aggiunti, tolti = nomi_dei_test(diff, linguaggio)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -1806,7 +1884,7 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
         if not nuovi:
             continue  # un refactor non porta test nuovi, e la regola morde su quelli
         titolo = git("show", "--no-patch", "--format=%s", sha)
-        produzione = [p for _, p in file if e_file_di_produzione(p)]
+        produzione = [v.percorso for v in file if e_file_di_produzione(v.percorso)]
         if produzione:
             mancati.append(voce_mancata(sha, titolo, etichette_al_commit(sha, nuovi),
                                         MISTO, ", ".join(produzione[:10])))
@@ -2505,7 +2583,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
         # Builder otterrebbe la produzione aperta senza aver scritto una riga.
         return []
     file = file_del_commit("HEAD")
-    if any(e_file_di_produzione(percorso) for _, percorso in file):
+    if any(e_file_di_produzione(v.percorso) for v in file):
         return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
     return test_nuovi_del_commit("HEAD", file)
 
