@@ -1944,6 +1944,9 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     promessa è stata riscossa con un merge di un terzo del lavoro (difetto 18).
     """
     if not pubblica(branch):
+        # L'esito resta quello che era: un push mancato non disfa il giro, ma la
+        # riga del registro lo deve dire — il log da solo non lo guarda nessuno.
+        e.nota = " · ".join(t for t in (e.nota, NON_PUBBLICATO) if t)
         return ""
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
@@ -2071,6 +2074,11 @@ def nome_libero(pbi: str, presi: set[str]) -> str:
     return f"{base}-giro{n}"
 
 
+# Ciò che la nota del giro dice quando `pubblica()` torna False: stato e commit
+# restano quelli che erano, e questa è la riga che lo fa sapere al registro.
+NON_PUBBLICATO = "branch non pubblicato: i commit restano nel worktree"
+
+
 def pubblica(branch: str) -> bool:
     """Manda il branch su `origin`. Non alza mai: pubblicare è l'ultimo gesto.
 
@@ -2082,7 +2090,8 @@ def pubblica(branch: str) -> bool:
     quel ramo il push si rifiuta lo stesso, che è la sola cosa da proteggere.
 
     E **non alza**: un push che fallisce è una brutta notizia, non una ragione per
-    buttare via l'ora precedente. Chi legge il log la trova scritta, e i commit
+    buttare via l'ora precedente. Chi legge il log la trova scritta, chi la
+    chiama la riporta nella nota del giro (`NON_PUBBLICATO`), e i commit
     restano nel worktree.
 
     Si manda **`HEAD`**, non il ref del ramo, quando i due divergono (difetto 30):
@@ -2211,8 +2220,8 @@ def esegui_pbi(
         # lì, su PBI-322 li ha salvati a mano una persona prima di chiudere il
         # terminale. Difetto 8 di PBI-102. Sulla strada buona non si pubblica qui:
         # a quello ci pensa `apri_pr`, una volta sola.
-        if stato in STATI_CHE_INTERROMPONO:
-            pubblica(branch)
+        if stato in STATI_CHE_INTERROMPONO and not pubblica(branch):
+            dichiara(NON_PUBBLICATO)
         print(f"    tempo: {hms(e.durata_s)} "
               f"(builder {hms(e.tempi['builder'])} · gate {hms(e.tempi['gate'])} · "
               f"critic {hms(e.tempi['critic'])})")
