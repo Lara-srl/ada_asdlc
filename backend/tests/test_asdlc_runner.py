@@ -1975,6 +1975,20 @@ class RepoDiProva:
         self._git("commit", "-q", "-m", messaggio)
         return self._git("rev-parse", "HEAD")
 
+    def sposta(self, da: str, a: str) -> None:
+        """Un `git mv` vero, lasciato **in stage** e non committato.
+
+        Il rename lo produce git, non il test: un `write` nel file nuovo più un
+        `unlink` del vecchio darebbe a git le stesse due facce, ma è il comando
+        che il repository riceve davvero, e la prova deve partire da lì.
+        """
+        (self.radice / a).parent.mkdir(parents=True, exist_ok=True)
+        self._git("mv", da, a)
+
+    def commit_dello_stage(self, messaggio: str) -> str:
+        self._git("commit", "-q", "-m", messaggio)
+        return self._git("rev-parse", "HEAD")
+
 
 @pytest.fixture
 def repo_di_prova(tmp_path, monkeypatch):
@@ -1998,6 +2012,35 @@ def sorgente_che_lascia_un_segno(marcatore: Path, corpo: str) -> str:
         f"    Path({str(marcatore)!r}).write_text('eseguito')\n"
         f"    {corpo}\n"
     )
+
+
+TRE_TEST = ("def test_uno():\n    assert True\n\n\n"
+            "def test_due():\n    assert True\n\n\n"
+            "def test_tre():\n    assert True\n")
+
+
+class TestUnTestTraslocatoNonNasce:
+    """Difetto 31 di PBI-102: il `git mv` di un file di test contava una nascita
+    per ogni test che c'era dentro.
+
+    Su PBI-360, spostare `test_asdlc_runner.py` in `tools/tests/` ne avrebbe
+    fatti nascere **303** in un colpo, tutti da far passare per la quarta lettura
+    di ADR-0022, e il giro si è fermato lì dopo 4m39s e zero commit. Un test
+    traslocato non è un test scritto: il permesso di scrivere produzione l'aveva
+    già chiesto il commit che l'ha creato — ADR-0021 riguarda il **nascere**, non
+    il cambiare riga di un file.
+
+    Qui git non si finge: il rename lo rileva git, e un doppio deciderebbe al suo
+    posto proprio la cosa in discussione.
+    """
+
+    def test_un_commit_di_solo_trasloco_non_fa_nascere_niente(self, repo_di_prova):
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
+
+        assert runner.test_nuovi_del_commit(sha) == []
 
 
 class TestIlGateDelRossoCamminaICommit:
