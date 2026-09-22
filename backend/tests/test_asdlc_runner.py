@@ -1992,6 +1992,16 @@ class RepoDiProva:
         self._git("commit", "-q", "-m", messaggio)
         return self._git("rev-parse", "HEAD")
 
+    def cancella(self, percorso: str) -> None:
+        """Un `git rm` vero, lasciato in stage come `sposta`."""
+        self._git("rm", "-q", percorso)
+
+    def metti_in_stage(self, percorso: str, contenuto: str) -> None:
+        f = self.radice / percorso
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(contenuto, encoding="utf-8")
+        self._git("add", percorso)
+
 
 @pytest.fixture
 def repo_di_prova(tmp_path, monkeypatch):
@@ -2082,6 +2092,47 @@ class TestUnTestTraslocatoNonNasce:
         sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
 
         assert runner.test_nuovi_del_commit(sha) == []
+
+
+class TestNascitaECancellazioneRestanoQuelleDiPrima:
+    """I due casi che col rename non c'entrano, sulle due letture che il gate fa
+    a ogni commit di ogni giro: il commit e l'albero di lavoro.
+
+    Un file di test davvero nuovo fa nascere i suoi test; uno cancellato non ne
+    fa nascere nessuno e non alza. Nascono verdi — è il comportamento di sempre —
+    e mordono la **cancellazione** delle righe che questo branch introduce: senza
+    la scelta dei pathspec, o senza la lettura del `--name-status`, tutti e
+    quattro cadono. La lettura del rename la presidiano invece i test del
+    trasloco, che qui sopra restano rossi finché la scelta non c'è.
+    """
+
+    def test_un_file_di_test_nuovo_fa_nascere_i_suoi_test(self, repo_di_prova):
+        sha = repo_di_prova.commit("test: i tre casi (RED)",
+                                   {"backend/tests/test_tre.py": TRE_TEST})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_un_file_di_test_cancellato_non_fa_nascere_niente(self, repo_di_prova):
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.cancella("backend/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("chore: i tre casi non servono più")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_nellalbero_un_file_di_test_in_stage_fa_nascere_i_suoi_test(self, repo_di_prova):
+        repo_di_prova.metti_in_stage("backend/tests/test_tre.py", TRE_TEST)
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == [
+            "test_uno", "test_due", "test_tre"]
+
+    def test_nellalbero_un_file_di_test_cancellato_non_fa_nascere_niente(self, repo_di_prova):
+        repo_di_prova.commit("test: i tre casi (RED)",
+                             {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.cancella("backend/tests/test_tre.py")
+
+        assert runner.test_nuovi_dellalbero() == []
 
 
 class TestIlGateDelRossoCamminaICommit:
