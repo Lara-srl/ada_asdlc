@@ -2185,6 +2185,24 @@ def trova_pbi(pbi: str) -> Path | None:
     return REPO / nome if nome else None
 
 
+def fermata_del_builder(uscita: str) -> str | None:
+    """La domanda con cui il Builder si è fermato, o `None` se non si è fermato.
+
+    Una fermata è una **riga** che, dopo lo `strip()`, si apre con `STOP:`; la
+    domanda è il resto di quella riga, e le righe dopo non ne fanno parte. Prima
+    bastava la stringa in un punto qualunque della risposta: il 23/09/2026 il
+    Builder di PBI-363 aveva finito, ha citato il marcatore fra due backtick nel
+    riepilogo, e il giro ha chiuso `fermato` con mezza frase per domanda
+    (`runs/20260923-103007.json`, difetto 32 di PBI-102).
+    """
+    domanda = None
+    for riga in uscita.splitlines():
+        riga = riga.strip()
+        if riga.startswith("STOP:"):
+            domanda = riga.removeprefix("STOP:").strip()
+    return domanda
+
+
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
 ) -> Esito:
@@ -2290,8 +2308,7 @@ def esegui_pbi(
             with misura(e, "builder"):
                 _, out = esegui(cmd, REPO)
 
-            if "STOP:" in out:
-                domanda = out.split("STOP:")[-1].strip().splitlines()[0]
+            if (domanda := fermata_del_builder(out)) is not None:
                 return chiudi("fermato", f"domanda dell'agente: {domanda}")
 
             # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
