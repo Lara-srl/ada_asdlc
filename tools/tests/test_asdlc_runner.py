@@ -856,6 +856,30 @@ class TestLaFermataDelBuilderEUnaRiga:
                 "la nota porta il resto della riga di fermata, intero e su una riga sola"
             )
 
+    def test_un_fatto_sull_ultima_riga_vince_sul_protocollo_ricopiato_sopra(
+        self, monkeypatch
+    ):
+        """Decisione 2 di PBI-364: il `FATTO:` che chiude la risposta è la parola
+        definitiva del Builder. Un riepilogo che ricopia il protocollo del prompt
+        in un blocco rientrato ha una riga che si apre col marcatore, e non è
+        una domanda."""
+        self._mondo(
+            monkeypatch,
+            "Il prompt chiede di chiudere così, se c'è un'ambiguità:\n"
+            "\n"
+            "    STOP: <la domanda>\n"
+            "\n"
+            "Non ce n'erano, e i criteri sono tutti verdi.\n"
+            "FATTO: la fermata del Builder è la riga che il marcatore apre\n",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto", (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: il FATTO sull'ultima "
+            "riga vale più di una riga di fermata ricopiata sopra"
+        )
+
 
 class TestDiUnGateRossoRestaLaRagione:
     """Difetto 14 di PBI-102.
