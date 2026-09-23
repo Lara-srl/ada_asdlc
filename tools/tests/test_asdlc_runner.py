@@ -896,6 +896,24 @@ class TestLaFermataDelBuilderEUnaRiga:
                 "domanda sta su una riga sola: il resto non arriva alla persona"
             )
 
+    def test_con_piu_righe_di_fermata_la_nota_porta_l_ultima(self, monkeypatch):
+        """Decisione 3 di PBI-364: la più vicina alla fine è quella con cui il
+        prompt chiede di terminare. Guardia: nasce verde."""
+        self._mondo(
+            monkeypatch,
+            "STOP: la spec dice netto, il PBI lordo: quale vale?\n"
+            "Rileggendo, la spec è stata aggiornata ieri e vale netto.\n"
+            "STOP: la migrazione 0012 tocca `righe_ricambio`, che ha dati sopra: la eseguo?\n",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert esito.nota.split(" · ")[0] == (
+            "domanda dell'agente: la migrazione 0012 tocca `righe_ricambio`, che ha "
+            "dati sopra: la eseguo?"
+        ), "fra più righe di fermata vale l'ultima, non la prima"
+
 
 class TestDiUnGateRossoRestaLaRagione:
     """Difetto 14 di PBI-102.
