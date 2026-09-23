@@ -319,6 +319,8 @@ silenzio: fermati, scrivi la domanda, e termina con la riga esatta
 
     STOP: <la domanda>
 
+e la domanda sta tutta su quella riga: ciò che va a capo non arriva alla persona.
+
 Quando hai finito, termina con la riga esatta
 
     FATTO: <riepilogo in una riga>
@@ -388,6 +390,9 @@ vuoto. Scrivi la domanda e termina con le due righe esatte:
 
     STOP: <la domanda per la persona>
     VERDETTO: SOSPESO
+
+Ciò che va a capo non arriva alla persona: la domanda sta tutta su quella riga, la prima
+delle due.
 
 È la stessa diagnosi che il Builder produce quando incontra un'ambiguità, raggiunta
 dall'altro lato. Un sospeso senza la riga `STOP:` non è una diagnosi: lascia una persona
