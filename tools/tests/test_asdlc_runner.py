@@ -880,6 +880,22 @@ class TestLaFermataDelBuilderEUnaRiga:
             "riga vale più di una riga di fermata ricopiata sopra"
         )
 
+    def test_i_prompt_dicono_che_la_domanda_sta_tutta_sulla_riga_di_fermata(self):
+        """Decisione 7 di PBI-364: il runner prende della domanda una riga sola,
+        e l'agente che si ferma deve saperlo — ciò che va a capo non arriva alla
+        persona."""
+        builder = runner.PROMPT_BUILDER.format(pbi_path="backlog/x.md")
+        critic = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md")
+        for nome, prompt, riga in (
+            ("PROMPT_BUILDER", builder, "    STOP: <la domanda>\n"),
+            ("PROMPT_CRITIC", critic, "    STOP: <la domanda per la persona>\n"),
+        ):
+            dopo = prompt.split(riga, 1)[1]
+            assert "la domanda sta tutta su quella riga" in dopo[:400], (
+                f"{nome} chiede la riga di fermata senza dire, lì accanto, che la "
+                "domanda sta su una riga sola: il resto non arriva alla persona"
+            )
+
 
 class TestDiUnGateRossoRestaLaRagione:
     """Difetto 14 di PBI-102.
