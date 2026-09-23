@@ -2194,9 +2194,15 @@ def fermata_del_builder(uscita: str) -> str | None:
     Builder di PBI-363 aveva finito, ha citato il marcatore fra due backtick nel
     riepilogo, e il giro ha chiuso `fermato` con mezza frase per domanda
     (`runs/20260923-103007.json`, difetto 32 di PBI-102).
+
+    Se l'ultima riga si apre con `FATTO:` il Builder ha finito, qualunque cosa ci
+    sia sopra: un riepilogo che ricopia il protocollo del prompt non è una domanda.
     """
+    righe = uscita.strip().splitlines()
+    if righe and righe[-1].strip().startswith("FATTO:"):
+        return None
     domanda = None
-    for riga in uscita.splitlines():
+    for riga in righe:
         riga = riga.strip()
         if riga.startswith("STOP:"):
             domanda = riga.removeprefix("STOP:").strip()
