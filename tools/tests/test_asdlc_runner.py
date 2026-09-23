@@ -782,6 +782,160 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         assert esito.commit == 4
 
 
+class TestLaFermataDelBuilderEUnaRiga:
+    """Difetto 32 di PBI-102, misurato su PBI-363 il 23/09/2026.
+
+    Il runner fermava il giro se `STOP:` compariva in un punto qualunque della
+    risposta, mentre il prompt chiede al Builder di *terminare con la riga
+    esatta*. Il Builder di PBI-363 aveva finito — 14 commit, otto criteri — e
+    nel riepilogo ha citato il marcatore fra due backtick: `fermato` in 9
+    minuti, gate e Critic mai partiti, e per nota mezza frase
+    (`runs/20260923-103007.json`).
+    """
+
+    # Il riepilogo del 23/09, ricostruito dalla nota del rapporto: ciò che la
+    # nota riporta è quanto seguiva la citazione.
+    RIEPILOGO_DI_PBI_363 = (
+        "Il controllo del limite d'uso sta subito dopo quello dello `STOP:`, prima "
+        "dell'igiene e dei gate. Il giro chiude `fermato` senza rilanciare `-c` e "
+        "senza consumare tentativi.\n"
+        "\n"
+        "FATTO: il limite d'uso conta solo se apre l'ultima riga\n"
+    )
+
+    def _mondo(self, monkeypatch, uscita_builder: str) -> None:
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return ""
+            if args[:2] == ("rev-list", "--count"):
+                return "14"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita_builder))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+
+    @pytest.mark.parametrize(
+        "uscita, stato, domanda",
+        [
+            pytest.param(RIEPILOGO_DI_PBI_363, "fatto", None, id="citazione-del-23-09"),
+            pytest.param(
+                "Ho letto i due prompt.\n"
+                "STOP: il prompt del Critic cita `STOP:` a metà riga, lo tocco?\n",
+                "fermato",
+                "il prompt del Critic cita `STOP:` a metà riga, lo tocco?",
+                id="domanda-che-contiene-il-marcatore",
+            ),
+            pytest.param(
+                "STOP: la migrazione tocca una tabella con dati sopra, la eseguo?\n"
+                "Il prompt chiede di chiudere con la riga `STOP:` e l'ho messa sopra.\n",
+                "fermato",
+                "la migrazione tocca una tabella con dati sopra, la eseguo?",
+                id="citazione-dopo-la-riga-di-fermata",
+            ),
+        ],
+    )
+    def test_una_fermata_e_la_riga_che_il_marcatore_apre(
+        self, monkeypatch, uscita, stato, domanda
+    ):
+        self._mondo(monkeypatch, uscita)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == stato, (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: conta solo la riga che "
+            "si apre col marcatore, non la parola citata a metà riga"
+        )
+        if domanda is not None:
+            assert esito.nota.split(" · ")[0] == f"domanda dell'agente: {domanda}", (
+                "la nota porta il resto della riga di fermata, intero e su una riga sola"
+            )
+
+    def test_un_fatto_sull_ultima_riga_vince_sul_protocollo_ricopiato_sopra(
+        self, monkeypatch
+    ):
+        """Decisione 2 di PBI-364: il `FATTO:` che chiude la risposta è la parola
+        definitiva del Builder. Un riepilogo che ricopia il protocollo del prompt
+        in un blocco rientrato ha una riga che si apre col marcatore, e non è
+        una domanda."""
+        self._mondo(
+            monkeypatch,
+            "Il prompt chiede di chiudere così, se c'è un'ambiguità:\n"
+            "\n"
+            "    STOP: <la domanda>\n"
+            "\n"
+            "Non ce n'erano, e i criteri sono tutti verdi.\n"
+            "FATTO: la fermata del Builder è la riga che il marcatore apre\n",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto", (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: il FATTO sull'ultima "
+            "riga vale più di una riga di fermata ricopiata sopra"
+        )
+
+    def test_i_prompt_dicono_che_la_domanda_sta_tutta_sulla_riga_di_fermata(self):
+        """Decisione 7 di PBI-364: il runner prende della domanda una riga sola,
+        e l'agente che si ferma deve saperlo — ciò che va a capo non arriva alla
+        persona."""
+        builder = runner.PROMPT_BUILDER.format(pbi_path="backlog/x.md")
+        critic = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md")
+        for nome, prompt, riga in (
+            ("PROMPT_BUILDER", builder, "    STOP: <la domanda>\n"),
+            ("PROMPT_CRITIC", critic, "    STOP: <la domanda per la persona>\n"),
+        ):
+            dopo = prompt.split(riga, 1)[1]
+            assert "la domanda sta tutta su quella riga" in dopo[:400], (
+                f"{nome} chiede la riga di fermata senza dire, lì accanto, che la "
+                "domanda sta su una riga sola: il resto non arriva alla persona"
+            )
+
+    def test_con_piu_righe_di_fermata_la_nota_porta_l_ultima(self, monkeypatch):
+        """Decisione 3 di PBI-364: la più vicina alla fine è quella con cui il
+        prompt chiede di terminare. Guardia: nasce verde."""
+        self._mondo(
+            monkeypatch,
+            "STOP: la spec dice netto, il PBI lordo: quale vale?\n"
+            "Rileggendo, la spec è stata aggiornata ieri e vale netto.\n"
+            "STOP: la migrazione 0012 tocca `righe_ricambio`, che ha dati sopra: la eseguo?\n",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert esito.nota.split(" · ")[0] == (
+            "domanda dell'agente: la migrazione 0012 tocca `righe_ricambio`, che ha "
+            "dati sopra: la eseguo?"
+        ), "fra più righe di fermata vale l'ultima, non la prima"
+
+    def test_una_riga_rientrata_che_si_apre_col_marcatore_ferma_il_giro(self, monkeypatch):
+        """Decisione 8 di PBI-364: lo `strip()` viene prima del prefisso, e un
+        Builder che rientra per sbaglio la sua domanda non la perde. Guardia:
+        nasce verde."""
+        self._mondo(
+            monkeypatch,
+            "Mi fermo qui, i criteri 1 e 2 sono verdi.\n"
+            "\n"
+            "    STOP: la decisione 4 contraddice la 2 sul FATTO finale, quale vale?\n",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato", (
+            f"chiuso {esito.stato}: una riga di fermata rientrata è una fermata"
+        )
+        assert esito.nota.split(" · ")[0] == (
+            "domanda dell'agente: la decisione 4 contraddice la 2 sul FATTO finale, "
+            "quale vale?"
+        )
+
+
 class TestDiUnGateRossoRestaLaRagione:
     """Difetto 14 di PBI-102.
 
