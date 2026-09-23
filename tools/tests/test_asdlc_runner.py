@@ -4285,6 +4285,7 @@ class TestIGateVengonoDaAsdlcToml:
             ("tsc", ["npm", "run", "build"], "frontend"),
             ("eslint", ["npm", "run", "lint"], "frontend"),
             ("vitest", ["npm", "test"], "frontend"),
+            ("asdlc", ["python3", "-m", "pytest", "-q", "tools/tests"], "."),
         ]
         assert [g.nome for g in runner.GATE] == [g.nome for g in runner.CFG.gate], (
             "i gate del runner sono quelli letti da asdlc.toml, non una lista sua"
@@ -4573,4 +4574,4 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
         )
 
     def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
-        assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], []]
+        assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], [], []]
