@@ -782,6 +782,81 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         assert esito.commit == 4
 
 
+class TestLaFermataDelBuilderEUnaRiga:
+    """Difetto 32 di PBI-102, misurato su PBI-363 il 23/09/2026.
+
+    Il runner fermava il giro se `STOP:` compariva in un punto qualunque della
+    risposta, mentre il prompt chiede al Builder di *terminare con la riga
+    esatta*. Il Builder di PBI-363 aveva finito — 14 commit, otto criteri — e
+    nel riepilogo ha citato il marcatore fra due backtick: `fermato` in 9
+    minuti, gate e Critic mai partiti, e per nota mezza frase
+    (`runs/20260923-103007.json`).
+    """
+
+    # Il riepilogo del 23/09, ricostruito dalla nota del rapporto: ciò che la
+    # nota riporta è quanto seguiva la citazione.
+    RIEPILOGO_DI_PBI_363 = (
+        "Il controllo del limite d'uso sta subito dopo quello dello `STOP:`, prima "
+        "dell'igiene e dei gate. Il giro chiude `fermato` senza rilanciare `-c` e "
+        "senza consumare tentativi.\n"
+        "\n"
+        "FATTO: il limite d'uso conta solo se apre l'ultima riga\n"
+    )
+
+    def _mondo(self, monkeypatch, uscita_builder: str) -> None:
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return ""
+            if args[:2] == ("rev-list", "--count"):
+                return "14"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita_builder))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+        )
+
+    @pytest.mark.parametrize(
+        "uscita, stato, domanda",
+        [
+            pytest.param(RIEPILOGO_DI_PBI_363, "fatto", None, id="citazione-del-23-09"),
+            pytest.param(
+                "Ho letto i due prompt.\n"
+                "STOP: il prompt del Critic cita `STOP:` a metà riga, lo tocco?\n",
+                "fermato",
+                "il prompt del Critic cita `STOP:` a metà riga, lo tocco?",
+                id="domanda-che-contiene-il-marcatore",
+            ),
+            pytest.param(
+                "STOP: la migrazione tocca una tabella con dati sopra, la eseguo?\n"
+                "Il prompt chiede di chiudere con la riga `STOP:` e l'ho messa sopra.\n",
+                "fermato",
+                "la migrazione tocca una tabella con dati sopra, la eseguo?",
+                id="citazione-dopo-la-riga-di-fermata",
+            ),
+        ],
+    )
+    def test_una_fermata_e_la_riga_che_il_marcatore_apre(
+        self, monkeypatch, uscita, stato, domanda
+    ):
+        self._mondo(monkeypatch, uscita)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == stato, (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: conta solo la riga che "
+            "si apre col marcatore, non la parola citata a metà riga"
+        )
+        if domanda is not None:
+            assert esito.nota.split(" · ")[0] == f"domanda dell'agente: {domanda}", (
+                "la nota porta il resto della riga di fermata, intero e su una riga sola"
+            )
+
+
 class TestDiUnGateRossoRestaLaRagione:
     """Difetto 14 di PBI-102.
 
