@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Esegue i PBI uno per volta: Builder → gate deterministici → Critic → PR.
 
-Il principio è quello di `asdlc-skill/practices/workflow-as-code.md`: l'orchestrazione
-è deterministica (branch, gate, retry, stop), probabilistico è solo ciò che richiede
-intelligenza — scrivere il codice, e giudicarlo.
+Il principio è quello di `.claude/skills/asdlc/practices/workflow-as-code.md`:
+l'orchestrazione è deterministica (branch, gate, retry, stop), probabilistico è solo
+ciò che richiede intelligenza — scrivere il codice, e giudicarlo.
 
-Tre livelli di verifica, come in `patterns/context-gates.md`, e sono tre cose diverse:
+Tre livelli di verifica, come in `.claude/skills/asdlc/patterns/context-gates.md`, e sono
+tre cose diverse:
 
   1. Quality Gate  (deterministico) — pytest, tsc, eslint, vitest. Gli E2E no: li fa la CI.
      Li esegue QUESTO script e ne legge l'exit code: un agente che si autodichiara
