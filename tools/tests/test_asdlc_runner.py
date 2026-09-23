@@ -914,6 +914,27 @@ class TestLaFermataDelBuilderEUnaRiga:
             "dati sopra: la eseguo?"
         ), "fra più righe di fermata vale l'ultima, non la prima"
 
+    def test_una_riga_rientrata_che_si_apre_col_marcatore_ferma_il_giro(self, monkeypatch):
+        """Decisione 8 di PBI-364: lo `strip()` viene prima del prefisso, e un
+        Builder che rientra per sbaglio la sua domanda non la perde. Guardia:
+        nasce verde."""
+        self._mondo(
+            monkeypatch,
+            "Mi fermo qui, i criteri 1 e 2 sono verdi.\n"
+            "\n"
+            "    STOP: la decisione 4 contraddice la 2 sul FATTO finale, quale vale?\n",
+        )
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato", (
+            f"chiuso {esito.stato}: una riga di fermata rientrata è una fermata"
+        )
+        assert esito.nota.split(" · ")[0] == (
+            "domanda dell'agente: la decisione 4 contraddice la 2 sul FATTO finale, "
+            "quale vale?"
+        )
+
 
 class TestDiUnGateRossoRestaLaRagione:
     """Difetto 14 di PBI-102.
