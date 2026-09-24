@@ -311,6 +311,60 @@ class TestSenzaChiamataLoStatoESenzaEsito:
         assert len(gate) == gate_attesi, "dopo un Builder senza esito i gate non partono"
 
 
+class TestUnSenzaEsitoFermaLaCoda:
+    """PBI-367, decisione 10: dopo un `senza esito` la coda si ferma, come dopo un `fermato`.
+
+    Un `senza esito` dovuto al limite d'uso colpirebbe anche il PBI dopo, e quello
+    dopo ancora: una catena di `senza esito` che consuma la coda senza fare
+    niente. Il ramo si pubblica anche vuoto, perché il tick trovi su `origin` il
+    segno che il PBI aspetta, come per `pbi/pbi-360` il 22/09.
+    """
+
+    def test_pubblica_il_ramo_anche_con_zero_commit(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        chiamate: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args[:2] == ("rev-list", "--count"):
+                return "0"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito"
+        assert esito.commit == 0
+        assert any(c[0] == "push" for c in chiamate), (
+            "senza il ramo su origin il tick non vede che il PBI aspetta, e lo rilancia"
+        )
+
+    def test_la_sequenza_non_va_avanti(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        eseguiti: list[str] = []
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            eseguiti.append(pbi)
+            return runner.Esito(pbi, "senza esito")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv",
+                            ["asdlc_runner", "PBI-212", "PBI-213", "--in-primo-piano"])
+
+        runner.main()
+
+        assert eseguiti == ["PBI-212"], (
+            "un senza esito del limite d'uso colpirebbe anche il PBI dopo"
+        )
+
+
 class TestIlSospesoChiudeAlPrimoGiro:
     def test_non_consuma_le_revisioni(self, monkeypatch, git_finto, tmp_path):
         """È il difetto che è costato quattro giri su PBI-203.
