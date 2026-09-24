@@ -1622,7 +1622,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
 
 @dataclass(frozen=True)
 class Mutante:
-    """Una riga guastata: dov'è, com'era, come diventa. `dopo` vuoto = cancellata."""
+    """Una riga guastata: dov'è, com'era, come diventa. `dopo` vuoto = cancellata,
+    anche quando nel file al suo posto si scrive `pass` (`sorgente_del_mutante`)."""
 
     riga: int   # 1-based, come nel file
     prima: str
@@ -1793,12 +1794,10 @@ def quarta_lettura(albero: Path, base: str, sha: str,
         sorgente = leggi_sorgente(file)
         if sorgente is None:
             continue
-        righe_del_file = sorgente.splitlines(keepends=True)
         try:
             for m in mutanti_del_sorgente(sorgente, righe):
-                guasto = "".join(
-                    righe_del_file[:m.riga - 1] + [m.dopo + "\n"] + righe_del_file[m.riga:])
-                if not compila(percorso, guasto):
+                guasto = sorgente_del_mutante(percorso, sorgente, m)
+                if guasto is None:
                     continue
                 file.write_text(guasto, encoding="utf-8")
                 provati += 1
@@ -1809,6 +1808,29 @@ def quarta_lettura(albero: Path, base: str, sha: str,
             # e i suoi mutanti devono nascere dal sorgente e non dall'ultimo guasto.
             file.write_text(sorgente, encoding="utf-8")
     return None, provati
+
+
+def sorgente_del_mutante(percorso: str, sorgente: str, m: Mutante) -> str | None:
+    """Il file con la riga guasta, o `None` se non compila: non si prova nemmeno.
+
+    La cancellazione di una riga Python che è l'unica istruzione del suo blocco —
+    il `return` dentro un `if` — lascia il blocco vuoto, e il file non compila. Lì
+    la riga si sostituisce con `pass` alla stessa indentazione (PBI-365): il blocco
+    resta valido e ciò che la riga fa sparisce. È lo stesso mutante, non un altro —
+    `m.dopo` resta vuoto e il rapporto dice «riga cancellata» — e se non compila
+    neanche così, da quella riga non nasce nessuna cancellazione. TypeScript non ha
+    `pass`, e la sua cancellazione resta com'era.
+    """
+    righe_del_file = sorgente.splitlines(keepends=True)
+    candidati = [m.dopo]
+    if not m.dopo and percorso.endswith(".py"):
+        rientro = m.prima[:len(m.prima) - len(m.prima.lstrip())]
+        candidati.append(rientro + "pass")
+    for dopo in candidati:
+        guasto = "".join(righe_del_file[:m.riga - 1] + [dopo + "\n"] + righe_del_file[m.riga:])
+        if compila(percorso, guasto):
+            return guasto
+    return None
 
 
 def linguaggio_del_file(percorso: str) -> str | None:
@@ -1822,9 +1844,10 @@ def linguaggio_del_file(percorso: str) -> str | None:
 
 def compila(percorso: str, sorgente: str) -> bool:
     """`False` se il mutante ha rotto la sintassi di un file Python: non si prova
-    nemmeno. Il `return` cancellato lascia un `def` vuoto, e un test che importa
-    il modulo **dentro** il proprio corpo lo vede come un `FAILED` suo — mentre
-    non è il test che ha morso, è il file che non c'è più. Per TypeScript decide
+    nemmeno. Un `def` rimasto vuoto — se non basta neanche il `pass` di
+    `sorgente_del_mutante` — fa fallire un test che importa il modulo **dentro** il
+    proprio corpo come un `FAILED` suo, mentre non è il test che ha morso, è il
+    file che non c'è più. Per TypeScript decide
     vitest, che un file rotto non lo carica e non scrive nessun esito per test.
     """
     if not percorso.endswith(".py"):
