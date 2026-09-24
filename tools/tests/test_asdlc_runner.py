@@ -252,6 +252,65 @@ class TestLEsitoVieneDallaChiamata:
             assert gate == [], "dopo un fermati del Builder i gate non partono"
 
 
+class TestSenzaChiamataLoStatoESenzaEsito:
+    """PBI-367, secondo criterio: nessun ripiego sul testo (`ADR-0027`, decisione 2).
+
+    Un agente che non ha fatto una chiamata valida non ha detto niente che il
+    runner possa leggere, qualunque cosa ci sia nel testo. Si chiude al primo
+    lancio, senza igiene e senza gate: il limite d'uso con l'albero sporco oggi
+    spende i tre giri d'igiene (difetto 27, giro 5 di PBI-333).
+    """
+
+    @pytest.mark.parametrize(
+        "esiti, testi, codice, sporco, invocazioni, gate_attesi",
+        [
+            pytest.param({"critic": verdetto("pass")}, {"builder": "FATTO: fatto\n"},
+                         0, False, 1, 0, id="builder-fatto-solo-testo"),
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "STOP: la migrazione si esegue?\n"},
+                         0, False, 1, 0, id="builder-stop-solo-testo"),
+            pytest.param({"critic": verdetto("pass")}, {}, 0, False, 1, 0, id="builder-muto"),
+            pytest.param({"builder": FATTO}, {"critic": "VERDETTO: PASS\n"},
+                         0, False, 2, 1, id="critic-pass-solo-testo"),
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "You've hit your usage limit · resets 3am\n"},
+                         1, True, 1, 0, id="limite-d-uso"),
+        ],
+    )
+    def test_il_giro_chiude_senza_esito(
+        self, monkeypatch, tmp_path, esiti, testi, codice, sporco, invocazioni, gate_attesi
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        # Il primo `status` è quello d'ingresso, prima che il PBI cominci.
+        stati = [""] + ([" M backend/app/marginalita.py"] * 20 if sporco else [])
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return stati.pop(0) if stati else ""
+            if args[:2] == ("rev-list", "--count"):
+                return "2"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        gate: list[str] = []
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: gate.append("gate") or [])
+        agente = agente_finto(esiti, testi, codice=codice)
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito", (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: senza una chiamata "
+            "valida il testo non deve decidere niente"
+        )
+        assert len(agente.comandi) == invocazioni, (
+            "un senza esito non rilancia l'agente: né igiene né un altro tentativo"
+        )
+        assert len(gate) == gate_attesi, "dopo un Builder senza esito i gate non partono"
+
+
 class TestIlSospesoChiudeAlPrimoGiro:
     def test_non_consuma_le_revisioni(self, monkeypatch, git_finto, tmp_path):
         """È il difetto che è costato quattro giri su PBI-203.
