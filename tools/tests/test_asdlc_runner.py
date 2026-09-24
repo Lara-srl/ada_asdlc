@@ -365,6 +365,53 @@ class TestUnSenzaEsitoFermaLaCoda:
         )
 
 
+class TestNelSenzaEsitoRestaLUscitaGrezza:
+    """PBI-367, decisioni 7 e 11: con cosa si distingue un limite d'uso da un crash.
+
+    `esegui()` rendeva `stdout + stderr` concatenati, e le due chiamate agli
+    agenti scartavano il codice d'uscita. Sono i dati con cui si distingue un
+    limite d'uso da un crash della CLI o da un modello che non ha chiamato
+    niente — e `PBI-363` li legge. Il log delle chiamate al server dice quelle
+    rifiutate, che il file d'esito non vede.
+    """
+
+    def test_esegui_scrive_stdout_e_stderr_in_due_file(self, tmp_path):
+        fuori, dentro = tmp_path / "x.stdout", tmp_path / "x.stderr"
+
+        codice, _ = runner.esegui(["sh", "-c", "echo fuori; echo errore >&2; exit 3"],
+                                  tmp_path, flussi=(fuori, dentro))
+
+        assert codice == 3
+        assert fuori.read_text(encoding="utf-8") == "fuori\n"
+        assert dentro.read_text(encoding="utf-8") == "errore\n"
+
+    def test_il_rapporto_e_la_nota_portano_i_file_e_il_codice(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({}, "You've hit your usage limit\n", codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
+
+        assert esito.stato == "senza esito"
+        ultima = rapporto["esiti"][0]["invocazioni"][-1]
+        assert ultima["ruolo"] == "builder"
+        assert ultima["codice"] == 1, "il codice d'uscita di claude -p non si scarta"
+        assert ultima["stdout"] != ultima["stderr"], "i due flussi stanno in due file"
+        assert Path(ultima["stdout"]).parent == tmp_path == Path(ultima["stderr"]).parent
+        assert ultima["chiamate"].endswith(".chiamate.jsonl"), (
+            "le chiamate rifiutate si vedono solo nel log del server"
+        )
+        for voce in ("codice d'uscita 1", ultima["stdout"], ultima["stderr"]):
+            assert voce in esito.nota, f"la nota non dice {voce}"
+
+
 class TestIlSospesoChiudeAlPrimoGiro:
     def test_non_consuma_le_revisioni(self, monkeypatch, git_finto, tmp_path):
         """È il difetto che è costato quattro giri su PBI-203.
