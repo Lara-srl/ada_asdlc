@@ -4639,6 +4639,22 @@ class TestIlGateCorrettoNonRegredisce:
         assert self._prove(repo_di_prova, "backend/app/coppia.py", sorgente) == [
             "backend/app/coppia.py:3"]
 
+    def test_il_pass_non_nasce_su_commento_apertura_di_blocco_e_riga_di_modulo(
+        self, repo_di_prova
+    ):
+        """Delle sei righe si provano solo i due `return`: il primo, unico nel suo
+        `if`, col `pass`; il secondo con la cancellazione. Il `def`, il commento,
+        l'`if` e la riga di modulo non danno mutanti, né cancellati né `pass`."""
+        sorgente = ("def f(x):\n"
+                    "    # il segno\n"
+                    "    if x:\n"
+                    "        return 1\n"
+                    "    return 0\n"
+                    "somma = sum\n")
+
+        assert self._prove(repo_di_prova, "backend/app/segno.py", sorgente) == [
+            "backend/app/segno.py:4", "backend/app/segno.py:5"]
+
 
 class TestSiCancellaSoloDentroUnCorpo:
     """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
