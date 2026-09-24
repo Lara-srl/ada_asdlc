@@ -43,14 +43,14 @@ def strumenti(ruolo: str) -> list[dict]:
     return [
         {
             "name": "fatto",
-            "description": descrizione_fatto,
+            "description": descrizione_fatto + " La prima chiamata valida è definitiva.",
             "inputSchema": {"type": "object", "properties": proprieta_fatto,
                             "required": list(proprieta_fatto)},
         },
         {
             "name": "fermati",
             "description": ("Fermati con una domanda per una persona, quando non puoi "
-                            "decidere da solo."),
+                            "decidere da solo. La prima chiamata valida è definitiva."),
             "inputSchema": {"type": "object",
                             "properties": {"domanda": _testo("La domanda, per intero.")},
                             "required": ["domanda"]},
@@ -67,7 +67,9 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     leggerà, con il nome dello strumento sotto `esito` e gli argomenti accanto.
 
     Una chiamata che non passa la validazione riceve `isError` con il motivo, e
-    il file non si scrive: il modello legge l'errore e può richiamare."""
+    il file non si scrive: il modello legge l'errore e può richiamare. La prima
+    chiamata valida è definitiva: il file nasce con `O_EXCL`, e dopo di lei
+    ogni chiamata si rifiuta e lo lascia com'è."""
     campo = "domanda" if nome == "fermati" else "riepilogo"
     testo = argomenti.get(campo)
     if not isinstance(testo, str) or not testo.strip():
@@ -77,7 +79,12 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
         return _contenuto(f"Il campo «verdetto» vale {argomenti.get('verdetto')!r}: deve "
                           f"essere uno fra {VERDETTI}. Richiama fatto con il verdetto.",
                           errore=True)
-    with open(esito, "w", encoding="utf-8") as file:
+    try:
+        descrittore = os.open(esito, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return _contenuto("Esito già dichiarato: la prima chiamata valida è "
+                          "definitiva, e questa non cambia niente.", errore=True)
+    with os.fdopen(descrittore, "w", encoding="utf-8") as file:
         json.dump({"esito": nome, **argomenti}, file, ensure_ascii=False)
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
 
