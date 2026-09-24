@@ -4582,6 +4582,35 @@ class TestIlGateCorrettoNonRegredisce:
             "tests/test_x.py::test_raises",
         }
 
+    COPPIA = ("def coppia(a, b):\n"
+              "    return tuple([\n"
+              "        a,\n"
+              "        b])\n")
+
+    def test_la_riga_di_continuazione_da_la_cancellazione_e_non_il_pass(
+        self, repo_di_prova, tmp_path
+    ):
+        """`        a,` dentro una chiamata su più righe, cancellata, compila e
+        toglie l'argomento: il mutante è quello, uno solo, e nel file la riga è
+        vuota e non `pass`. La guardia copia il modulo com'è quando gira."""
+        copia = tmp_path / "modulo-sotto-il-mutante.py"
+        repo_di_prova.commit("feat: la coppia", {"backend/app/coppia.py": self.COPPIA})
+        repo_di_prova.commit("test: la guardia della coppia", {
+            "backend/tests/test_coppia.py":
+                "from pathlib import Path\n\n"
+                "import app.coppia as modulo\n\n\n"
+                "def test_la_guardia():\n"
+                f"    Path({str(copia)!r}).write_text(Path(modulo.__file__).read_text())\n"
+                "    assert modulo.coppia(1, 2) == (1, 2)\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [p["mutante"].split("  ")[0] for p in morsi[0]["prove"]] == [
+            "backend/app/coppia.py:3"]
+        assert "riga cancellata" in morsi[0]["mutante"]
+        assert copia.read_text().splitlines()[2] == ""
+
 
 class TestSiCancellaSoloDentroUnCorpo:
     """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
