@@ -198,7 +198,7 @@ def test_una_chiamata_valida_scrive_l_esito(ruolo, nome, argomenti, atteso, tmp_
     assert leggi_esito(esito) == atteso
 
 
-def testo_della_risposta(risultato):
+def parole_della_risposta(risultato):
     return " ".join(c.get("text", "") for c in risultato.get("content", []))
 
 
@@ -220,5 +220,25 @@ def test_un_testo_vuoto_si_rifiuta_e_il_file_non_nasce(ruolo, nome, argomenti, c
 
     risultato = risposte[1].get("result", {})
     assert risultato.get("isError") is True
-    assert campo in testo_della_risposta(risultato)
+    assert campo in parole_della_risposta(risultato)
+    assert not esito.exists()
+
+
+# --- Il verdetto del Critic è obbligatorio e chiuso ---------------------------
+
+
+@pytest.mark.parametrize("argomenti", [
+    pytest.param({"riepilogo": RAPPORTO}, id="critic-senza-verdetto"),
+    pytest.param({"verdetto": "PASS con riserva", "riepilogo": RAPPORTO},
+                 id="verdetto-fuori-elenco"),
+])
+def test_il_verdetto_del_critic_e_obbligatorio_e_chiuso(argomenti, tmp_path):
+    """Nella prova del 24/09 (*critic-d*) la chiamata senza verdetto è arrivata
+    al server così com'era: lo schema non la ferma, la ferma il server."""
+    esito = tmp_path / "esito.json"
+    risposte = parla("critic", esito, [*apertura(), chiamata(1, "fatto", argomenti)])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is True
+    assert "verdetto" in parole_della_risposta(risultato)
     assert not esito.exists()
