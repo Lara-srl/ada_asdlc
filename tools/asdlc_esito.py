@@ -10,12 +10,14 @@ Il trasporto è quello stdio di MCP: un messaggio JSON-RPC per riga, in entrata
 su stdin e in uscita su stdout. Il runner lo configura con due variabili:
 
     ASDLC_RUOLO   `builder` o `critic`: cambia lo schema di `fatto`
-    ASDLC_ESITO   il file in cui scrivere l'esito
+    ASDLC_ESITO   il file in cui scrivere l'esito; accanto, `<esito>.chiamate.jsonl`
+                  registra ogni chiamata, valida o rifiutata
 """
 
 import json
 import os
 import sys
+from datetime import datetime
 
 NOME = "asdlc"
 VERSIONE = "1"
@@ -89,6 +91,15 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
 
 
+def registra(nome: str, argomenti: dict, esito: str) -> None:
+    """Una riga del log per chiamata, prima di validarla: anche quelle
+    rifiutate ci finiscono."""
+    riga = {"ora": datetime.now().astimezone().isoformat(), "nome": nome,
+            "argomenti": argomenti}
+    with open(f"{esito}.chiamate.jsonl", "a", encoding="utf-8") as log:
+        log.write(json.dumps(riga, ensure_ascii=False) + "\n")
+
+
 def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
     """La risposta a un messaggio, o `None` per una notifica, che non ne ha."""
     if "id" not in messaggio:
@@ -104,8 +115,9 @@ def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
     elif metodo == "tools/list":
         risultato = {"tools": strumenti(ruolo)}
     elif metodo == "tools/call":
-        risultato = chiama(parametri.get("name"), parametri.get("arguments") or {}, ruolo,
-                           esito)
+        nome, argomenti = parametri.get("name"), parametri.get("arguments") or {}
+        registra(nome, argomenti, esito)
+        risultato = chiama(nome, argomenti, ruolo, esito)
     else:
         return {"jsonrpc": "2.0", "id": messaggio["id"],
                 "error": {"code": -32601, "message": f"metodo sconosciuto: {metodo}"}}
