@@ -58,7 +58,19 @@ def strumenti(ruolo: str) -> list[dict]:
     ]
 
 
-def rispondi(messaggio: dict, ruolo: str) -> dict | None:
+def _contenuto(testo: str, errore: bool) -> dict:
+    return {"content": [{"type": "text", "text": testo}], "isError": errore}
+
+
+def chiama(nome: str, argomenti: dict, esito: str) -> dict:
+    """Scrive l'esito della chiamata nel file `esito`: l'oggetto che il runner
+    leggerà, con il nome dello strumento sotto `esito` e gli argomenti accanto."""
+    with open(esito, "w", encoding="utf-8") as file:
+        json.dump({"esito": nome, **argomenti}, file, ensure_ascii=False)
+    return _contenuto(f"Esito registrato: {nome}.", errore=False)
+
+
+def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
     """La risposta a un messaggio, o `None` per una notifica, che non ne ha."""
     if "id" not in messaggio:
         return None
@@ -72,6 +84,8 @@ def rispondi(messaggio: dict, ruolo: str) -> dict | None:
         }
     elif metodo == "tools/list":
         risultato = {"tools": strumenti(ruolo)}
+    elif metodo == "tools/call":
+        risultato = chiama(parametri.get("name"), parametri.get("arguments") or {}, esito)
     else:
         return {"jsonrpc": "2.0", "id": messaggio["id"],
                 "error": {"code": -32601, "message": f"metodo sconosciuto: {metodo}"}}
@@ -80,10 +94,11 @@ def rispondi(messaggio: dict, ruolo: str) -> dict | None:
 
 def main() -> int:
     ruolo = os.environ.get("ASDLC_RUOLO", "builder")
+    esito = os.environ["ASDLC_ESITO"]
     for riga in sys.stdin:
         if not riga.strip():
             continue
-        risposta = rispondi(json.loads(riga), ruolo)
+        risposta = rispondi(json.loads(riga), ruolo, esito)
         if risposta is not None:
             sys.stdout.write(json.dumps(risposta, ensure_ascii=False) + "\n")
             sys.stdout.flush()
