@@ -4611,6 +4611,34 @@ class TestIlGateCorrettoNonRegredisce:
         assert "riga cancellata" in morsi[0]["mutante"]
         assert copia.read_text().splitlines()[2] == ""
 
+    def _prove(self, repo_di_prova, percorso: str, sorgente: str) -> list[str]:
+        """Le prove della quarta lettura su un modulo nuovo, con una guardia che
+        non guarda niente — `callable` — così nessun kill le interrompe: `file:riga`
+        di ogni mutante provato, in ordine."""
+        repo_di_prova.commit("feat: il modulo", {percorso: sorgente})
+        modulo = Path(percorso).stem
+        sha = repo_di_prova.commit("test: il modulo esiste", {
+            f"backend/tests/test_{modulo}.py":
+                f"import app.{modulo} as modulo\n\n\n"
+                "def test_il_modulo_esiste():\n    assert callable(modulo.f)\n",
+        })
+        nuovi = runner.test_nuovi_del_commit(sha)
+        with runner.worktree_usa_e_getta(sha) as albero:
+            comandi, _ = runner.comandi_dei_test(albero, nuovi)
+            ucciso, prove = runner.quarta_lettura(
+                albero, "origin/main", sha, comandi[0],
+                f"tests/test_{modulo}.py::test_il_modulo_esiste")
+        assert ucciso is None
+        return [p["mutante"].split("  ")[0] for p in prove]
+
+    def test_la_riga_che_chiude_la_chiamata_non_da_mutanti(self, repo_di_prova):
+        """`        b])`: cancellata non compila, e col `pass` al suo posto neanche.
+        Delle due righe di continuazione si prova solo la prima."""
+        sorgente = self.COPPIA.replace("def coppia", "def f")
+
+        assert self._prove(repo_di_prova, "backend/app/coppia.py", sorgente) == [
+            "backend/app/coppia.py:3"]
+
 
 class TestSiCancellaSoloDentroUnCorpo:
     """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
