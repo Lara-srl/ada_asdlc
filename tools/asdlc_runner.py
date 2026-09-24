@@ -261,7 +261,7 @@ Esegui il PBI con queste regole non negoziabili:
      file dello Scope le righe che parlano di ciò che hai spostato o tolto.
   In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
   il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
-  dillo con `STOP:`.
+  dillo con lo strumento `fermati`.
 - **Un modulo nuovo nasce vuoto, in un commit suo.** Il primo test di un file che non
   esiste non fallisce: esplode in raccolta, e un errore di import non è un rosso — non
   dimostra che il test morde, e `--chiedi-impl` lo rifiuta dicendolo. Fai prima lo
@@ -322,8 +322,8 @@ Esegui il PBI con queste regole non negoziabili:
   - Disattivare test, marcare `skip`, allargare tolleranze per far passare il gate
   - Modificare asserzioni per renderle meno stringenti
   Se un gate è rosso, la causa è nel **codice di dominio**, non nell'infrastruttura di
-  test. L'unica eccezione: se il gate fallisce per un bug nel gate stesso, fermati e
-  scrivi `STOP:` con la diagnosi.
+  test. L'unica eccezione: se il gate fallisce per un bug nel gate stesso, chiama
+  `fermati` con la diagnosi.
 - **Non pubblicare niente**: nessun `git push`, nessun `gh pr create`. Al branch e alla PR
   ci pensa il runner, quando il Critic ha finito. Un branch pushato a metà giro è una
   promessa fatta su lavoro che nessuno ha ancora accettato — su PBI-324 quella promessa è
@@ -331,15 +331,13 @@ Esegui il PBI con queste regole non negoziabili:
   checklist spuntata.
 
 Se incontri un'ambiguità che il protocollo di rifinitura non copre, NON scegliere in
-silenzio: fermati, scrivi la domanda, e termina con la riga esatta
+silenzio: chiama lo strumento `fermati` con la domanda, per intero.
 
-    STOP: <la domanda>
+Quando hai finito, chiama lo strumento `fatto` con il riepilogo del lavoro.
 
-e la domanda sta tutta su quella riga: ciò che va a capo non arriva alla persona.
-
-Quando hai finito, termina con la riga esatta
-
-    FATTO: <riepilogo in una riga>
+L'esito il runner lo legge **solo** da una di queste due chiamate, e la prima valida è
+definitiva: il testo della tua risposta resta per le persone e non decide niente. Una
+risposta che non chiama né `fatto` né `fermati` chiude il giro senza esito.
 """
 
 PROMPT_IGIENE = """Ci sono modifiche non committate:
@@ -349,7 +347,8 @@ PROMPT_IGIENE = """Ci sono modifiche non committate:
 Committale con micro-commit coerenti. **`git add` esplicito**, o `git add -A`: i file nuovi
 non sono tracciati, e `git commit -am` li lascia fuori senza dire niente — è così che una
 pagina intera è rimasta a un `git add` dal non esistere. Finché l'albero è sporco il lavoro
-non è giudicabile e i gate non partono. Termina con FATTO: oppure STOP: come prima.
+non è giudicabile e i gate non partono. Poi chiama `fatto`, oppure `fermati` con la
+domanda, come prima.
 """
 
 PROMPT_RIPROVA = """I gate sono rossi. Output (troncato):
@@ -358,7 +357,8 @@ PROMPT_RIPROVA = """I gate sono rossi. Output (troncato):
 
 Correggi la causa, non il sintomo: se un test è sbagliato lo si corregge, se è giusto si
 corregge il codice. Non disattivare test, non marcare skip, non allargare tolleranze.
-Committa la correzione con un commit suo. Termina con FATTO: oppure STOP: come prima.
+Committa la correzione con un commit suo. Poi chiama `fatto`, oppure `fermati` con la
+domanda, come prima.
 """
 
 # I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
@@ -394,38 +394,30 @@ I commit: `git log --oneline {base}..HEAD`
    che allude invece di dire cosa è cambiato è un rilievo da chiudere con un rebase dei
    messaggi, non una questione di gusto.
 
-## Formato di uscita
-Se non ci sono violazioni, termina con la riga esatta:
+## Come si dichiara l'esito
+Il runner legge l'esito **solo** dalla tua chiamata a uno dei due strumenti, e la prima
+chiamata valida è definitiva: il testo della risposta non decide niente.
 
-    VERDETTO: PASS
+Chiama `fatto` con il verdetto e con il rapporto intero nel riepilogo: è l'unico testo
+che arriva al Builder e a chi mergia.
+
+- Se non ci sono violazioni, il verdetto è `pass`.
+- Altrimenti elenca nel rapporto ogni violazione come
+
+      **N. [categoria]: descrizione breve**
+      - Violato: <clausola della spec o di AGENTS.md>
+      - Impatto: <perché conta>
+      - Rimedio: <come si chiude>
+
+  e il verdetto è `non pronto`.
 
 Se invece trovi un rilievo che **nessuna correzione può chiudere** — perché la risposta è
 di una persona: una decisione di dominio, un `CHIEDI` di AGENTS.md saltato, una violazione
 *ex ante* che chi l'ha commessa non può annullare — non mandare il Builder a girare a
-vuoto. Scrivi la domanda e termina con le due righe esatte:
+vuoto: chiama `fermati` con la domanda per la persona, per intero. È la stessa diagnosi
+che il Builder produce quando incontra un'ambiguità, raggiunta dall'altro lato.
 
-    STOP: <la domanda per la persona>
-    VERDETTO: SOSPESO
-
-Ciò che va a capo non arriva alla persona: la domanda sta tutta su quella riga, la prima
-delle due.
-
-È la stessa diagnosi che il Builder produce quando incontra un'ambiguità, raggiunta
-dall'altro lato. Un sospeso senza la riga `STOP:` non è una diagnosi: lascia una persona
-davanti a un muro, e vale come guasto.
-
-Altrimenti elenca ogni violazione come
-
-    **N. [categoria]: descrizione breve**
-    - Violato: <clausola della spec o di AGENTS.md>
-    - Impatto: <perché conta>
-    - Rimedio: <come si chiude>
-
-e termina con la riga esatta:
-
-    VERDETTO: NON PRONTO
-
-**Un commento falso non fa `NON PRONTO` da solo**, né in produzione né in un file di test.
+**Un commento falso non fa `non pronto` da solo**, né in produzione né in un file di test.
 Un commento non ha comportamento — nessun rosso lo produce, nessuna asserzione
 cambia — e spendere un giro intero, Builder e gate e Critic, per una frase è un giro
 buttato ovunque quella frase stia (PBI-335, giro 4, 03/09/2026; PBI-342, giro 5,
@@ -436,7 +428,7 @@ e riga, sotto il titolo
 
     ## Note per chi mergia
 
-fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `PASS` e la nota
+fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `pass` e la nota
 va nel rapporto, dove chi mergia la legge.
 """
 
@@ -502,7 +494,8 @@ proteggeva: se una violazione si chiude solo così, non è una violazione da chi
 caso qui sotto.
 
 Se ritieni che una violazione sia infondata, NON ignorarla: spiega perché nella risposta e
-lasciala aperta. Termina con FATTO: oppure STOP: come prima.
+lasciala aperta. Poi chiama `fatto` con il riepilogo, oppure `fermati` con la domanda:
+l'esito il runner lo legge solo da quella chiamata, non dal testo della risposta.
 """
 
 PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
@@ -1170,7 +1163,8 @@ def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
         if e_file_di_test(percorso):
             return (f"{percorso} è un test e il giro è in {FASE_IMPL}: il verde si "
                     f"ottiene scrivendo il codice, non ammorbidendo l'asserzione. "
-                    f"Se il test è davvero sbagliato, fermati e dillo con STOP:.")
+                    f"Se il test è davvero sbagliato, non chiamare `fatto`: chiama "
+                    f"`fermati` e dillo.")
         return None
     return (f"fase «{fase}» sconosciuta in {FILE_DELLA_FASE}: la guardia si chiude. "
             f"Un file scritto a metà non vale come «nessun giro in corso».")
