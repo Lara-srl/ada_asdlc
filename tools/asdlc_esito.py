@@ -62,7 +62,7 @@ def _contenuto(testo: str, errore: bool) -> dict:
     return {"content": [{"type": "text", "text": testo}], "isError": errore}
 
 
-def chiama(nome: str, argomenti: dict, esito: str) -> dict:
+def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     """Scrive l'esito della chiamata nel file `esito`: l'oggetto che il runner
     leggerà, con il nome dello strumento sotto `esito` e gli argomenti accanto.
 
@@ -72,6 +72,10 @@ def chiama(nome: str, argomenti: dict, esito: str) -> dict:
     testo = argomenti.get(campo)
     if not isinstance(testo, str) or not testo.strip():
         return _contenuto(f"Il campo «{campo}» è vuoto: scrivilo e richiama {nome}.",
+                          errore=True)
+    if ruolo == "critic" and nome == "fatto" and argomenti.get("verdetto") not in VERDETTI:
+        return _contenuto(f"Il campo «verdetto» vale {argomenti.get('verdetto')!r}: deve "
+                          f"essere uno fra {VERDETTI}. Richiama fatto con il verdetto.",
                           errore=True)
     with open(esito, "w", encoding="utf-8") as file:
         json.dump({"esito": nome, **argomenti}, file, ensure_ascii=False)
@@ -93,7 +97,8 @@ def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
     elif metodo == "tools/list":
         risultato = {"tools": strumenti(ruolo)}
     elif metodo == "tools/call":
-        risultato = chiama(parametri.get("name"), parametri.get("arguments") or {}, esito)
+        risultato = chiama(parametri.get("name"), parametri.get("arguments") or {}, ruolo,
+                           esito)
     else:
         return {"jsonrpc": "2.0", "id": messaggio["id"],
                 "error": {"code": -32601, "message": f"metodo sconosciuto: {metodo}"}}
