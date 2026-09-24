@@ -412,6 +412,44 @@ class TestNelSenzaEsitoRestaLUscitaGrezza:
             assert voce in esito.nota, f"la nota non dice {voce}"
 
 
+class TestITestiChiedonoGliStrumenti:
+    """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
+
+    Un prompt che chiede ancora una riga di fatto o di fermata insegna al
+    modello un protocollo che il runner non legge più: l'agente obbedisce, non
+    chiama niente, e il giro chiude `senza esito`. Il contratto «la domanda sta
+    su una riga» cade insieme al parser che lo imponeva (decisione 6).
+    """
+
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param(lambda: runner.PROMPT_BUILDER.format(pbi_path="backlog/x.md"),
+                         id="builder"),
+            pytest.param(lambda: runner.PROMPT_IGIENE.format(sporco="?? nuovo.tsx"),
+                         id="igiene"),
+            pytest.param(lambda: runner.PROMPT_RIPROVA.format(esiti="## pytest\n1 failed"),
+                         id="riprova"),
+            pytest.param(lambda: runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md"),
+                         id="critic"),
+            pytest.param(lambda: runner.PROMPT_RIMEDIO.format(rapporto="1. [scope]: x",
+                                                              pbi_path="backlog/x.md"),
+                         id="rimedio"),
+            pytest.param(lambda: runner.guardia_di_fase(runner.FASE_IMPL,
+                                                        "backend/tests/test_x.py"),
+                         id="guardia-di-fase"),
+        ],
+    )
+    def test_nessun_marcatore_e_i_due_strumenti_nominati(self, testo):
+        scritto = testo()
+        for marcatore in ("STOP:", "FATTO:", "VERDETTO:"):
+            assert marcatore not in scritto, (
+                f"il testo istruisce ancora con {marcatore}, che il runner non legge più"
+            )
+        for strumento in ("`fatto`", "`fermati`"):
+            assert strumento in scritto, f"il testo non nomina lo strumento {strumento}"
+
+
 class TestIlSospesoChiudeAlPrimoGiro:
     def test_non_consuma_le_revisioni(self, monkeypatch, git_finto, tmp_path):
         """È il difetto che è costato quattro giri su PBI-203.
