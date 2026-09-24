@@ -4134,9 +4134,8 @@ class TestIlTestNatoVerdePassaSeMorde:
         """Il caso di `9f952c0`: il test nasce verde, e cancellata la riga che
         restituisce il totale si accorge che la somma non torna più.
 
-        Tre righe e non due: con `return a + b` da solo l'unico mutante è il `def`
-        vuoto, che non compila e non si prova — e una guardia che non ha mutanti
-        da uccidere non è il caso di questo test. La cancellazione della riga 2
+        Tre righe, con il totale in una variabile: la riga 2 è un'assegnazione
+        che il `return` usa, cioè la forma della #254. La cancellazione della riga 2
         non è il morso: fa morire il test di `NameError`, un guasto di esistenza
         che uccide anche un test che non guarda niente (PBI-365)."""
         repo_di_prova.commit("feat: la somma", {
@@ -4181,10 +4180,12 @@ class TestIlTestNatoVerdePassaSeMorde:
         assert "2 mutanti provati" in mancati[0]["esito"]
 
     def test_senza_righe_da_mutare_la_lettura_lo_dice(self, repo_di_prova):
-        """Un `def` con il solo `return` ha un mutante solo, e non compila: zero
-        provati non è «nessuno lo fa fallire», è «non c'era niente da provare»."""
+        """Una riga a livello di modulo senza operatori da scambiare non ha
+        mutanti: zero provati non è «nessuno lo fa fallire», è «non c'era niente
+        da provare». (Un `def` col solo `return` non basta più: da PBI-365 il
+        `return` cancellato diventa `pass`, e compila.)"""
         repo_di_prova.commit("feat: la somma", {
-            "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
+            "backend/app/somma.py": "somma = sum\n",
         })
         repo_di_prova.commit("test: la somma esiste", {
             "backend/tests/test_somma.py":
