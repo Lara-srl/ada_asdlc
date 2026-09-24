@@ -157,6 +157,35 @@ def test_un_metodo_sconosciuto_riceve_un_errore_json_rpc(tmp_path):
     assert risposte[1].get("error", {}).get("code") == -32601
 
 
+@pytest.mark.parametrize("ruolo", [
+    pytest.param("critico", id="refuso"),
+    pytest.param("Critic", id="maiuscola"),
+    pytest.param(None, id="assente"),
+])
+def test_un_ruolo_sconosciuto_ferma_il_server_all_avvio(ruolo, tmp_path):
+    """Un ruolo che non è `builder` né `critic` non deve valere come builder: il
+    Critic potrebbe dichiarare `fatto` senza verdetto. Il server si ferma, e
+    `PBI-367` lo legge come «senza esito»."""
+    esito = tmp_path / "esito.json"
+    ambiente = {k: v for k, v in os.environ.items() if k != "ASDLC_RUOLO"}
+    ambiente["ASDLC_ESITO"] = str(esito)
+    if ruolo is not None:
+        ambiente["ASDLC_RUOLO"] = ruolo
+    messaggi = [*apertura(), richiesta(1, "tools/call",
+                                       {"name": "fatto", "arguments": {"riepilogo": "x"}})]
+    fatto = subprocess.run(
+        [sys.executable, str(SORGENTE)],
+        input="".join(json.dumps(m) + "\n" for m in messaggi),
+        capture_output=True, text=True, env=ambiente, timeout=20,
+    )
+
+    assert fatto.returncode != 0
+    assert "ASDLC_RUOLO" in fatto.stderr
+    assert "Traceback" not in fatto.stderr
+    assert not fatto.stdout.strip()
+    assert not esito.exists()
+
+
 def chiamata(id_, nome, argomenti):
     return richiesta(id_, "tools/call", {"name": nome, "arguments": argomenti})
 
