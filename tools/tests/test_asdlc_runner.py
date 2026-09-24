@@ -3850,6 +3850,86 @@ class TestIlBuilderGiraDoveGliHookScattano:
         assert runner.BUILDER.index("--allowedTools") < len(runner.BUILDER) - 2
 
 
+class TestIComandiPortanoIlServerDellEsito:
+    """PBI-367, decisioni 4 e 5: ogni invocazione ha la sua config e il suo file d'esito.
+
+    Il server di PBI-366 si ferma già all'avvio con un ruolo sconosciuto, ma
+    dentro un giro quella fermata arriverebbe come «senza esito», dopo i minuti
+    del Builder. Un errore nella config si deve vedere qui, in un test del
+    runner, e non dopo un giro intero (Francesco, 24/09).
+    """
+
+    VARIADICI = ("--mcp-config", "--allowedTools")
+
+    @staticmethod
+    def valori(cmd: list[str], flag: str) -> list[str]:
+        """Gli argomenti che seguono `flag` fino al flag successivo."""
+        dopo = cmd[cmd.index(flag) + 1:]
+        fine = next((i for i, a in enumerate(dopo) if a.startswith("-")), len(dopo))
+        return dopo[:fine]
+
+    @pytest.mark.parametrize("ruolo", ["builder", "critic"])
+    def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
+        self, monkeypatch, git_finto, tmp_path, ruolo
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")},
+                              {"builder": "FATTO: fatto\n", "critic": "VERDETTO: PASS\n"})
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == ruolo)
+        assert "--mcp-config" in cmd and "--strict-mcp-config" in cmd, (
+            "senza la config il server dell'esito non parte, e l'agente non ha "
+            "strumenti da chiamare"
+        )
+        config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
+        server = config["mcpServers"]["asdlc"]
+        assert any(a.endswith("asdlc_esito.py") for a in [server["command"], *server["args"]])
+        ambiente = server["env"]
+        assert ambiente["ASDLC_RUOLO"] == ruolo
+        assert Path(ambiente["ASDLC_ESITO"]).parent == tmp_path, (
+            "il file d'esito sta in LOG_DIR, accanto al prompt"
+        )
+        esiti = [str(ruolo_ed_esito(c)[1]) for c in agente.comandi]
+        assert len(set(esiti)) == len(esiti), "ogni invocazione ha il suo file d'esito"
+
+        permessi = {t for v in self.valori(cmd, "--allowedTools") for t in v.split(",")}
+        assert {"mcp__asdlc__fatto", "mcp__asdlc__fermati"} <= permessi, (
+            "senza l'allowlist `-p` nega gli strumenti, e il file non si scrive"
+        )
+        prompt = next(i for i, a in enumerate(cmd) if a.startswith("@"))
+        flag_prima = next(a for a in reversed(cmd[:prompt]) if a.startswith("-"))
+        assert flag_prima not in self.VARIADICI, (
+            f"il prompt segue {flag_prima}, che è variadico e se lo mangia"
+        )
+
+    @pytest.mark.parametrize(
+        "ruolo, esito",
+        [
+            pytest.param(None, "esito.json", id="ruolo-mancante"),
+            pytest.param("critico", "esito.json", id="ruolo-sbagliato"),
+            pytest.param("builder", None, id="esito-mancante"),
+        ],
+    )
+    def test_una_config_sbagliata_ferma_prima_del_lancio(
+        self, monkeypatch, tmp_path, ruolo, esito
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        agente = agente_finto({})
+        monkeypatch.setattr(runner, "esegui", agente)
+        prompt = tmp_path / "prompt.txt"
+        prompt.write_text("x", encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            runner.invoca_agente(ruolo, runner.BUILDER, prompt,
+                                 tmp_path / esito if esito else None)
+
+        assert agente.comandi == [], "claude non si lancia con una config che non regge"
+
+
 class TestIMutantiSiFannoDalleRigheCambiate:
     """La quarta lettura del gate: `PBI-105`.
 
