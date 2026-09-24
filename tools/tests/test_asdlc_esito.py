@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -265,3 +266,27 @@ def test_la_seconda_chiamata_si_rifiuta_e_il_file_resta_quello_della_prima(
     assert rifiuto.get("isError") is True
     assert "già dichiarato" in parole_della_risposta(rifiuto)
     assert leggi_esito(esito) == {"esito": prima[0], **prima[1]}
+
+
+# --- Ogni chiamata finisce nel log --------------------------------------------
+
+
+def test_ogni_chiamata_finisce_nel_log_comprese_quelle_rifiutate(tmp_path):
+    """Il log è ciò che resta di una chiamata rifiutata: senza, un esito arrivato
+    al secondo tentativo non dice che ce n'è stato un primo."""
+    esito = tmp_path / "esito.json"
+    chiamate = [
+        ("fatto", {"riepilogo": RAPPORTO}),
+        ("fatto", {"verdetto": "non pronto", "riepilogo": RAPPORTO}),
+        ("fermati", {"domanda": DOMANDA}),
+    ]
+    parla("critic", esito, [
+        *apertura(), *(chiamata(i, *c) for i, c in enumerate(chiamate, start=1)),
+    ])
+
+    log = Path(f"{esito}.chiamate.jsonl")
+    assert log.is_file(), "il log delle chiamate non è stato scritto"
+    righe = [json.loads(r) for r in log.read_text(encoding="utf-8").splitlines()]
+    assert [(r["nome"], r["argomenti"]) for r in righe] == chiamate
+    for riga in righe:
+        datetime.fromisoformat(riga["ora"])
