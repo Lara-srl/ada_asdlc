@@ -22,6 +22,7 @@ from datetime import datetime
 NOME = "asdlc"
 VERSIONE = "1"
 
+RUOLI = ["builder", "critic"]
 VERDETTI = ["pass", "non pronto"]
 
 
@@ -135,7 +136,14 @@ def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
 
 
 def main() -> int:
-    ruolo = os.environ.get("ASDLC_RUOLO", "builder")
+    # Un ruolo sbagliato che valesse come builder toglierebbe al Critic il
+    # verdetto obbligatorio: meglio un server che non parte, che il runner legge
+    # come «senza esito» (`ADR-0027`, §Fuori da questa decisione).
+    ruolo = os.environ.get("ASDLC_RUOLO")
+    if ruolo not in RUOLI:
+        print(f"ASDLC_RUOLO vale {ruolo!r}: deve essere uno fra {RUOLI}.",
+              file=sys.stderr)
+        return 2
     esito = os.environ["ASDLC_ESITO"]
     for riga in sys.stdin:
         if not riga.strip():
