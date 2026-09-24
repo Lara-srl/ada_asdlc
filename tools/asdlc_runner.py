@@ -126,7 +126,11 @@ MAX_REVISIONI: int
 
 # Gli stati dopo i quali non si prosegue. `sospeso` sta qui insieme a `fermato`
 # per la stessa ragione — sono tutti e due «fermo su una domanda» — e la domanda
-# aperta è precisamente ciò che non si supera andando avanti.
+# aperta è precisamente ciò che non si supera andando avanti. `senza esito` ci sta
+# per un'altra ragione: se l'ha causato il limite d'uso, colpirebbe anche il PBI
+# dopo, e una catena di `senza esito` consumerebbe la coda senza fare niente
+# (PBI-367, decisione 10). Come gli altri, pubblica il ramo anche vuoto: è il
+# segno su `origin` che il tick legge per non rilanciare il PBI.
 # ⚠️ `respinto` non è assegnato da nessuna parte: PBI-102 lo ha sostituito con
 # `non convergente` sul caso «revisioni esaurite», e la diagnosi che gli resterebbe —
 # *il PBI non era pronto a partire*, riconosciuta al primo giro invece che all'ultimo —
@@ -134,7 +138,8 @@ MAX_REVISIONI: int
 # toglie perché è un'intenzione, non codice morto: cancellarlo perderebbe la distinzione
 # che PBI-102 ha introdotto, e chi legge `runs/tempi.csv` deve sapere che quello stato
 # esiste e che nessuna run lo porta ancora.
-STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso")
+STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso",
+                          "senza esito")
 
 COLONNE_CSV = [
     "run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
