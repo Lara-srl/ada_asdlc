@@ -4132,11 +4132,13 @@ class TestIlTestNatoVerdePassaSeMorde:
         self, repo_di_prova, tmp_path
     ):
         """Il caso di `9f952c0`: il test nasce verde, e cancellata la riga che
-        somma si accorge che il totale non c'è più.
+        restituisce il totale si accorge che la somma non torna più.
 
         Tre righe e non due: con `return a + b` da solo l'unico mutante è il `def`
         vuoto, che non compila e non si prova — e una guardia che non ha mutanti
-        da uccidere non è il caso di questo test."""
+        da uccidere non è il caso di questo test. La cancellazione della riga 2
+        non è il morso: fa morire il test di `NameError`, un guasto di esistenza
+        che uccide anche un test che non guarda niente (PBI-365)."""
         repo_di_prova.commit("feat: la somma", {
             "backend/app/somma.py":
                 "def somma(a, b):\n    totale = a + b\n    return totale\n",
@@ -4150,8 +4152,8 @@ class TestIlTestNatoVerdePassaSeMorde:
         assert runner.gate_del_rosso(morsi=morsi) == []
         assert [m["commit"] for m in morsi] == [sha[:7]]
         assert morsi[0]["test"] == "tests/test_somma.py::test_la_somma_fa_due"
-        assert "backend/app/somma.py:2" in morsi[0]["mutante"]
-        assert "totale = a + b" in morsi[0]["mutante"]
+        assert "backend/app/somma.py:3" in morsi[0]["mutante"]
+        assert "return totale" in morsi[0]["mutante"]
         assert "riga cancellata" in morsi[0]["mutante"]
 
     def test_una_guardia_che_non_uccide_nessun_mutante_ferma_e_dice_quanti_ne_ha_provati(
@@ -4332,9 +4334,60 @@ class TestIlMorsoEUnFallimentoPerAsserzione:
                                         {"tests/test_x.py::test_a": "tests/test_x.py::test_a"})
         uscita = ("tests/test_x.py::test_a FAILED\n"
                   "tests/test_x.py::test_b ERROR\n"
-                  "tests/test_x.py::test_c PASSED\n")
+                  "tests/test_x.py::test_c PASSED\n"
+                  "=== short test summary info ===\n"
+                  "FAILED tests/test_x.py::test_a - assert 1 == 2\n")
 
         assert runner.falliti_per_asserzione(comando, uscita) == {"tests/test_x.py::test_a"}
+
+
+class TestUnEccezioneDelCodiceMutatoNonEUnMorso:
+    """PBI-365, decisione 1: il morso è un `AssertionError`, letto da pytest.
+
+    Sulla #254 (secondo giro di PBI-364) due guardie sono passate nominando lo
+    stesso mutante, la cancellazione di `righe = uscita.strip().splitlines()`:
+    senza quella riga `righe` non esiste, e il test muore di `NameError` dentro la
+    funzione. È un guasto di **esistenza**, che uccide anche un test che non guarda
+    niente. Il gate deve contarlo come fallito per eccezione e passare al mutante
+    dopo, finché uno non fa fallire un'asserzione.
+    """
+
+    CASI = [
+        pytest.param(
+            "def ultima_fermata(uscita):\n"
+            "    righe = uscita.strip().splitlines()\n"
+            "    fermate = [r for r in righe if r.startswith('STOP:')]\n"
+            "    return fermate[-1] if len(fermate) > 0 else None\n",
+            "from app.fermata import ultima_fermata\n\n\n"
+            "def test_la_guardia():\n"
+            "    assert ultima_fermata('a\\nSTOP: x') == 'STOP: x'\n",
+            id="nameerror-della-254"),
+        pytest.param(
+            "def ha_parole(uscita):\n"
+            "    pulita = None\n"
+            "    pulita = uscita.strip()\n"
+            "    return len(pulita.split()) > 0\n",
+            "from app.fermata import ha_parole\n\n\n"
+            "def test_la_guardia():\n"
+            "    assert ha_parole('   ') is False\n",
+            id="attributeerror"),
+    ]
+
+    @pytest.mark.parametrize("sorgente, guardia", CASI)
+    def test_il_gate_passa_al_mutante_che_fallisce_per_asserzione(
+        self, repo_di_prova, sorgente, guardia
+    ):
+        """Cancellata la riga 2 o la 3, la guardia muore di un'eccezione (o
+        sopravvive); solo la cancellazione del `return` alla riga 4 la fa fallire
+        per asserzione, ed è quello il mutante che il gate deve nominare."""
+        repo_di_prova.commit("feat: la fermata", {"backend/app/fermata.py": sorgente})
+        repo_di_prova.commit("test: la guardia", {"backend/tests/test_fermata.py": guardia})
+        morsi: list[dict[str, str]] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert "backend/app/fermata.py:4" in morsi[0]["mutante"], (
+            f"ucciso da un'eccezione e non da un'asserzione: {morsi[0]['mutante']}"
+        )
 
 
 class TestSiCancellaSoloDentroUnCorpo:
