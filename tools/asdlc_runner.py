@@ -547,11 +547,12 @@ class Esito:
     # la fa una persona, che deve poter andare a quel commit e guardarlo.
     commit_senza_rosso: list[dict[str, str]] = field(default_factory=list)
     # I test nati verdi che il gate ha lasciato passare perché mordono: `{"commit",
-    # "titolo", "test", "mutante"}`. Stanno nel rapporto per la stessa ragione dei
-    # commit senza rosso — chi legge deve poter andare a quella riga — e in più
-    # perché un passaggio senza ragione scritta è una parola, e la parola qui non
-    # vale (PBI-105).
-    test_che_mordono: list[dict[str, str]] = field(default_factory=list)
+    # "titolo", "test", "mutante", "tipo", "prove"}`, dove le prove sono i mutanti
+    # provati fino al kill, ognuno con esito e tipo (PBI-365). Stanno nel rapporto
+    # per la stessa ragione dei commit senza rosso — chi legge deve poter andare a
+    # quella riga — e in più perché un passaggio senza ragione scritta è una
+    # parola, e la parola qui non vale (PBI-105).
+    test_che_mordono: list[dict] = field(default_factory=list)
     # Tempi: il totale è il tempo di parete del PBI, il resto ne è la scomposizione.
     iniziato: str = ""
     finito: str = ""
@@ -1755,29 +1756,49 @@ def falliti_per_asserzione(c: ComandoDiProva, uscita: str) -> set[str]:
             for caso in file.get("assertionResults", []) if caso.get("status") == "failed"}
 
 
-def morde(c: ComandoDiProva, chiave: str) -> bool:
-    """Il test `chiave`, rigirato com'è adesso l'albero, fallisce **per asserzione**.
+UCCISO = "ucciso per asserzione"
+PER_ECCEZIONE = "fallito per eccezione"
+SOPRAVVISSUTO = "sopravvissuto"
+# vitest scrive `failed` sia per un `expect` mancato sia per un'eccezione del
+# codice, e le matcher di jest-dom non lanciano tutte `AssertionError`: lì vale la
+# regola di prima, e chi legge il rapporto deve saperlo (PBI-365, decisione 5).
+TIPO_NON_MISURATO = "tipo non misurato per vitest"
 
-    Il rapporto di vitest si toglie prima di girare: se il mutante fa morire il
-    processo prima di scriverlo, resterebbe quello del giro prima a dire il falso.
-    Un test che non termina sotto il mutante non ha morso: ha girato a vuoto.
+
+def morde(c: ComandoDiProva, chiave: str) -> tuple[str, str]:
+    """Com'è andato il test `chiave`, rigirato com'è adesso l'albero: `(esito,
+    tipo)`, con l'esito fra `UCCISO`, `PER_ECCEZIONE` e `SOPRAVVISSUTO`.
+
+    Morde solo se fallisce **per asserzione**. Il rapporto di vitest si toglie
+    prima di girare: se il mutante fa morire il processo prima di scriverlo,
+    resterebbe quello del giro prima a dire il falso. Un test che non termina
+    sotto il mutante non ha morso: ha girato a vuoto.
     """
     if c.rapporto is not None:
         c.rapporto.unlink(missing_ok=True)
     try:
         _, uscita = esegui(c.argv, c.cartella, timeout=600)
     except subprocess.TimeoutExpired:
-        return False
-    return chiave in falliti_per_asserzione(c, uscita)
+        return SOPRAVVISSUTO, ""
+    # I tipi di **questo** test, un caso per riga se è parametrico.
+    tipi = [tipo for nodo, tipo in tipi_dei_falliti(uscita).items()
+            if c.linguaggio == "python" and RE_PARAMETRO.sub("", nodo) == chiave]
+    if chiave not in falliti_per_asserzione(c, uscita):
+        return (PER_ECCEZIONE, tipi[0]) if tipi else (SOPRAVVISSUTO, "")
+    if c.linguaggio != "python":
+        return UCCISO, TIPO_NON_MISURATO
+    return UCCISO, next(tipo for tipo in tipi if tipo in TIPI_DI_ASSERZIONE)
 
 
-def quarta_lettura(albero: Path, base: str, sha: str,
-                   comando: ComandoDiProva, chiave: str) -> tuple[str | None, int]:
+def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
+                   chiave: str) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
     """Il test nato verde, rigirato contro i mutanti delle righe del branch.
 
-    Torna il primo mutante che lo fa fallire — descritto — e quanti ne ha provati.
-    `None` e il conto quando nessuno lo fa fallire: quel test non guarda le righe
-    che il branch ha scritto, e la lettura resta «nato verde».
+    Torna la prova del primo mutante che lo fa fallire per asserzione, e tutte le
+    prove fatte fino a lì: `{"mutante", "esito", "tipo"}`, una per mutante, perché
+    chi legge il rapporto veda anche quelli sopravvissuti e quelli falliti per
+    eccezione (PBI-365). `None` quando nessuno lo uccide: quel test non guarda le
+    righe che il branch ha scritto, e la lettura resta «nato verde».
 
     Un mutante alla volta, nello stesso worktree in cui il test è stato visto
     verde: il file si riscrive con la riga guasta, il test gira da solo, e si esce
@@ -1786,7 +1807,7 @@ def quarta_lettura(albero: Path, base: str, sha: str,
     """
     test = comando.origine[chiave]
     da_solo, _ = comandi_dei_test(albero, [test])
-    provati = 0
+    prove: list[dict[str, str]] = []
     for percorso, righe in righe_cambiate(base, sha).items():
         if linguaggio_del_file(percorso) != test.linguaggio:
             continue  # un test Python non morde un .ts, e rigirarlo lì è tempo perso
@@ -1800,14 +1821,16 @@ def quarta_lettura(albero: Path, base: str, sha: str,
                 if guasto is None:
                     continue
                 file.write_text(guasto, encoding="utf-8")
-                provati += 1
-                if morde(da_solo[0], chiave):
-                    return descrizione_del_mutante(percorso, m), provati
+                esito, tipo = morde(da_solo[0], chiave)
+                prove.append({"mutante": descrizione_del_mutante(percorso, m),
+                              "esito": esito, "tipo": tipo})
+                if esito == UCCISO:
+                    return prove[-1], prove
         finally:
             # Com'era, sempre: il test nato verde dopo questo legge lo stesso file,
             # e i suoi mutanti devono nascere dal sorgente e non dall'ultimo guasto.
             file.write_text(sorgente, encoding="utf-8")
-    return None, provati
+    return None, prove
 
 
 def sorgente_del_mutante(percorso: str, sorgente: str, m: Mutante) -> str | None:
@@ -1875,8 +1898,8 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
     """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso.
 
     Un test nato verde ha la quarta lettura prima di finire fra i mancati: se
-    morde un mutante delle righe del branch, va in `morsi` — commit, test, mutante
-    — e non ferma niente.
+    morde un mutante delle righe del branch, va in `morsi` — commit, test, mutante,
+    tipo del fallimento e le prove fatte fino al kill — e non ferma niente.
     """
     mancati: list[dict[str, str]] = []
     morsi = morsi if morsi is not None else []
@@ -1896,31 +1919,52 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                     continue
                 lettura = ESITI_MANCATI[esiti[chiave]]
                 if esiti[chiave] == "verde":
-                    mutante, provati = quarta_lettura(albero, base, sha, comando, chiave)
-                    if mutante is not None:
+                    ucciso, prove = quarta_lettura(albero, base, sha, comando, chiave)
+                    if ucciso is not None:
                         morsi.append({"commit": sha[:7], "titolo": titolo,
-                                      "test": etichetta, "mutante": mutante})
+                                      "test": etichetta, "mutante": ucciso["mutante"],
+                                      "tipo": ucciso["tipo"], "prove": prove})
                         continue
-                    lettura = lettura_del_verde(provati)
+                    lettura = lettura_del_verde(prove)
                 per_lettura[lettura].append(etichetta)
             for lettura, elenco in per_lettura.items():
                 mancati.append(voce_mancata(sha, titolo, elenco, lettura, coda))
     return mancati
 
 
-def lettura_del_verde(provati: int) -> str:
+def descrizione_del_morso(m: dict, rientro: str) -> str:
+    """La riga «nato verde, ma morde» con il mutante **e** il tipo, e sotto le
+    prove fatte fino al kill, una per riga: `mutante: esito (tipo)`."""
+    tipo = f" ({m['tipo']})" if m.get("tipo") else ""
+    righe = [f"{rientro}→ nato verde, ma morde: {m['mutante']}{tipo}"]
+    for p in m.get("prove", []):
+        tipo = f" ({p['tipo']})" if p["tipo"] else ""
+        righe.append(f"{rientro}  · {p['mutante']}: {p['esito']}{tipo}")
+    return "\n".join(righe)
+
+
+def lettura_del_verde(prove: list[dict[str, str]]) -> str:
     """Cosa si scrive di un nato verde dopo la quarta lettura.
 
     Con dei mutanti provati la lettura è più forte di «il codice c'era già»: dice
     che il test **non guarda** le righe che il branch ha scritto. Senza — il branch
     non ha righe di produzione, o i suoi mutanti non compilano — resta quella di
     prima, e lo dice: zero provati non è «nessuno lo fa fallire».
+
+    I mutanti che l'hanno fatto fallire per eccezione si contano a parte, col tipo:
+    chi legge un «non morde» deve vedere che un guasto il test l'ha sentito, e
+    perché non conta (PBI-365).
     """
-    if provati == 0:
+    if not prove:
         return f"{ESITI_MANCATI['verde']} — e nessun mutante da provare sulle righe cambiate"
-    quanti = "1 mutante provato" if provati == 1 else f"{provati} mutanti provati"
-    return (f"nato verde e non morde: a quel commit il test passa, e {quanti} sulle "
-            f"righe che il branch ha cambiato non lo fanno fallire")
+    quanti = "1 mutante provato" if len(prove) == 1 else f"{len(prove)} mutanti provati"
+    lettura = (f"nato verde e non morde: a quel commit il test passa, e {quanti} sulle "
+               f"righe che il branch ha cambiato non lo fanno fallire")
+    tipi = [p["tipo"] for p in prove if p["esito"] == PER_ECCEZIONE]
+    if tipi:
+        lettura += (f" per asserzione; {len(tipi)} {PER_ECCEZIONE} "
+                    f"({', '.join(sorted(set(tipi)))}), che non è un morso")
+    return lettura
 
 
 def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
@@ -2449,7 +2493,7 @@ def esegui_pbi(
         e.test_che_mordono += morsi
         for m in morsi:
             print(f"    ── {m['commit']} {m['titolo']} ──\n"
-                  f"       {m['test']}\n       → nato verde, ma morde: {m['mutante']}")
+                  f"       {m['test']}\n{descrizione_del_morso(m, '       ')}")
         if senza_rosso:
             # `fermato` e non un rilievo da chiudere in un giro di revisione: il ciclo
             # mancato è **ex ante**, e nessuna fix lo annulla. Mandare il Builder a
@@ -2918,7 +2962,7 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
         print(f"{len(morsi)} test nati verdi che mordono, in {base}..{solo_ref}:\n")
         for m in morsi:
             print(f"  {m['commit']}  {m['titolo']}\n    {m['test']}\n"
-                  f"    → nato verde, ma morde: {m['mutante']}\n")
+                  f"{descrizione_del_morso(m, '    ')}\n")
     if not mancati:
         print(f"Il rosso c'è stato: in {base}..{solo_ref} nessun test è nato verde.")
         return 0
