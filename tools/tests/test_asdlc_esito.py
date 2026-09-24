@@ -242,3 +242,26 @@ def test_il_verdetto_del_critic_e_obbligatorio_e_chiuso(argomenti, tmp_path):
     assert risultato.get("isError") is True
     assert "verdetto" in parole_della_risposta(risultato)
     assert not esito.exists()
+
+
+# --- La prima chiamata valida è definitiva ------------------------------------
+
+
+@pytest.mark.parametrize("prima, seconda", [
+    pytest.param(("fatto", {"riepilogo": "finito"}), ("fermati", {"domanda": "e ora?"}),
+                 id="fatto-poi-fermati"),
+    pytest.param(("fermati", {"domanda": "e ora?"}), ("fatto", {"riepilogo": "finito"}),
+                 id="fermati-poi-fatto"),
+])
+def test_la_seconda_chiamata_si_rifiuta_e_il_file_resta_quello_della_prima(
+        prima, seconda, tmp_path):
+    esito = tmp_path / "esito.json"
+    risposte = parla("builder", esito, [
+        *apertura(), chiamata(1, *prima), chiamata(2, *seconda),
+    ])
+
+    assert risposte[1].get("result", {}).get("isError") is False
+    rifiuto = risposte[2].get("result", {})
+    assert rifiuto.get("isError") is True
+    assert "già dichiarato" in parole_della_risposta(rifiuto)
+    assert leggi_esito(esito) == {"esito": prima[0], **prima[1]}
