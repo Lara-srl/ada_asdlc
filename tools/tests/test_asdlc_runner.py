@@ -172,6 +172,86 @@ class TestIlCriticPuoSospendere:
             )
 
 
+class TestLEsitoVieneDallaChiamata:
+    """PBI-367, primo criterio: il runner decide dal file d'esito, non dal testo.
+
+    `ADR-0027`. Il testo libero del modello resta contenuto per le persone. I
+    quattro casi sono i difetti 32, 34, 35 e 36 di `PBI-102` visti dal giro
+    intero: un marcatore citato nel testo non deve più contare niente, e il
+    difetto 36 — un `NON PRONTO` che cita il `PASS` letto come `pass` — avrebbe
+    aperto la PR su un lavoro respinto.
+    """
+
+    @pytest.mark.parametrize(
+        "esiti, testi, stato, nota, domanda, rapporto",
+        [
+            pytest.param(
+                {"builder": FATTO, "critic": verdetto("pass")},
+                {"builder": "Il controllo sta dopo quello dello stop.\n"
+                            "STOP: la migrazione si esegue?\n",
+                 "critic": "VERDETTO: PASS\n"},
+                "fatto", None, "", None,
+                id="builder-fatto-con-stop-nel-testo",
+            ),
+            pytest.param(
+                {"builder": fermati("la spec dice netto,\nil PBI lordo: quale vale?"),
+                 "critic": verdetto("pass")},
+                {"builder": "Tutto verde.\nFATTO: i criteri sono chiusi\n",
+                 "critic": "VERDETTO: PASS\n"},
+                "fermato",
+                "domanda dell'agente: la spec dice netto, / il PBI lordo: quale vale?",
+                "la spec dice netto,\nil PBI lordo: quale vale?", None,
+                id="builder-fermati-con-fatto-nel-testo",
+            ),
+            pytest.param(
+                {"builder": FATTO, "critic": verdetto("non pronto", "1. manca il test")},
+                {"builder": "FATTO: fatto\n",
+                 "critic": "Non posso dare VERDETTO: PASS senza il test.\n"
+                           "VERDETTO: NON PRONTO\n"},
+                "non convergente", None, "", "1. manca il test",
+                id="critic-non-pronto-che-cita-pass",
+            ),
+            pytest.param(
+                {"builder": FATTO, "critic": fermati("la 0011 tocca pratiche:\nla eseguo?")},
+                {"builder": "FATTO: fatto\n", "critic": "Ho letto il diff e i commit.\n"},
+                "sospeso", "domanda del critic: la 0011 tocca pratiche: / la eseguo?",
+                "la 0011 tocca pratiche:\nla eseguo?", "Ho letto il diff e i commit.",
+                id="critic-fermati-senza-marcatori",
+            ),
+        ],
+    )
+    def test_decide_il_file_d_esito(
+        self, monkeypatch, tmp_path, esiti, testi, stato, nota, domanda, rapporto
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "MAX_REVISIONI", 0)
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("3" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        gate: list[str] = []
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: gate.append("gate") or [])
+        monkeypatch.setattr(runner, "esegui", agente_finto(esiti, testi))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == stato, (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: ha deciso il testo, "
+            "non la chiamata"
+        )
+        if nota is not None:
+            assert esito.nota.split(" · ")[0] == nota, (
+                "la domanda arriva intera, con le righe unite da « / »"
+            )
+        assert esito.domanda == domanda, "nel rapporto JSON la domanda sta intera"
+        if rapporto is not None:
+            assert rapporto in esito.rapporto_critic
+        if stato == "fermato":
+            assert gate == [], "dopo un fermati del Builder i gate non partono"
+
+
 class TestIlSospesoChiudeAlPrimoGiro:
     def test_non_consuma_le_revisioni(self, monkeypatch, git_finto, tmp_path):
         """È il difetto che è costato quattro giri su PBI-203.
