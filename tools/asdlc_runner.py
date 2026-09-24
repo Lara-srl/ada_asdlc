@@ -544,6 +544,9 @@ class Esito:
     nota: str = ""
     pr: str = ""
     rapporto_critic: str = ""
+    # La domanda di un `fermato` del Builder o di un `sospeso` del Critic, intera:
+    # nella nota le sue righe si uniscono con « / », qui restano com'erano.
+    domanda: str = ""
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -881,9 +884,40 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     return config
 
 
+class Invocazione(NamedTuple):
+    """Cosa resta di un'invocazione: il codice d'uscita di `claude -p`, il suo
+    testo, e l'esito che il server ha scritto — `None` se l'agente non ha fatto
+    nessuna chiamata valida."""
+
+    codice: int
+    uscita: str
+    dichiarato: dict | None
+
+
+def esito_dichiarato(percorso: Path) -> dict | None:
+    """L'esito che il server ha scritto nel file di questa invocazione, o `None`.
+
+    È l'unica lettura dell'esito, per il Builder e per il Critic, e non ha un
+    ripiego sul testo: il testo libero del modello non decide niente
+    (`ADR-0027`). Prima c'erano due parser di marcatori, e ogni forma nuova
+    che un modello scriveva chiedeva una regola in più (difetti 32, 34, 35 e
+    36 di `PBI-102`).
+    """
+    try:
+        return json.loads(percorso.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def una_riga(testo: str) -> str:
+    """Un testo su più righe nella nota, che è una colonna di `runs/tempi.csv`:
+    le righe si uniscono con « / », e non se ne perde nessuna."""
+    return " / ".join(r.strip() for r in testo.splitlines() if r.strip())
+
+
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
-                  esito: Path | None) -> tuple[int, str]:
-    """Lancia un agente con il server dell'esito accanto.
+                  esito: Path | None) -> Invocazione:
+    """Lancia un agente con il server dell'esito accanto, e legge l'esito.
 
     `--mcp-config` è variadico come `--allowedTools`: lo chiude
     `--strict-mcp-config`, un flag booleano, e il prompt viene dopo. Nella
@@ -891,8 +925,9 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     config, e `-p` è partito senza input.
     """
     config = config_del_server(ruolo, esito)
-    return esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
-                             f"@{prompt}"], REPO)
+    codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
+                                       f"@{prompt}"], REPO)
+    return Invocazione(codice, uscita, esito_dichiarato(esito))
 
 
 def git(*args: str) -> str:
@@ -2062,11 +2097,6 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     return mancati
 
 
-VERDETTI = {"VERDETTO: PASS": "pass",
-            "VERDETTO: NON PRONTO": "non pronto",
-            "VERDETTO: SOSPESO": "sospeso"}
-
-
 def revisione_critica(pbi_path: Path) -> Verdetto:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
     print("    critic … ", end="", flush=True)
@@ -2077,30 +2107,24 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
     prompt_file, file_esito = file_dell_invocazione("critic")
     prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
-    _, out = invoca_agente("critic", CRITIC, prompt_file, file_esito)
+    _, out, dichiarato = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
     # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio.
-    esito = next((v for riga, v in VERDETTI.items() if riga in out), None)
-    if esito is None:
+    if dichiarato is None:
         print("GUASTO")
         raise RuntimeError(f"il Critic non ha emesso un verdetto — output:\n{out[-2000:]}")
 
-    domanda = ""
-    if esito == "sospeso":
-        if "STOP:" not in out:
-            # Stessa regola del verdetto mancante, per la stessa ragione: sospendere
-            # senza dire cosa si aspetta lascia una persona davanti a un muro, e un
-            # muro non è una diagnosi.
-            print("GUASTO")
-            raise RuntimeError(
-                f"il Critic ha sospeso senza scrivere la domanda — output:\n{out[-2000:]}"
-            )
-        domanda = out.split("STOP:")[-1].strip().splitlines()[0]
-
-    print({"pass": "PASS", "non pronto": "NON PRONTO", "sospeso": "SOSPESO"}[esito])
-    return Verdetto(esito, domanda, out)
+    # Il sospeso senza domanda non arriva fin qui: lo rifiuta lo strumento. Il
+    # rapporto è il riepilogo della chiamata; per il sospeso, che non ne ha, il
+    # testo finale entra come contesto per chi legge, e non decide niente.
+    if dichiarato["esito"] == "fermati":
+        verdetto = Verdetto("sospeso", dichiarato["domanda"], out)
+    else:
+        verdetto = Verdetto(dichiarato["verdetto"], "", dichiarato["riepilogo"])
+    print(verdetto.esito.upper())
+    return verdetto
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
@@ -2352,30 +2376,6 @@ def trova_pbi(pbi: str) -> Path | None:
     return REPO / nome if nome else None
 
 
-def fermata_del_builder(uscita: str) -> str | None:
-    """La domanda con cui il Builder si è fermato, o `None` se non si è fermato.
-
-    Una fermata è una **riga** che, dopo lo `strip()`, si apre con `STOP:`; la
-    domanda è il resto di quella riga, e le righe dopo non ne fanno parte. Prima
-    bastava la stringa in un punto qualunque della risposta: il 23/09/2026 il
-    Builder di PBI-363 aveva finito, ha citato il marcatore fra due backtick nel
-    riepilogo, e il giro ha chiuso `fermato` con mezza frase per domanda
-    (`runs/20260923-103007.json`, difetto 32 di PBI-102).
-
-    Se l'ultima riga si apre con `FATTO:` il Builder ha finito, qualunque cosa ci
-    sia sopra: un riepilogo che ricopia il protocollo del prompt non è una domanda.
-    """
-    righe = uscita.strip().splitlines()
-    if righe and righe[-1].strip().startswith("FATTO:"):
-        return None
-    domanda = None
-    for riga in righe:
-        riga = riga.strip()
-        if riga.startswith("STOP:"):
-            domanda = riga.removeprefix("STOP:").strip()
-    return domanda
-
-
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
 ) -> Esito:
@@ -2478,10 +2478,11 @@ def esegui_pbi(
             cmd = BUILDER + ([] if primo_del_giro else ["-c"])
             primo_del_giro = False
             with misura(e, "builder"):
-                _, out = invoca_agente("builder", cmd, prompt_file, file_esito)
+                dichiarato = invoca_agente("builder", cmd, prompt_file, file_esito).dichiarato
 
-            if (domanda := fermata_del_builder(out)) is not None:
-                return chiudi("fermato", f"domanda dell'agente: {domanda}")
+            if dichiarato is not None and dichiarato["esito"] == "fermati":
+                e.domanda = dichiarato["domanda"]
+                return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
 
             # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
             # il registro non si scrive più dal branch (`ADR-0020`).
@@ -2588,7 +2589,8 @@ def esegui_pbi(
             # diagnosi non cambia riprovando, perché ciò che manca non è nel
             # repository. Riprovare qui è esattamente ciò che è costato a PBI-203
             # cinque giri e 1h26m per tornare al punto di partenza.
-            return chiudi("sospeso", f"domanda del critic: {verdetto.domanda}")
+            e.domanda = verdetto.domanda
+            return chiudi("sospeso", f"domanda del critic: {una_riga(verdetto.domanda)}")
         if revisione == MAX_REVISIONI:
             # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
             # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
