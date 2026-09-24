@@ -4390,6 +4390,48 @@ class TestUnEccezioneDelCodiceMutatoNonEUnMorso:
         )
 
 
+class TestLaRigaCheDecideSiCancellaConPass:
+    """PBI-365, decisione 3: dove la riga cancellata lascerebbe un file che non
+    compila, la cancellazione la sostituisce con `pass` alla stessa indentazione.
+
+    Nel primo giro di PBI-364 la riga che decideva era
+    `return riga.removeprefix("STOP:").strip()`, unica istruzione del suo `if`:
+    cancellata lasciava un `if` vuoto, il mutante si scartava, e nessun altro la
+    toccava. Il `pass` tiene il blocco valido e toglie ciò che la riga fa.
+    """
+
+    SORGENTE = ("def fermata(riga):\n"
+                "    riga = riga.strip()\n"
+                "    if riga.startswith('STOP:'):\n"
+                "        return riga.removeprefix('STOP:').strip()\n"
+                "    return None\n")
+
+    def test_il_return_unico_nel_suo_if_diventa_pass_e_la_guardia_lo_uccide(
+        self, repo_di_prova, tmp_path
+    ):
+        """La guardia copia il modulo com'è quando gira: l'ultima copia è quella
+        del mutante che l'ha uccisa, perché il gate esce al primo kill."""
+        copia = tmp_path / "modulo-sotto-il-mutante.py"
+        repo_di_prova.commit("feat: la fermata", {"backend/app/fermata.py": self.SORGENTE})
+        repo_di_prova.commit("test: la guardia della fermata", {
+            "backend/tests/test_fermata.py":
+                "from pathlib import Path\n\n"
+                "import app.fermata as modulo\n\n\n"
+                "def test_la_guardia():\n"
+                f"    Path({str(copia)!r}).write_text(Path(modulo.__file__).read_text())\n"
+                "    assert modulo.fermata('STOP: x') == 'x'\n",
+        })
+        morsi: list[dict[str, str]] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert "backend/app/fermata.py:4" in morsi[0]["mutante"]
+        assert "riga cancellata" in morsi[0]["mutante"]
+        assert copia.read_text().splitlines()[3] == "        pass"
+        assert [m.dopo for m in runner.mutanti_del_sorgente(self.SORGENTE, {4})] == [""], (
+            "un mutante solo di cancellazione sulla riga che decide"
+        )
+
+
 class TestSiCancellaSoloDentroUnCorpo:
     """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
     la guardia ha ucciso era la cancellazione di `import { … } from '../lib/nav'`
