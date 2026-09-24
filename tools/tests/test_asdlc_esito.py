@@ -199,6 +199,42 @@ def test_una_chiamata_valida_scrive_l_esito(ruolo, nome, argomenti, atteso, tmp_
     assert leggi_esito(esito) == atteso
 
 
+@pytest.mark.parametrize("ruolo, nome, argomenti, atteso", [
+    pytest.param("builder", "fermati", {"domanda": DOMANDA, "esito": "fatto"},
+                 {"esito": "fermati", "domanda": DOMANDA},
+                 id="fermati-con-esito-fatto"),
+    pytest.param("builder", "fatto", {"riepilogo": "finito", "verdetto": "pass"},
+                 {"esito": "fatto", "riepilogo": "finito"},
+                 id="builder-fatto-con-verdetto"),
+    pytest.param("critic", "fermati", {"domanda": DOMANDA, "verdetto": "pass"},
+                 {"esito": "fermati", "domanda": DOMANDA},
+                 id="critic-fermati-con-verdetto"),
+])
+def test_nel_file_d_esito_entrano_solo_i_campi_dello_schema(ruolo, nome, argomenti,
+                                                            atteso, tmp_path):
+    """La CLI non fa rispettare lo schema (*critic-d*): un campo in più scelto dal
+    modello non deve riscrivere l'esito né portarci un verdetto che il ruolo non ha.
+    Nel log, invece, la chiamata resta intera."""
+    esito = tmp_path / "esito.json"
+    risposte = parla(ruolo, esito, [*apertura(), chiamata(1, nome, argomenti)])
+
+    assert risposte[1].get("result", {}).get("isError") is False
+    assert leggi_esito(esito) == atteso
+    riga = json.loads(Path(f"{esito}.chiamate.jsonl").read_text(encoding="utf-8"))
+    assert riga["argomenti"] == argomenti
+
+
+def test_uno_strumento_sconosciuto_si_rifiuta_e_il_file_non_nasce(tmp_path):
+    esito = tmp_path / "esito.json"
+    risposte = parla("builder", esito,
+                     [*apertura(), chiamata(1, "altro", {"riepilogo": "finito"})])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is True
+    assert "altro" in parole_della_risposta(risultato)
+    assert not esito.exists()
+
+
 def parole_della_risposta(risultato):
     return " ".join(c.get("text", "") for c in risultato.get("content", []))
 
