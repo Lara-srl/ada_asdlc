@@ -154,3 +154,45 @@ def test_un_metodo_sconosciuto_riceve_un_errore_json_rpc(tmp_path):
     risposte = parla("builder", tmp_path / "esito.json",
                      [*apertura(), richiesta(1, "resources/list")])
     assert risposte[1].get("error", {}).get("code") == -32601
+
+
+def chiamata(id_, nome, argomenti):
+    return richiesta(id_, "tools/call", {"name": nome, "arguments": argomenti})
+
+
+def leggi_esito(esito):
+    return json.loads(esito.read_text(encoding="utf-8"))
+
+
+# --- Una chiamata valida scrive l'esito --------------------------------------
+
+DOMANDA = "La spec dice due cose diverse sul netto.\nQuale vale?"
+RAPPORTO = "Tre rilievi.\n1. manca un test\n2. un commento falso\n3. niente altro"
+
+
+@pytest.mark.parametrize("ruolo, nome, argomenti, atteso", [
+    pytest.param("builder", "fatto", {"riepilogo": "il server risponde"},
+                 {"esito": "fatto", "riepilogo": "il server risponde"},
+                 id="builder-fatto"),
+    pytest.param("builder", "fermati", {"domanda": DOMANDA},
+                 {"esito": "fermati", "domanda": DOMANDA},
+                 id="builder-fermati"),
+    pytest.param("critic", "fatto", {"verdetto": "pass", "riepilogo": RAPPORTO},
+                 {"esito": "fatto", "verdetto": "pass", "riepilogo": RAPPORTO},
+                 id="critic-pass"),
+    pytest.param("critic", "fatto", {"verdetto": "non pronto", "riepilogo": RAPPORTO},
+                 {"esito": "fatto", "verdetto": "non pronto", "riepilogo": RAPPORTO},
+                 id="critic-non-pronto"),
+    pytest.param("critic", "fermati", {"domanda": DOMANDA},
+                 {"esito": "fermati", "domanda": DOMANDA},
+                 id="critic-fermati"),
+])
+def test_una_chiamata_valida_scrive_l_esito(ruolo, nome, argomenti, atteso, tmp_path):
+    esito = tmp_path / "esito.json"
+    risposte = parla(ruolo, esito, [*apertura(), chiamata(1, nome, argomenti)])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is False
+    assert risultato.get("content"), "il modello deve ricevere una conferma"
+    assert esito.is_file(), "il file d'esito non è stato scritto"
+    assert leggi_esito(esito) == atteso
