@@ -66,12 +66,18 @@ def _contenuto(testo: str, errore: bool) -> dict:
 
 def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     """Scrive l'esito della chiamata nel file `esito`: l'oggetto che il runner
-    leggerà, con il nome dello strumento sotto `esito` e gli argomenti accanto.
+    leggerà, con il nome dello strumento sotto `esito` e i campi dello schema accanto.
 
     Una chiamata che non passa la validazione riceve `isError` con il motivo, e
     il file non si scrive: il modello legge l'errore e può richiamare. La prima
     chiamata valida è definitiva: il file nasce con `O_EXCL`, e dopo di lei
-    ogni chiamata si rifiuta e lo lascia com'è."""
+    ogni chiamata si rifiuta e lo lascia com'è.
+
+    Nel file entrano solo i campi dello schema del ruolo: la CLI non lo fa
+    rispettare, e un argomento in più non deve riscrivere l'esito."""
+    if nome not in ("fatto", "fermati"):
+        return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
+                          errore=True)
     campo = "domanda" if nome == "fermati" else "riepilogo"
     testo = argomenti.get(campo)
     if not isinstance(testo, str) or not testo.strip():
@@ -81,13 +87,17 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
         return _contenuto(f"Il campo «verdetto» vale {argomenti.get('verdetto')!r}: deve "
                           f"essere uno fra {VERDETTI}. Richiama fatto con il verdetto.",
                           errore=True)
+    dichiarato = {"esito": nome}
+    if ruolo == "critic" and nome == "fatto":
+        dichiarato["verdetto"] = argomenti["verdetto"]
+    dichiarato[campo] = testo
     try:
         descrittore = os.open(esito, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except FileExistsError:
         return _contenuto("Esito già dichiarato: la prima chiamata valida è "
                           "definitiva, e questa non cambia niente.", errore=True)
     with os.fdopen(descrittore, "w", encoding="utf-8") as file:
-        json.dump({"esito": nome, **argomenti}, file, ensure_ascii=False)
+        json.dump(dichiarato, file, ensure_ascii=False)
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
 
 
