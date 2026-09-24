@@ -4551,6 +4551,38 @@ class TestIlRapportoDiceMutanteETipoPerOgniGuardia:
         assert "non misurato" in prova[1]
 
 
+class TestIlGateCorrettoNonRegredisce:
+    """PBI-365, criterio 4: le guardie. Descrivono comportamenti che `main` ha già
+    — un `AssertionError` è un kill, la riga di continuazione si cancella, `b)` non
+    dà mutanti, il `pass` non nasce fuori da un corpo — e nascono verdi: le giudica
+    la quarta lettura, che le lascia passare solo se un mutante delle righe del
+    ramo le fa fallire. Per questo ognuna guarda il **risultato** che quelle righe
+    producono — l'insieme dei falliti, l'elenco delle prove — e non solo che la
+    funzione giri.
+    """
+
+    RIEPILOGO = ("tests/test_x.py::test_assert FAILED\n"
+                 "tests/test_x.py::test_messaggio FAILED\n"
+                 "tests/test_x.py::test_raises FAILED\n"
+                 "tests/test_x.py::test_nome FAILED\n"
+                 "=== short test summary info ===\n"
+                 "FAILED tests/test_x.py::test_assert - assert 1 == 2\n"
+                 "FAILED tests/test_x.py::test_messaggio - AssertionError: il totale: 3\n"
+                 "FAILED tests/test_x.py::test_raises - Failed: DID NOT RAISE ValueError\n"
+                 "FAILED tests/test_x.py::test_nome - NameError: name 'righe' is not defined\n")
+
+    def test_un_fallimento_per_asserzione_resta_un_kill(self):
+        """L'`assert` riscritto da pytest, l'`AssertionError` col suo messaggio e il
+        `Failed` di `pytest.raises` sono asserzioni del test; il `NameError` no."""
+        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python", {})
+
+        assert runner.falliti_per_asserzione(comando, self.RIEPILOGO) == {
+            "tests/test_x.py::test_assert",
+            "tests/test_x.py::test_messaggio",
+            "tests/test_x.py::test_raises",
+        }
+
+
 class TestSiCancellaSoloDentroUnCorpo:
     """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
     la guardia ha ucciso era la cancellazione di `import { … } from '../lib/nav'`
