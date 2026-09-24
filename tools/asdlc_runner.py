@@ -532,6 +532,7 @@ class Verdetto:
     esito: str  # pass | non pronto | sospeso | senza esito
     domanda: str  # valorizzata solo su `sospeso`
     rapporto: str
+    registro: dict | None = None  # la voce dell'invocazione, come `Invocazione.registro`
 
 
 @dataclass
@@ -555,6 +556,8 @@ class Esito:
     # La domanda di un `fermato` del Builder o di un `sospeso` del Critic, intera:
     # nella nota le sue righe si uniscono con « / », qui restano com'erano.
     domanda: str = ""
+    # Una voce per invocazione di un agente, nell'ordine: `Invocazione.registro`.
+    invocazioni: list[dict] = field(default_factory=list)
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -842,7 +845,8 @@ def misura(e: Esito, voce: str):
         e.tempi[voce] += time.monotonic() - t0
 
 
-def esegui(cmd: list[str], cwd: Path, timeout: int = 7200) -> tuple[int, str]:
+def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
+           flussi: tuple[Path, Path] | None = None) -> tuple[int, str]:
     """Il varco verso il mondo. Un comando che non esiste torna `127`, non alza.
 
     `subprocess.run` alza `FileNotFoundError`, e l'eccezione saliva fino a
@@ -850,12 +854,19 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200) -> tuple[int, str]:
     rapporto — un `pytest` non installato spegneva la sequenza invece di essere
     il gate rosso con la diagnosi più ovvia che ci sia (difetto 11). `127` è la
     convenzione della shell per «comando non trovato», e la nota dice quale.
+
+    Con `flussi`, stdout e stderr si scrivono anche in due file separati: nel
+    testo reso sono concatenati, e per un agente senza esito sono ciò che
+    distingue un limite d'uso da un crash della CLI (PBI-367, decisione 11).
     """
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
         return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
                      f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
+    if flussi is not None:
+        flussi[0].write_text(p.stdout, encoding="utf-8")
+        flussi[1].write_text(p.stderr, encoding="utf-8")
     return p.returncode, (p.stdout + p.stderr)
 
 
@@ -894,12 +905,15 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
 
 class Invocazione(NamedTuple):
     """Cosa resta di un'invocazione: il codice d'uscita di `claude -p`, il suo
-    testo, e l'esito che il server ha scritto — `None` se l'agente non ha fatto
-    nessuna chiamata valida."""
+    testo, l'esito che il server ha scritto — `None` se l'agente non ha fatto
+    nessuna chiamata valida — e la voce per `runs/<run>.json`: ruolo, codice e
+    i percorsi di stdout, stderr e del log delle chiamate al server, dove si
+    vedono anche quelle rifiutate (PBI-367, decisioni 7 e 11)."""
 
     codice: int
     uscita: str
     dichiarato: dict | None
+    registro: dict
 
 
 def esito_dichiarato(percorso: Path) -> dict | None:
@@ -933,9 +947,19 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     config, e `-p` è partito senza input.
     """
     config = config_del_server(ruolo, esito)
+    fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
-                                       f"@{prompt}"], REPO)
-    return Invocazione(codice, uscita, esito_dichiarato(esito))
+                                       f"@{prompt}"], REPO, flussi=(fuori, dentro))
+    registro = {"ruolo": ruolo, "codice": codice, "stdout": str(fuori),
+                "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl"}
+    return Invocazione(codice, uscita, esito_dichiarato(esito), registro)
+
+
+def nota_senza_esito(registro: dict) -> str:
+    """La nota di un `senza esito`: chi non ha chiamato, e dove guardare."""
+    return (f"il {registro['ruolo']} non ha chiamato né fatto né fermati · "
+            f"codice d'uscita {registro['codice']} · stdout {registro['stdout']} · "
+            f"stderr {registro['stderr']}")
 
 
 def git(*args: str) -> str:
@@ -2115,7 +2139,7 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
     prompt_file, file_esito = file_dell_invocazione("critic")
     prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
-    _, out, dichiarato = invoca_agente("critic", CRITIC, prompt_file, file_esito)
+    _, out, dichiarato, registro = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
@@ -2123,15 +2147,15 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     # è `senza esito`, come per il Builder, e non più un'eccezione (`ADR-0027`).
     if dichiarato is None:
         print("SENZA ESITO")
-        return Verdetto("senza esito", "", out)
+        return Verdetto("senza esito", "", out, registro)
 
     # Il sospeso senza domanda non arriva fin qui: lo rifiuta lo strumento. Il
     # rapporto è il riepilogo della chiamata; per il sospeso, che non ne ha, il
     # testo finale entra come contesto per chi legge, e non decide niente.
     if dichiarato["esito"] == "fermati":
-        verdetto = Verdetto("sospeso", dichiarato["domanda"], out)
+        verdetto = Verdetto("sospeso", dichiarato["domanda"], out, registro)
     else:
-        verdetto = Verdetto(dichiarato["verdetto"], "", dichiarato["riepilogo"])
+        verdetto = Verdetto(dichiarato["verdetto"], "", dichiarato["riepilogo"], registro)
     print(verdetto.esito.upper())
     return verdetto
 
@@ -2487,14 +2511,16 @@ def esegui_pbi(
             cmd = BUILDER + ([] if primo_del_giro else ["-c"])
             primo_del_giro = False
             with misura(e, "builder"):
-                dichiarato = invoca_agente("builder", cmd, prompt_file, file_esito).dichiarato
+                invocazione = invoca_agente("builder", cmd, prompt_file, file_esito)
+            e.invocazioni.append(invocazione.registro)
+            dichiarato = invocazione.dichiarato
 
             # Senza una chiamata valida il Builder non ha detto niente che si possa
             # leggere, qualunque cosa ci sia nel suo testo: si chiude qui, senza
             # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
             # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
             if dichiarato is None:
-                return chiudi("senza esito", "il builder non ha chiamato né fatto né fermati")
+                return chiudi("senza esito", nota_senza_esito(invocazione.registro))
             if dichiarato["esito"] == "fermati":
                 e.domanda = dichiarato["domanda"]
                 return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
@@ -2595,12 +2621,14 @@ def esegui_pbi(
 
         with misura(e, "critic"):
             verdetto = revisione_critica(pbi_path)
+        if verdetto.registro is not None:
+            e.invocazioni.append(verdetto.registro)
         rapporto = verdetto.rapporto
         e.rapporto_critic = rapporto[-6000:]
         if verdetto.esito == "pass":
             break
         if verdetto.esito == "senza esito":
-            return chiudi("senza esito", "il critic non ha chiamato né fatto né fermati")
+            return chiudi("senza esito", nota_senza_esito(verdetto.registro))
         if verdetto.esito == "sospeso":
             # Non si consuma una revisione e non si richiama il Critic: la sua
             # diagnosi non cambia riprovando, perché ciò che manca non è nel
