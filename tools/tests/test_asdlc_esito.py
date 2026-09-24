@@ -196,3 +196,29 @@ def test_una_chiamata_valida_scrive_l_esito(ruolo, nome, argomenti, atteso, tmp_
     assert risultato.get("content"), "il modello deve ricevere una conferma"
     assert esito.is_file(), "il file d'esito non è stato scritto"
     assert leggi_esito(esito) == atteso
+
+
+def testo_della_risposta(risultato):
+    return " ".join(c.get("text", "") for c in risultato.get("content", []))
+
+
+# --- Un testo vuoto si rifiuta ------------------------------------------------
+
+
+@pytest.mark.parametrize("ruolo, nome, argomenti, campo", [
+    pytest.param("builder", "fermati", {"domanda": ""}, "domanda", id="domanda-vuota"),
+    pytest.param("critic", "fermati", {"domanda": " \n\t "}, "domanda",
+                 id="domanda-di-spazi"),
+    pytest.param("builder", "fatto", {"riepilogo": ""}, "riepilogo", id="riepilogo-vuoto"),
+])
+def test_un_testo_vuoto_si_rifiuta_e_il_file_non_nasce(ruolo, nome, argomenti, campo,
+                                                        tmp_path):
+    """Il modello legge l'errore e richiama: deve sapere quale campo manca
+    (nella prova del 24/09 l'ha riportato alla lettera)."""
+    esito = tmp_path / "esito.json"
+    risposte = parla(ruolo, esito, [*apertura(), chiamata(1, nome, argomenti)])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is True
+    assert campo in testo_della_risposta(risultato)
+    assert not esito.exists()
