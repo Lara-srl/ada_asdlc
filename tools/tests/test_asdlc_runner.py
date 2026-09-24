@@ -4433,6 +4433,124 @@ class TestLaRigaCheDecideSiCancellaConPass:
         )
 
 
+class TestIlRapportoDiceMutanteETipoPerOgniGuardia:
+    """PBI-365, decisioni 4 e 5: per ogni guardia il rapporto dice i mutanti che
+    ha provato e com'è andato ciascuno, fino al primo kill — *sopravvissuto*,
+    *fallito per eccezione* col tipo, *ucciso per asserzione* — e la riga «nato
+    verde, ma morde» nomina il mutante **e** il tipo. Sulla #254 il rapporto
+    diceva solo il mutante, e chi leggeva non poteva vedere che era un `NameError`.
+    Per vitest il tipo non si misura, e il rapporto lo scrive invece di tacere.
+    """
+
+    MORSO = {"commit": "abc1234", "titolo": "test(ci): la guardia della fermata",
+             "test": "tests/test_fermata.py::test_la_guardia",
+             "mutante": "backend/app/fermata.py:4  `return fermate[-1]` → riga cancellata",
+             "tipo": "AssertionError",
+             "prove": [
+                 {"mutante": "backend/app/fermata.py:2  `righe = uscita.strip()` → "
+                             "riga cancellata",
+                  "esito": "fallito per eccezione", "tipo": "NameError"},
+                 {"mutante": "backend/app/fermata.py:4  `return fermate[-1]` → riga cancellata",
+                  "esito": "ucciso per asserzione", "tipo": "AssertionError"},
+             ]}
+
+    def test_ogni_mutante_provato_ha_esito_e_tipo(self, repo_di_prova):
+        """Riga 2 cancellata: la guardia sopravvive. Riga 3: muore di
+        `AttributeError`. Riga 4: fallisce per asserzione, e lì ci si ferma."""
+        repo_di_prova.commit("feat: le parole", {
+            "backend/app/fermata.py":
+                "def ha_parole(uscita):\n"
+                "    pulita = None\n"
+                "    pulita = uscita.strip()\n"
+                "    return len(pulita.split()) > 0\n",
+        })
+        repo_di_prova.commit("test: la guardia", {
+            "backend/tests/test_fermata.py":
+                "from app.fermata import ha_parole\n\n\n"
+                "def test_la_guardia():\n"
+                "    assert ha_parole('   ') is False\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert morsi[0].get("tipo") == "AssertionError"
+        prove = morsi[0]["prove"]
+        assert [(p["esito"], p["tipo"]) for p in prove] == [
+            ("sopravvissuto", ""),
+            ("fallito per eccezione", "AttributeError"),
+            ("ucciso per asserzione", "AssertionError"),
+        ]
+        assert [p["mutante"].split("  ")[0] for p in prove] == [
+            "backend/app/fermata.py:2", "backend/app/fermata.py:3", "backend/app/fermata.py:4"]
+
+    def test_la_guardia_che_non_morde_dice_i_mutanti_falliti_per_eccezione(
+        self, repo_di_prova
+    ):
+        """Riga 2 cancellata: `NameError`. Riga 3: la somma torna `None`, e la
+        guardia non guarda il valore. Nessun morso, ma chi legge deve sapere che un
+        mutante l'ha fatta fallire e perché non conta."""
+        repo_di_prova.commit("feat: la somma", {
+            "backend/app/somma.py":
+                "def somma(a, b):\n    totale = a + b\n    return totale\n",
+        })
+        sha = repo_di_prova.commit("test: la somma gira", {
+            "backend/tests/test_somma.py":
+                "from app.somma import somma\n\n\n"
+                "def test_la_somma_gira():\n    somma(1, 1)\n    assert True\n",
+        })
+
+        mancati = runner.gate_del_rosso()
+
+        assert [m["commit"] for m in mancati] == [sha[:7]]
+        assert "2 mutanti provati" in mancati[0]["esito"]
+        assert "per eccezione" in mancati[0]["esito"]
+        assert "NameError" in mancati[0]["esito"]
+
+    def test_il_log_del_giro_nomina_mutante_tipo_e_prove(self, monkeypatch, capsys):
+        TestITestCheMordonoFinisconoNelRapporto._mondo(self, monkeypatch)
+
+        esito = runner.esegui_pbi("PBI-365", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.test_che_mordono == [self.MORSO]
+        a_schermo = capsys.readouterr().out
+        [morso] = [r for r in a_schermo.splitlines() if "nato verde, ma morde" in r]
+        assert "fermata.py:4" in morso and "AssertionError" in morso
+        assert "fallito per eccezione" in a_schermo and "NameError" in a_schermo
+
+    def test_il_gate_lanciato_da_solo_nomina_mutante_tipo_e_prove(self, monkeypatch, capsys):
+        def _gate(base, ref, morsi=None, **k):
+            morsi.append(dict(self.MORSO))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+
+        assert runner.stampa_il_gate_del_rosso("origin/main..pbi/pbi-365") == 0
+        a_schermo = capsys.readouterr().out
+        [morso] = [r for r in a_schermo.splitlines() if "nato verde, ma morde" in r]
+        assert "fermata.py:4" in morso and "AssertionError" in morso
+        assert "fallito per eccezione" in a_schermo and "NameError" in a_schermo
+
+    def test_per_vitest_il_tipo_non_e_misurato(self, tmp_path, monkeypatch):
+        """vitest scrive `failed` sia per un `expect` mancato sia per un'eccezione
+        del codice, e le matcher di jest-dom non lanciano tutte `AssertionError`:
+        il fallimento resta un morso, e il tipo si dichiara non misurato."""
+        rapporto = tmp_path / "vitest.json"
+        comando = runner.ComandoDiProva(tmp_path, ["npm", "test"], "vitest",
+                                        {"morde": "x.test.ts -t morde"}, rapporto)
+
+        def _vitest(argv, cartella, timeout=None):
+            rapporto.write_text(json.dumps({"testResults": [{"status": "failed",
+                "assertionResults": [{"title": "morde", "status": "failed"}]}]}))
+            return 1, ""
+
+        monkeypatch.setattr(runner, "esegui", _vitest)
+
+        prova = runner.morde(comando, "morde")
+
+        assert isinstance(prova, tuple) and prova[0] == "ucciso per asserzione"
+        assert "non misurato" in prova[1]
+
+
 class TestSiCancellaSoloDentroUnCorpo:
     """Dalla prima prova sul caso vero (`pbi/pbi-333-giro4`, 01/09): il mutante che
     la guardia ha ucciso era la cancellazione di `import { … } from '../lib/nav'`
