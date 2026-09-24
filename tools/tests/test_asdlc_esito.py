@@ -13,6 +13,9 @@ che fallisce e non un errore di raccolta.
 """
 
 import ast
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +23,10 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SORGENTE = REPO / "tools" / "asdlc_esito.py"
+
+# Una versione che il server non ha motivo di conoscere: deve rispondere con
+# quella del client, non con una sua (decisione 5).
+VERSIONE_DEL_CLIENT = "2099-01-01"
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +57,100 @@ def test_il_server_esiste_e_usa_solo_la_libreria_standard():
     }
     fuori = importati - sys.stdlib_module_names
     assert not fuori, f"import fuori dalla libreria standard: {sorted(fuori)}"
+
+
+# --- Il varco: un processo vero, una riga JSON per messaggio -----------------
+
+
+def richiesta(id_, metodo, parametri=None):
+    messaggio = {"jsonrpc": "2.0", "id": id_, "method": metodo}
+    if parametri is not None:
+        messaggio["params"] = parametri
+    return messaggio
+
+
+def notifica(metodo):
+    return {"jsonrpc": "2.0", "method": metodo}
+
+
+def apertura():
+    """Ciò che la CLI manda prima di tutto il resto."""
+    return [
+        richiesta(0, "initialize", {
+            "protocolVersion": VERSIONE_DEL_CLIENT,
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        }),
+        notifica("notifications/initialized"),
+    ]
+
+
+def parla(ruolo, esito, messaggi):
+    """Manda `messaggi` al server, chiude stdin e torna le risposte per id.
+
+    Una notifica non ha risposta: il server che ne desse una produrrebbe una
+    riga senza id, e la si trova sotto `None`."""
+    ambiente = {**os.environ, "ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)}
+    fatto = subprocess.run(
+        [sys.executable, str(SORGENTE)],
+        input="".join(json.dumps(m) + "\n" for m in messaggi),
+        capture_output=True, text=True, env=ambiente, timeout=20,
+    )
+    assert fatto.returncode == 0, fatto.stderr
+    risposte = {}
+    for riga in fatto.stdout.splitlines():
+        if riga.strip():
+            risposta = json.loads(riga)
+            risposte[risposta.get("id")] = risposta
+    attese = {m["id"] for m in messaggi if "id" in m}
+    assert attese <= set(risposte), f"richieste senza risposta: {sorted(attese - set(risposte))}"
+    return risposte
+
+
+# --- Il server parla MCP su stdio --------------------------------------------
+
+SCHEMI_DEL_RUOLO = {
+    "builder": {
+        "fatto": ({"riepilogo"}, {"riepilogo"}),
+        "fermati": ({"domanda"}, {"domanda"}),
+    },
+    "critic": {
+        "fatto": ({"verdetto", "riepilogo"}, {"verdetto", "riepilogo"}),
+        "fermati": ({"domanda"}, {"domanda"}),
+    },
+}
+
+
+@pytest.mark.parametrize("ruolo", ["builder", "critic"])
+def test_il_server_risponde_a_initialize_e_elenca_i_due_strumenti(ruolo, tmp_path):
+    risposte = parla(ruolo, tmp_path / "esito.json",
+                     [*apertura(), richiesta(1, "tools/list")])
+
+    assert None not in risposte, "una notifica ha ricevuto una risposta"
+    iniziale = risposte[0]["result"]
+    assert iniziale["protocolVersion"] == VERSIONE_DEL_CLIENT
+    assert "tools" in iniziale["capabilities"]
+    assert iniziale["serverInfo"]["name"] == "asdlc"
+
+    strumenti = {s["name"]: s for s in risposte[1]["result"]["tools"]}
+    assert set(strumenti) == set(SCHEMI_DEL_RUOLO[ruolo])
+    for nome, (proprieta, obbligatori) in SCHEMI_DEL_RUOLO[ruolo].items():
+        schema = strumenti[nome]["inputSchema"]
+        assert strumenti[nome]["description"]
+        assert schema["type"] == "object"
+        assert set(schema["properties"]) == proprieta
+        assert set(schema["required"]) == obbligatori
+
+
+def test_il_verdetto_del_critic_ha_due_valori_nello_schema(tmp_path):
+    risposte = parla("critic", tmp_path / "esito.json",
+                     [*apertura(), richiesta(1, "tools/list")])
+    fatto = next(s for s in risposte[1]["result"]["tools"] if s["name"] == "fatto")
+    assert fatto["inputSchema"]["properties"]["verdetto"]["enum"] == ["pass", "non pronto"]
+
+
+def test_un_metodo_sconosciuto_riceve_un_errore_json_rpc(tmp_path):
+    """Una richiesta senza risposta lascia la CLI in attesa."""
+    risposte = parla("builder", tmp_path / "esito.json",
+                     [*apertura(), richiesta(1, "resources/list")])
+    assert risposte[1].get("error", {}).get("code") == -32601
