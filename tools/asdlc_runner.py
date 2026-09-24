@@ -1415,9 +1415,13 @@ def comandi_dei_test(albero: Path,
 
     # `-v` e non `-q`: il conteggio finale è una somma e non dice **quale**, mentre
     # una riga per test dice nome ed esito. `--tb=no` perché il traceback qui non
-    # serve — la coda che finisce nel rapporto è la stessa per tutti.
+    # serve — la coda che finisce nel rapporto è la stessa per tutti. `-rf` scrive
+    # in fondo, per ogni test fallito, l'eccezione che l'ha fatto fallire: è ciò
+    # che separa un'asserzione mancata da un `NameError` del codice mutato. E `-vv`
+    # e non `-v`, perché con `-v` pytest taglia quel messaggio alla larghezza del
+    # terminale, e con un node id lungo lo toglie del tutto.
     comandi: list[ComandoDiProva] = [
-        ComandoDiProva(cartella, ["pytest", "--tb=no", "-v", *nodi], "python",
+        ComandoDiProva(cartella, ["pytest", "--tb=no", "-vv", "-rf", *nodi], "python",
                        {nodo: nodo for nodo in nodi},
                        origine={nodo: origine[nodo] for nodo in nodi})
         for cartella, nodi in per_pytest.items()
@@ -1487,6 +1491,33 @@ RE_ESITO_PYTEST = re.compile(
 # `file::test[caso]` → `file::test`: l'id che il gate ha chiesto è quello della
 # funzione, e un test parametrizzato ne stampa uno per caso.
 RE_PARAMETRO = re.compile(r"\[.*\]$")
+# `pytest -rf` riepiloga ogni fallito come `FAILED file::test - messaggio`.
+RE_RIEPILOGO_PYTEST = re.compile(r"^FAILED (\S+::\S+) - (.*)$", re.MULTILINE)
+# Un'asserzione del test: l'`assert` che pytest riscrive, e il `Failed` di
+# `pytest.fail` e di `pytest.raises` che non vede l'eccezione attesa.
+TIPI_DI_ASSERZIONE = {"AssertionError", "Failed"}
+
+
+def tipo_del_fallimento(messaggio: str) -> str:
+    """Il tipo dell'eccezione, dal messaggio del riepilogo di `-rf`.
+
+    Un `assert` riscritto da pytest senza messaggio suo non porta il tipo davanti
+    — il messaggio è la sua espressione, `assert 1 == 2` — e lì il tipo è
+    `AssertionError`. Tutto il resto comincia col nome della classe:
+    `NameError: name 'righe' is not defined`, o solo `AssertionError`.
+    """
+    if messaggio == "assert" or messaggio.startswith("assert "):
+        return "AssertionError"
+    trovato = re.match(r"[A-Za-z_][\w.]*(?=:|$)", messaggio)
+    return trovato.group(0) if trovato else ""
+
+
+def tipi_dei_falliti(uscita: str) -> dict[str, str]:
+    """Per ogni test `FAILED` di pytest, il tipo di eccezione che l'ha fatto
+    fallire, per node id e **per caso**: il riepilogo di `-rf` ne scrive una riga
+    ciascuno."""
+    return {nodo: tipo_del_fallimento(messaggio)
+            for nodo, messaggio in RE_RIEPILOGO_PYTEST.findall(uscita)}
 
 ESITI_DI_PYTEST = {"PASSED": "verde", "XPASS": "verde",
                    "FAILED": "rosso", "ERROR": "rosso",
@@ -1703,10 +1734,17 @@ def falliti_per_asserzione(c: ComandoDiProva, uscita: str) -> set[str]:
     passare ogni guardia, perché cancellare una riga a caso rompe la sintassi una
     volta su tre. E l'`ERROR` per test — la fixture che esplode — sta dalla stessa
     parte: il test non è arrivato all'asserzione.
+
+    Né ci arriva il `FAILED` per un'eccezione del codice — un `NameError` perché la
+    riga cancellata definiva un nome: è un guasto di esistenza, e lo uccide anche
+    un test che non guarda niente (la #254, PBI-365). In pytest il tipo si legge
+    dal riepilogo di `-rf`, e conta solo un `AssertionError` o un `Failed`: un
+    `FAILED` di cui il riepilogo non dice il tipo non è un'asserzione misurata.
     """
     if c.linguaggio == "python":
         return {RE_PARAMETRO.sub("", nodo)
-                for nodo, esito in RE_ESITO_PYTEST.findall(uscita) if esito == "FAILED"}
+                for nodo, tipo in tipi_dei_falliti(uscita).items()
+                if tipo in TIPI_DI_ASSERZIONE}
     try:
         dati = json.loads(c.rapporto.read_text(encoding="utf-8"))
     except (AttributeError, OSError, ValueError):
