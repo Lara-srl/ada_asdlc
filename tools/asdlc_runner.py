@@ -99,13 +99,24 @@ AGENTI = ("claude", "asdlc_runner")
 # dall'hook; `Bash` va permesso per nome, o gira in una sandbox che non scrive
 # fuori dalla working directory. `--allowedTools` è variadico e non deve restare
 # in coda: il prompt si concatena subito dopo, e se lo mangia.
-BUILDER = ["claude", "-p", "--allowedTools", "Bash", "--permission-mode", "acceptEdits"]
+# I due strumenti del server dell'esito vanno permessi per nome, come `Bash`: senza,
+# `-p` li nega (`permission_denials`) e il file d'esito non si scrive (PBI-367).
+BUILDER = ["claude", "-p", "--allowedTools", "Bash", "mcp__asdlc__fatto", "mcp__asdlc__fermati",
+           "--permission-mode", "acceptEdits"]
 # Model routing (patterns/model-routing.md): il giudizio costa più della generazione,
-# e il Critic non scrive niente — solo lettura e `git diff`.
+# e il Critic non scrive niente — solo lettura e `git diff`, più i due strumenti
+# con cui dichiara l'esito.
 # ⚠️ `--allowedTools <tools...>` è **variadico**: se resta in coda si mangia il prompt,
 # che viene concatenato subito dopo, e `-p` parte senza input. Il flag variadico non
-# deve mai essere l'ultimo. Il Builder non ne soffre perché i suoi flag sono booleani.
-CRITIC = ["claude", "-p", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)", "--model", "opus"]
+# deve mai essere l'ultimo, e lo stesso vale per `--mcp-config` (`invoca_agente`).
+CRITIC = ["claude", "-p", "--allowedTools",
+          "Read,Grep,Glob,Bash(git diff:*),mcp__asdlc__fatto,mcp__asdlc__fermati",
+          "--model", "opus"]
+
+# Il server dell'esito (`PBI-366`, `ADR-0027`): sta accanto al runner, e si
+# estrae con lui. I ruoli sono i suoi: un altro valore lo ferma all'avvio.
+SERVER_DELL_ESITO = Path(__file__).resolve().parent / "asdlc_esito.py"
+RUOLI = ("builder", "critic")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
 # il numero; la ragione di ognuno sta lì accanto, dove chi lo cambia la legge.
@@ -835,6 +846,53 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200) -> tuple[int, str]:
         return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
                      f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
     return p.returncode, (p.stdout + p.stderr)
+
+
+def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
+    """Il prompt e il file d'esito di un'invocazione, in `LOG_DIR` e con lo
+    stesso prefisso: sono la stessa invocazione vista da due parti."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    return (LOG_DIR / f"{timestamp}_{ruolo}_prompt.txt",
+            LOG_DIR / f"{timestamp}_{ruolo}_esito.json")
+
+
+def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
+    """Scrive la config MCP che fa partire il server dell'esito per questa
+    invocazione, accanto al suo file d'esito, e ne torna il percorso.
+
+    Un ruolo che non è `builder` o `critic`, o un file d'esito mancante,
+    sollevano `ValueError` **prima** del lancio. Il server si fermerebbe da sé
+    all'avvio, ma dentro un giro quella fermata arriverebbe come un agente
+    senza esito, dopo i minuti del Builder (PBI-367, decisione 4).
+
+    Il file d'esito non si crea qui: lo crea il server alla prima chiamata
+    valida, con `O_EXCL`, e un file già presente la rifiuterebbe.
+    """
+    if ruolo not in RUOLI:
+        raise ValueError(f"ruolo {ruolo!r}: il server dell'esito conosce solo {RUOLI}")
+    if esito is None:
+        raise ValueError(f"il {ruolo} non ha un file d'esito in cui il server possa scrivere")
+    config = esito.with_suffix(".mcp.json")
+    config.write_text(json.dumps({"mcpServers": {"asdlc": {
+        "command": sys.executable,
+        "args": [str(SERVER_DELL_ESITO)],
+        "env": {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)},
+    }}}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return config
+
+
+def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
+                  esito: Path | None) -> tuple[int, str]:
+    """Lancia un agente con il server dell'esito accanto.
+
+    `--mcp-config` è variadico come `--allowedTools`: lo chiude
+    `--strict-mcp-config`, un flag booleano, e il prompt viene dopo. Nella
+    prima prova il prompt in coda a `--mcp-config` è stato preso per un'altra
+    config, e `-p` è partito senza input.
+    """
+    config = config_del_server(ruolo, esito)
+    return esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
+                             f"@{prompt}"], REPO)
 
 
 def git(*args: str) -> str:
@@ -2017,10 +2075,9 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     except ValueError:
         percorso = pbi_path
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    prompt_file = LOG_DIR / f"{timestamp}_critic_prompt.txt"
+    prompt_file, file_esito = file_dell_invocazione("critic")
     prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
-    _, out = esegui(CRITIC + [f"@{prompt_file}"], REPO)
+    _, out = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
@@ -2416,13 +2473,12 @@ def esegui_pbi(
         while gate_falliti < MAX_TENTATIVI:
             print(f"  builder — giro {e.tentativi + igiene + 1}")
             # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-            prompt_file = LOG_DIR / f"{timestamp}_builder_prompt.txt"
+            prompt_file, file_esito = file_dell_invocazione("builder")
             prompt_file.write_text(prompt, encoding="utf-8")
-            cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [f"@{prompt_file}"]
+            cmd = BUILDER + ([] if primo_del_giro else ["-c"])
             primo_del_giro = False
             with misura(e, "builder"):
-                _, out = esegui(cmd, REPO)
+                _, out = invoca_agente("builder", cmd, prompt_file, file_esito)
 
             if (domanda := fermata_del_builder(out)) is not None:
                 return chiudi("fermato", f"domanda dell'agente: {domanda}")
