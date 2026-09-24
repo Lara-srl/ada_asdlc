@@ -64,7 +64,15 @@ def _contenuto(testo: str, errore: bool) -> dict:
 
 def chiama(nome: str, argomenti: dict, esito: str) -> dict:
     """Scrive l'esito della chiamata nel file `esito`: l'oggetto che il runner
-    leggerà, con il nome dello strumento sotto `esito` e gli argomenti accanto."""
+    leggerà, con il nome dello strumento sotto `esito` e gli argomenti accanto.
+
+    Una chiamata che non passa la validazione riceve `isError` con il motivo, e
+    il file non si scrive: il modello legge l'errore e può richiamare."""
+    campo = "domanda" if nome == "fermati" else "riepilogo"
+    testo = argomenti.get(campo)
+    if not isinstance(testo, str) or not testo.strip():
+        return _contenuto(f"Il campo «{campo}» è vuoto: scrivilo e richiama {nome}.",
+                          errore=True)
     with open(esito, "w", encoding="utf-8") as file:
         json.dump({"esito": nome, **argomenti}, file, ensure_ascii=False)
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
