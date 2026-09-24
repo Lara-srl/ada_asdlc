@@ -515,7 +515,8 @@ except asdlc_config.ErroreDiConfigurazione as guasto:
 
 @dataclass
 class Verdetto:
-    """Cosa ha detto il Critic. Tre esiti, non due.
+    """Cosa ha detto il Critic. Tre esiti, non due — più `senza esito`, che è
+    il Critic che non ha detto niente.
 
     ``non pronto`` e ``sospeso`` sembrano vicini e sono opposti: il primo dice
     «c'è del lavoro da fare», il secondo «il lavoro non può proseguire finché
@@ -523,7 +524,7 @@ class Verdetto:
     nessuna correzione chiude — su PBI-203 sono stati quattro giri buttati.
     """
 
-    esito: str  # pass | non pronto | sospeso
+    esito: str  # pass | non pronto | sospeso | senza esito
     domanda: str  # valorizzata solo su `sospeso`
     rapporto: str
 
@@ -531,12 +532,14 @@ class Verdetto:
 @dataclass
 class Esito:
     pbi: str
-    # fatto | rosso | respinto | non convergente | fermato | sospeso | saltato
+    # fatto | rosso | respinto | non convergente | fermato | sospeso | senza esito | saltato
     #
     # `fermato` e `sospeso` sono tutti e due «aspetta una persona», e restano
     # distinti perché il rimedio è diverso: `fermato` arriva dal Builder e si
     # chiude riscrivendo il PBI che era ambiguo; `sospeso` arriva dal Critic e si
-    # chiude rispondendo alla domanda.
+    # chiude rispondendo alla domanda. `senza esito` è l'agente, dell'uno o
+    # dell'altro ruolo, che non ha fatto nessuna chiamata valida: non aspetta una
+    # risposta, è un'anomalia da guardare (`ADR-0027`).
     stato: str
     tentativi: int = 0
     revisioni: int = 0
@@ -2111,10 +2114,11 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
-    # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio.
+    # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio:
+    # è `senza esito`, come per il Builder, e non più un'eccezione (`ADR-0027`).
     if dichiarato is None:
-        print("GUASTO")
-        raise RuntimeError(f"il Critic non ha emesso un verdetto — output:\n{out[-2000:]}")
+        print("SENZA ESITO")
+        return Verdetto("senza esito", "", out)
 
     # Il sospeso senza domanda non arriva fin qui: lo rifiuta lo strumento. Il
     # rapporto è il riepilogo della chiamata; per il sospeso, che non ne ha, il
@@ -2420,7 +2424,7 @@ def esegui_pbi(
 
     def chiudi(stato: str, nota: str = "") -> Esito:
         # Il conteggio sta **qui** e non dopo il giro dei gate: ogni uscita
-        # anticipata — lo `STOP` del Builder, l'albero che resta sporco — scriveva
+        # anticipata — il `fermati` del Builder, l'albero che resta sporco — scriveva
         # `commit = 0` mentre sul branch c'era il lavoro. Su PBI-209 erano otto
         # commit e 2.174 righe, e la colonna del registro diceva zero: è quella
         # che si guarda per decidere se un branch fermato si butta (difetto 10).
@@ -2480,7 +2484,13 @@ def esegui_pbi(
             with misura(e, "builder"):
                 dichiarato = invoca_agente("builder", cmd, prompt_file, file_esito).dichiarato
 
-            if dichiarato is not None and dichiarato["esito"] == "fermati":
+            # Senza una chiamata valida il Builder non ha detto niente che si possa
+            # leggere, qualunque cosa ci sia nel suo testo: si chiude qui, senza
+            # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
+            # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
+            if dichiarato is None:
+                return chiudi("senza esito", "il builder non ha chiamato né fatto né fermati")
+            if dichiarato["esito"] == "fermati":
                 e.domanda = dichiarato["domanda"]
                 return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
 
@@ -2584,6 +2594,8 @@ def esegui_pbi(
         e.rapporto_critic = rapporto[-6000:]
         if verdetto.esito == "pass":
             break
+        if verdetto.esito == "senza esito":
+            return chiudi("senza esito", "il critic non ha chiamato né fatto né fermati")
         if verdetto.esito == "sospeso":
             # Non si consuma una revisione e non si richiama il Critic: la sua
             # diagnosi non cambia riprovando, perché ciò che manca non è nel
