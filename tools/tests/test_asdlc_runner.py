@@ -324,7 +324,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
             giri["critic"] += 1
             return runner.Verdetto("sospeso", "chi decide se la migrazione si esegue?", "rapporto")
 
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica", critic_sospende)
 
@@ -343,7 +343,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         quale lato è arrivata la domanda, perché il rimedio è diverso: la prima si
         chiude riscrivendo il PBI, la seconda rispondendo.
         """
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
@@ -369,7 +369,7 @@ class TestIlBranchNasceDaOriginMain:
         `git()` alza: il PBI muore prima di cominciare. Ramificare direttamente da
         `origin/main` non tocca nessun branch locale e non può collidere.
         """
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
@@ -395,7 +395,7 @@ class TestIlBranchNasceDaOriginMain:
         """Il `main` locale del worktree può essere indietro di giorni: da quando
         non lo si estrae più, nessuno lo aggiorna. Contare `main..HEAD` gonfierebbe
         i commit del PBI con quelli che main ha ricevuto nel frattempo."""
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
@@ -433,7 +433,7 @@ class TestIlPbiSiCercaSuOriginMain:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
@@ -524,7 +524,7 @@ class TestLIgieneGuardaTuttoLAlbero:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
@@ -590,7 +590,7 @@ class TestLaSessioneRuotaFraLeRevisioni:
         gate = {"chiamate": 0}
         critic = {"chiamate": 0}
 
-        agente = agente_finto({"builder": FATTO}, "FATTO: fatto\n")
+        agente = agente_finto({"builder": FATTO})
 
         def esegui_finto(cmd, cwd, **k):
             comandi.append(cmd)
@@ -762,7 +762,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "gira_gate", _gate)
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
@@ -835,7 +835,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
@@ -867,7 +867,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
                 return runner.Verdetto("non pronto", "", "manca una deroga")
             return runner.Verdetto("pass", "", "")
 
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica", _critic)
         monkeypatch.setattr(
@@ -898,7 +898,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
     decide se buttare il branch guardando quella colonna.
     """
 
-    def _mondo(self, monkeypatch, esito_builder: dict, testo: str, commit: str = "8"):
+    def _mondo(self, monkeypatch, esito_builder: dict, commit: str = "8"):
         def _git(*args: str) -> str:
             if args[:2] == ("status", "--porcelain"):
                 return ""
@@ -909,15 +909,14 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": esito_builder}, testo))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": esito_builder}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
 
     def test_uno_stop_del_builder_conta_i_suoi_commit(self, monkeypatch):
-        self._mondo(monkeypatch, fermati("la migrazione tocca una tabella con dati sopra"),
-                    "STOP: la migrazione tocca una tabella con dati sopra\n")
+        self._mondo(monkeypatch, fermati("la migrazione tocca una tabella con dati sopra"))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
@@ -928,7 +927,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         )
 
     def test_un_sospeso_del_critic_conta_i_suoi_commit(self, monkeypatch):
-        self._mondo(monkeypatch, FATTO, "FATTO: fatto\n", commit="4")
+        self._mondo(monkeypatch, FATTO, commit="4")
         monkeypatch.setattr(
             runner, "revisione_critica",
             lambda p: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
@@ -961,7 +960,7 @@ class TestDiUnGateRossoRestaLaRagione:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "gira_gate",
             lambda attivi: [("pytest", "E   assert 496.51 == 609.00\ntest_riga_12 FAILED")],
@@ -1162,7 +1161,7 @@ class TestSiPuoSaltareIlCritic:
 
     @pytest.fixture
     def builder_verde(self, monkeypatch):
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
@@ -1190,7 +1189,7 @@ class TestSiPuoSaltareIlCritic:
 
     def test_senza_il_flag_il_critic_gira_come_sempre(self, monkeypatch, git_finto):
         """Il default non si sposta: chi non chiede niente ha i tre gate."""
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         giri = {"critic": 0}
 
@@ -1387,7 +1386,7 @@ class TestIlBranchLoPubblicaIlRunner:
 
     def test_un_giro_sospeso_pubblica_lo_stesso_il_suo_branch(self, monkeypatch, git_finto):
         """Il lavoro c'è: sta su un ramo che nessuno vedrà mai, se resta locale."""
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
@@ -1401,7 +1400,7 @@ class TestIlBranchLoPubblicaIlRunner:
 
     def test_un_giro_fatto_non_pubblica_due_volte(self, monkeypatch, git_finto):
         """Sulla strada buona a pubblicare è `apri_pr`, e una volta sola."""
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
@@ -1597,7 +1596,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
             return ""
 
         monkeypatch.setattr(runner, "git", _g)
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica",
                             lambda p: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
@@ -3119,7 +3118,7 @@ class TestIlGateDelRossoStaNelGiro:
                         else ""),
         )
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(
             runner, "revisione_critica", critic or (lambda p: runner.Verdetto("pass", "", "ok"))
@@ -4013,8 +4012,7 @@ class TestIComandiPortanoIlServerDellEsito:
     ):
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")},
-                              {"builder": "FATTO: fatto\n", "critic": "VERDETTO: PASS\n"})
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
         monkeypatch.setattr(runner, "esegui", agente)
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -4348,7 +4346,7 @@ class TestITestCheMordonoFinisconoNelRapporto:
                         else ""),
         )
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(runner, "revisione_critica",
                             lambda p: runner.Verdetto("pass", "", "ok"))
@@ -4928,7 +4926,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
     def test_un_giro_intero_non_nomina_mai_origin_main(self, su_master, git_finto, monkeypatch):
         """Il conteggio dei commit, l'elenco dei file e il gate del rosso: sono
         le letture dentro `esegui_pbi`, e si guardano da fuori tutte insieme."""
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "PASS"))
@@ -5051,7 +5049,7 @@ class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
 
     def _giro(self, monkeypatch, con_critic=True):
         chiamati: list[str] = []
-        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: chiamati.append("gate") or [])
         monkeypatch.setattr(runner, "gate_del_rosso",
                             lambda **k: chiamati.append("rosso") or [])
