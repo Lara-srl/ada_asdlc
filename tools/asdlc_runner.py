@@ -2263,6 +2263,49 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     return verdetto
 
 
+# Il limite documentato di GitHub per il corpo di un commento, in caratteri. Un
+# rapporto più lungo si divide in commenti consecutivi, e non si tronca (PBI-371).
+LIMITE_COMMENTO_GITHUB = 65_536
+
+
+def parti_del_commento(titolo: str, testo: str,
+                       limite: int = LIMITE_COMMENTO_GITHUB) -> list[str]:
+    """Il testo in commenti da al più `limite` caratteri, senza perderne uno.
+
+    Se sta in un commento resta com'è. Altrimenti ogni parte comincia con
+    «**titolo · parte i di k**» e una riga vuota, e le parti, una dopo l'altra,
+    ridanno il testo intero. La testata più lunga è quella con `i = k`: si
+    ricalcola `k` finché il passo che le lascia posto non cambia più."""
+    if len(testo) <= limite:
+        return [testo]
+    k = 1
+    while True:
+        passo = limite - len(f"**{titolo} · parte {k} di {k}**\n\n")
+        necessarie = -(-len(testo) // passo)
+        if necessarie <= k:
+            break
+        k = necessarie
+    pezzi = [testo[i:i + passo] for i in range(0, len(testo), passo)]
+    return [f"**{titolo} · parte {i} di {len(pezzi)}**\n\n{pezzo}"
+            for i, pezzo in enumerate(pezzi, 1)]
+
+
+def commenta_i_rapporti(url: str, e: Esito) -> None:
+    """Un commento sulla PR per ogni revisione del Critic, in ordine, col testo
+    intero del suo file (PBI-371): chi decide il merge lo legge lì, e non in
+    `runs/` dentro il worktree del runner. Il corpo passa da un file, perché un
+    argomento di 65.536 caratteri accentati sfiora il limite di un argomento."""
+    with tempfile.TemporaryDirectory() as cartella:
+        for r in e.rapporti_critic:
+            testo = Path(r["percorso"]).read_text(encoding="utf-8")
+            titolo = f"Critic — revisione {r['revisione']} — {r['verdetto']}"
+            for i, parte in enumerate(parti_del_commento(titolo, testo)):
+                corpo = Path(cartella) / f"{r['revisione']}-{i}.md"
+                corpo.write_text(parte, encoding="utf-8")
+                esegui(["gh", "pr", "comment", url, "--body-file", str(corpo)],
+                       REPO, timeout=300)
+
+
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     """Apre la PR e si ferma lì: il merge è dell'umano (micro-commits §5).
 
@@ -2333,6 +2376,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     if url is None:
         print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
         return ""
+    commenta_i_rapporti(url.group(0), e)
     return url.group(0)
 
 
