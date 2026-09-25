@@ -837,6 +837,47 @@ class TestLInventarioDelGiro:
                 "le altre voci si leggono lo stesso"
             )
 
+    def test_un_ls_remote_che_scade_non_ferma_il_giro_e_non_salta_la_pubblicazione(
+            self, monkeypatch, tmp_path):
+        """`git()` lascia salire `subprocess.TimeoutExpired`, e `ls-remote` è una
+        chiamata di rete. All'inizio l'eccezione fermava il giro prima del Builder;
+        alla fine, dentro `chiudi()` e prima di `pubblica`, sostituiva l'esito vero
+        con un'eccezione del runner e lasciava il ramo fuori da `origin` (difetti 8
+        e 37 di PBI-102). Rilievo 1 del Critic su PBI-363."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        buono = git_dell_inventario()
+
+        # Scade solo l'`ls-remote` dell'inventario, quello con il pattern di tutti i
+        # rami `pbi/pbi-*`. Quello di `rami_su_origin()` dentro `crea_branch()` è il
+        # difetto 52 di PBI-102, di PBI-374 (decisione 9 di PBI-363).
+        def _git(*args: str) -> str:
+            if args[:2] == ("ls-remote", "--heads") and args[-1] == "pbi/pbi-*":
+                raise subprocess.TimeoutExpired(["git", *args], 120)
+            return buono(*args)
+
+        pubblicati: list[str] = []
+
+        def _pubblica(branch: str) -> bool:
+            pubblicati.append(branch)
+            return True
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "pubblica", _pubblica)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito", f"chiuso {esito.stato}: {esito.nota}"
+        assert pubblicati, "il ramo di un giro che si interrompe va su origin"
+        for momento in ("inizio", "fine"):
+            fotografia = esito.inventario[momento]
+            assert "errore" in fotografia["rami"], (
+                "la voce che non si è potuta leggere lo dice, e non finge un elenco vuoto"
+            )
+            assert fotografia["alberi"] == [ALBERO_DEL_GIRO, ALBERO_APPESO], (
+                "le altre voci si leggono lo stesso"
+            )
+
 
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
