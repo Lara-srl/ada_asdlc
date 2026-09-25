@@ -2570,6 +2570,25 @@ def file_dell_inventario() -> dict[str, int]:
     return dict(sorted(file.items()))
 
 
+def lasciato(inizio: dict, fine: dict) -> list[str]:
+    """Ciò che l'inventario di fine ha in più di quello d'inizio, una voce per
+    cosa: `albero …`, `ramo …`, `file <cartella> +n` (PBI-363, decisione 8). Una
+    voce che una delle due fotografie non ha saputo leggere non si confronta."""
+    voci: list[str] = []
+    prima, dopo = inizio.get("alberi"), fine.get("alberi")
+    if isinstance(prima, list) and isinstance(dopo, list):
+        voci += [f"albero {a}" for a in dopo if a not in prima]
+    prima, dopo = inizio.get("rami", {}), fine.get("rami", {})
+    for dove in ("locali", "origin"):
+        if isinstance(prima.get(dove), list) and isinstance(dopo.get(dove), list):
+            voci += [f"ramo {r} ({dove})" for r in dopo[dove] if r not in prima[dove]]
+    prima, dopo = inizio.get("file", {}), fine.get("file", {})
+    if "errore" not in prima and "errore" not in dopo:
+        voci += [f"file {c} +{n - prima.get(c, 0)}" for c, n in dopo.items()
+                 if n > prima.get(c, 0)]
+    return voci
+
+
 def ramo_del_pbi(pbi: str) -> str:
     """`pbi/pbi-322` da `PBI-322`: `[git].prefisso_ramo` più il numero, letto
     dal modello `[backlog].id`. È **l'unico** posto in cui la forma del ramo si
@@ -2776,6 +2795,11 @@ def esegui_pbi(
         chiudi_la_fase()
         e.commit = conta_commit()
         e.inventario["fine"] = inventario()
+        # Contare vale anche quando la strada che lascia il residuo non si riesce a
+        # riprodurre: un albero appeso che si vede nella nota non si perde in /tmp.
+        if resti := lasciato(e.inventario["inizio"], e.inventario["fine"]):
+            print(f"    ⚠️  il giro lascia: {', '.join(resti)}")
+            dichiara(f"il giro lascia: {', '.join(resti)}")
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
         if nota:
