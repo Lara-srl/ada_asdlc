@@ -5347,3 +5347,59 @@ class TestDueInvocazioniNelloStessoIstanteHannoNomiDiversi:
             assert esito.name == prompt.name.replace("_prompt.txt", "_esito.json"), (
                 "prompt ed esito della stessa invocazione hanno lo stesso prefisso"
             )
+
+
+class TestLaChiusuraGiraSempre:
+    """PBI-369, difetto 37 di `PBI-102`: un'eccezione dentro il giro saltava
+    `chiudi()`. La raccoglieva la rete di `main()`, che scriveva `rosso`, ma il
+    ramo non si pubblicava e i commit non si contavano: senza ramo su `origin` il
+    tick rilanciava lo stesso PBI al primo giro utile. Verificato su `main`
+    (`e37caf7`) il 24/09/2026, con il timeout del Builder."""
+
+    @staticmethod
+    def _agente_che_scade(ruolo_che_scade: str):
+        """Un `esegui` che fa l'agente, e per `ruolo_che_scade` alza il timeout
+        che `subprocess.run` alzava prima di PBI-369."""
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if ruolo_ed_esito(cmd)[0] == ruolo_che_scade:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            return agente(cmd, cwd, timeout, **k)
+
+        return _esegui
+
+    @pytest.mark.parametrize(
+        "caso, tipo",
+        [
+            pytest.param("builder", "TimeoutExpired", id="timeout-del-builder"),
+            pytest.param("critic", "TimeoutExpired", id="timeout-del-critic"),
+            pytest.param("gate", "TimeoutExpired", id="timeout-di-un-gate"),
+            pytest.param("rosso", "RuntimeError", id="eccezione-qualunque"),
+        ],
+    )
+    def test_uneccezione_nel_giro_passa_dalla_chiusura(self, monkeypatch, git_finto, caso, tipo):
+        monkeypatch.setattr(runner, "esegui", self._agente_che_scade(caso))
+        if caso == "gate":
+            def gate_che_scade(attivi):
+                raise subprocess.TimeoutExpired(["pytest", "-q"], 3600)
+            monkeypatch.setattr(runner, "gira_gate", gate_che_scade)
+        else:
+            monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        if caso == "rosso":
+            def gate_del_rosso_rotto(**k):
+                raise RuntimeError("worktree usa e getta non creato")
+            monkeypatch.setattr(runner, "gate_del_rosso", gate_del_rosso_rotto)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "rosso"
+        assert any(c[0] == "push" for c in git_finto), (
+            "senza ramo su origin il tick rilancia lo stesso PBI al primo giro utile"
+        )
+        assert esito.commit == 3, "i commit del giro interrotto si contano come gli altri"
+        assert tipo in esito.nota, "il tipo dell'eccezione sta nella nota del giro"
+        traccia = Path(esito.file_traceback)
+        assert traccia.parent == runner.LOG_DIR, "il traceback sta accanto al log del giro"
+        assert "Traceback" in traccia.read_text(encoding="utf-8")
+        assert tipo in traccia.read_text(encoding="utf-8")
