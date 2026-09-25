@@ -5803,3 +5803,8 @@ class TestIlRapportoDelCriticArrivaIntero:
         cmd = catturato["cmd"]
         assert ("Gate deterministici verdi · revisione avversariale del diff PASS."
                 in cmd[cmd.index("--body") + 1])
+
+    def test_il_prompt_del_critic_chiede_il_rapporto_in_italiano(self):
+        """Decisione 8: il PASS di PBI-366 (#263) è arrivato in inglese, e chi legge
+        la PR prima del merge legge in italiano."""
+        assert "Scrivi il rapporto in italiano" in runner.PROMPT_CRITIC
