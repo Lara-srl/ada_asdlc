@@ -5269,3 +5269,25 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
 
     def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
         assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], [], []]
+
+
+class TestITestNonScrivonoNellaCartellaVeraDeiGiri:
+    """PBI-370, difetto 38 di PBI-102: i test che fanno girare `esegui_pbi` con
+    `esegui` sostituito scrivevano prompt, esiti e config MCP nella `runs/` del
+    checkout — 124 file a ogni giro di `pytest tools/tests`, mescolati alle chiamate
+    vere del runner. La fixture di `tools/tests/conftest.py` sposta l'intera
+    `LOG_DIR` in una cartella temporanea del test."""
+
+    def test_un_giro_di_una_classe_che_scrive_non_lascia_file_in_runs(self):
+        cartella = REPO / "runs"
+        prima = set(os.listdir(cartella)) if cartella.exists() else set()
+
+        fatto = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+             str(Path(__file__)), "-k", "TestUnGiroSpesoACommittareNonEUnGateRosso"],
+            cwd=REPO, capture_output=True, text=True, timeout=300,
+        )
+        assert fatto.returncode == 0, (fatto.stdout + fatto.stderr)[-3000:]
+
+        dopo = set(os.listdir(cartella)) if cartella.exists() else set()
+        assert sorted(dopo - prima) == [], "i test hanno scritto nella runs/ del repository"
