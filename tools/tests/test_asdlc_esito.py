@@ -8,11 +8,15 @@ con due strumenti, `fatto` e `fermati`, che scrive l'esito in un file nominato d
 runner. Il runner non lo usa ancora: lo collega `PBI-367`.
 
 I test parlano col server come la CLI: un processo vero, JSON-RPC su righe da
-stdin a stdout. Il modulo non si importa, così un file che non c'è è un'asserzione
-che fallisce e non un errore di raccolta.
+stdin a stdout. Il modulo non si importa in cima al file, così un file che non c'è
+è un'asserzione che fallisce e non un errore di raccolta. Lo carica dal percorso
+solo chi deve sostituirne una funzione (`PBI-372`): un guasto che il processo vero
+non sa produrre a comando.
 """
 
 import ast
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -464,3 +468,47 @@ def test_un_asdlc_esito_mancante_ferma_il_server_all_avvio(valore):
     assert "ASDLC_ESITO" in fatto.stderr
     assert "Traceback" not in fatto.stderr
     assert not fatto.stdout.strip()
+
+
+def carica_il_server():
+    specifica = importlib.util.spec_from_file_location("asdlc_esito", SORGENTE)
+    modulo = importlib.util.module_from_spec(specifica)
+    specifica.loader.exec_module(modulo)
+    return modulo
+
+
+def parla_in_processo(server, monkeypatch, capsys, esito, messaggi):
+    """Fa girare `main()` del modulo caricato, con stdin e ambiente sostituiti:
+    torna il codice d'uscita, le risposte e lo stderr."""
+    monkeypatch.setenv("ASDLC_RUOLO", "builder")
+    monkeypatch.setenv("ASDLC_ESITO", str(esito))
+    monkeypatch.setattr(sys, "stdin",
+                        io.StringIO("".join(_json(m) + "\n" for m in messaggi)))
+    uscita = server.main()
+    catturato = capsys.readouterr()
+    risposte = [json.loads(r) for r in catturato.out.splitlines() if r.strip()]
+    return uscita, risposte, catturato.err
+
+
+def test_un_eccezione_non_prevista_diventa_un_errore_interno_e_il_server_continua(
+        monkeypatch, capsys, tmp_path):
+    """Decisione 6 di `PBI-372`: il principio è «non cade mai», non «non cade nei
+    casi elencati». Un guasto che nessuno ha previsto risponde `-32603` all'`id`
+    del messaggio, finisce su stderr, e il messaggio dopo ha la sua risposta."""
+    server = carica_il_server()
+
+    def guasto(*_argomenti, **_nominali):
+        raise RuntimeError("guasto di prova")
+
+    monkeypatch.setattr(server, "chiama", guasto)
+    uscita, risposte, stderr = parla_in_processo(server, monkeypatch, capsys,
+                                                  tmp_path / "esito.json", [
+        *apertura(), chiamata(1, "fatto", {"riepilogo": "finito"}),
+        richiesta(2, "tools/list"),
+    ])
+
+    assert uscita == 0
+    per_id = {r.get("id"): r for r in risposte}
+    assert per_id.get(1, {}).get("error", {}).get("code") == -32603
+    assert per_id.get(2, {}).get("result", {}).get("tools")
+    assert "guasto di prova" in stderr
