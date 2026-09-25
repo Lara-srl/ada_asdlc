@@ -5556,3 +5556,38 @@ class TestOgniChiamataLasciaDurataECodice:
             assert voce["codice"] == -15, "il codice di una chiamata scaduta è il segnale"
         else:
             assert voce["codice"] == 0
+
+
+class TestIlRapportoDelCriticArrivaIntero:
+    """PBI-371: il rapporto del Critic arriva intero, uno per revisione, anche sulla PR.
+
+    Fino a qui il rapporto stava in `esiti[].rapporto_critic` del JSON del giro,
+    tagliato agli ultimi 6000 caratteri e riscritto a ogni revisione: un rapporto
+    lungo perdeva la testa, e i `NON PRONTO` che avevano portato al `PASS` restavano
+    solo nelle sessioni di Claude Code, che scadono dopo 30 giorni.
+    """
+
+    def _giro(self, monkeypatch, verdetti, **k):
+        """Un giro col Builder che chiama `fatto`, i gate verdi e il Critic che
+        risponde, revisione dopo revisione, i `verdetti` dati."""
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "MAX_REVISIONI", 5)
+        coda = list(verdetti)
+        monkeypatch.setattr(runner, "revisione_critica", lambda p, **_: coda.pop(0))
+        return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False, **k)
+
+    def test_un_rapporto_oltre_i_6000_caratteri_arriva_intero_nel_file(
+        self, monkeypatch, git_finto
+    ):
+        rapporto = "TESTA: il primo rilievo sta qui\n" + "x" * 6972
+        assert len(rapporto) == 7004, "la misura del 25/09 su main"
+
+        self._giro(monkeypatch, [runner.Verdetto("pass", "", rapporto)])
+
+        file = sorted(runner.LOG_DIR.glob("*-PBI-102-critic-0.md"))
+        assert len(file) == 1, "la revisione 0 non ha il suo file in runs/"
+        assert rapporto in file[0].read_text(encoding="utf-8"), (
+            "il rapporto nel file non è intero: la testa è andata persa"
+        )
