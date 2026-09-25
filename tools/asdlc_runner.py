@@ -2326,24 +2326,38 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
     argomento di 65.536 caratteri accentati sfiora il limite di un argomento.
 
     Un commento che non parte non ferma niente: la PR è aperta, i file restano,
-    e la nota dice quali revisioni mancano e perché (`ADR-0008`)."""
+    e la nota dice quali revisioni mancano e perché (`ADR-0008`). Vale anche per
+    un `gh` in timeout e per un file che non si legge, **senza alzare**: da qui
+    un'eccezione arriverebbe a `main()`, che registra `rosso` e senza PR un giro
+    già pubblicato."""
     mancate: list[str] = []
     ragione = ""
+
+    def mancata(r: dict, perche: str) -> None:
+        nonlocal ragione
+        print(f"    ⚠️  commento della revisione {r['revisione']} non partito: {perche}")
+        if str(r["revisione"]) not in mancate:
+            mancate.append(str(r["revisione"]))
+        ragione = ragione or perche
+
     with tempfile.TemporaryDirectory() as cartella:
         for r in e.rapporti_critic:
-            testo = Path(r["percorso"]).read_text(encoding="utf-8")
+            try:
+                testo = Path(r["percorso"]).read_text(encoding="utf-8")
+            except OSError as exc:
+                mancata(r, str(exc)[:200])
+                continue
             titolo = f"Critic — revisione {r['revisione']} — {r['verdetto']}"
             for i, parte in enumerate(parti_del_commento(titolo, testo)):
                 corpo = Path(cartella) / f"{r['revisione']}-{i}.md"
-                corpo.write_text(parte, encoding="utf-8")
-                code, out = esegui(["gh", "pr", "comment", url, "--body-file", str(corpo)],
-                                   REPO, timeout=300)
+                try:
+                    corpo.write_text(parte, encoding="utf-8")
+                    code, out = esegui(["gh", "pr", "comment", url, "--body-file", str(corpo)],
+                                       REPO, timeout=300)
+                except (subprocess.TimeoutExpired, OSError) as exc:
+                    code, out = 1, str(exc)
                 if code != 0:
-                    print(f"    ⚠️  commento della revisione {r['revisione']} non partito: "
-                          f"{out.strip()[:200]}")
-                    if str(r["revisione"]) not in mancate:
-                        mancate.append(str(r["revisione"]))
-                    ragione = ragione or out.strip()[:200]
+                    mancata(r, out.strip()[:200])
     if mancate:
         nota = (f"rapporto del Critic non commentato sulla PR (revisioni {', '.join(mancate)}): "
                 f"{ragione} — i file restano in {LOG_DIR}")
