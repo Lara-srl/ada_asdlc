@@ -365,14 +365,18 @@ def test_ogni_chiamata_finisce_nel_log_comprese_quelle_rifiutate(tmp_path):
 
 
 def parla_a_righe(ruolo, esito, righe):
-    """Come `parla`, ma con righe già scritte, anche non JSON: torna il processo
-    finito e la lista delle risposte, comprese quelle con `id` nullo."""
+    """Come `parla`, ma con righe già scritte, anche non JSON o in byte che non
+    sono UTF-8: torna il processo finito, con stdout e stderr in testo, e la
+    lista delle risposte, comprese quelle con `id` nullo."""
     ambiente = {**os.environ, "ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)}
     fatto = subprocess.run(
         [sys.executable, str(SORGENTE)],
-        input="".join(riga + "\n" for riga in righe),
-        capture_output=True, text=True, env=ambiente, timeout=20,
+        input=b"".join((riga if isinstance(riga, bytes) else riga.encode("utf-8")) + b"\n"
+                       for riga in righe),
+        capture_output=True, env=ambiente, timeout=20,
     )
+    fatto.stdout = fatto.stdout.decode("utf-8")
+    fatto.stderr = fatto.stderr.decode("utf-8", errors="replace")
     risposte = [json.loads(r) for r in fatto.stdout.splitlines() if r.strip()]
     return fatto, risposte
 
@@ -394,6 +398,28 @@ def test_un_messaggio_non_valido_riceve_un_errore_e_il_server_risponde_ancora(
     """Difetto 39 e decisioni 1-2 di `PBI-372`: su `main` la riga non JSON, il
     numero e i `params` in lista facevano cadere il processo, e la lista si
     ignorava senza risposta."""
+    _risponde_con_un_errore_e_poi_ancora(riga, id_atteso, codice, tmp_path)
+
+
+@pytest.mark.parametrize("riga, id_atteso, codice", [
+    pytest.param("[" * 100_000, None, -32700, id="riga-annidata-oltre-la-ricorsione"),
+    pytest.param('{"jsonrpc": "2.0", "id": ' + "1" * 5000 + ', "method": "tools/list"}',
+                 None, -32700, id="id-di-cinquemila-cifre"),
+    pytest.param(_json({"jsonrpc": "2.0", "id": 1, "method": "\ud800"}),
+                 1, -32601, id="metodo-con-surrogato-isolato"),
+    pytest.param(b"\xff\xfe non UTF-8", None, -32700, id="byte-non-utf8"),
+])
+def test_un_guasto_nel_parse_nella_scrittura_o_nella_lettura_riceve_un_errore_e_il_server_risponde_ancora(
+        riga, id_atteso, codice, tmp_path):
+    """Decisioni 1 e 6 di `PBI-372`, dal Critic sulla prima versione: la rete
+    avvolgeva solo `rispondi()`. La riga annidata e l'`id` di cinquemila cifre
+    cadevano nel parse con un'eccezione che non è `JSONDecodeError`, il
+    surrogato isolato nella scrittura su stdout, i byte non UTF-8 nella lettura
+    di stdin."""
+    _risponde_con_un_errore_e_poi_ancora(riga, id_atteso, codice, tmp_path)
+
+
+def _risponde_con_un_errore_e_poi_ancora(riga, id_atteso, codice, tmp_path):
     esito = tmp_path / "esito.json"
     fatto, risposte = parla_a_righe("builder", esito, [
         *map(_json, apertura()), riga, _json(richiesta(2, "tools/list")),
