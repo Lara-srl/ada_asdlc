@@ -355,3 +355,112 @@ def test_ogni_chiamata_finisce_nel_log_comprese_quelle_rifiutate(tmp_path):
     assert [(r["nome"], r["argomenti"]) for r in righe] == chiamate
     for riga in righe:
         datetime.fromisoformat(riga["ora"])
+
+
+# --- Il server non cade mai (`PBI-372`) ---------------------------------------
+
+
+def parla_a_righe(ruolo, esito, righe):
+    """Come `parla`, ma con righe già scritte, anche non JSON: torna il processo
+    finito e la lista delle risposte, comprese quelle con `id` nullo."""
+    ambiente = {**os.environ, "ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)}
+    fatto = subprocess.run(
+        [sys.executable, str(SORGENTE)],
+        input="".join(riga + "\n" for riga in righe),
+        capture_output=True, text=True, env=ambiente, timeout=20,
+    )
+    risposte = [json.loads(r) for r in fatto.stdout.splitlines() if r.strip()]
+    return fatto, risposte
+
+
+def _json(messaggio):
+    return json.dumps(messaggio)
+
+
+@pytest.mark.parametrize("riga, id_atteso, codice", [
+    pytest.param("{non è json", None, -32700, id="riga-non-json"),
+    pytest.param(_json([1, 2]), None, -32600, id="messaggio-lista"),
+    pytest.param(_json(42), None, -32600, id="messaggio-numero"),
+    pytest.param(_json({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                        "params": ["fatto", {"riepilogo": "x"}]}),
+                 1, -32600, id="params-lista"),
+])
+def test_un_messaggio_non_valido_riceve_un_errore_e_il_server_risponde_ancora(
+        riga, id_atteso, codice, tmp_path):
+    """Difetto 39 e decisioni 1-2 di `PBI-372`: su `main` la riga non JSON, il
+    numero e i `params` in lista facevano cadere il processo, e la lista si
+    ignorava senza risposta."""
+    esito = tmp_path / "esito.json"
+    fatto, risposte = parla_a_righe("builder", esito, [
+        *map(_json, apertura()), riga, _json(richiesta(2, "tools/list")),
+    ])
+
+    assert "Traceback" not in fatto.stderr, fatto.stderr
+    assert fatto.returncode == 0
+    errori = [r for r in risposte if r.get("id") == id_atteso and "error" in r]
+    assert [e["error"]["code"] for e in errori] == [codice]
+    elenco = next((r for r in risposte if r.get("id") == 2), {})
+    assert elenco.get("result", {}).get("tools"), "dopo l'errore tools/list non risponde"
+    assert not esito.exists()
+
+
+def test_un_arguments_che_non_e_un_oggetto_si_rifiuta_e_finisce_nel_log(tmp_path):
+    """Difetto 40, decisione 3: la chiamata si rifiuta con `isError`, come ogni
+    chiamata non valida, e il server resta vivo."""
+    esito = tmp_path / "esito.json"
+    fatto, risposte = parla_a_righe("builder", esito, [
+        *map(_json, apertura()),
+        _json(chiamata(1, "fatto", ["il riepilogo"])),
+        _json(richiesta(2, "tools/list")),
+    ])
+
+    assert "Traceback" not in fatto.stderr, fatto.stderr
+    per_id = {r.get("id"): r for r in risposte}
+    rifiuto = per_id.get(1, {}).get("result", {})
+    assert rifiuto.get("isError") is True
+    assert parole_della_risposta(rifiuto)
+    assert not esito.exists()
+    righe = Path(f"{esito}.chiamate.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(r)["argomenti"] for r in righe] == [["il riepilogo"]]
+    assert per_id.get(2, {}).get("result", {}).get("tools")
+
+
+@pytest.mark.parametrize("nome, argomenti, campo", [
+    pytest.param("fatto", {"riepilogo": 42}, "riepilogo", id="riepilogo-numero"),
+    pytest.param("fermati", {"domanda": ["e ora?"]}, "domanda", id="domanda-lista"),
+])
+def test_un_campo_che_non_e_testo_si_rifiuta_dicendolo(nome, argomenti, campo, tmp_path):
+    """Difetto 41, decisione 4: il rifiuto diceva «è vuoto», e il modello
+    cercava il problema nel posto sbagliato."""
+    esito = tmp_path / "esito.json"
+    risposte = parla("builder", esito, [*apertura(), chiamata(1, nome, argomenti)])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is True
+    parole = parole_della_risposta(risultato)
+    assert f"«{campo}» non è testo" in parole
+    assert "vuoto" not in parole
+    assert not esito.exists()
+
+
+@pytest.mark.parametrize("valore", [
+    pytest.param(None, id="esito-mancante"),
+    pytest.param("", id="esito-vuoto"),
+])
+def test_un_asdlc_esito_mancante_ferma_il_server_all_avvio(valore):
+    """Difetto 42, decisione 5: si ferma come per un ruolo sbagliato, con un
+    messaggio che nomina la variabile e senza traceback."""
+    ambiente = {k: v for k, v in os.environ.items() if k != "ASDLC_ESITO"}
+    ambiente["ASDLC_RUOLO"] = "builder"
+    if valore is not None:
+        ambiente["ASDLC_ESITO"] = valore
+    fatto = subprocess.run(
+        [sys.executable, str(SORGENTE)],
+        input="".join(_json(m) + "\n" for m in apertura()),
+        capture_output=True, text=True, env=ambiente, timeout=20,
+    )
+
+    assert fatto.returncode == 2
+    assert "ASDLC_ESITO" in fatto.stderr
+    assert "Traceback" not in fatto.stderr
+    assert not fatto.stdout.strip()
