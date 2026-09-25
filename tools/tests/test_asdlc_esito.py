@@ -536,6 +536,32 @@ def test_un_campo_con_un_surrogato_isolato_si_rifiuta_dicendolo(nome, argomenti,
     assert per_id.get(2, {}).get("result", {}).get("tools")
 
 
+@pytest.mark.parametrize("nome, campo", [
+    pytest.param("fatto", "riepilogo", id="riepilogo"),
+    pytest.param("fermati", "domanda", id="domanda"),
+])
+def test_dei_byte_non_utf8_dentro_un_campo_si_rifiutano_dicendolo(nome, campo, tmp_path):
+    """Rilievo 1 del Critic sul terzo giro di `PBI-372`, `ADR-0027` §3: stdin
+    si leggeva con `errors="replace"`, e dei byte non UTF-8 dentro una stringa
+    diventavano U+FFFD in una riga JSON valida. Il file d'esito si scriveva con
+    un testo che il modello non aveva mandato, e senza nessun rifiuto."""
+    esito = tmp_path / "esito.json"
+    riga = (b'{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": '
+            b'{"name": "' + nome.encode() + b'", "arguments": {"' + campo.encode()
+            + b'": "ok \xff"}}}')
+    fatto, risposte = parla_a_righe("builder", esito, [
+        *map(_json, apertura()), riga, _json(richiesta(2, "tools/list")),
+    ])
+
+    assert "Traceback" not in fatto.stderr, fatto.stderr
+    per_id = {r.get("id"): r for r in risposte}
+    risultato = per_id.get(1, {}).get("result", {})
+    assert risultato.get("isError") is True, per_id.get(1)
+    assert f"«{campo}» contiene un carattere non valido" in parole_della_risposta(risultato)
+    assert not esito.exists()
+    assert per_id.get(2, {}).get("result", {}).get("tools")
+
+
 @pytest.mark.parametrize("nome, argomenti, campo", [
     pytest.param("fatto", {"riepilogo": 42}, "riepilogo", id="riepilogo-numero"),
     pytest.param("fermati", {"domanda": ["e ora?"]}, "domanda", id="domanda-lista"),
