@@ -2833,11 +2833,15 @@ def esegui_pbi(
         chiudi_la_fase()
         e.commit = conta_commit()
         e.inventario["fine"] = inventario()
-        e.inventario["usa_e_getta"] = {k: USA_E_GETTA[k] - contati[k]
-                                       for k in ("montati", "smontati")}
+        e.inventario["usa_e_getta"] = conto = {k: USA_E_GETTA[k] - contati[k]
+                                               for k in ("montati", "smontati")}
         # Contare vale anche quando la strada che lascia il residuo non si riesce a
         # riprodurre: un albero appeso che si vede nella nota non si perde in /tmp.
-        if resti := lasciato(e.inventario["inizio"], e.inventario["fine"], branch):
+        resti = lasciato(e.inventario["inizio"], e.inventario["fine"], branch)
+        if (persi := conto["montati"] - conto["smontati"]) > 0:
+            resti.append(f"{persi} albero usa e getta montato e non smontato" if persi == 1
+                         else f"{persi} alberi usa e getta montati e non smontati")
+        if resti:
             print(f"    ⚠️  il giro lascia: {', '.join(resti)}")
             dichiara(f"il giro lascia: {', '.join(resti)}")
         e.stato, e.durata_s = stato, time.monotonic() - t0
