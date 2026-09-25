@@ -981,9 +981,11 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
 class Invocazione(NamedTuple):
     """Cosa resta di un'invocazione: il codice d'uscita di `claude -p`, il suo
     testo, l'esito che il server ha scritto — `None` se l'agente non ha fatto
-    nessuna chiamata valida — e la voce per `runs/<run>.json`: ruolo, codice e
-    i percorsi di stdout, stderr e del log delle chiamate al server, dove si
-    vedono anche quelle rifiutate (PBI-367, decisioni 7 e 11)."""
+    nessuna chiamata valida — e la voce per `runs/<run>.json`: ruolo, codice,
+    durata in secondi e i percorsi di stdout, stderr e del log delle chiamate al
+    server, dove si vedono anche quelle rifiutate (PBI-367, decisioni 7 e 11). La
+    durata c'è per ogni chiamata, anche scaduta: il registro somma le chiamate di
+    un giro, e i tetti si rileggono da qui (PBI-369, decisione 7)."""
 
     codice: int
     uscita: str
@@ -1030,13 +1032,15 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
     scaduto = False
+    t0 = time.monotonic()
     try:
         codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
                                            f"@{prompt}"], REPO, timeout=minuti * 60,
                                 flussi=(fuori, dentro))
     except TettoSuperato as tetto:
         codice, uscita, scaduto = tetto.codice, tetto.uscita, True
-    registro = {"ruolo": ruolo, "codice": codice, "stdout": str(fuori),
+    registro = {"ruolo": ruolo, "codice": codice,
+                "durata_s": round(time.monotonic() - t0, 1), "stdout": str(fuori),
                 "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl"}
     if scaduto:
         registro["tetto_minuti"] = minuti
