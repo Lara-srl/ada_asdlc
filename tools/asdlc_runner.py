@@ -1074,7 +1074,9 @@ def limite_d_uso(uscita: str) -> str:
         return ""
     if ora := ORA_DEL_RESET.search(uscita):
         return f"limite d'uso dell'account, reset alle {ora.group(1)}"
-    return ""
+    # Un'ora inventata è peggio di un'ora mancante: chi legge `runs/tempi.csv`
+    # la userebbe (decisione 4).
+    return "limite d'uso dell'account, ora del reset non leggibile"
 
 
 def nota_senza_esito(registro: dict, uscita: str = "") -> str:
