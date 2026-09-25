@@ -15,7 +15,8 @@ su stdin e in uscita su stdout. Il runner lo configura con due variabili:
 
 Il server non esce per un ingresso che non si aspetta (`PBI-372`): una riga che
 non è JSON, un messaggio o dei `params` che non sono un oggetto ricevono un
-errore JSON-RPC, una chiamata con argomenti sbagliati un `isError`. Si ferma
+errore JSON-RPC, una chiamata con argomenti sbagliati un `isError`, e un guasto
+che nessuno ha previsto un `-32603` con il traceback su stderr. Si ferma
 all'avvio, con un messaggio su stderr e l'uscita 2, solo se una delle due
 variabili lo rende inutilizzabile.
 """
@@ -23,6 +24,7 @@ variabili lo rende inutilizzabile.
 import json
 import os
 import sys
+import traceback
 from datetime import datetime
 
 NOME = "asdlc"
@@ -165,6 +167,20 @@ def rispondi(messaggio, ruolo: str, esito: str) -> dict | None:
     return {"jsonrpc": "2.0", "id": messaggio["id"], "result": risultato}
 
 
+def _rispondi_senza_cadere(messaggio, ruolo: str, esito: str) -> dict | None:
+    """`rispondi()` con la rete sotto: un'eccezione che nessuno ha previsto non
+    esce dal ciclo di lettura. Va su stderr, e la richiesta riceve `-32603`; una
+    notifica non ha risposta nemmeno così (`PBI-372`, decisione 6)."""
+    try:
+        return rispondi(messaggio, ruolo, esito)
+    except Exception as errore:
+        traceback.print_exc(file=sys.stderr)
+        if isinstance(messaggio, dict) and "id" not in messaggio:
+            return None
+        id_ = messaggio.get("id") if isinstance(messaggio, dict) else None
+        return _errore(id_, -32603, f"errore interno del server: {errore}")
+
+
 def main() -> int:
     # Un ruolo sbagliato che valesse come builder toglierebbe al Critic il
     # verdetto obbligatorio: meglio un server che non parte, che il runner legge
@@ -189,7 +205,7 @@ def main() -> int:
         except json.JSONDecodeError as errore:
             risposta = _errore(None, -32700, f"la riga non è JSON: {errore}")
         else:
-            risposta = rispondi(messaggio, ruolo, esito)
+            risposta = _rispondi_senza_cadere(messaggio, ruolo, esito)
         if risposta is not None:
             sys.stdout.write(json.dumps(risposta, ensure_ascii=False) + "\n")
             sys.stdout.flush()
