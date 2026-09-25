@@ -641,6 +641,40 @@ class TestLInventarioDelGiro:
             f"la nota «{esito.nota}» segnala il ramo del giro o i suoi file in runs/"
         )
 
+    @pytest.mark.parametrize(
+        "residuo",
+        [
+            pytest.param(ALBERO_APPESO, id="albero-usa-e-getta"),
+            pytest.param("pbi/pbi-102-giro1", id="ramo-dello-stesso-pbi"),
+            pytest.param("data", id="file-ignorato-fuori-da-runs"),
+        ],
+    )
+    def test_all_avvio_un_residuo_si_nomina_e_non_si_tocca(
+        self, monkeypatch, tmp_path, capsys, residuo
+    ):
+        """Decisione 7: all'inizio l'inventario nomina i residui dei giri prima —
+        un albero `ada-rosso-*`, un ramo del PBI che sta per partire, un file
+        ignorato fuori da `runs/` — prima che parta il Builder. Non li tocca: non
+        sono suoi, e smontare alberi di qualcun altro è un'iniziativa che non si
+        prende."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        git_finto = git_dell_inventario()
+        monkeypatch.setattr(runner, "git", git_finto)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        log = capsys.readouterr().out
+
+        prima_del_builder = log.split("builder — giro 1")[0]
+        residui = [r for r in prima_del_builder.splitlines() if "residui" in r]
+        assert residui and residuo in residui[0], (
+            f"all'avvio il log non nomina il residuo {residuo}:\n{prima_del_builder}"
+        )
+        toccati = [c for c in git_finto.chiamate
+                   if c[:2] in (("worktree", "remove"), ("worktree", "prune"))
+                   or c[0] == "clean" or (c[0] == "branch" and {"-d", "-D"} & set(c))]
+        assert toccati == [], f"il giro ha toccato un residuo non suo: {toccati}"
+
     def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
         """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
         che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
