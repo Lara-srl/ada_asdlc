@@ -67,7 +67,8 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
     `alberi` (i percorsi di `git worktree list`, compresi gli usa e getta `ada-rosso-*`) e
     `file` (i non tracciati, gli ignorati e i tracciati modificati, contati per cartella:
     `{"data": 1, "runs": 12}`).
-    Una voce che `git` non ha saputo leggere vale `{"errore": …}`. `fine` si scrive quando
+    Accanto, `usa_e_getta: {montati, smontati}` conta gli alberi `ada-rosso-*` che il giro ha
+    montato e smontato. Una voce che `git` non ha saputo leggere vale `{"errore": …}`. `fine` si scrive quando
     il giro chiude; un esito `saltato` non ha inventario. Ciò che `fine` ha in più di
     `inizio`, fuori da ciò che è suo per contratto (il suo ramo, i suoi file in `runs/`), il giro
     lo scrive nel log e in coda alla `nota`: «il giro lascia: albero …, ramo

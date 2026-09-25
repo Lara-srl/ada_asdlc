@@ -1505,6 +1505,12 @@ def commit_da_esaminare(base: str, ref: str, visti: set[str]) -> list[str]:
     return [sha for sha in fuori.split() if sha not in visti]
 
 
+# Gli alberi usa e getta montati e smontati da quando il processo è partito. Il
+# giro ne legge la differenza fra l'inizio e la fine (PBI-363, decisione 6): se
+# una strada salta lo smontaggio, i due numeri divergono anche senza un avviso.
+USA_E_GETTA: Counter[str] = Counter()
+
+
 @contextmanager
 def worktree_usa_e_getta(sha: str):
     """Estrae un commit **fuori** dall'albero del giro, e lo smonta comunque vada.
@@ -1518,6 +1524,7 @@ def worktree_usa_e_getta(sha: str):
     albero = cartella / "albero"
     try:
         git("worktree", "add", "--detach", "--quiet", str(albero), sha)
+        USA_E_GETTA["montati"] += 1
         for prestito in PRESTITI:
             sorgente, destinazione = REPO / prestito, albero / prestito
             if sorgente.exists() and not destinazione.exists() and destinazione.parent.is_dir():
@@ -1526,6 +1533,7 @@ def worktree_usa_e_getta(sha: str):
     finally:
         try:
             git("worktree", "remove", "--force", str(albero))
+            USA_E_GETTA["smontati"] += 1
         except RuntimeError as exc:  # smontarlo è igiene, non è il verdetto
             print(f"    ⚠️  worktree non smontato: {str(exc)[:200]}")
         shutil.rmtree(cartella, ignore_errors=True)
@@ -2793,6 +2801,7 @@ def esegui_pbi(
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
     e.inventario["inizio"] = inventario()
+    contati = Counter(USA_E_GETTA)
     # Solo nel log, non nella nota: fra i file ignorati ci sono sempre il venv e
     # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
     if trovati := residui(e.inventario["inizio"], pbi):
@@ -2824,6 +2833,8 @@ def esegui_pbi(
         chiudi_la_fase()
         e.commit = conta_commit()
         e.inventario["fine"] = inventario()
+        e.inventario["usa_e_getta"] = {k: USA_E_GETTA[k] - contati[k]
+                                       for k in ("montati", "smontati")}
         # Contare vale anche quando la strada che lascia il residuo non si riesce a
         # riprodurre: un albero appeso che si vede nella nota non si perde in /tmp.
         if resti := lasciato(e.inventario["inizio"], e.inventario["fine"], branch):
