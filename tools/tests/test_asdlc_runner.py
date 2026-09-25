@@ -5014,8 +5014,10 @@ class TestLeSoglieEIPercorsiVengonoDaAsdlcToml:
         assert (runner.MAX_TENTATIVI, runner.MAX_IGIENE, runner.MAX_REVISIONI) == (2, 5, 7)
 
     def test_i_prestiti_e_il_registro_seguono_il_toml(self, configura):
+        """Il valore di ieri si legge dalla configurazione e non dal percorso:
+        dentro un test `CSV_TEMPI` sta in una cartella temporanea (PBI-370)."""
         assert runner.PRESTITI == ("data", "frontend/node_modules")
-        assert runner.CSV_TEMPI == runner.REPO / "runs" / "tempi.csv"
+        assert (runner.CFG.registro.cartella, runner.CFG.registro.tempi) == ("runs", "tempi.csv")
 
         configura(toml_di_prova(prestiti=("dati",), registro="giri", tempi="ore.csv"))
 
