@@ -419,6 +419,56 @@ class TestNelSenzaEsitoRestaLUscitaGrezza:
             assert voce in esito.nota, f"la nota non dice {voce}"
 
 
+def git_del_senza_esito(*args: str) -> str:
+    """Il `git` minimo di un giro che chiude `senza esito`: albero pulito, due commit."""
+    if args[:2] == ("rev-list", "--count"):
+        return "2"
+    if args[:2] == ("ls-tree", "--name-only"):
+        return elenco_backlog()
+    return ""
+
+
+class TestIlSenzaEsitoDiceLOraDelReset:
+    """PBI-363, difetto 27 di `PBI-102`: l'ora del reset entra nella nota.
+
+    Giro 5 di PBI-333 (02/09/2026, 00:46:20): il Builder ha risposto una riga
+    sola, «You've hit your session limit · resets 1:30am». Dopo `PBI-367` il giro
+    chiude `senza esito`, ma la nota non dice né il limite né quando si può
+    rilanciare: lo sa solo chi apre il file di stderr. La frase è della CLI, non
+    del modello (`ADR-0027`, §Fuori, e l'eccezione dichiarata del PBI).
+    """
+
+    @pytest.mark.parametrize(
+        "esiti, testi, ora",
+        [
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "You've hit your session limit · resets 1:30am\n"},
+                         "1:30am", id="builder-riga-del-02-09"),
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "You've hit your usage limit · resets 3am\n"},
+                         "3am", id="builder-usage-limit"),
+            pytest.param({"builder": FATTO},
+                         {"critic": "You've hit your session limit · resets 11:30pm\n"},
+                         "11:30pm", id="critic"),
+        ],
+    )
+    def test_la_nota_nomina_il_limite_e_l_ora(self, monkeypatch, tmp_path, esiti, testi, ora):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", agente_finto(esiti, testi, codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito"
+        assert "limite d'uso dell'account" in esito.nota, (
+            f"la nota «{esito.nota}» non nomina il limite d'uso"
+        )
+        assert f"reset alle {ora}" in esito.nota, (
+            f"la nota «{esito.nota}» non dice quando si può rilanciare"
+        )
+
+
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
 
