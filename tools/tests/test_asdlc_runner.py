@@ -5315,3 +5315,35 @@ class TestDentroUnTestNessunPercorsoDelRunnerPuntaSottoRuns:
         configura(toml_di_prova())
 
         assert self._percorsi_sotto_runs() == []
+
+
+class TestDueInvocazioniNelloStessoIstanteHannoNomiDiversi:
+    """PBI-370, decisione 4: il prefisso `%Y%m%d-%H%M%S-%f` non basta, perché nei
+    test le invocazioni sono a pochi microsecondi l'una dall'altra. Due con lo
+    stesso nome si sovrascrivono prompt e config, e la seconda legge il file
+    d'esito della prima. Il nome si prenota creando il prompt con `O_EXCL`, e un
+    nome preso ne fa provare un altro con un suffisso prima di `_<ruolo>_…`."""
+
+    def test_con_l_ora_ferma_due_invocazioni_non_si_sovrascrivono(self, monkeypatch):
+        from datetime import datetime as vero
+
+        class OraFerma(vero):
+            @classmethod
+            def now(cls, tz=None):
+                return vero(2026, 9, 25, 10, 30, 0, 123456)
+
+        monkeypatch.setattr(runner, "datetime", OraFerma)
+
+        primo_prompt, primo_esito = runner.file_dell_invocazione("builder")
+        primo_prompt.write_text("il prompt della prima", encoding="utf-8")
+        secondo_prompt, secondo_esito = runner.file_dell_invocazione("builder")
+
+        assert primo_prompt != secondo_prompt
+        assert primo_esito != secondo_esito
+        assert primo_prompt.read_text(encoding="utf-8") == "il prompt della prima"
+        for prompt, esito in ((primo_prompt, primo_esito), (secondo_prompt, secondo_esito)):
+            assert prompt.parent == esito.parent == runner.LOG_DIR
+            assert prompt.name.endswith("_builder_prompt.txt")
+            assert esito.name == prompt.name.replace("_prompt.txt", "_esito.json"), (
+                "prompt ed esito della stessa invocazione hanno lo stesso prefisso"
+            )
