@@ -2570,6 +2570,26 @@ def file_dell_inventario() -> dict[str, int]:
     return dict(sorted(file.items()))
 
 
+def residui(fotografia: dict, pbi: str) -> list[str]:
+    """Ciò che l'inventario d'inizio trova dei giri prima (PBI-363, decisione 7):
+    gli alberi usa e getta `ada-rosso-*`, i rami di questo PBI, locali o su
+    `origin`, e le cartelle con file ignorati o non tracciati fuori dal registro.
+    Si nominano e non si toccano: non sono del giro."""
+    voci: list[str] = []
+    alberi = fotografia.get("alberi")
+    if isinstance(alberi, list):
+        voci += [f"albero {a}" for a in alberi if "ada-rosso-" in a]
+    ramo = ramo_del_pbi(pbi)
+    for dove, rami in fotografia.get("rami", {}).items():
+        if isinstance(rami, list):
+            voci += [f"ramo {r} ({dove})" for r in rami
+                     if r == ramo or r.startswith(f"{ramo}-")]
+    file = fotografia.get("file", {})
+    if "errore" not in file:
+        voci += [f"file {c} ({n})" for c, n in file.items() if c != CFG.registro.cartella]
+    return voci
+
+
 def lasciato(inizio: dict, fine: dict, ramo: str) -> list[str]:
     """Ciò che l'inventario di fine ha in più di quello d'inizio, una voce per
     cosa: `albero …`, `ramo …`, `file <cartella> +n` (PBI-363, decisione 8). Una
@@ -2773,6 +2793,10 @@ def esegui_pbi(
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
     e.inventario["inizio"] = inventario()
+    # Solo nel log, non nella nota: fra i file ignorati ci sono sempre il venv e
+    # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
+    if trovati := residui(e.inventario["inizio"], pbi):
+        print(f"    residui dei giri prima (non li tocco): {', '.join(trovati)}")
     branch = crea_branch(pbi)
     apri_la_fase()
 
