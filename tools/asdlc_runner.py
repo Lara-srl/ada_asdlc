@@ -553,7 +553,11 @@ class Esito:
     commit: int = 0
     nota: str = ""
     pr: str = ""
-    rapporto_critic: str = ""
+    # Un puntatore per revisione del Critic, in ordine: `{"revisione", "verdetto",
+    # "percorso"}`. Il testo sta intero nel file (`scrivi_rapporto_critic`), e non
+    # qui: nel JSON era tagliato a 6000 caratteri e riscritto a ogni revisione, e
+    # dei `NON PRONTO` che portano al `PASS` non restava niente (PBI-371).
+    rapporti_critic: list[dict] = field(default_factory=list)
     # La domanda di un `fermato` del Builder o di un `sospeso` del Critic, intera:
     # nella nota le sue righe si uniscono con « / », qui restano com'erano.
     domanda: str = ""
@@ -2521,9 +2525,18 @@ def salva_il_traceback(pbi: str) -> Path:
 def scrivi_rapporto_critic(run: str, pbi: str, revisione: int, verdetto: Verdetto) -> Path:
     """Il rapporto di una revisione del Critic, intero, nel suo file di `LOG_DIR`:
     `<run>-<PBI>-critic-<n>.md` (PBI-371). Nel JSON del giro stava tagliato agli
-    ultimi 6000 caratteri, e un rapporto più lungo perdeva la testa."""
+    ultimi 6000 caratteri, e un rapporto più lungo perdeva la testa.
+
+    In testa il verdetto e l'ora. Il rapporto di un sospeso è la sua domanda, con
+    il testo finale del Critic sotto come contesto, come in PBI-367."""
+    ora = datetime.now().isoformat(timespec="seconds")
+    domanda = f"## Domanda\n\n{verdetto.domanda}\n\n## Contesto\n\n" if verdetto.domanda else ""
     file = LOG_DIR / f"{run}-{pbi}-critic-{revisione}.md"
-    file.write_text(verdetto.rapporto, encoding="utf-8")
+    file.write_text(
+        f"# Critic — revisione {revisione} — {verdetto.esito}\n\n{ora}\n\n"
+        f"{domanda}{verdetto.rapporto}\n",
+        encoding="utf-8",
+    )
     return file
 
 
@@ -2751,8 +2764,9 @@ def esegui_pbi(
             if verdetto.registro is not None:
                 e.invocazioni.append(verdetto.registro)
             rapporto = verdetto.rapporto
-            e.rapporto_critic = rapporto[-6000:]
-            scrivi_rapporto_critic(run, pbi, revisione, verdetto)
+            file = scrivi_rapporto_critic(run, pbi, revisione, verdetto)
+            e.rapporti_critic.append(
+                {"revisione": revisione, "verdetto": verdetto.esito, "percorso": str(file)})
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
@@ -2771,8 +2785,9 @@ def esegui_pbi(
                 # Chi legge runs/tempi.csv deve poter distinguere un PBI difficile da uno mal
                 # posto, altrimenti il registro misura la fatica e non la causa.
                 return chiudi("non convergente",
-                              f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
-                              f"del Critic nel rapporto JSON. Serve una lettura umana.")
+                              f"{MAX_REVISIONI + 1} revisioni senza convergere — i rilievi "
+                              f"del Critic in {LOG_DIR / f'{run}-{pbi}-critic-*.md'}. "
+                              f"Serve una lettura umana.")
             # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
             # letto, e un assoluto qui lo farebbe sembrare un altro file. Il rapporto
             # va intero: tagliato, il Builder non leggeva i primi rilievi (PBI-371).
@@ -3349,7 +3364,7 @@ def main() -> int:
         for pbi in a.pbi:
             try:
                 e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
-                               con_critic=not a.senza_critic)
+                               con_critic=not a.senza_critic, run=run)
             except Exception as exc:  # noqa: BLE001 — qui si cattura per non perdere il resto
                 # Un guasto dentro un PBI è un esito di **quel** PBI. Prima usciva
                 # da `main()` col traceback e si portava via la sequenza intera, e

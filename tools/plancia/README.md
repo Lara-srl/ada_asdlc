@@ -57,10 +57,18 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
   ⚠️ **I rilievi del Critic NON ci sono finché il giro non chiude.**
 - **A giro chiuso: completo** → `{run, stato:"finito", finito, esiti:[…]}`. Ogni voce di
   `esiti[]` porta:
-  - `rapporto_critic` — **il testo integrale della revisione del Critic** (es. «Revisione
-    avversariale — PBI-337 … 1. Criteri di verifica — tutti co…»). È qui che sta il «perché
-    NON PRONTO / PASS».
+  - `rapporti_critic` — **un puntatore per revisione del Critic**, in ordine:
+    `{revisione, verdetto, percorso}`, con `revisione` che parte da 0 come `revisioni`. Il
+    testo **non** sta nel JSON: sta intero nel file `percorso`, ed è lì che sta il «perché
+    NON PRONTO / PASS» (PBI-371). Fino a PBI-371 c'era `rapporto_critic`, il testo tagliato
+    agli ultimi 6000 caratteri e riscritto a ogni revisione: i giri passati restano così.
   - `critic_saltato` (bool), `tempi.{builder,gate,critic}` (secondi), ecc.
+
+### `runs/<run>-<PBI>-critic-<n>.md` — il rapporto di una revisione del Critic
+Uno per revisione, scritto appena il Critic ha parlato, quindi **anche a giro in corso**. In
+testa `# Critic — revisione n — verdetto` e l'ora (ISO), poi il rapporto **intero**: il
+`riepilogo` della chiamata `fatto`, o per un `sospeso` la domanda con sotto il testo finale
+del Critic come contesto. La plancia li legge dai `percorso` di `esiti[].rapporti_critic`.
 
 ### `runs/<run>.log` — il log del giro (incrementale, **live**)
 Aggiornato **a ogni fase**, quindi ottimo per il tempo reale:
@@ -131,17 +139,14 @@ Lo **stato di un PBI** nella coda si legge combinando questi: *in main* (`mergia
 - Progresso del giro corrente: fase, numero di giro builder, gate con esiti e tempi, motivo
   dello STOP — dal `.log` incrementale.
 - Coda, PBI, rami su origin, lucchetto, tick di cron, PR aperte/verdi.
-- Per i giri **chiusi**: il **rapporto integrale del Critic** (`esiti[].rapporto_critic`),
-  tempi, tentativi, revisioni, note (dal `.json` finito e da `tempi.csv`).
+- Per i giri **chiusi**: il **rapporto integrale di ogni revisione del Critic** (i file
+  puntati da `esiti[].rapporti_critic`), tempi, tentativi, revisioni, note (dal `.json`
+  finito e da `tempi.csv`).
 
-**NON live oggi → serve una piccola modifica al runner:**
-- I **rilievi del Critic mentre il giro è ancora aperto** (il «perché NON PRONTO» in diretta).
-  Oggi il runner li tiene in pancia e scrive il JSON **solo a fine giro** (il `.json` è uno
-  stub `in-corso` fino ad allora); il `.log` mostra solo `critic … NON PRONTO`, senza il perché.
-- **Evoluzione proposta (PBI a sé, piccolo e circoscritto):** far scrivere al runner
-  l'output del Critic a ogni giro — un `runs/<run>_giroN_critic.md` — oppure aggiornare il
-  `.json` in modo **incrementale** per giro. Da lì la plancia mostra i rilievi in tempo reale
-  senza cambiare altro.
+**Live da PBI-371:** i **rilievi del Critic mentre il giro è ancora aperto** (il «perché NON
+PRONTO» in diretta). Il `.json` resta uno stub `in-corso` fino a fine giro, ma ogni revisione
+scrive subito il suo `runs/<run>-<PBI>-critic-<n>.md`: la plancia li trova per nome, senza
+aspettare i puntatori.
 
 ## Vincoli operativi che la plancia deve rispettare
 
@@ -180,7 +185,8 @@ vivo il 07/09 (dettaglio in memoria `tick-cron-blocchi`):
 - `GET /api/coda` → voci della coda con stato derivato (in-main / ha-ramo / in-corso / in-coda).
 - `GET /api/pbi/{id}` → il markdown del PBI + checklist di verifica + eventuali `❓`.
 - `GET /api/giri` → timeline da `tempi.csv` + `runs/*.json` (esiti, tempi, tentativi, note).
-- `GET /api/giri/{run}` → dettaglio di un giro, incluso `rapporto_critic` se chiuso.
+- `GET /api/giri/{run}` → dettaglio di un giro, inclusi i rapporti del Critic letti dai file
+  di `rapporti_critic` se chiuso.
 - `GET /api/giro-corrente` → il `.log` live del giro in corso + stato lucchetto/runner.
 - `GET /api/stato` → rami su origin, lucchetto (tenuto?), ultimo tick di cron, PR aperte.
 
