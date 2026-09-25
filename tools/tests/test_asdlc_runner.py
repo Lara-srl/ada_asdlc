@@ -5485,3 +5485,36 @@ class TestIlTimeoutDiUnAgenteChiudeSenzaEsito:
         assert "uscita parziale" in Path(registro["stdout"]).read_text(encoding="utf-8")
         assert "errore parziale" in Path(registro["stderr"]).read_text(encoding="utf-8")
         assert any(c[0] == "push" for c in git_finto), "senza esito pubblica il ramo"
+
+
+def vivo(pid: int) -> bool:
+    """Se il processo esiste e non è uno zombie in attesa di chi lo raccolga."""
+    try:
+        stato = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return stato != "Z"
+
+
+class TestAlloScadereNonRestanoProcessiDelGruppo:
+    """PBI-369, decisione 5: `subprocess.run` scaduto uccide solo il figlio
+    diretto, e restavano vivi il server MCP e i test lanciati dal Builder —
+    misurato con `sh -c 'sleep & sleep'` il 24/09/2026."""
+
+    def test_il_nipote_muore_con_il_figlio(self, tmp_path):
+        pid_del_nipote = tmp_path / "nipote.pid"
+        comando = ["sh", "-c", f'sleep 30 & echo $! > "{pid_del_nipote}"; sleep 30']
+        flussi = (tmp_path / "fuori", tmp_path / "dentro")
+
+        with pytest.raises(runner.TettoSuperato):
+            runner.esegui(comando, tmp_path, timeout=1, flussi=flussi)
+
+        nipote = int(pid_del_nipote.read_text())
+        try:
+            scadenza = time.monotonic() + 3
+            while vivo(nipote) and time.monotonic() < scadenza:
+                time.sleep(0.05)
+            assert not vivo(nipote), "allo scadere il nipote resta vivo, orfano"
+        finally:
+            if vivo(nipote):
+                os.kill(nipote, 9)
