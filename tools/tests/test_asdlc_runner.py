@@ -730,6 +730,48 @@ class TestLInventarioDelGiro:
         assert avviso in esito.nota, f"la nota «{esito.nota}» non dice l'albero perso"
         assert avviso in log, "il log non dice l'albero perso"
 
+    def test_un_giro_che_finisce_non_lascia_alberi_oltre_a_quelli_trovati(
+        self, monkeypatch, tmp_path
+    ):
+        """Guardia dichiarata del difetto 28: lo smontaggio c'è già, e la guardia
+        nasce verde. Qui `git worktree` è un elenco vero — `add` aggiunge,
+        `remove` toglie — e il giro monta due alberi usa e getta come due gate
+        del rosso: alla fine l'elenco è quello d'inizio, e il conto torna."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner.tempfile, "mkdtemp",
+                            lambda prefix: str(Path(tmp_path, f"{prefix}x").resolve()))
+        alberi = [ALBERO_DEL_GIRO, ALBERO_APPESO]  # uno di ieri, che non è suo
+        base = git_dell_inventario()
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("worktree", "add"):
+                alberi.append(args[-2])
+                return ""
+            if args[:2] == ("worktree", "remove"):
+                alberi.remove(args[-1])
+                return ""
+            if args[:3] == ("worktree", "list", "--porcelain"):
+                return "\n\n".join(f"worktree {a}\nHEAD abc123\ndetached" for a in alberi)
+            return base(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        agente = agente_finto({})
+
+        def _esegui(*a, **k):
+            for sha in ("abc123", "def456"):
+                with runner.worktree_usa_e_getta(sha):
+                    pass
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.inventario["fine"]["alberi"] == esito.inventario["inizio"]["alberi"]
+        conto = esito.inventario["usa_e_getta"]
+        assert conto["montati"] == conto["smontati"] == 2, f"il conto non torna: {conto}"
+        assert "il giro lascia" not in esito.nota, esito.nota
+
     def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
         """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
         che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
