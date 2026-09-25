@@ -492,6 +492,33 @@ class TestIlSenzaEsitoDiceLOraDelReset:
         )
         assert "reset alle" not in esito.nota
 
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param("", id="muto"),
+            pytest.param("API Error: 500 Internal Server Error\n", id="crash-della-cli"),
+            pytest.param("resets 1:30am\n", id="ora-senza-la-frase"),
+        ],
+    )
+    def test_senza_la_frase_la_nota_resta_quella_di_367(self, monkeypatch, tmp_path, testo):
+        """Decisione 3, il fallimento sicuro: la lettura aggiunge e non cambia
+        niente. Senza la frase del limite la nota è quella di `PBI-367`, parola
+        per parola."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"critic": verdetto("pass")}, {"builder": testo},
+                                         codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        registro = esito.invocazioni[-1]
+        assert esito.stato == "senza esito"
+        assert esito.nota == (
+            "il builder non ha chiamato né fatto né fermati · codice d'uscita 1 · "
+            f"stdout {registro['stdout']} · stderr {registro['stderr']}"
+        )
+
 
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
