@@ -584,6 +584,36 @@ class TestLInventarioDelGiro:
                 f"l'inventario di {momento} non porta {voce}: {inventario}"
             )
 
+    def test_cio_che_il_giro_lascia_va_nel_log_e_nella_nota(self, monkeypatch, tmp_path, capsys):
+        """Decisione 8: alla fine si scrive la differenza. Un albero usa e getta
+        rimasto montato, un ramo nato durante il giro, un file ignorato nuovo: se
+        la differenza non è vuota, il log e la nota lo dicono."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        prima = git_dell_inventario(rami_locali="", rami_origin="",
+                                    alberi=(ALBERO_DEL_GIRO,), stato="")
+        dopo = git_dell_inventario(rami_locali="pbi/pbi-999\n", rami_origin="",
+                                   alberi=(ALBERO_DEL_GIRO, ALBERO_APPESO),
+                                   stato="!! data/fattura.pdf\n")
+        agente = agente_finto({})
+        chiamato = []
+
+        def _esegui(*a, **k):
+            chiamato.append(True)
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "git", lambda *a: (dopo if chiamato else prima)(*a))
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        log = capsys.readouterr().out
+
+        for residuo in (ALBERO_APPESO, "pbi/pbi-999", "data"):
+            assert residuo in esito.nota, f"la nota «{esito.nota}» non dice che resta {residuo}"
+            assert residuo in log, f"il log non dice che resta {residuo}"
+        assert esito.nota.startswith("il builder non ha chiamato"), (
+            "la diagnosi del giro resta davanti: ciò che lascia si aggiunge dietro"
+        )
+
     def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
         """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
         che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
