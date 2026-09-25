@@ -5437,3 +5437,51 @@ class TestITettiDelleChiamateVengonoDaAsdlcToml:
             "revisioni = 4\n", "revisioni = 4\nminuti_builder = 45\nminuti_critic = 12\n"))
 
         assert (runner.MINUTI_BUILDER, runner.MINUTI_CRITIC) == (45, 12)
+
+
+# Un agente vero che scrive sui due flussi, dichiara `fatto` nel suo file d'esito
+# — accanto alla config MCP, che arriva in `$2` — e poi dorme oltre il tetto.
+AGENTE_CHE_DORME = (
+    'echo "uscita parziale"; echo "errore parziale" >&2; '
+    'echo \'{"esito": "fatto", "verdetto": "pass", "riepilogo": "fatto"}\' '
+    '> "${2%.mcp.json}.json"; exec sleep 30'
+)
+
+
+class TestIlTimeoutDiUnAgenteChiudeSenzaEsito:
+    """PBI-369, decisioni 3 e 4: il tetto di una chiamata scaduto chiude il giro
+    `senza esito`, con il ruolo e il tetto nella nota, e i flussi parziali su
+    file. Prima `subprocess.run` scaduto uccideva la CLI e alzava con stdout e
+    stderr a `None`: l'uscita di un'ora e mezza di Builder era persa."""
+
+    @pytest.mark.parametrize("ruolo", ["builder", "critic"])
+    def test_il_tetto_scaduto_chiude_senza_esito_con_i_flussi_parziali(
+        self, monkeypatch, git_finto, ruolo
+    ):
+        vero = runner.esegui
+        finto = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if ruolo_ed_esito(cmd)[0] == ruolo:
+                return vero(cmd, cwd, timeout, **k)
+            return finto(cmd, cwd, timeout, **k)
+
+        comando = ["sh", "-c", AGENTE_CHE_DORME, "agente"]
+        monkeypatch.setattr(runner, "BUILDER" if ruolo == "builder" else "CRITIC", comando)
+        monkeypatch.setattr(runner, "MINUTI_BUILDER" if ruolo == "builder" else "MINUTI_CRITIC",
+                            0.02)
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+
+        inizio = time.monotonic()
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert time.monotonic() - inizio < 20, "la chiamata si ferma al tetto, non alla fine"
+        assert esito.stato == "senza esito", (
+            "un agente scaduto non ha finito, anche se aveva già dichiarato un esito"
+        )
+        assert f"tetto di {0.02:g} minuti superato ({ruolo})" in esito.nota
+        registro = next(r for r in esito.invocazioni if r["ruolo"] == ruolo)
+        assert "uscita parziale" in Path(registro["stdout"]).read_text(encoding="utf-8")
+        assert "errore parziale" in Path(registro["stderr"]).read_text(encoding="utf-8")
+        assert any(c[0] == "push" for c in git_finto), "senza esito pubblica il ramo"
