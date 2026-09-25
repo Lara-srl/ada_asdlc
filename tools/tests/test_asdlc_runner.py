@@ -5427,3 +5427,13 @@ class TestLaChiusuraGiraSempre:
 
         assert "disco pieno" in str(alzata.value)
         assert "TimeoutExpired" in str(alzata.value)
+
+
+class TestITettiDelleChiamateVengonoDaAsdlcToml:
+    """PBI-369, decisione 6: il runner legge i due tetti da `[soglie]`."""
+
+    def test_configura_porta_i_tetti_nelle_costanti_del_runner(self, configura):
+        configura(toml_di_prova().replace(
+            "revisioni = 4\n", "revisioni = 4\nminuti_builder = 45\nminuti_critic = 12\n"))
+
+        assert (runner.MINUTI_BUILDER, runner.MINUTI_CRITIC) == (45, 12)

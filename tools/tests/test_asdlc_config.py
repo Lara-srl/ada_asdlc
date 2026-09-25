@@ -121,6 +121,33 @@ def test_l_asdlc_toml_del_repository_si_carica():
     assert cfg.gate_del_rosso.attivo is True
 
 
+def test_i_tetti_per_chiamata_hanno_i_default_90_e_25(tmp_path):
+    """PBI-369, decisione 6: un tetto per ruolo in `[soglie]`. Il TOML di prova
+    non li scrive, e valgono i minuti confermati da Francesco il 24/09."""
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path))
+
+    assert (cfg.soglie.minuti_builder, cfg.soglie.minuti_critic) == (90, 25)
+
+
+def test_i_tetti_per_chiamata_si_leggono_da_soglie(tmp_path):
+    con_i_tetti = TOML_DI_PROVA.replace(
+        "revisioni = 7\n", "revisioni = 7\nminuti_builder = 45\nminuti_critic = 12\n"
+    )
+
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path, con_i_tetti))
+
+    assert (cfg.soglie.minuti_builder, cfg.soglie.minuti_critic) == (45, 12)
+
+
+def test_l_asdlc_toml_del_repository_dichiara_i_tetti():
+    """I due valori stanno scritti nel TOML, con la loro ragione accanto: un
+    default del lettore non si vede da chi apre il file."""
+    testo = (REPO / "asdlc.toml").read_text(encoding="utf-8")
+
+    assert "minuti_builder = 90" in testo
+    assert "minuti_critic = 25" in testo
+
+
 def test_un_file_assente_si_ferma_nominando_il_file(tmp_path):
     """Nessun default silenzioso: un runner che partisse senza `asdlc.toml`
     passerebbe per la ragione sbagliata (decisione 3)."""
