@@ -975,7 +975,8 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     senza esito, dopo i minuti del Builder (PBI-367, decisione 4).
 
     Il file d'esito non si crea qui: lo crea il server alla prima chiamata
-    valida, con `O_EXCL`, e un file già presente la rifiuterebbe.
+    valida, collegando al nome un temporaneo già scritto con `os.link`, e un
+    file già presente la rifiuterebbe.
     """
     if ruolo not in RUOLI:
         raise ValueError(f"ruolo {ruolo!r}: il server dell'esito conosce solo {RUOLI}")
