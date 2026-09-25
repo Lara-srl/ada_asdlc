@@ -2530,24 +2530,44 @@ def inventario() -> dict:
       e i tracciati modificati — contato per cartella.
 
     Il giro lo fa all'inizio e alla fine, e non tocca niente di ciò che trova.
+    Osserva e non decide (`ADR-0008`): una voce che `git` non sa dire diventa
+    `{"errore": …}`, e le altre si leggono lo stesso.
     """
+    voci = {"rami": rami_dell_inventario, "alberi": alberi_dell_inventario,
+            "file": file_dell_inventario}
+    fotografia: dict = {}
+    for voce, leggi in voci.items():
+        try:
+            fotografia[voce] = leggi()
+        except RuntimeError as exc:
+            fotografia[voce] = {"errore": str(exc)[:300]}
+    return fotografia
+
+
+def rami_dell_inventario() -> dict[str, list[str]]:
     prefisso = f"{CFG.git.prefisso_ramo}*"
     locali = git("branch", "--list", prefisso, "--format=%(refname:short)")
     remoti = git("ls-remote", "--heads", REMOTO, prefisso)
-    alberi = git("worktree", "list", "--porcelain")
+    return {"locali": sorted(r.strip() for r in locali.splitlines() if r.strip()),
+            "origin": sorted(r.split("refs/heads/")[-1].strip()
+                             for r in remoti.splitlines() if "refs/heads/" in r)}
+
+
+def alberi_dell_inventario() -> list[str]:
+    return [r.removeprefix("worktree ").strip()
+            for r in git("worktree", "list", "--porcelain").splitlines()
+            if r.startswith("worktree ")]
+
+
+def file_dell_inventario() -> dict[str, int]:
+    """Ciò che `git status --ignored` elenca — i non tracciati, gli ignorati e i
+    tracciati modificati — contato per cartella di primo livello; `.` è la radice."""
     file: Counter[str] = Counter()
     for riga in git("status", "--ignored", "--porcelain").splitlines():
         percorso = riga[3:].strip()
         if percorso:
             file[percorso.split("/")[0] if "/" in percorso else "."] += 1
-    return {
-        "rami": {"locali": sorted(r.strip() for r in locali.splitlines() if r.strip()),
-                 "origin": sorted(r.split("refs/heads/")[-1].strip()
-                                  for r in remoti.splitlines() if "refs/heads/" in r)},
-        "alberi": [r.removeprefix("worktree ").strip()
-                   for r in alberi.splitlines() if r.startswith("worktree ")],
-        "file": dict(sorted(file.items())),
-    }
+    return dict(sorted(file.items()))
 
 
 def ramo_del_pbi(pbi: str) -> str:

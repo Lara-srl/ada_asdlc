@@ -66,8 +66,9 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
     `rami: {locali, origin}` (i `pbi/pbi-*`, quelli di `origin` letti con `ls-remote`),
     `alberi` (i percorsi di `git worktree list`, compresi gli usa e getta `ada-rosso-*`) e
     `file` (i non tracciati, gli ignorati e i tracciati modificati, contati per cartella:
-    `{"data": 1, "runs": 12}`).
-    `fine` si scrive quando il giro chiude; un esito `saltato` non ha inventario.
+    `{"data": 1, "runs": 12}`). Una voce che `git` non ha saputo leggere vale
+    `{"errore": …}`. `fine` si scrive quando il giro chiude; un esito `saltato` non ha
+    inventario.
   - `critic_saltato` (bool), `tempi.{builder,gate,critic}` (secondi), ecc.
 
 ### `runs/<run>-<PBI>-critic-<n>.md` — il rapporto di una revisione del Critic
