@@ -44,6 +44,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -884,24 +885,49 @@ class TettoSuperato(Exception):
         self.codice, self.uscita = codice, uscita
 
 
+# I secondi fra il `SIGTERM` al gruppo di una chiamata scaduta e il `SIGKILL`.
+ATTESA_DOPO_SIGTERM = 5
+
+
 def esegui_su_file(cmd: list[str], cwd: Path, timeout: float,
                    flussi: tuple[Path, Path]) -> tuple[int, str]:
-    """`esegui` con stdout e stderr scritti nei due file mentre il comando gira."""
+    """`esegui` con stdout e stderr scritti nei due file mentre il comando gira.
+
+    Il comando parte in una sessione sua, e allo scadere si uccide il **gruppo**:
+    `SIGTERM`, qualche secondo, poi `SIGKILL`. Uccidere la sola CLI lasciava vivi
+    il server MCP e i test lanciati dal Builder (PBI-369, decisione 5). Sfugge
+    solo un processo che si stacca da sé in una sessione nuova.
+    """
     scaduto = False
     with flussi[0].open("w", encoding="utf-8") as fuori, \
             flussi[1].open("w", encoding="utf-8") as dentro:
-        p = subprocess.Popen(cmd, cwd=cwd, stdout=fuori, stderr=dentro, text=True)
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=fuori, stderr=dentro, text=True,
+                             start_new_session=True)
         try:
             p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            p.kill()
-            p.wait()
             scaduto = True
+            uccidi_il_gruppo(p)
     uscita = (flussi[0].read_text(encoding="utf-8", errors="replace")
               + flussi[1].read_text(encoding="utf-8", errors="replace"))
     if scaduto:
         raise TettoSuperato(p.returncode, uscita)
     return p.returncode, uscita
+
+
+def uccidi_il_gruppo(p: subprocess.Popen) -> None:
+    """`SIGTERM` al gruppo di `p`, `ATTESA_DOPO_SIGTERM` secondi perché il capo
+    esca, poi `SIGKILL` a chi del gruppo è rimasto."""
+    for segnale in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, segnale)
+        except ProcessLookupError:
+            break  # il gruppo non c'è più
+        try:
+            p.wait(timeout=ATTESA_DOPO_SIGTERM)
+        except subprocess.TimeoutExpired:
+            pass
+    p.wait()
 
 
 def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
