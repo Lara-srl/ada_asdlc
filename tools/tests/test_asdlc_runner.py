@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -247,7 +248,13 @@ class TestLEsitoVieneDallaChiamata:
             )
         assert esito.domanda == domanda, "nel rapporto JSON la domanda sta intera"
         if rapporto is not None:
-            assert rapporto in esito.rapporto_critic
+            # Il rapporto sta nel file della revisione, e il JSON del giro ne tiene
+            # il puntatore (PBI-371, decisione 4).
+            voce = json.loads(runner.scrivi_rapporto("giro", [esito], "finito")
+                              .read_text(encoding="utf-8"))["esiti"][0]
+            assert voce.get("rapporti_critic"), "nessun puntatore al rapporto del Critic"
+            percorso = Path(voce["rapporti_critic"][-1]["percorso"])
+            assert rapporto in percorso.read_text(encoding="utf-8")
         if stato == "fermato":
             assert gate == [], "dopo un fermati del Builder i gate non partono"
 
@@ -5606,3 +5613,61 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert rapporto in prompt[1].read_text(encoding="utf-8"), (
             "il Builder di rimedio riceve il rapporto tagliato: la testa è andata persa"
         )
+
+    @pytest.mark.parametrize(
+        "verdetti, attesi, stato",
+        [
+            pytest.param([runner.Verdetto("pass", "", "nessun rilievo")],
+                         ["pass"], "fatto", id="una-revisione"),
+            pytest.param([runner.Verdetto("non pronto", "", f"1. rilievo del giro {n}")
+                          for n in range(3)] + [runner.Verdetto("pass", "", "chiuso")],
+                         ["non pronto"] * 3 + ["pass"], "fatto",
+                         id="tre-revisioni-non-pronto-poi-pass"),
+            pytest.param([runner.Verdetto("non pronto", "", "1. manca il test"),
+                          runner.Verdetto("sospeso", "la 0011 tocca pratiche: la eseguo?",
+                                          "Ho letto il diff e i commit.")],
+                         ["non pronto", "sospeso"], "sospeso", id="sospeso"),
+        ],
+    )
+    def test_ogni_revisione_ha_il_suo_file_e_il_suo_puntatore(
+        self, monkeypatch, git_finto, verdetti, attesi, stato
+    ):
+        esito = self._giro(monkeypatch, verdetti, run="20260925-160000")
+        voce = json.loads(runner.scrivi_rapporto("20260925-160000", [esito], "finito")
+                          .read_text(encoding="utf-8"))["esiti"][0]
+
+        assert esito.stato == stato
+        assert "rapporto_critic" not in voce, "il testo non sta più nel JSON: ci sono i file"
+        assert voce.get("rapporti_critic") == [
+            {"revisione": n, "verdetto": v,
+             "percorso": str(runner.LOG_DIR / f"20260925-160000-PBI-102-critic-{n}.md")}
+            for n, v in enumerate(attesi)
+        ], "un puntatore per revisione, in ordine, con il verdetto"
+        for n, v in enumerate(verdetti):
+            testo = (runner.LOG_DIR / f"20260925-160000-PBI-102-critic-{n}.md").read_text(
+                encoding="utf-8")
+            righe = testo.splitlines()
+            assert righe[0] == f"# Critic — revisione {n} — {v.esito}", "in testa il verdetto"
+            datetime.fromisoformat(righe[2])  # e l'ora
+            assert v.rapporto in testo
+            if v.domanda:
+                assert v.domanda in testo, "il rapporto di un sospeso è la sua domanda"
+
+    def test_main_da_al_giro_il_nome_del_suo_rapporto(self, monkeypatch):
+        """I file delle revisioni portano il nome del giro: quello di `runs/<run>.json`."""
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        ricevuti: list[str] = []
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            ricevuti.append(k.get("run", ""))
+            return runner.Esito(pbi, "fatto")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        runner.main()
+
+        giri = [f.stem for f in runner.LOG_DIR.glob("*.json")]
+        assert len(giri) == 1
+        assert ricevuti == giri, "esegui_pbi non riceve il nome del giro"
