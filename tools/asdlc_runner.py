@@ -858,19 +858,50 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
     il gate rosso con la diagnosi più ovvia che ci sia (difetto 11). `127` è la
     convenzione della shell per «comando non trovato», e la nota dice quale.
 
-    Con `flussi`, stdout e stderr si scrivono anche in due file separati: nel
-    testo reso sono concatenati, e per un agente senza esito sono ciò che
-    distingue un limite d'uso da un crash della CLI (PBI-367, decisione 11).
+    Con `flussi`, stdout e stderr vanno in due file separati **mentre il comando
+    gira**: nel testo reso sono concatenati, e per un agente senza esito sono ciò
+    che distingue un limite d'uso da un crash della CLI (PBI-367, decisione 11).
+    Scaduto il tetto, il comando si uccide e si alza `TettoSuperato` con ciò che
+    i file hanno raccolto fin lì (PBI-369, decisione 4): raccolti alla fine, come
+    fa `subprocess.run`, dopo un timeout non ci sarebbe niente.
     """
     try:
+        if flussi is not None:
+            return esegui_su_file(cmd, cwd, timeout, flussi)
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
         return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
                      f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
-    if flussi is not None:
-        flussi[0].write_text(p.stdout, encoding="utf-8")
-        flussi[1].write_text(p.stderr, encoding="utf-8")
     return p.returncode, (p.stdout + p.stderr)
+
+
+class TettoSuperato(Exception):
+    """Una chiamata scaduta: il codice d'uscita del processo ucciso, e l'uscita
+    parziale che i file dei flussi hanno raccolto."""
+
+    def __init__(self, codice: int, uscita: str):
+        super().__init__(f"tetto superato (codice {codice})")
+        self.codice, self.uscita = codice, uscita
+
+
+def esegui_su_file(cmd: list[str], cwd: Path, timeout: float,
+                   flussi: tuple[Path, Path]) -> tuple[int, str]:
+    """`esegui` con stdout e stderr scritti nei due file mentre il comando gira."""
+    scaduto = False
+    with flussi[0].open("w", encoding="utf-8") as fuori, \
+            flussi[1].open("w", encoding="utf-8") as dentro:
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=fuori, stderr=dentro, text=True)
+        try:
+            p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+            scaduto = True
+    uscita = (flussi[0].read_text(encoding="utf-8", errors="replace")
+              + flussi[1].read_text(encoding="utf-8", errors="replace"))
+    if scaduto:
+        raise TettoSuperato(p.returncode, uscita)
+    return p.returncode, uscita
 
 
 def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
@@ -963,19 +994,38 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     `--strict-mcp-config`, un flag booleano, e il prompt viene dopo. Nella
     prima prova il prompt in coda a `--mcp-config` è stato preso per un'altra
     config, e `-p` è partito senza input.
+
+    La chiamata ha un tetto per ruolo, `MINUTI_BUILDER` o `MINUTI_CRITIC`.
+    Scaduto, l'esito è `None` anche se l'agente ne aveva dichiarato uno: non ha
+    finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
+    porta allora `tetto_minuti`, che è ciò che la nota dice.
     """
     config = config_del_server(ruolo, esito)
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
-    codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
-                                       f"@{prompt}"], REPO, flussi=(fuori, dentro))
+    minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
+    scaduto = False
+    try:
+        codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
+                                           f"@{prompt}"], REPO, timeout=minuti * 60,
+                                flussi=(fuori, dentro))
+    except TettoSuperato as tetto:
+        codice, uscita, scaduto = tetto.codice, tetto.uscita, True
     registro = {"ruolo": ruolo, "codice": codice, "stdout": str(fuori),
                 "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl"}
-    return Invocazione(codice, uscita, esito_dichiarato(esito), registro)
+    if scaduto:
+        registro["tetto_minuti"] = minuti
+    dichiarato = None if scaduto else esito_dichiarato(esito)
+    return Invocazione(codice, uscita, dichiarato, registro)
 
 
 def nota_senza_esito(registro: dict) -> str:
-    """La nota di un `senza esito`: chi non ha chiamato, e dove guardare."""
-    return (f"il {registro['ruolo']} non ha chiamato né fatto né fermati · "
+    """La nota di un `senza esito`: chi non ha chiamato, o chi è scaduto, e dove
+    guardare."""
+    if "tetto_minuti" in registro:
+        chi = f"tetto di {registro['tetto_minuti']:g} minuti superato ({registro['ruolo']})"
+    else:
+        chi = f"il {registro['ruolo']} non ha chiamato né fatto né fermati"
+    return (f"{chi} · "
             f"codice d'uscita {registro['codice']} · stdout {registro['stdout']} · "
             f"stderr {registro['stderr']}")
 
