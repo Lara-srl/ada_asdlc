@@ -468,6 +468,30 @@ class TestIlSenzaEsitoDiceLOraDelReset:
             f"la nota «{esito.nota}» non dice quando si può rilanciare"
         )
 
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param("You've hit your session limit\n", id="senza-ora"),
+            pytest.param("You've hit your session limit · resets soon\n", id="ora-illeggibile"),
+        ],
+    )
+    def test_se_l_ora_non_si_legge_la_nota_lo_dichiara(self, monkeypatch, tmp_path, testo):
+        """Decisione 4: un orario plausibile ma inventato è peggio di uno mancante,
+        perché chi legge `runs/tempi.csv` lo userebbe."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"critic": verdetto("pass")}, {"builder": testo},
+                                         codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito"
+        assert "limite d'uso dell'account, ora del reset non leggibile" in esito.nota, (
+            f"la nota «{esito.nota}» tace il limite, o gli inventa un'ora"
+        )
+        assert "reset alle" not in esito.nota
+
 
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
