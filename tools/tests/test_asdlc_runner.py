@@ -5826,6 +5826,33 @@ class TestIlRapportoDelCriticArrivaIntero:
             "il test che morde arriva al Critic con il suo mutante"
         )
 
+    def _prompt_del_critic(self, monkeypatch) -> str:
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda visti, morsi: [])
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        [file] = runner.LOG_DIR.glob("*_critic_prompt.txt")
+        return file.read_text(encoding="utf-8")
+
+    def test_un_gate_che_il_diff_non_tocca_arriva_al_critic_come_non_girato(
+        self, configura, monkeypatch, git_finto
+    ):
+        """Decisione 6: un gate mai girato che il prompt chiamasse «verde» è la
+        confusione di `gate_s = 0` su PBI-208, detta al Critic."""
+        configura(toml_di_prova(gate=(
+            ("pytest", ("pytest", "-q"), "backend", ()),
+            ("asdlc", ("pytest", "-q", "tools/tests"), ".", ("tools/", "asdlc.toml")),
+        )))
+
+        prompt = self._prompt_del_critic(monkeypatch)
+
+        assert "- `pytest`: verde" in prompt
+        assert "- `asdlc`: non girato, il diff non tocca tools/, asdlc.toml" in prompt
+        assert "- `asdlc`: verde" not in prompt
+
     def test_il_nome_e_revisione_avversariale_del_diff_nel_prompt_e_nella_pr(
         self, monkeypatch
     ):
