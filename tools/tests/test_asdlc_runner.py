@@ -5685,7 +5685,8 @@ class TestIlRapportoDelCriticArrivaIntero:
 
     URL = "https://github.com/Lara-srl/ada_controller/pull/371"
 
-    def _pr_con_i_rapporti(self, monkeypatch, verdetti, commento_fallisce=False):
+    def _pr_con_i_rapporti(self, monkeypatch, verdetti, commento_fallisce=False,
+                           commento_alza=None, prima_dei_commenti=None):
         """Apre la PR di un giro le cui revisioni hanno dato i `verdetti`, con `gh`
         sostituito. Torna l'esito, i testi dei file delle revisioni e i comandi
         `gh pr comment` ricevuti, ognuno col testo del suo corpo."""
@@ -5706,9 +5707,13 @@ class TestIlRapportoDelCriticArrivaIntero:
                 return 0, self.URL + "\n"
             corpo = Path(cmd[cmd.index("--body-file") + 1]).read_text(encoding="utf-8")
             comandi.append((cmd, corpo))
+            if commento_alza is not None:
+                raise commento_alza
             return (1, "HTTP 502: Bad Gateway") if commento_fallisce else (0, "")
 
         monkeypatch.setattr(runner, "esegui", _esegui)
+        if prima_dei_commenti is not None:
+            prima_dei_commenti(esito)
         pr = runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
         assert pr == self.URL
         assert comandi[0][0][:3] == ["gh", "pr", "create"], "prima si apre la PR"
@@ -5758,6 +5763,35 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert "HTTP 502" in esito.nota, "la nota dice perché"
         for r in esito.rapporti_critic:
             assert Path(r["percorso"]).exists(), "i file restano"
+
+    def test_un_commento_in_timeout_non_ferma_il_giro_e_la_nota_lo_dice(self, monkeypatch):
+        """Decisione 5: `esegui` lascia risalire `subprocess.TimeoutExpired`, e
+        un'eccezione in `apri_pr` arriva alla rete di `main()`, che registra
+        `rosso` senza PR un giro già pubblicato (rilievo 1 del Critic)."""
+        esito, _, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. manca il test"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ], commento_alza=subprocess.TimeoutExpired(["gh", "pr", "comment"], 300))
+
+        assert esito.stato == "fatto", "un commento in timeout non disfa il giro (ADR-0008)"
+        assert len(commenti) == 2, "il primo commento in timeout non ferma i successivi"
+        assert "rapporto del Critic non commentato sulla PR (revisioni 0, 1)" in esito.nota
+        assert "timed out" in esito.nota, "la nota dice perché"
+
+    def test_un_file_di_revisione_illeggibile_non_ferma_il_giro_e_la_nota_lo_dice(
+        self, monkeypatch
+    ):
+        """Decisione 5: `read_text` sul file di una revisione può alzare `OSError`,
+        e l'eccezione risalirebbe da `apri_pr` come il timeout."""
+        esito, _, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. manca il test"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ], prima_dei_commenti=lambda e: Path(e.rapporti_critic[0]["percorso"]).unlink())
+
+        assert esito.stato == "fatto", "un file illeggibile non disfa il giro (ADR-0008)"
+        assert len(commenti) == 1, "la revisione leggibile riceve comunque il suo commento"
+        assert "rapporto del Critic non commentato sulla PR (revisioni 0)" in esito.nota
+        assert "No such file" in esito.nota, "la nota dice perché"
 
     def test_il_prompt_del_critic_dice_che_non_esegue_e_porta_i_gate_del_giro(
         self, monkeypatch, git_finto
