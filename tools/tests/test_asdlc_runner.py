@@ -520,6 +520,71 @@ class TestIlSenzaEsitoDiceLOraDelReset:
         )
 
 
+ALBERO_DEL_GIRO = "/home/laisdev/ada-run"
+ALBERO_APPESO = "/tmp/ada-rosso-k3j9/albero"
+
+
+def git_dell_inventario(rami_locali: str = "pbi/pbi-102-giro1\n",
+                        rami_origin: str = "abc123\trefs/heads/pbi/pbi-200\n",
+                        alberi: tuple[str, ...] = (ALBERO_DEL_GIRO, ALBERO_APPESO),
+                        stato: str = "!! data/\n?? runs/x.json\n!! runs/y.log\n"):
+    """Un `git` che risponde alle tre domande dell'inventario — rami, alberi,
+    file — e il minimo di un giro che chiude `senza esito`. Le chiamate restano
+    in `.chiamate`."""
+    chiamate: list[tuple[str, ...]] = []
+
+    def _git(*args: str) -> str:
+        chiamate.append(args)
+        if args[:2] == ("branch", "--list"):
+            return rami_locali
+        if args[:2] == ("ls-remote", "--heads"):
+            return rami_origin
+        if args[:3] == ("worktree", "list", "--porcelain"):
+            return "\n\n".join(f"worktree {a}\nHEAD abc123\ndetached" for a in alberi)
+        if args[:3] == ("status", "--ignored", "--porcelain"):
+            return stato
+        return git_del_senza_esito(*args)
+
+    _git.chiamate = chiamate
+    return _git
+
+
+class TestLInventarioDelGiro:
+    """PBI-363, decisione 7 e difetto 28 di `PBI-102`: il giro conta rami, alberi
+    e file all'inizio e alla fine, e li scrive nel suo rapporto.
+
+    Dopo il giro 6 di PBI-333 (02/09/2026) in `/tmp` erano rimasti tre alberi
+    `ada-rosso-*` montati, e nel log nessuna riga lo diceva. Un albero appeso
+    contende il lock di `git worktree` al gate dopo: il giro deve saperlo.
+    """
+
+    @pytest.mark.parametrize(
+        "voce, atteso",
+        [
+            pytest.param("rami", {"locali": ["pbi/pbi-102-giro1"], "origin": ["pbi/pbi-200"]},
+                         id="rami"),
+            pytest.param("alberi", [ALBERO_DEL_GIRO, ALBERO_APPESO], id="alberi"),
+            pytest.param("file", {"data": 1, "runs": 2}, id="file"),
+        ],
+    )
+    def test_il_rapporto_porta_l_inventario_di_inizio_e_fine(
+        self, monkeypatch, tmp_path, voce, atteso
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_dell_inventario())
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        voce_del_rapporto = json.loads(
+            runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))["esiti"][0]
+
+        inventario = voce_del_rapporto.get("inventario", {})
+        for momento in ("inizio", "fine"):
+            assert inventario.get(momento, {}).get(voce) == atteso, (
+                f"l'inventario di {momento} non porta {voce}: {inventario}"
+            )
+
+
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
 
