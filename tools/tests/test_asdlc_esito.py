@@ -512,6 +512,31 @@ def test_una_chiamata_con_un_surrogato_isolato_negli_argomenti_finisce_nel_log(t
 
 
 @pytest.mark.parametrize("nome, argomenti, campo", [
+    pytest.param("fatto", {"riepilogo": "\ud800 finito"}, "riepilogo", id="riepilogo"),
+    pytest.param("fermati", {"domanda": "e ora? \udfff"}, "domanda", id="domanda"),
+])
+def test_un_campo_con_un_surrogato_isolato_si_rifiuta_dicendolo(nome, argomenti, campo,
+                                                               tmp_path):
+    """Rilievo 1 del Critic sul secondo giro di `PBI-372`, `ADR-0027` §3: il
+    file d'esito si scrive in UTF-8, il surrogato faceva fallire la scrittura e
+    il modello riceveva -32603 con un messaggio di codec invece di un rifiuto
+    che dice cosa correggere."""
+    esito = tmp_path / "esito.json"
+    fatto, risposte = parla_a_righe("builder", esito, [
+        *map(_json, apertura()), _json(chiamata(1, nome, argomenti)),
+        _json(richiesta(2, "tools/list")),
+    ])
+
+    assert "Traceback" not in fatto.stderr, fatto.stderr
+    per_id = {r.get("id"): r for r in risposte}
+    risultato = per_id.get(1, {}).get("result", {})
+    assert risultato.get("isError") is True, per_id.get(1)
+    assert f"«{campo}» contiene un carattere non valido" in parole_della_risposta(risultato)
+    assert not esito.exists()
+    assert per_id.get(2, {}).get("result", {}).get("tools")
+
+
+@pytest.mark.parametrize("nome, argomenti, campo", [
     pytest.param("fatto", {"riepilogo": 42}, "riepilogo", id="riepilogo-numero"),
     pytest.param("fermati", {"domanda": ["e ora?"]}, "domanda", id="domanda-lista"),
 ])
