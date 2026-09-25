@@ -5747,3 +5747,36 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert "HTTP 502" in esito.nota, "la nota dice perché"
         for r in esito.rapporti_critic:
             assert Path(r["percorso"]).exists(), "i file restano"
+
+    def test_il_prompt_del_critic_dice_che_non_esegue_e_porta_i_gate_del_giro(
+        self, monkeypatch, git_finto
+    ):
+        """Decisione 6: il Critic ha solo `Read`, `Grep`, `Glob` e `git diff`. Su
+        PBI-365 ha scritto «non ho potuto eseguire niente io» e ha giudicato dal log
+        del giro, che si era andato a cercare: ciò che i gate hanno misurato glielo
+        passa il runner."""
+        morso = {"commit": "abc1234", "titolo": "test(ci): guardia", "prove": [],
+                 "test": "tools/tests/test_x.py::test_guardia",
+                 "mutante": "tools/asdlc_runner.py:10  `==` → `!=`", "tipo": "AssertionError"}
+
+        def rosso(visti, morsi):
+            morsi.append(morso)
+            return []
+
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", rosso)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        [file] = runner.LOG_DIR.glob("*_critic_prompt.txt")
+        prompt = file.read_text(encoding="utf-8")
+        assert "giudichi dal diff e dai rapporti dei gate" in prompt
+        assert "non provi a eseguire" in prompt
+        for g in runner.GATE:
+            assert f"`{g.nome}`: verde" in prompt, f"il prompt non porta il gate {g.nome}"
+        assert "gate del rosso: verde" in prompt
+        assert morso["test"] in prompt and morso["mutante"] in prompt, (
+            "il test che morde arriva al Critic con il suo mutante"
+        )
