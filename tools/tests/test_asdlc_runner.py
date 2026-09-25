@@ -5853,6 +5853,16 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert "- `asdlc`: non girato, il diff non tocca tools/, asdlc.toml" in prompt
         assert "- `asdlc`: verde" not in prompt
 
+    def test_il_gate_del_rosso_spento_arriva_al_critic_come_spento(
+        self, configura, monkeypatch, git_finto
+    ):
+        configura(toml_di_prova(gate_del_rosso=False))
+
+        prompt = self._prompt_del_critic(monkeypatch)
+
+        assert "- gate del rosso: spento da asdlc.toml" in prompt
+        assert "gate del rosso: verde" not in prompt
+
     def test_il_nome_e_revisione_avversariale_del_diff_nel_prompt_e_nella_pr(
         self, monkeypatch
     ):
