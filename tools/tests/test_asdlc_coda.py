@@ -20,6 +20,7 @@ import fcntl
 import importlib.util
 import datetime
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -436,6 +437,33 @@ def test_il_lucchetto_tenuto_nel_worktree_ferma_il_tick(tmp_path, monkeypatch):
         fcntl.flock(tenuto, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
         assert coda.decidi(repo, albero) == coda.Occupato()
+
+
+def test_un_processo_che_nomina_il_runner_non_occupa_lalbero(tmp_path, monkeypatch):
+    """Il lucchetto libero dice che non c'è nessun giro, chiunque lavori lì.
+
+    Il 07/09 e due volte il 25/09 un poller o un Monitor di Claude, con la
+    cartella corrente nel worktree e `asdlc_runner` nel comando, hanno fatto
+    dire `occupato` al tick senza essere un runner (difetto 47 di PBI-102). Qui
+    il processo è vero: un `python3` che dorme dentro l'albero e ha
+    `tools/asdlc_runner.py` fra gli argomenti, col lucchetto che nessuno tiene.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    (albero / "runs").mkdir(parents=True)
+    (albero / "runs" / ".runner.lock").touch()
+    monkeypatch.setattr(coda, "esegui", mondo())
+
+    impostore = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)", "tools/asdlc_runner.py"],
+        cwd=albero,
+    )
+    try:
+        assert coda.giro_in_corso(albero) is False
+        assert coda.decidi(repo, albero) != coda.Occupato()
+    finally:
+        impostore.kill()
+        impostore.wait()
 
 
 def test_un_gh_che_non_risponde_non_produce_lancia(tmp_path, monkeypatch):
