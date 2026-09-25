@@ -110,6 +110,13 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
     if testo is None or not testo.strip():
         return _contenuto(f"Il campo «{campo}» è vuoto: scrivilo e richiama {nome}.",
                           errore=True)
+    # Un surrogato isolato passa `json.loads` ma non si scrive in UTF-8: si
+    # rifiuta qui, prima del temporaneo, e non come errore interno (`PBI-372`).
+    try:
+        testo.encode("utf-8")
+    except UnicodeEncodeError:
+        return _contenuto(f"Il campo «{campo}» contiene un carattere non valido: "
+                          f"riscrivilo e richiama {nome}.", errore=True)
     if ruolo == "critic" and nome == "fatto" and argomenti.get("verdetto") not in VERDETTI:
         return _contenuto(f"Il campo «verdetto» vale {argomenti.get('verdetto')!r}: deve "
                           f"essere uno fra {VERDETTI}. Richiama fatto con il verdetto.",
