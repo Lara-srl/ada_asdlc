@@ -537,3 +537,25 @@ def test_una_scrittura_interrotta_non_lascia_il_file_d_esito(monkeypatch, tmp_pa
     assert risultato["isError"] is False, parole_della_risposta(risultato)
     assert leggi_esito(esito) == {"esito": "fatto", "riepilogo": "finito"}
     assert [f.name for f in tmp_path.iterdir()] == ["esito.json"]
+
+
+@pytest.mark.parametrize("nome, argomenti, campo", [
+    pytest.param("fatto", {"riepilogo": ""}, "riepilogo", id="riepilogo-vuoto"),
+    pytest.param("fermati", {"domanda": " \n\t "}, "domanda", id="domanda-di-spazi"),
+    pytest.param("fatto", {}, "riepilogo", id="riepilogo-assente"),
+])
+def test_un_testo_vuoto_si_rifiuta_ancora_come_vuoto(nome, argomenti, campo, tmp_path):
+    """Guardia di `PBI-372`: il rifiuto «non è testo» (decisione 4) non deve
+    prendersi anche la stringa vuota, di soli spazi o assente, che restano «è
+    vuoto». Le altre guardie della Verifica ci sono già:
+    `test_un_ruolo_sconosciuto_ferma_il_server_all_avvio` e
+    `test_la_seconda_chiamata_si_rifiuta_e_il_file_resta_quello_della_prima`."""
+    esito = tmp_path / "esito.json"
+    risposte = parla("builder", esito, [*apertura(), chiamata(1, nome, argomenti)])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is True
+    parole = parole_della_risposta(risultato)
+    assert f"«{campo}» è vuoto" in parole
+    assert "non è testo" not in parole
+    assert not esito.exists()
