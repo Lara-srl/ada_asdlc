@@ -584,6 +584,33 @@ class TestLInventarioDelGiro:
                 f"l'inventario di {momento} non porta {voce}: {inventario}"
             )
 
+    def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
+        """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
+        che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
+        di `esegui_pbi`, e un'eccezione lì chiudeva il PBI `rosso` prima del Builder."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        buono = git_dell_inventario()
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("worktree", "list"):
+                raise RuntimeError("git worktree list → fatal: lock contesa")
+            return buono(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito", f"chiuso {esito.stato}: {esito.nota}"
+        for momento in ("inizio", "fine"):
+            fotografia = esito.inventario[momento]
+            assert "lock contesa" in fotografia["alberi"]["errore"], (
+                "la voce che non si è potuta leggere lo dice, e non finge un elenco vuoto"
+            )
+            assert fotografia["rami"]["locali"] == ["pbi/pbi-102-giro1"], (
+                "le altre voci si leggono lo stesso"
+            )
+
 
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
