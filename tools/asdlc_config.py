@@ -198,8 +198,8 @@ def interpreta(dati: dict, file: str) -> Config:
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
-                      minuti_builder=soglie.intero("minuti_builder", default=90),
-                      minuti_critic=soglie.intero("minuti_critic", default=25)),
+                      minuti_builder=soglie.positivo("minuti_builder", default=90),
+                      minuti_critic=soglie.positivo("minuti_critic", default=25)),
         gate_del_rosso=GateDelRosso(attivo=gate_del_rosso.booleano("attivo")),
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
     )
@@ -261,6 +261,14 @@ class _Sezione:
 
     def intero(self, chiave: str, default=_MANCA) -> int:
         return self._valore(chiave, int, "un numero intero", default)
+
+    def positivo(self, chiave: str, default=_MANCA) -> int:
+        """Un intero sopra lo zero: un tetto di zero minuti scadrebbe a ogni chiamata."""
+        valore = self.intero(chiave, default)
+        if valore <= 0:
+            raise ErroreDiConfigurazione(
+                f"{self.file}: `{self._chiave(chiave)}` deve essere positivo, non {valore!r}")
+        return valore
 
     def booleano(self, chiave: str) -> bool:
         return self._valore(chiave, bool, "`true` o `false`")
