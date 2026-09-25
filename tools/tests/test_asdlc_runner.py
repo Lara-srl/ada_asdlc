@@ -614,6 +614,33 @@ class TestLInventarioDelGiro:
             "la diagnosi del giro resta davanti: ciò che lascia si aggiunge dietro"
         )
 
+    def test_cio_che_e_del_giro_per_contratto_non_si_segnala(self, monkeypatch, tmp_path):
+        """Decisione 8: la differenza è ciò che il giro lascia **oltre** al suo
+        contratto — il suo ramo, locale e su `origin`, e i suoi file in `runs/`,
+        registro compreso. Segnalarli in ogni nota la renderebbe rumore."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        prima = git_dell_inventario(rami_locali="", rami_origin="",
+                                    alberi=(ALBERO_DEL_GIRO,), stato="")
+        dopo = git_dell_inventario(rami_locali="pbi/pbi-102\n",
+                                   rami_origin="abc123\trefs/heads/pbi/pbi-102\n",
+                                   alberi=(ALBERO_DEL_GIRO,),
+                                   stato="?? runs/giro.json\n!! runs/giro.log\n")
+        agente = agente_finto({})
+        chiamato = []
+
+        def _esegui(*a, **k):
+            chiamato.append(True)
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "git", lambda *a: (dopo if chiamato else prima)(*a))
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert "il giro lascia" not in esito.nota, (
+            f"la nota «{esito.nota}» segnala il ramo del giro o i suoi file in runs/"
+        )
+
     def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
         """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
         che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
