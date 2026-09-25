@@ -387,6 +387,11 @@ a un falso negativo. Non sei qui per essere utile: sei qui per trovare ciò che 
 Il diff del branch corrente: `git diff {base}...HEAD`
 I commit: `git log --oneline {base}..HEAD`
 
+Tu giudichi dal diff e dai rapporti dei gate, e non provi a eseguire niente: i tuoi
+strumenti sono `Read`, `Grep`, `Glob` e `git diff`. Ciò che si esegue l'hanno già
+eseguito i gate deterministici, e i loro esiti te li passa il runner in fondo a questo
+prompt, sotto «I gate di questo giro»: non andarli a cercare nei log.
+
 ## Cosa controllare, in quest'ordine
 1. **Criteri di verifica del PBI**: uno per uno, spuntato o no.
 2. **Scope**: file toccati fuori da quelli dichiarati?
@@ -2232,8 +2237,32 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     return mancati
 
 
-def revisione_critica(pbi_path: Path) -> Verdetto:
-    """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
+def gate_per_il_critic(attivi: set[str], morsi: list[dict]) -> str:
+    """Ciò che i gate hanno misurato, per il prompt del Critic (PBI-371, decisione 6).
+
+    Il Critic non esegue niente: senza questo testo, su PBI-365, è andato a
+    cercarsi il log del giro. Si chiama dopo i gate verdi e il gate del rosso
+    passato, quindi i gate che hanno girato sono verdi."""
+    toccati = file_toccati() if any(g.solo_se_tocca for g in GATE) else set()
+    righe = ["", "## I gate di questo giro", "",
+             "Misurati dal runner su `HEAD`, prima di chiamarti.", ""]
+    for g in GATE:
+        righe.append(f"- `{g.nome}`: verde" if acceso(g, attivi, toccati) else
+                     f"- `{g.nome}`: non girato, il diff non tocca {', '.join(g.solo_se_tocca)}")
+    righe.append("- gate del rosso: " + ("verde" if GATE_DEL_ROSSO_ATTIVO else
+                                         "spento da asdlc.toml"))
+    if morsi:
+        righe += ["", "Test nati verdi che il gate del rosso ha lasciato passare perché "
+                  "mordono un mutante:", ""]
+        for m in morsi:
+            righe += [f"- `{m['commit']}` {m['titolo']}", f"  {m['test']}",
+                      descrizione_del_morso(m, "  ")]
+    return "\n".join(righe) + "\n"
+
+
+def revisione_critica(pbi_path: Path, gate: str = "") -> Verdetto:
+    """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder.
+    `gate` è ciò che i gate del giro hanno misurato, in coda al prompt."""
     print("    critic … ", end="", flush=True)
     try:
         percorso = pbi_path.relative_to(REPO)
@@ -2241,7 +2270,7 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
         percorso = pbi_path
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
     prompt_file, file_esito = file_dell_invocazione("critic")
-    prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
+    prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso) + gate, encoding="utf-8")
     _, out, dichiarato, registro = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
@@ -2819,7 +2848,8 @@ def esegui_pbi(
                 break
 
             with misura(e, "critic"):
-                verdetto = revisione_critica(pbi_path)
+                verdetto = revisione_critica(
+                    pbi_path, gate=gate_per_il_critic(attivi, e.test_che_mordono))
             if verdetto.registro is not None:
                 e.invocazioni.append(verdetto.registro)
             rapporto = verdetto.rapporto
