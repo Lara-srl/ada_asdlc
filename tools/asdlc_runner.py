@@ -596,6 +596,9 @@ class Esito:
     # Il file col traceback di un'eccezione che ha interrotto il giro: la nota ne
     # porta tipo e messaggio, e il resto sta lì (PBI-369, decisione 2).
     file_traceback: str = ""
+    # Rami, alberi e file com'erano all'inizio del giro e come sono alla fine:
+    # `{"inizio": inventario(), "fine": inventario()}` (PBI-363, decisione 7).
+    inventario: dict = field(default_factory=dict)
 
 
 def apri_rapporto(run: str, pbi: list[str]) -> Path:
@@ -1057,16 +1060,40 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     return Invocazione(codice, uscita, dichiarato, registro)
 
 
-def nota_senza_esito(registro: dict) -> str:
-    """La nota di un `senza esito`: chi non ha chiamato, o chi è scaduto, e dove
-    guardare."""
+# Ciò che la CLI risponde quando l'account esaurisce il limite d'uso, e l'ora del
+# reset dentro quella frase: «You've hit your session limit · resets 1:30am» (giro
+# 5 di PBI-333, 02/09/2026). Stanno nel sorgente e non in `asdlc.toml`: cambiano
+# quando cambia l'agente, non il progetto (PBI-363, decisione 5). È un testo letto
+# da uno strumento, un'eccezione dichiarata: se la CLI esporrà l'ora in un campo,
+# si leggerà da lì.
+FRASE_DEL_LIMITE = re.compile(r"You've hit your \w+ limit")
+ORA_DEL_RESET = re.compile(r"resets\s+(\d{1,2}(?::\d{2})?\s?[ap]m)", re.IGNORECASE)
+
+
+def limite_d_uso(uscita: str) -> str:
+    """Ciò che la nota aggiunge quando l'uscita porta la frase del limite d'uso,
+    o `""`. La lettura aggiunge e non cambia niente (PBI-363, decisione 3)."""
+    if not FRASE_DEL_LIMITE.search(uscita):
+        return ""
+    if ora := ORA_DEL_RESET.search(uscita):
+        return f"limite d'uso dell'account, reset alle {ora.group(1)}"
+    # Un'ora inventata è peggio di un'ora mancante: chi legge `runs/tempi.csv`
+    # la userebbe (decisione 4).
+    return "limite d'uso dell'account, ora del reset non leggibile"
+
+
+def nota_senza_esito(registro: dict, uscita: str = "") -> str:
+    """La nota di un `senza esito`: chi non ha chiamato, o chi è scaduto, dove
+    guardare e, se l'uscita dell'agente lo dice, il limite d'uso con l'ora del
+    reset."""
     if "tetto_minuti" in registro:
         chi = f"tetto di {registro['tetto_minuti']:g} minuti superato ({registro['ruolo']})"
     else:
         chi = f"il {registro['ruolo']} non ha chiamato né fatto né fermati"
-    return (f"{chi} · "
+    nota = (f"{chi} · "
             f"codice d'uscita {registro['codice']} · stdout {registro['stdout']} · "
             f"stderr {registro['stderr']}")
+    return " · ".join(t for t in (nota, limite_d_uso(uscita)) if t)
 
 
 def git(*args: str) -> str:
@@ -1478,6 +1505,12 @@ def commit_da_esaminare(base: str, ref: str, visti: set[str]) -> list[str]:
     return [sha for sha in fuori.split() if sha not in visti]
 
 
+# Gli alberi usa e getta montati e smontati da quando il processo è partito. Il
+# giro ne legge la differenza fra l'inizio e la fine (PBI-363, decisione 6): se
+# una strada salta lo smontaggio, i due numeri divergono anche senza un avviso.
+USA_E_GETTA: Counter[str] = Counter()
+
+
 @contextmanager
 def worktree_usa_e_getta(sha: str):
     """Estrae un commit **fuori** dall'albero del giro, e lo smonta comunque vada.
@@ -1491,6 +1524,7 @@ def worktree_usa_e_getta(sha: str):
     albero = cartella / "albero"
     try:
         git("worktree", "add", "--detach", "--quiet", str(albero), sha)
+        USA_E_GETTA["montati"] += 1
         for prestito in PRESTITI:
             sorgente, destinazione = REPO / prestito, albero / prestito
             if sorgente.exists() and not destinazione.exists() and destinazione.parent.is_dir():
@@ -1499,6 +1533,7 @@ def worktree_usa_e_getta(sha: str):
     finally:
         try:
             git("worktree", "remove", "--force", str(albero))
+            USA_E_GETTA["smontati"] += 1
         except RuntimeError as exc:  # smontarlo è igiene, non è il verdetto
             print(f"    ⚠️  worktree non smontato: {str(exc)[:200]}")
         shutil.rmtree(cartella, ignore_errors=True)
@@ -2492,6 +2527,104 @@ def rami_locali(pbi: str) -> set[str]:
     return {r.strip() for r in dentro.splitlines() if r.strip()}
 
 
+def inventario() -> dict:
+    """Ciò che sta intorno al giro, in tre voci (PBI-363, decisione 7).
+
+    - `rami`: i `pbi/pbi-*` locali e quelli su `origin`, chiesti con `ls-remote` e
+      non al tracking, che resta indietro;
+    - `alberi`: i percorsi di `git worktree list`, compresi gli usa e getta
+      `ada-rosso-*` di un gate;
+    - `file`: ciò che `git status --ignored` elenca — i non tracciati, gli ignorati
+      e i tracciati modificati — contato per cartella.
+
+    Il giro lo fa all'inizio e alla fine, e non tocca niente di ciò che trova.
+    Osserva e non decide (`ADR-0008`): una voce che `git` non sa dire diventa
+    `{"errore": …}`, e le altre si leggono lo stesso. Anche quando `git` scade:
+    `ls-remote` va in rete, e `esegui` lascia salire `TimeoutExpired`. Alla fine
+    del giro l'inventario sta prima di `pubblica`, e un'eccezione qui lasciava il
+    ramo fuori da `origin` (difetti 8 e 37 di PBI-102).
+    """
+    voci = {"rami": rami_dell_inventario, "alberi": alberi_dell_inventario,
+            "file": file_dell_inventario}
+    fotografia: dict = {}
+    for voce, leggi in voci.items():
+        try:
+            fotografia[voce] = leggi()
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            fotografia[voce] = {"errore": str(exc)[:300]}
+    return fotografia
+
+
+def rami_dell_inventario() -> dict[str, list[str]]:
+    prefisso = f"{CFG.git.prefisso_ramo}*"
+    locali = git("branch", "--list", prefisso, "--format=%(refname:short)")
+    remoti = git("ls-remote", "--heads", REMOTO, prefisso)
+    return {"locali": sorted(r.strip() for r in locali.splitlines() if r.strip()),
+            "origin": sorted(r.split("refs/heads/")[-1].strip()
+                             for r in remoti.splitlines() if "refs/heads/" in r)}
+
+
+def alberi_dell_inventario() -> list[str]:
+    return [r.removeprefix("worktree ").strip()
+            for r in git("worktree", "list", "--porcelain").splitlines()
+            if r.startswith("worktree ")]
+
+
+def file_dell_inventario() -> dict[str, int]:
+    """Ciò che `git status --ignored` elenca — i non tracciati, gli ignorati e i
+    tracciati modificati — contato per cartella di primo livello; `.` è la radice."""
+    file: Counter[str] = Counter()
+    for riga in git("status", "--ignored", "--porcelain").splitlines():
+        percorso = riga[3:].strip()
+        if percorso:
+            file[percorso.split("/")[0] if "/" in percorso else "."] += 1
+    return dict(sorted(file.items()))
+
+
+def residui(fotografia: dict, pbi: str) -> list[str]:
+    """Ciò che l'inventario d'inizio trova dei giri prima (PBI-363, decisione 7):
+    gli alberi usa e getta `ada-rosso-*`, i rami di questo PBI, locali o su
+    `origin`, e le cartelle con file ignorati o non tracciati fuori dal registro.
+    Si nominano e non si toccano: non sono del giro."""
+    voci: list[str] = []
+    alberi = fotografia.get("alberi")
+    if isinstance(alberi, list):
+        voci += [f"albero {a}" for a in alberi if "ada-rosso-" in a]
+    ramo = ramo_del_pbi(pbi)
+    for dove, rami in fotografia.get("rami", {}).items():
+        if isinstance(rami, list):
+            voci += [f"ramo {r} ({dove})" for r in rami
+                     if r == ramo or r.startswith(f"{ramo}-")]
+    file = fotografia.get("file", {})
+    if "errore" not in file:
+        voci += [f"file {c} ({n})" for c, n in file.items() if c != CFG.registro.cartella]
+    return voci
+
+
+def lasciato(inizio: dict, fine: dict, ramo: str) -> list[str]:
+    """Ciò che l'inventario di fine ha in più di quello d'inizio, una voce per
+    cosa: `albero …`, `ramo …`, `file <cartella> +n` (PBI-363, decisione 8). Una
+    voce che una delle due fotografie non ha saputo leggere non si confronta.
+
+    Resta fuori ciò che il giro lascia per contratto: il suo `ramo`, locale e su
+    `origin`, e i suoi file nella cartella del registro — rapporto, log, prompt.
+    Segnalati in ogni nota, renderebbero la nota rumore."""
+    voci: list[str] = []
+    prima, dopo = inizio.get("alberi"), fine.get("alberi")
+    if isinstance(prima, list) and isinstance(dopo, list):
+        voci += [f"albero {a}" for a in dopo if a not in prima]
+    prima, dopo = inizio.get("rami", {}), fine.get("rami", {})
+    for dove in ("locali", "origin"):
+        if isinstance(prima.get(dove), list) and isinstance(dopo.get(dove), list):
+            voci += [f"ramo {r} ({dove})" for r in dopo[dove]
+                     if r not in prima[dove] and r != ramo]
+    prima, dopo = inizio.get("file", {}), fine.get("file", {})
+    if "errore" not in prima and "errore" not in dopo:
+        voci += [f"file {c} +{n - prima.get(c, 0)}" for c, n in dopo.items()
+                 if n > prima.get(c, 0) and c != CFG.registro.cartella]
+    return voci
+
+
 def ramo_del_pbi(pbi: str) -> str:
     """`pbi/pbi-322` da `PBI-322`: `[git].prefisso_ramo` più il numero, letto
     dal modello `[backlog].id`. È **l'unico** posto in cui la forma del ramo si
@@ -2668,6 +2801,14 @@ def esegui_pbi(
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
+    # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
+    # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
+    e.inventario["inizio"] = inventario()
+    contati = Counter(USA_E_GETTA)
+    # Solo nel log, non nella nota: fra i file ignorati ci sono sempre il venv e
+    # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
+    if trovati := residui(e.inventario["inizio"], pbi):
+        print(f"    residui dei giri prima (non li tocco): {', '.join(trovati)}")
     branch = crea_branch(pbi)
     apri_la_fase()
 
@@ -2694,6 +2835,18 @@ def esegui_pbi(
         # che si guarda per decidere se un branch fermato si butta (difetto 10).
         chiudi_la_fase()
         e.commit = conta_commit()
+        e.inventario["fine"] = inventario()
+        e.inventario["usa_e_getta"] = conto = {k: USA_E_GETTA[k] - contati[k]
+                                               for k in ("montati", "smontati")}
+        # Contare vale anche quando la strada che lascia il residuo non si riesce a
+        # riprodurre: un albero appeso che si vede nella nota non si perde in /tmp.
+        resti = lasciato(e.inventario["inizio"], e.inventario["fine"], branch)
+        if (persi := conto["montati"] - conto["smontati"]) > 0:
+            resti.append(f"{persi} albero usa e getta montato e non smontato" if persi == 1
+                         else f"{persi} alberi usa e getta montati e non smontati")
+        if resti:
+            print(f"    ⚠️  il giro lascia: {', '.join(resti)}")
+            dichiara(f"il giro lascia: {', '.join(resti)}")
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
         if nota:
@@ -2762,7 +2915,8 @@ def esegui_pbi(
                 # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
                 # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
                 if dichiarato is None:
-                    return chiudi("senza esito", nota_senza_esito(invocazione.registro))
+                    return chiudi("senza esito", nota_senza_esito(invocazione.registro,
+                                                                  invocazione.uscita))
                 if dichiarato["esito"] == "fermati":
                     e.domanda = dichiarato["domanda"]
                     return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
@@ -2873,7 +3027,8 @@ def esegui_pbi(
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
-                return chiudi("senza esito", nota_senza_esito(verdetto.registro))
+                return chiudi("senza esito",
+                              nota_senza_esito(verdetto.registro, verdetto.rapporto))
             if verdetto.esito == "sospeso":
                 # Non si consuma una revisione e non si richiama il Critic: la sua
                 # diagnosi non cambia riprovando, perché ciò che manca non è nel

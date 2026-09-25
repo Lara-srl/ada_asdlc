@@ -419,6 +419,466 @@ class TestNelSenzaEsitoRestaLUscitaGrezza:
             assert voce in esito.nota, f"la nota non dice {voce}"
 
 
+def git_del_senza_esito(*args: str) -> str:
+    """Il `git` minimo di un giro che chiude `senza esito`: albero pulito, due commit."""
+    if args[:2] == ("rev-list", "--count"):
+        return "2"
+    if args[:2] == ("ls-tree", "--name-only"):
+        return elenco_backlog()
+    return ""
+
+
+class TestIlSenzaEsitoDiceLOraDelReset:
+    """PBI-363, difetto 27 di `PBI-102`: l'ora del reset entra nella nota.
+
+    Giro 5 di PBI-333 (02/09/2026, 00:46:20): il Builder ha risposto una riga
+    sola, «You've hit your session limit · resets 1:30am». Dopo `PBI-367` il giro
+    chiude `senza esito`, ma la nota non dice né il limite né quando si può
+    rilanciare: lo sa solo chi apre il file di stderr. La frase è della CLI, non
+    del modello (`ADR-0027`, §Fuori, e l'eccezione dichiarata del PBI).
+    """
+
+    @pytest.mark.parametrize(
+        "esiti, testi, ora",
+        [
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "You've hit your session limit · resets 1:30am\n"},
+                         "1:30am", id="builder-riga-del-02-09"),
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "You've hit your usage limit · resets 3am\n"},
+                         "3am", id="builder-usage-limit"),
+            pytest.param({"builder": FATTO},
+                         {"critic": "You've hit your session limit · resets 11:30pm\n"},
+                         "11:30pm", id="critic"),
+        ],
+    )
+    def test_la_nota_nomina_il_limite_e_l_ora(self, monkeypatch, tmp_path, esiti, testi, ora):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "esegui", agente_finto(esiti, testi, codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito"
+        assert "limite d'uso dell'account" in esito.nota, (
+            f"la nota «{esito.nota}» non nomina il limite d'uso"
+        )
+        assert f"reset alle {ora}" in esito.nota, (
+            f"la nota «{esito.nota}» non dice quando si può rilanciare"
+        )
+
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param("You've hit your session limit\n", id="senza-ora"),
+            pytest.param("You've hit your session limit · resets soon\n", id="ora-illeggibile"),
+        ],
+    )
+    def test_se_l_ora_non_si_legge_la_nota_lo_dichiara(self, monkeypatch, tmp_path, testo):
+        """Decisione 4: un orario plausibile ma inventato è peggio di uno mancante,
+        perché chi legge `runs/tempi.csv` lo userebbe."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"critic": verdetto("pass")}, {"builder": testo},
+                                         codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito"
+        assert "limite d'uso dell'account, ora del reset non leggibile" in esito.nota, (
+            f"la nota «{esito.nota}» tace il limite, o gli inventa un'ora"
+        )
+        assert "reset alle" not in esito.nota
+
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param("", id="muto"),
+            pytest.param("API Error: 500 Internal Server Error\n", id="crash-della-cli"),
+            pytest.param("resets 1:30am\n", id="ora-senza-la-frase"),
+        ],
+    )
+    def test_senza_la_frase_la_nota_resta_quella_di_367(self, monkeypatch, tmp_path, testo):
+        """Decisione 3, il fallimento sicuro: la lettura aggiunge e non cambia
+        niente. Senza la frase del limite la nota è quella di `PBI-367`, parola
+        per parola."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"critic": verdetto("pass")}, {"builder": testo},
+                                         codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        registro = esito.invocazioni[-1]
+        assert esito.stato == "senza esito"
+        assert esito.nota == (
+            "il builder non ha chiamato né fatto né fermati · codice d'uscita 1 · "
+            f"stdout {registro['stdout']} · stderr {registro['stderr']}"
+        )
+
+
+ALBERO_DEL_GIRO = "/home/laisdev/ada-run"
+ALBERO_APPESO = "/tmp/ada-rosso-k3j9/albero"
+
+
+def git_dell_inventario(rami_locali: str = "pbi/pbi-102-giro1\n",
+                        rami_origin: str = "abc123\trefs/heads/pbi/pbi-200\n",
+                        alberi: tuple[str, ...] = (ALBERO_DEL_GIRO, ALBERO_APPESO),
+                        stato: str = "!! data/\n?? runs/x.json\n!! runs/y.log\n"):
+    """Un `git` che risponde alle tre domande dell'inventario — rami, alberi,
+    file — e il minimo di un giro che chiude `senza esito`. Le chiamate restano
+    in `.chiamate`."""
+    chiamate: list[tuple[str, ...]] = []
+
+    def _git(*args: str) -> str:
+        chiamate.append(args)
+        if args[:2] == ("branch", "--list"):
+            return rami_locali
+        if args[:2] == ("ls-remote", "--heads"):
+            return rami_origin
+        if args[:3] == ("worktree", "list", "--porcelain"):
+            return "\n\n".join(f"worktree {a}\nHEAD abc123\ndetached" for a in alberi)
+        if args[:3] == ("status", "--ignored", "--porcelain"):
+            return stato
+        return git_del_senza_esito(*args)
+
+    _git.chiamate = chiamate
+    return _git
+
+
+class TestLAlberoSporcoVeroNonDiventaUnLimite:
+    """PBI-363, decisione 2: la frase del limite si legge solo dentro un `senza
+    esito`. Un Builder che ha chiamato `fatto` ha dichiarato il suo esito, e se
+    lascia file non committati è l'albero sporco di sempre — anche se nel suo
+    testo cita «You've hit your session limit»."""
+
+    def test_consuma_i_giri_d_igiene_e_la_nota_dice_l_albero_sporco(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        sporco = " M backend/app/marginalita.py"
+        stati = [""]  # il controllo d'ingresso, prima del PBI
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return stati.pop(0) if stati else sporco
+            return git_del_senza_esito(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        agente = agente_finto(
+            {"builder": FATTO},
+            {"builder": "Ho finito. Prima mi era apparso «You've hit your session "
+                        "limit · resets 1:30am», poi ho ripreso.\n"},
+        )
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert len(agente.comandi) == runner.MAX_IGIENE, (
+            "l'albero sporco vero spende i giri d'igiene esattamente come prima"
+        )
+        assert esito.nota == (
+            f"l'albero resta sporco dopo {runner.MAX_IGIENE} giri del Builder: "
+            f"il lavoro c'è ma non è committato ({sporco})"
+        ), f"la nota «{esito.nota}» non è quella dell'albero sporco, e basta"
+
+
+class TestLInventarioDelGiro:
+    """PBI-363, decisione 7 e difetto 28 di `PBI-102`: il giro conta rami, alberi
+    e file all'inizio e alla fine, e li scrive nel suo rapporto.
+
+    Dopo il giro 6 di PBI-333 (02/09/2026) in `/tmp` erano rimasti tre alberi
+    `ada-rosso-*` montati, e nel log nessuna riga lo diceva. Un albero appeso
+    contende il lock di `git worktree` al gate dopo: il giro deve saperlo.
+    """
+
+    @pytest.mark.parametrize(
+        "voce, atteso",
+        [
+            pytest.param("rami", {"locali": ["pbi/pbi-102-giro1"], "origin": ["pbi/pbi-200"]},
+                         id="rami"),
+            pytest.param("alberi", [ALBERO_DEL_GIRO, ALBERO_APPESO], id="alberi"),
+            pytest.param("file", {"data": 1, "runs": 2}, id="file"),
+        ],
+    )
+    def test_il_rapporto_porta_l_inventario_di_inizio_e_fine(
+        self, monkeypatch, tmp_path, voce, atteso
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_dell_inventario())
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        voce_del_rapporto = json.loads(
+            runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))["esiti"][0]
+
+        inventario = voce_del_rapporto.get("inventario", {})
+        for momento in ("inizio", "fine"):
+            assert inventario.get(momento, {}).get(voce) == atteso, (
+                f"l'inventario di {momento} non porta {voce}: {inventario}"
+            )
+
+    def test_cio_che_il_giro_lascia_va_nel_log_e_nella_nota(self, monkeypatch, tmp_path, capsys):
+        """Decisione 8: alla fine si scrive la differenza. Un albero usa e getta
+        rimasto montato, un ramo nato durante il giro, un file ignorato nuovo: se
+        la differenza non è vuota, il log e la nota lo dicono."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        prima = git_dell_inventario(rami_locali="", rami_origin="",
+                                    alberi=(ALBERO_DEL_GIRO,), stato="")
+        dopo = git_dell_inventario(rami_locali="pbi/pbi-999\n", rami_origin="",
+                                   alberi=(ALBERO_DEL_GIRO, ALBERO_APPESO),
+                                   stato="!! data/fattura.pdf\n")
+        agente = agente_finto({})
+        chiamato = []
+
+        def _esegui(*a, **k):
+            chiamato.append(True)
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "git", lambda *a: (dopo if chiamato else prima)(*a))
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        log = capsys.readouterr().out
+
+        for residuo in (ALBERO_APPESO, "pbi/pbi-999", "data"):
+            assert residuo in esito.nota, f"la nota «{esito.nota}» non dice che resta {residuo}"
+            assert residuo in log, f"il log non dice che resta {residuo}"
+        assert esito.nota.startswith("il builder non ha chiamato"), (
+            "la diagnosi del giro resta davanti: ciò che lascia si aggiunge dietro"
+        )
+
+    def test_cio_che_e_del_giro_per_contratto_non_si_segnala(self, monkeypatch, tmp_path):
+        """Decisione 8: la differenza è ciò che il giro lascia **oltre** al suo
+        contratto — il suo ramo, locale e su `origin`, e i suoi file in `runs/`,
+        registro compreso. Segnalarli in ogni nota la renderebbe rumore."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        prima = git_dell_inventario(rami_locali="", rami_origin="",
+                                    alberi=(ALBERO_DEL_GIRO,), stato="")
+        dopo = git_dell_inventario(rami_locali="pbi/pbi-102\n",
+                                   rami_origin="abc123\trefs/heads/pbi/pbi-102\n",
+                                   alberi=(ALBERO_DEL_GIRO,),
+                                   stato="?? runs/giro.json\n!! runs/giro.log\n")
+        agente = agente_finto({})
+        chiamato = []
+
+        def _esegui(*a, **k):
+            chiamato.append(True)
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "git", lambda *a: (dopo if chiamato else prima)(*a))
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert "il giro lascia" not in esito.nota, (
+            f"la nota «{esito.nota}» segnala il ramo del giro o i suoi file in runs/"
+        )
+
+    @pytest.mark.parametrize(
+        "residuo",
+        [
+            pytest.param(ALBERO_APPESO, id="albero-usa-e-getta"),
+            pytest.param("pbi/pbi-102-giro1", id="ramo-dello-stesso-pbi"),
+            pytest.param("data", id="file-ignorato-fuori-da-runs"),
+        ],
+    )
+    def test_all_avvio_un_residuo_si_nomina_e_non_si_tocca(
+        self, monkeypatch, tmp_path, capsys, residuo
+    ):
+        """Decisione 7: all'inizio l'inventario nomina i residui dei giri prima —
+        un albero `ada-rosso-*`, un ramo del PBI che sta per partire, un file
+        ignorato fuori da `runs/` — prima che parta il Builder. Non li tocca: non
+        sono suoi, e smontare alberi di qualcun altro è un'iniziativa che non si
+        prende."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        git_finto = git_dell_inventario()
+        monkeypatch.setattr(runner, "git", git_finto)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        log = capsys.readouterr().out
+
+        prima_del_builder = log.split("builder — giro 1")[0]
+        residui = [r for r in prima_del_builder.splitlines() if "residui" in r]
+        assert residui and residuo in residui[0], (
+            f"all'avvio il log non nomina il residuo {residuo}:\n{prima_del_builder}"
+        )
+        toccati = [c for c in git_finto.chiamate
+                   if c[:2] in (("worktree", "remove"), ("worktree", "prune"))
+                   or c[0] == "clean" or (c[0] == "branch" and {"-d", "-D"} & set(c))]
+        assert toccati == [], f"il giro ha toccato un residuo non suo: {toccati}"
+
+    def test_il_rapporto_conta_gli_alberi_usa_e_getta_montati_e_smontati(
+        self, monkeypatch, tmp_path
+    ):
+        """Decisione 6: gli alberi si contano. È la metà robusta della cura del
+        difetto 28, e vale anche se la strada che salta lo smontaggio non si
+        riesce a riprodurre."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_dell_inventario())
+        agente = agente_finto({})
+
+        def _esegui(*a, **k):
+            # Due gate del rosso dentro il giro: due alberi montati e smontati.
+            for sha in ("abc123", "def456"):
+                with runner.worktree_usa_e_getta(sha):
+                    pass
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.inventario.get("usa_e_getta") == {"montati": 2, "smontati": 2}
+
+    def test_un_albero_montato_e_mai_smontato_va_nel_log_e_nella_nota(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Decisione 6: se la differenza fra montati e smontati non è zero, il log
+        lo dice. Il 02/09 la strada che ha lasciato tre alberi in `/tmp` non è
+        passata dal `finally`, e l'avviso che ci sta dentro non è partito: qui la
+        si imita entrando nell'albero senza uscirne."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_dell_inventario())
+        monkeypatch.setattr(runner.tempfile, "mkdtemp",
+                            lambda prefix: str(Path(tmp_path, f"{prefix}x").resolve()))
+        agente = agente_finto({})
+        appesi = []
+
+        def _esegui(*a, **k):
+            if not appesi:
+                albero = runner.worktree_usa_e_getta("abc123")
+                albero.__enter__()  # e il `finally` non arriva mai
+                appesi.append(albero)
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        log = capsys.readouterr().out
+
+        appesi[0].__exit__(None, None, None)  # con `git` ancora sostituito
+
+        avviso = "1 albero usa e getta montato e non smontato"
+        assert avviso in esito.nota, f"la nota «{esito.nota}» non dice l'albero perso"
+        assert avviso in log, "il log non dice l'albero perso"
+
+    def test_un_giro_che_finisce_non_lascia_alberi_oltre_a_quelli_trovati(
+        self, monkeypatch, tmp_path
+    ):
+        """Guardia dichiarata del difetto 28: lo smontaggio c'è già, e la guardia
+        nasce verde. Qui `git worktree` è un elenco vero — `add` aggiunge,
+        `remove` toglie — e il giro monta due alberi usa e getta come due gate
+        del rosso: alla fine l'elenco è quello d'inizio, e il conto torna."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner.tempfile, "mkdtemp",
+                            lambda prefix: str(Path(tmp_path, f"{prefix}x").resolve()))
+        alberi = [ALBERO_DEL_GIRO, ALBERO_APPESO]  # uno di ieri, che non è suo
+        base = git_dell_inventario()
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("worktree", "add"):
+                alberi.append(args[-2])
+                return ""
+            if args[:2] == ("worktree", "remove"):
+                alberi.remove(args[-1])
+                return ""
+            if args[:3] == ("worktree", "list", "--porcelain"):
+                return "\n\n".join(f"worktree {a}\nHEAD abc123\ndetached" for a in alberi)
+            return base(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        agente = agente_finto({})
+
+        def _esegui(*a, **k):
+            for sha in ("abc123", "def456"):
+                with runner.worktree_usa_e_getta(sha):
+                    pass
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.inventario["fine"]["alberi"] == esito.inventario["inizio"]["alberi"]
+        conto = esito.inventario["usa_e_getta"]
+        assert conto["montati"] == conto["smontati"] == 2, f"il conto non torna: {conto}"
+        assert "il giro lascia" not in esito.nota, esito.nota
+
+    def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
+        """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
+        che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
+        di `esegui_pbi`, e un'eccezione lì chiudeva il PBI `rosso` prima del Builder."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        buono = git_dell_inventario()
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("worktree", "list"):
+                raise RuntimeError("git worktree list → fatal: lock contesa")
+            return buono(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito", f"chiuso {esito.stato}: {esito.nota}"
+        for momento in ("inizio", "fine"):
+            fotografia = esito.inventario[momento]
+            assert "lock contesa" in fotografia["alberi"]["errore"], (
+                "la voce che non si è potuta leggere lo dice, e non finge un elenco vuoto"
+            )
+            assert fotografia["rami"]["locali"] == ["pbi/pbi-102-giro1"], (
+                "le altre voci si leggono lo stesso"
+            )
+
+    def test_un_ls_remote_che_scade_non_ferma_il_giro_e_non_salta_la_pubblicazione(
+            self, monkeypatch, tmp_path):
+        """`git()` lascia salire `subprocess.TimeoutExpired`, e `ls-remote` è una
+        chiamata di rete. All'inizio l'eccezione fermava il giro prima del Builder;
+        alla fine, dentro `chiudi()` e prima di `pubblica`, sostituiva l'esito vero
+        con un'eccezione del runner e lasciava il ramo fuori da `origin` (difetti 8
+        e 37 di PBI-102). Rilievo 1 del Critic su PBI-363."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        buono = git_dell_inventario()
+
+        # Scade solo l'`ls-remote` dell'inventario, quello con il pattern di tutti i
+        # rami `pbi/pbi-*`. Quello di `rami_su_origin()` dentro `crea_branch()` è il
+        # difetto 52 di PBI-102, di PBI-374 (decisione 9 di PBI-363).
+        def _git(*args: str) -> str:
+            if args[:2] == ("ls-remote", "--heads") and args[-1] == "pbi/pbi-*":
+                raise subprocess.TimeoutExpired(["git", *args], 120)
+            return buono(*args)
+
+        pubblicati: list[str] = []
+
+        def _pubblica(branch: str) -> bool:
+            pubblicati.append(branch)
+            return True
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "pubblica", _pubblica)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito", f"chiuso {esito.stato}: {esito.nota}"
+        assert pubblicati, "il ramo di un giro che si interrompe va su origin"
+        for momento in ("inizio", "fine"):
+            fotografia = esito.inventario[momento]
+            assert "errore" in fotografia["rami"], (
+                "la voce che non si è potuta leggere lo dice, e non finge un elenco vuoto"
+            )
+            assert fotografia["alberi"] == [ALBERO_DEL_GIRO, ALBERO_APPESO], (
+                "le altre voci si leggono lo stesso"
+            )
+
+
 class TestITestiChiedonoGliStrumenti:
     """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
 
