@@ -576,6 +576,9 @@ class Esito:
     finito: str = ""
     durata_s: float = 0.0
     tempi: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+    # Il file col traceback di un'eccezione che ha interrotto il giro: la nota ne
+    # porta tipo e messaggio, e il resto sta lì (PBI-369, decisione 2).
+    file_traceback: str = ""
 
 
 def apri_rapporto(run: str, pbi: list[str]) -> Path:
@@ -2418,6 +2421,16 @@ def trova_pbi(pbi: str) -> Path | None:
     return REPO / nome if nome else None
 
 
+def salva_il_traceback(pbi: str) -> Path:
+    """Il traceback dell'eccezione in corso in un file di `LOG_DIR`, accanto al
+    log del giro. `.log` perché `runs/*.log` è ignorato da git: un file nuovo in
+    `runs/` sporcherebbe l'albero del giro dopo."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    file = LOG_DIR / f"{timestamp}_{pbi}_traceback.log"
+    file.write_text(traceback.format_exc(), encoding="utf-8")
+    return file
+
+
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
 ) -> Esito:
@@ -2486,183 +2499,194 @@ def esegui_pbi(
               f"critic {hms(e.tempi['critic'])})")
         return e
 
-    # I commit già passati sotto il gate del rosso. Vive fuori dal ciclo delle
-    # revisioni apposta: alla seconda revisione i commit del primo giro sono gli
-    # stessi, e rigirarne i test moltiplicherebbe il tempo macchina per le revisioni.
-    visti: set[str] = set()
+    # Il giro sta in un `try` perché ogni strada d'uscita passi da `chiudi()`:
+    # un'eccezione — il timeout di un gate, un guasto dentro il gate del rosso —
+    # usciva da qui, la raccoglieva la rete di `main()`, e il ramo restava solo
+    # nel worktree con i commit non contati. Senza ramo su `origin` il tick
+    # rilanciava lo stesso PBI (difetto 37). La rete di `main()` resta, come
+    # ultima difesa e non come strada.
+    try:
+        # I commit già passati sotto il gate del rosso. Vive fuori dal ciclo delle
+        # revisioni apposta: alla seconda revisione i commit del primo giro sono gli
+        # stessi, e rigirarne i test moltiplicherebbe il tempo macchina per le revisioni.
+        visti: set[str] = set()
 
-    for revisione in range(MAX_REVISIONI + 1):
-        e.revisioni = revisione
+        for revisione in range(MAX_REVISIONI + 1):
+            e.revisioni = revisione
 
-        # --- Builder + Quality Gate (deterministico) ---
-        verde = False
-        rossi: list[tuple[str, str]] = []  # se l'agente non arriva mai ai gate, resta vuoto
-        # Ogni revisione apre una sessione nuova; i ritentativi **dentro** la revisione la
-        # continuano. Sono due situazioni opposte servite dallo stesso flag: un gate rosso
-        # è "hai sbagliato una riga", e rileggere tutto il repository per quello è il modo
-        # più costoso di dirlo; un NON PRONTO è "il giudice ha respinto il lavoro", e lì la
-        # finestra vecchia è il problema — dopo quattro giri di discussione sullo Scope
-        # contiene le ragioni per cui l'agente si era convinto di poterlo allargare
-        # (`decisions/ADR-0015`, *Dove entra*). Prima `e.tentativi`, che non si azzera mai,
-        # faceva valere la regola del gate rosso anche fra le revisioni.
-        primo_del_giro = True
-        # Due contatori locali alla revisione, e uno cumulativo che va nel registro.
-        # `e.tentativi` non si azzera mai — è la fatica totale, ed è ciò che si legge in
-        # `runs/tempi.csv` — quindi non può essere lui a decidere quando smettere: farebbe
-        # valere il tetto dei gate **fra** le revisioni, e alla terza il Builder non avrebbe
-        # più un giro. È lo stesso equivoco che ADR-0015 ha già tolto una volta.
-        gate_falliti = igiene = 0
-        while gate_falliti < MAX_TENTATIVI:
-            print(f"  builder — giro {e.tentativi + igiene + 1}")
-            # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-            prompt_file, file_esito = file_dell_invocazione("builder")
-            prompt_file.write_text(prompt, encoding="utf-8")
-            cmd = BUILDER + ([] if primo_del_giro else ["-c"])
-            primo_del_giro = False
-            with misura(e, "builder"):
-                invocazione = invoca_agente("builder", cmd, prompt_file, file_esito)
-            e.invocazioni.append(invocazione.registro)
-            dichiarato = invocazione.dichiarato
+            # --- Builder + Quality Gate (deterministico) ---
+            verde = False
+            rossi: list[tuple[str, str]] = []  # se l'agente non arriva mai ai gate, resta vuoto
+            # Ogni revisione apre una sessione nuova; i ritentativi **dentro** la revisione la
+            # continuano. Sono due situazioni opposte servite dallo stesso flag: un gate rosso
+            # è "hai sbagliato una riga", e rileggere tutto il repository per quello è il modo
+            # più costoso di dirlo; un NON PRONTO è "il giudice ha respinto il lavoro", e lì la
+            # finestra vecchia è il problema — dopo quattro giri di discussione sullo Scope
+            # contiene le ragioni per cui l'agente si era convinto di poterlo allargare
+            # (`decisions/ADR-0015`, *Dove entra*). Prima `e.tentativi`, che non si azzera mai,
+            # faceva valere la regola del gate rosso anche fra le revisioni.
+            primo_del_giro = True
+            # Due contatori locali alla revisione, e uno cumulativo che va nel registro.
+            # `e.tentativi` non si azzera mai — è la fatica totale, ed è ciò che si legge in
+            # `runs/tempi.csv` — quindi non può essere lui a decidere quando smettere: farebbe
+            # valere il tetto dei gate **fra** le revisioni, e alla terza il Builder non avrebbe
+            # più un giro. È lo stesso equivoco che ADR-0015 ha già tolto una volta.
+            gate_falliti = igiene = 0
+            while gate_falliti < MAX_TENTATIVI:
+                print(f"  builder — giro {e.tentativi + igiene + 1}")
+                # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
+                prompt_file, file_esito = file_dell_invocazione("builder")
+                prompt_file.write_text(prompt, encoding="utf-8")
+                cmd = BUILDER + ([] if primo_del_giro else ["-c"])
+                primo_del_giro = False
+                with misura(e, "builder"):
+                    invocazione = invoca_agente("builder", cmd, prompt_file, file_esito)
+                e.invocazioni.append(invocazione.registro)
+                dichiarato = invocazione.dichiarato
 
-            # Senza una chiamata valida il Builder non ha detto niente che si possa
-            # leggere, qualunque cosa ci sia nel suo testo: si chiude qui, senza
-            # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
-            # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
-            if dichiarato is None:
-                return chiudi("senza esito", nota_senza_esito(invocazione.registro))
-            if dichiarato["esito"] == "fermati":
-                e.domanda = dichiarato["domanda"]
-                return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
+                # Senza una chiamata valida il Builder non ha detto niente che si possa
+                # leggere, qualunque cosa ci sia nel suo testo: si chiude qui, senza
+                # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
+                # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
+                if dichiarato is None:
+                    return chiudi("senza esito", nota_senza_esito(invocazione.registro))
+                if dichiarato["esito"] == "fermati":
+                    e.domanda = dichiarato["domanda"]
+                    return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
 
-            # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
-            # il registro non si scrive più dal branch (`ADR-0020`).
-            if sporco := git("status", "--porcelain"):
-                # Non committato = non esiste: niente da giudicare, niente da ripristinare.
-                # Il giro si conta fra quelli d'igiene: `e.tentativi` è la pazienza sui
-                # **gate**, e spenderla qui vorrebbe dire togliere al lavoro vero i giri
-                # che gli servivano (PBI-208, notte del 24/08).
-                igiene += 1
-                if igiene >= MAX_IGIENE:
-                    return chiudi(
-                        "fermato",
-                        f"l'albero resta sporco dopo {MAX_IGIENE} giri del Builder: "
-                        f"il lavoro c'è ma non è committato ({sporco.splitlines()[0][:120]})",
-                    )
-                prompt = PROMPT_IGIENE.format(sporco=sporco[:1500])
-                continue
+                # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
+                # il registro non si scrive più dal branch (`ADR-0020`).
+                if sporco := git("status", "--porcelain"):
+                    # Non committato = non esiste: niente da giudicare, niente da ripristinare.
+                    # Il giro si conta fra quelli d'igiene: `e.tentativi` è la pazienza sui
+                    # **gate**, e spenderla qui vorrebbe dire togliere al lavoro vero i giri
+                    # che gli servivano (PBI-208, notte del 24/08).
+                    igiene += 1
+                    if igiene >= MAX_IGIENE:
+                        return chiudi(
+                            "fermato",
+                            f"l'albero resta sporco dopo {MAX_IGIENE} giri del Builder: "
+                            f"il lavoro c'è ma non è committato ({sporco.splitlines()[0][:120]})",
+                        )
+                    prompt = PROMPT_IGIENE.format(sporco=sporco[:1500])
+                    continue
 
-            e.tentativi += 1
-            gate_falliti += 1
+                e.tentativi += 1
+                gate_falliti += 1
 
-            with misura(e, "gate"):
-                rossi = gira_gate(attivi)
-            if not rossi:
-                verde = True
-                break
-            prompt = PROMPT_RIPROVA.format(esiti="\n\n".join(f"## {n}\n{o}" for n, o in rossi))
-
-        e.commit = conta_commit()
-        if not verde:
-            e.gate_rossi = [{"gate": n, "coda": o[-2000:]} for n, o in rossi]
-            for g in e.gate_rossi:
-                print(f"    ── {g['gate']} ──\n{g['coda']}")
-            return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
-
-        # --- Quality Gate, seconda domanda: quei test sono mai stati rossi? ---
-        # Sta qui e non prima: finché i quattro sono rossi il lavoro non è finito, e
-        # non ha senso chiedere di un ciclo che potrebbe non essere ancora chiuso.
-        print("    gate del rosso … ", end="", flush=True)
-        morsi: list[dict[str, str]] = []
-        senza_rosso: list[dict[str, str]] = []
-        if not GATE_DEL_ROSSO_ATTIVO:
-            # La valvola del livello 4 rinviato (PBI-358, decisione 7): un progetto
-            # il cui runner di test il gate non sa leggere tiene gli altri due gate.
-            # Degradato, ma ancora ASDLC — e lo **dichiara**, a schermo e nella nota
-            # che va nel rapporto e in `runs/tempi.csv`: un gate che si indebolisce
-            # in silenzio è la prima cosa che `AUTOMAZIONE.md` vieta.
-            print("spento (asdlc.toml)")
-            if NOTA_ROSSO_SPENTO not in e.nota:
-                dichiara(NOTA_ROSSO_SPENTO)
-        else:
-            t_rosso = time.monotonic()
-            try:
                 with misura(e, "gate"):
-                    senza_rosso = gate_del_rosso(visti=visti, morsi=morsi)
-            except GuastoDelGate as guasto:
-                # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
-                # accusa nessun commit, perché il gate non ne ha guardato nessuno.
-                print(f"GUASTO ({hms(time.monotonic() - t_rosso)})")
-                print(f"    ── gate del rosso ──\n{guasto}")
-                return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
-            print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
-        # I nati verdi che mordono si scrivono **prima** dell'eventuale fermata: sono
-        # passati, e il rapporto lo dice anche quando un altro commit ferma il giro.
-        e.test_che_mordono += morsi
-        for m in morsi:
-            print(f"    ── {m['commit']} {m['titolo']} ──\n"
-                  f"       {m['test']}\n{descrizione_del_morso(m, '       ')}")
-        if senza_rosso:
-            # `fermato` e non un rilievo da chiudere in un giro di revisione: il ciclo
-            # mancato è **ex ante**, e nessuna fix lo annulla. Mandare il Builder a
-            # rimediare vorrebbe dire spendere una revisione su una cosa che non si
-            # corregge — e poi far leggere lo stesso elenco a una persona.
-            e.commit_senza_rosso = senza_rosso
-            for m in senza_rosso:
+                    rossi = gira_gate(attivi)
+                if not rossi:
+                    verde = True
+                    break
+                prompt = PROMPT_RIPROVA.format(esiti="\n\n".join(f"## {n}\n{o}" for n, o in rossi))
+
+            e.commit = conta_commit()
+            if not verde:
+                e.gate_rossi = [{"gate": n, "coda": o[-2000:]} for n, o in rossi]
+                for g in e.gate_rossi:
+                    print(f"    ── {g['gate']} ──\n{g['coda']}")
+                return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
+
+            # --- Quality Gate, seconda domanda: quei test sono mai stati rossi? ---
+            # Sta qui e non prima: finché i quattro sono rossi il lavoro non è finito, e
+            # non ha senso chiedere di un ciclo che potrebbe non essere ancora chiuso.
+            print("    gate del rosso … ", end="", flush=True)
+            morsi: list[dict[str, str]] = []
+            senza_rosso: list[dict[str, str]] = []
+            if not GATE_DEL_ROSSO_ATTIVO:
+                # La valvola del livello 4 rinviato (PBI-358, decisione 7): un progetto
+                # il cui runner di test il gate non sa leggere tiene gli altri due gate.
+                # Degradato, ma ancora ASDLC — e lo **dichiara**, a schermo e nella nota
+                # che va nel rapporto e in `runs/tempi.csv`: un gate che si indebolisce
+                # in silenzio è la prima cosa che `AUTOMAZIONE.md` vieta.
+                print("spento (asdlc.toml)")
+                if NOTA_ROSSO_SPENTO not in e.nota:
+                    dichiara(NOTA_ROSSO_SPENTO)
+            else:
+                t_rosso = time.monotonic()
+                try:
+                    with misura(e, "gate"):
+                        senza_rosso = gate_del_rosso(visti=visti, morsi=morsi)
+                except GuastoDelGate as guasto:
+                    # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
+                    # accusa nessun commit, perché il gate non ne ha guardato nessuno.
+                    print(f"GUASTO ({hms(time.monotonic() - t_rosso)})")
+                    print(f"    ── gate del rosso ──\n{guasto}")
+                    return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
+                print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
+            # I nati verdi che mordono si scrivono **prima** dell'eventuale fermata: sono
+            # passati, e il rapporto lo dice anche quando un altro commit ferma il giro.
+            e.test_che_mordono += morsi
+            for m in morsi:
                 print(f"    ── {m['commit']} {m['titolo']} ──\n"
-                      f"       {m['test']}\n       → {m['esito']}")
-            return chiudi(
-                "fermato",
-                f"il rosso non si è mai visto su {len(senza_rosso)} commit "
-                f"({', '.join(m['commit'] for m in senza_rosso[:5])}): elenco nel rapporto "
-                f"del giro. Il ciclo mancato è ex ante e nessuna fix lo annulla",
+                      f"       {m['test']}\n{descrizione_del_morso(m, '       ')}")
+            if senza_rosso:
+                # `fermato` e non un rilievo da chiudere in un giro di revisione: il ciclo
+                # mancato è **ex ante**, e nessuna fix lo annulla. Mandare il Builder a
+                # rimediare vorrebbe dire spendere una revisione su una cosa che non si
+                # corregge — e poi far leggere lo stesso elenco a una persona.
+                e.commit_senza_rosso = senza_rosso
+                for m in senza_rosso:
+                    print(f"    ── {m['commit']} {m['titolo']} ──\n"
+                          f"       {m['test']}\n       → {m['esito']}")
+                return chiudi(
+                    "fermato",
+                    f"il rosso non si è mai visto su {len(senza_rosso)} commit "
+                    f"({', '.join(m['commit'] for m in senza_rosso[:5])}): elenco nel rapporto "
+                    f"del giro. Il ciclo mancato è ex ante e nessuna fix lo annulla",
+                )
+
+            # --- Review Gate (probabilistico, sessione separata) ---
+            # Si può togliere, e allora **si dichiara**: `critic_s = 0` non spiega se
+            # stesso — è la lezione di `gate_s = 0` su PBI-208, letto come «gate
+            # rosso» invece che «i gate non sono mai girati». Chi rilegge il registro
+            # deve sapere che quel giro ha avuto due gate su tre, non tre.
+            if not con_critic:
+                e.critic_saltato = True
+                dichiara("critic saltato (--senza-critic): revisione umana alla PR")
+                print("    critic … saltato (--senza-critic)")
+                break
+
+            with misura(e, "critic"):
+                verdetto = revisione_critica(pbi_path)
+            if verdetto.registro is not None:
+                e.invocazioni.append(verdetto.registro)
+            rapporto = verdetto.rapporto
+            e.rapporto_critic = rapporto[-6000:]
+            if verdetto.esito == "pass":
+                break
+            if verdetto.esito == "senza esito":
+                return chiudi("senza esito", nota_senza_esito(verdetto.registro))
+            if verdetto.esito == "sospeso":
+                # Non si consuma una revisione e non si richiama il Critic: la sua
+                # diagnosi non cambia riprovando, perché ciò che manca non è nel
+                # repository. Riprovare qui è esattamente ciò che è costato a PBI-203
+                # cinque giri e 1h26m per tornare al punto di partenza.
+                e.domanda = verdetto.domanda
+                return chiudi("sospeso", f"domanda del critic: {una_riga(verdetto.domanda)}")
+            if revisione == MAX_REVISIONI:
+                # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
+                # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
+                # male, `non convergente` che il lavoro non si è chiuso e serve una persona.
+                # Chi legge runs/tempi.csv deve poter distinguere un PBI difficile da uno mal
+                # posto, altrimenti il registro misura la fatica e non la causa.
+                return chiudi("non convergente",
+                              f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
+                              f"del Critic nel rapporto JSON. Serve una lettura umana.")
+            # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
+            # letto, e un assoluto qui lo farebbe sembrare un altro file.
+            prompt = PROMPT_RIMEDIO.format(
+                rapporto=rapporto[-6000:], pbi_path=pbi_path.relative_to(REPO)
             )
 
-        # --- Review Gate (probabilistico, sessione separata) ---
-        # Si può togliere, e allora **si dichiara**: `critic_s = 0` non spiega se
-        # stesso — è la lezione di `gate_s = 0` su PBI-208, letto come «gate
-        # rosso» invece che «i gate non sono mai girati». Chi rilegge il registro
-        # deve sapere che quel giro ha avuto due gate su tre, non tre.
-        if not con_critic:
-            e.critic_saltato = True
-            dichiara("critic saltato (--senza-critic): revisione umana alla PR")
-            print("    critic … saltato (--senza-critic)")
-            break
-
-        with misura(e, "critic"):
-            verdetto = revisione_critica(pbi_path)
-        if verdetto.registro is not None:
-            e.invocazioni.append(verdetto.registro)
-        rapporto = verdetto.rapporto
-        e.rapporto_critic = rapporto[-6000:]
-        if verdetto.esito == "pass":
-            break
-        if verdetto.esito == "senza esito":
-            return chiudi("senza esito", nota_senza_esito(verdetto.registro))
-        if verdetto.esito == "sospeso":
-            # Non si consuma una revisione e non si richiama il Critic: la sua
-            # diagnosi non cambia riprovando, perché ciò che manca non è nel
-            # repository. Riprovare qui è esattamente ciò che è costato a PBI-203
-            # cinque giri e 1h26m per tornare al punto di partenza.
-            e.domanda = verdetto.domanda
-            return chiudi("sospeso", f"domanda del critic: {una_riga(verdetto.domanda)}")
-        if revisione == MAX_REVISIONI:
-            # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
-            # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
-            # male, `non convergente` che il lavoro non si è chiuso e serve una persona.
-            # Chi legge runs/tempi.csv deve poter distinguere un PBI difficile da uno mal
-            # posto, altrimenti il registro misura la fatica e non la causa.
-            return chiudi("non convergente",
-                          f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
-                          f"del Critic nel rapporto JSON. Serve una lettura umana.")
-        # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
-        # letto, e un assoluto qui lo farebbe sembrare un altro file.
-        prompt = PROMPT_RIMEDIO.format(
-            rapporto=rapporto[-6000:], pbi_path=pbi_path.relative_to(REPO)
-        )
-
-    print(f"    commit sul branch: {e.commit} · "
-          f"file: {git('diff', '--name-only', f'{BASE}...HEAD')}")
-    chiudi("fatto")
+        print(f"    commit sul branch: {e.commit} · "
+              f"file: {git('diff', '--name-only', f'{BASE}...HEAD')}")
+        chiudi("fatto")
+    except Exception as exc:  # noqa: BLE001 — si cattura per chiudere, non per tacere
+        traceback.print_exc()
+        e.file_traceback = str(salva_il_traceback(pbi))
+        return chiudi("rosso", f"eccezione nel giro: {type(exc).__name__}: {exc}"[:300])
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
     if con_pr:
