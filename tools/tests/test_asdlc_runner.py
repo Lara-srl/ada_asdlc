@@ -466,7 +466,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         """
         giri = {"critic": 0}
 
-        def critic_sospende(_pbi_path):
+        def critic_sospende(_pbi_path, **_):
             giri["critic"] += 1
             return runner.Verdetto("sospeso", "chi decide se la migrazione si esegue?", "rapporto")
 
@@ -493,7 +493,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: runner.Verdetto("sospeso", "la migrazione si esegue?", "rapporto"),
+            lambda p, **_: runner.Verdetto("sospeso", "la migrazione si esegue?", "rapporto"),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -518,7 +518,7 @@ class TestIlBranchNasceDaOriginMain:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -544,7 +544,7 @@ class TestIlBranchNasceDaOriginMain:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -582,7 +582,7 @@ class TestIlPbiSiCercaSuOriginMain:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
 
         esito = runner.esegui_pbi("PBI-999", attivi=set(), dry=False, con_pr=False)
@@ -673,7 +673,7 @@ class TestLIgieneGuardaTuttoLAlbero:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -746,7 +746,7 @@ class TestLaSessioneRuotaFraLeRevisioni:
             gate["chiamate"] += 1
             return [("pytest", "1 failed")] if gate["chiamate"] == 1 else []
 
-        def critic_finto(_pbi_path):
+        def critic_finto(_pbi_path, **_):
             critic["chiamate"] += 1
             if critic["chiamate"] == 1:
                 return runner.Verdetto("non pronto", "", "manca una deroga")
@@ -910,7 +910,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         monkeypatch.setattr(runner, "gira_gate", _gate)
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
         return eseguiti
 
@@ -983,7 +983,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1005,7 +1005,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         """
         giri = {"critic": 0}
 
-        def _critic(_p):
+        def _critic(_p, **_):
             giri["critic"] += 1
             # Quattro NON PRONTO: `e.tentativi` supera MAX_TENTATIVI ben prima
             # che il Critic si dichiari soddisfatto.
@@ -1058,7 +1058,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": esito_builder}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
     def test_uno_stop_del_builder_conta_i_suoi_commit(self, monkeypatch):
@@ -1076,7 +1076,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         self._mondo(monkeypatch, FATTO, commit="4")
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
+            lambda p, **_: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1339,7 +1339,7 @@ class TestSiPuoSaltareIlCritic:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         giri = {"critic": 0}
 
-        def critic(_p):
+        def critic(_p, **_):
             giri["critic"] += 1
             return runner.Verdetto("pass", "", "rapporto")
 
@@ -1536,7 +1536,7 @@ class TestIlBranchLoPubblicaIlRunner:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: runner.Verdetto("sospeso", "chi decide?", "rapporto"),
+            lambda p, **_: runner.Verdetto("sospeso", "chi decide?", "rapporto"),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1549,7 +1549,7 @@ class TestIlBranchLoPubblicaIlRunner:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1745,7 +1745,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica",
-                            lambda p: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
+                            lambda p, **_: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
         return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
 
     def test_un_push_fallito_a_giro_fatto_lo_scrive_nella_nota_e_non_cambia_lesito(
@@ -3267,14 +3267,14 @@ class TestIlGateDelRossoStaNelGiro:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(
-            runner, "revisione_critica", critic or (lambda p: runner.Verdetto("pass", "", "ok"))
+            runner, "revisione_critica", critic or (lambda p, **_: runner.Verdetto("pass", "", "ok"))
         )
         monkeypatch.setattr(runner, "gate_del_rosso", mancati)
 
     def test_un_commit_senza_rosso_ferma_il_pbi_subito(self, monkeypatch):
         visto = {"critic": 0}
 
-        def _critic(_p):
+        def _critic(_p, **_):
             visto["critic"] += 1
             return runner.Verdetto("pass", "", "ok")
 
@@ -3338,7 +3338,7 @@ class TestIlGateDelRossoStaNelGiro:
             visti.add("abc1234")
             return []
 
-        def _critic(_p):
+        def _critic(_p, **_):
             giri["critic"] += 1
             return runner.Verdetto("non pronto" if giri["critic"] == 1 else "pass", "", "")
 
@@ -4498,7 +4498,7 @@ class TestITestCheMordonoFinisconoNelRapporto:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(runner, "revisione_critica",
-                            lambda p: runner.Verdetto("pass", "", "ok"))
+                            lambda p, **_: runner.Verdetto("pass", "", "ok"))
 
         def _gate(visti=None, morsi=None, **k):
             morsi.append(dict(self.MORSO))
@@ -5080,7 +5080,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "PASS"))
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "PASS"))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
@@ -5206,7 +5206,7 @@ class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
                             lambda **k: chiamati.append("rosso") or [])
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: chiamati.append("critic") or runner.Verdetto("pass", "", "PASS"))
+            lambda p, **_: chiamati.append("critic") or runner.Verdetto("pass", "", "PASS"))
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False,
                                   con_critic=con_critic)
         return esito, chiamati
