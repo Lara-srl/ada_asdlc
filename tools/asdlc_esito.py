@@ -12,6 +12,12 @@ su stdin e in uscita su stdout. Il runner lo configura con due variabili:
     ASDLC_RUOLO   `builder` o `critic`: cambia lo schema di `fatto`
     ASDLC_ESITO   il file in cui scrivere l'esito; accanto, `<esito>.chiamate.jsonl`
                   registra ogni chiamata, valida o rifiutata
+
+Il server non esce per un ingresso che non si aspetta (`PBI-372`): una riga che
+non è JSON, un messaggio o dei `params` che non sono un oggetto ricevono un
+errore JSON-RPC, una chiamata con argomenti sbagliati un `isError`. Si ferma
+all'avvio, con un messaggio su stderr e l'uscita 2, solo se una delle due
+variabili lo rende inutilizzabile.
 """
 
 import json
@@ -65,6 +71,12 @@ def _contenuto(testo: str, errore: bool) -> dict:
     return {"content": [{"type": "text", "text": testo}], "isError": errore}
 
 
+# Il tipo ricevuto con il nome che ha in JSON, per il rifiuto di un campo che
+# non è testo: è il nome che il modello ha scritto.
+TIPI_JSON = {int: "un numero", float: "un numero", bool: "un booleano",
+             list: "una lista", dict: "un oggetto"}
+
+
 def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     """Scrive l'esito della chiamata nel file `esito`: l'oggetto che il runner
     leggerà, con il nome dello strumento sotto `esito` e i campi dello schema accanto.
@@ -79,9 +91,17 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     if nome not in ("fatto", "fermati"):
         return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
                           errore=True)
+    if not isinstance(argomenti, dict):
+        ricevuto = TIPI_JSON.get(type(argomenti), "un valore")
+        return _contenuto(f"Gli argomenti di {nome} sono {ricevuto}, non un oggetto: "
+                          f"richiama {nome} con i campi per nome.", errore=True)
     campo = "domanda" if nome == "fermati" else "riepilogo"
     testo = argomenti.get(campo)
-    if not isinstance(testo, str) or not testo.strip():
+    if testo is not None and not isinstance(testo, str):
+        return _contenuto(f"Il campo «{campo}» non è testo: è "
+                          f"{TIPI_JSON.get(type(testo), 'un valore')}. Scrivilo come "
+                          f"testo e richiama {nome}.", errore=True)
+    if testo is None or not testo.strip():
         return _contenuto(f"Il campo «{campo}» è vuoto: scrivilo e richiama {nome}.",
                           errore=True)
     if ruolo == "critic" and nome == "fatto" and argomenti.get("verdetto") not in VERDETTI:
@@ -111,12 +131,23 @@ def registra(nome: str, argomenti: dict, esito: str) -> None:
         log.write(json.dumps(riga, ensure_ascii=False) + "\n")
 
 
-def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
-    """La risposta a un messaggio, o `None` per una notifica, che non ne ha."""
+def _errore(id_, codice: int, testo: str) -> dict:
+    return {"jsonrpc": "2.0", "id": id_, "error": {"code": codice, "message": testo}}
+
+
+def rispondi(messaggio, ruolo: str, esito: str) -> dict | None:
+    """La risposta a un messaggio, o `None` per una notifica, che non ne ha.
+
+    Un messaggio o dei `params` che non sono un oggetto ricevono `-32600`, con
+    l'`id` del messaggio se si legge (`PBI-372`, decisione 2)."""
+    if not isinstance(messaggio, dict):
+        return _errore(None, -32600, "il messaggio non è un oggetto JSON")
     if "id" not in messaggio:
         return None
     metodo = messaggio.get("method")
     parametri = messaggio.get("params") or {}
+    if not isinstance(parametri, dict):
+        return _errore(messaggio["id"], -32600, "i params non sono un oggetto JSON")
     if metodo == "initialize":
         risultato = {
             "protocolVersion": parametri.get("protocolVersion"),
@@ -130,8 +161,7 @@ def rispondi(messaggio: dict, ruolo: str, esito: str) -> dict | None:
         registra(nome, argomenti, esito)
         risultato = chiama(nome, argomenti, ruolo, esito)
     else:
-        return {"jsonrpc": "2.0", "id": messaggio["id"],
-                "error": {"code": -32601, "message": f"metodo sconosciuto: {metodo}"}}
+        return _errore(messaggio["id"], -32601, f"metodo sconosciuto: {metodo}")
     return {"jsonrpc": "2.0", "id": messaggio["id"], "result": risultato}
 
 
@@ -144,11 +174,22 @@ def main() -> int:
         print(f"ASDLC_RUOLO vale {ruolo!r}: deve essere uno fra {RUOLI}.",
               file=sys.stderr)
         return 2
-    esito = os.environ["ASDLC_ESITO"]
+    # Senza file d'esito il server non ha dove scrivere: si ferma come per il
+    # ruolo, non con un `KeyError` (`PBI-372`, decisione 5).
+    esito = os.environ.get("ASDLC_ESITO", "")
+    if not esito.strip():
+        print("ASDLC_ESITO manca o è vuota: deve nominare il file dell'esito.",
+              file=sys.stderr)
+        return 2
     for riga in sys.stdin:
         if not riga.strip():
             continue
-        risposta = rispondi(json.loads(riga), ruolo, esito)
+        try:
+            messaggio = json.loads(riga)
+        except json.JSONDecodeError as errore:
+            risposta = _errore(None, -32700, f"la riga non è JSON: {errore}")
+        else:
+            risposta = rispondi(messaggio, ruolo, esito)
         if risposta is not None:
             sys.stdout.write(json.dumps(risposta, ensure_ascii=False) + "\n")
             sys.stdout.flush()
