@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -247,7 +248,13 @@ class TestLEsitoVieneDallaChiamata:
             )
         assert esito.domanda == domanda, "nel rapporto JSON la domanda sta intera"
         if rapporto is not None:
-            assert rapporto in esito.rapporto_critic
+            # Il rapporto sta nel file della revisione, e il JSON del giro ne tiene
+            # il puntatore (PBI-371, decisione 4).
+            voce = json.loads(runner.scrivi_rapporto("giro", [esito], "finito")
+                              .read_text(encoding="utf-8"))["esiti"][0]
+            assert voce.get("rapporti_critic"), "nessun puntatore al rapporto del Critic"
+            percorso = Path(voce["rapporti_critic"][-1]["percorso"])
+            assert rapporto in percorso.read_text(encoding="utf-8")
         if stato == "fermato":
             assert gate == [], "dopo un fermati del Builder i gate non partono"
 
@@ -459,7 +466,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         """
         giri = {"critic": 0}
 
-        def critic_sospende(_pbi_path):
+        def critic_sospende(_pbi_path, **_):
             giri["critic"] += 1
             return runner.Verdetto("sospeso", "chi decide se la migrazione si esegue?", "rapporto")
 
@@ -486,7 +493,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: runner.Verdetto("sospeso", "la migrazione si esegue?", "rapporto"),
+            lambda p, **_: runner.Verdetto("sospeso", "la migrazione si esegue?", "rapporto"),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -511,7 +518,7 @@ class TestIlBranchNasceDaOriginMain:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -537,7 +544,7 @@ class TestIlBranchNasceDaOriginMain:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -575,7 +582,7 @@ class TestIlPbiSiCercaSuOriginMain:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
 
         esito = runner.esegui_pbi("PBI-999", attivi=set(), dry=False, con_pr=False)
@@ -666,7 +673,7 @@ class TestLIgieneGuardaTuttoLAlbero:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -739,7 +746,7 @@ class TestLaSessioneRuotaFraLeRevisioni:
             gate["chiamate"] += 1
             return [("pytest", "1 failed")] if gate["chiamate"] == 1 else []
 
-        def critic_finto(_pbi_path):
+        def critic_finto(_pbi_path, **_):
             critic["chiamate"] += 1
             if critic["chiamate"] == 1:
                 return runner.Verdetto("non pronto", "", "manca una deroga")
@@ -903,7 +910,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         monkeypatch.setattr(runner, "gira_gate", _gate)
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
         return eseguiti
 
@@ -976,7 +983,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -998,7 +1005,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
         """
         giri = {"critic": 0}
 
-        def _critic(_p):
+        def _critic(_p, **_):
             giri["critic"] += 1
             # Quattro NON PRONTO: `e.tentativi` supera MAX_TENTATIVI ben prima
             # che il Critic si dichiari soddisfatto.
@@ -1051,7 +1058,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": esito_builder}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
 
     def test_uno_stop_del_builder_conta_i_suoi_commit(self, monkeypatch):
@@ -1069,7 +1076,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         self._mondo(monkeypatch, FATTO, commit="4")
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
+            lambda p, **_: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1332,7 +1339,7 @@ class TestSiPuoSaltareIlCritic:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         giri = {"critic": 0}
 
-        def critic(_p):
+        def critic(_p, **_):
             giri["critic"] += 1
             return runner.Verdetto("pass", "", "rapporto")
 
@@ -1349,11 +1356,16 @@ class TestSiPuoSaltareIlCritic:
         merge — e la lezione del 25/08 su PBI-212 è esattamente questa: chi
         rilegge deve sapere quali gate non ci sono stati **prima** di guardare il
         diff, non dopo.
+
+        E non commenta (PBI-371): senza revisioni non c'è un rapporto da mettere
+        sulla PR, né un commento mancato da dichiarare nella nota.
         """
         catturato: dict[str, list[str]] = {}
+        comandi: list[list[str]] = []
 
         def finto_esegui(cmd, cwd, timeout=7200):
-            catturato["cmd"] = cmd
+            comandi.append(cmd)
+            catturato.setdefault("cmd", cmd)
             return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
 
         monkeypatch.setattr(runner, "esegui", finto_esegui)
@@ -1366,6 +1378,12 @@ class TestSiPuoSaltareIlCritic:
         corpo = cmd[cmd.index("--body") + 1]
         assert "PASS" not in corpo, "non si dichiara un verdetto che nessuno ha emesso"
         assert "--senza-critic" in corpo
+        assert [c[:3] for c in comandi] == [["gh", "pr", "create"]], (
+            "un giro senza Critic non commenta la PR"
+        )
+        assert "non commentato" not in esito.nota, (
+            "un giro senza Critic non ha commenti mancati da dichiarare"
+        )
 
 
 class TestIlRunnerSiStaccaDaSolo:
@@ -1529,7 +1547,7 @@ class TestIlBranchLoPubblicaIlRunner:
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: runner.Verdetto("sospeso", "chi decide?", "rapporto"),
+            lambda p, **_: runner.Verdetto("sospeso", "chi decide?", "rapporto"),
         )
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1542,7 +1560,7 @@ class TestIlBranchLoPubblicaIlRunner:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -1738,7 +1756,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica",
-                            lambda p: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
+                            lambda p, **_: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
         return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
 
     def test_un_push_fallito_a_giro_fatto_lo_scrive_nella_nota_e_non_cambia_lesito(
@@ -3260,14 +3278,14 @@ class TestIlGateDelRossoStaNelGiro:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(
-            runner, "revisione_critica", critic or (lambda p: runner.Verdetto("pass", "", "ok"))
+            runner, "revisione_critica", critic or (lambda p, **_: runner.Verdetto("pass", "", "ok"))
         )
         monkeypatch.setattr(runner, "gate_del_rosso", mancati)
 
     def test_un_commit_senza_rosso_ferma_il_pbi_subito(self, monkeypatch):
         visto = {"critic": 0}
 
-        def _critic(_p):
+        def _critic(_p, **_):
             visto["critic"] += 1
             return runner.Verdetto("pass", "", "ok")
 
@@ -3331,7 +3349,7 @@ class TestIlGateDelRossoStaNelGiro:
             visti.add("abc1234")
             return []
 
-        def _critic(_p):
+        def _critic(_p, **_):
             giri["critic"] += 1
             return runner.Verdetto("non pronto" if giri["critic"] == 1 else "pass", "", "")
 
@@ -4491,7 +4509,7 @@ class TestITestCheMordonoFinisconoNelRapporto:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(runner, "revisione_critica",
-                            lambda p: runner.Verdetto("pass", "", "ok"))
+                            lambda p, **_: runner.Verdetto("pass", "", "ok"))
 
         def _gate(visti=None, morsi=None, **k):
             morsi.append(dict(self.MORSO))
@@ -5073,7 +5091,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "PASS"))
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "PASS"))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
@@ -5199,7 +5217,7 @@ class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
                             lambda **k: chiamati.append("rosso") or [])
         monkeypatch.setattr(
             runner, "revisione_critica",
-            lambda p: chiamati.append("critic") or runner.Verdetto("pass", "", "PASS"))
+            lambda p, **_: chiamati.append("critic") or runner.Verdetto("pass", "", "PASS"))
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False,
                                   con_critic=con_critic)
         return esito, chiamati
@@ -5556,3 +5574,319 @@ class TestOgniChiamataLasciaDurataECodice:
             assert voce["codice"] == -15, "il codice di una chiamata scaduta è il segnale"
         else:
             assert voce["codice"] == 0
+
+
+class TestIlRapportoDelCriticArrivaIntero:
+    """PBI-371: il rapporto del Critic arriva intero, uno per revisione, anche sulla PR.
+
+    Fino a qui il rapporto stava in `esiti[].rapporto_critic` del JSON del giro,
+    tagliato agli ultimi 6000 caratteri e riscritto a ogni revisione: un rapporto
+    lungo perdeva la testa, e i `NON PRONTO` che avevano portato al `PASS` restavano
+    solo nelle sessioni di Claude Code, che scadono dopo 30 giorni.
+    """
+
+    def _giro(self, monkeypatch, verdetti, **k):
+        """Un giro col Builder che chiama `fatto`, i gate verdi e il Critic che
+        risponde, revisione dopo revisione, i `verdetti` dati."""
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "MAX_REVISIONI", 5)
+        coda = list(verdetti)
+        monkeypatch.setattr(runner, "revisione_critica", lambda p, **_: coda.pop(0))
+        return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False, **k)
+
+    def test_un_rapporto_oltre_i_6000_caratteri_arriva_intero_nel_file(
+        self, monkeypatch, git_finto
+    ):
+        rapporto = "TESTA: il primo rilievo sta qui\n" + "x" * 6972
+        assert len(rapporto) == 7004, "la misura del 25/09 su main"
+
+        self._giro(monkeypatch, [runner.Verdetto("pass", "", rapporto)])
+
+        file = sorted(runner.LOG_DIR.glob("*-PBI-102-critic-0.md"))
+        assert len(file) == 1, "la revisione 0 non ha il suo file in runs/"
+        assert rapporto in file[0].read_text(encoding="utf-8"), (
+            "il rapporto nel file non è intero: la testa è andata persa"
+        )
+
+    def test_il_prompt_di_rimedio_del_builder_riceve_il_rapporto_intero(
+        self, monkeypatch, git_finto
+    ):
+        rapporto = "1. [scope]: la testa del rapporto\n" + "x" * 6970
+        assert len(rapporto) > 6000
+
+        self._giro(monkeypatch, [runner.Verdetto("non pronto", "", rapporto),
+                                 runner.Verdetto("pass", "", "ok")])
+
+        prompt = sorted(runner.LOG_DIR.glob("*_builder_prompt.txt"))
+        assert len(prompt) == 2, "una revisione di rimedio, un secondo prompt del Builder"
+        assert rapporto in prompt[1].read_text(encoding="utf-8"), (
+            "il Builder di rimedio riceve il rapporto tagliato: la testa è andata persa"
+        )
+
+    @pytest.mark.parametrize(
+        "verdetti, attesi, stato",
+        [
+            pytest.param([runner.Verdetto("pass", "", "nessun rilievo")],
+                         ["pass"], "fatto", id="una-revisione"),
+            pytest.param([runner.Verdetto("non pronto", "", f"1. rilievo del giro {n}")
+                          for n in range(3)] + [runner.Verdetto("pass", "", "chiuso")],
+                         ["non pronto"] * 3 + ["pass"], "fatto",
+                         id="tre-revisioni-non-pronto-poi-pass"),
+            pytest.param([runner.Verdetto("non pronto", "", "1. manca il test"),
+                          runner.Verdetto("sospeso", "la 0011 tocca pratiche: la eseguo?",
+                                          "Ho letto il diff e i commit.")],
+                         ["non pronto", "sospeso"], "sospeso", id="sospeso"),
+        ],
+    )
+    def test_ogni_revisione_ha_il_suo_file_e_il_suo_puntatore(
+        self, monkeypatch, git_finto, verdetti, attesi, stato
+    ):
+        esito = self._giro(monkeypatch, verdetti, run="20260925-160000")
+        voce = json.loads(runner.scrivi_rapporto("20260925-160000", [esito], "finito")
+                          .read_text(encoding="utf-8"))["esiti"][0]
+
+        assert esito.stato == stato
+        assert "rapporto_critic" not in voce, "il testo non sta più nel JSON: ci sono i file"
+        assert voce.get("rapporti_critic") == [
+            {"revisione": n, "verdetto": v,
+             "percorso": str(runner.LOG_DIR / f"20260925-160000-PBI-102-critic-{n}.md")}
+            for n, v in enumerate(attesi)
+        ], "un puntatore per revisione, in ordine, con il verdetto"
+        for n, v in enumerate(verdetti):
+            testo = (runner.LOG_DIR / f"20260925-160000-PBI-102-critic-{n}.md").read_text(
+                encoding="utf-8")
+            righe = testo.splitlines()
+            assert righe[0] == f"# Critic — revisione {n} — {v.esito}", "in testa il verdetto"
+            datetime.fromisoformat(righe[2])  # e l'ora
+            assert v.rapporto in testo
+            if v.domanda:
+                assert v.domanda in testo, "il rapporto di un sospeso è la sua domanda"
+
+    def test_main_da_al_giro_il_nome_del_suo_rapporto(self, monkeypatch):
+        """I file delle revisioni portano il nome del giro: quello di `runs/<run>.json`."""
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        ricevuti: list[str] = []
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            ricevuti.append(k.get("run", ""))
+            return runner.Esito(pbi, "fatto")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        runner.main()
+
+        giri = [f.stem for f in runner.LOG_DIR.glob("*.json")]
+        assert len(giri) == 1
+        assert ricevuti == giri, "esegui_pbi non riceve il nome del giro"
+
+    URL = "https://github.com/Lara-srl/ada_controller/pull/371"
+
+    def _pr_con_i_rapporti(self, monkeypatch, verdetti, commento_fallisce=False,
+                           commento_alza=None, prima_dei_commenti=None):
+        """Apre la PR di un giro le cui revisioni hanno dato i `verdetti`, con `gh`
+        sostituito. Torna l'esito, i testi dei file delle revisioni e i comandi
+        `gh pr comment` ricevuti, ognuno col testo del suo corpo."""
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        esito = runner.Esito("PBI-371", "fatto")
+        file = []
+        for n, v in enumerate(verdetti):
+            percorso = runner.scrivi_rapporto_critic("giro", "PBI-371", n, v)
+            esito.rapporti_critic.append(
+                {"revisione": n, "verdetto": v.esito, "percorso": str(percorso)})
+            file.append(percorso.read_text(encoding="utf-8"))
+        comandi: list[tuple[list[str], str]] = []
+
+        def _esegui(cmd, cwd, timeout=0, **k):
+            if cmd[:3] == ["gh", "pr", "create"]:
+                comandi.append((cmd, ""))
+                return 0, self.URL + "\n"
+            corpo = Path(cmd[cmd.index("--body-file") + 1]).read_text(encoding="utf-8")
+            comandi.append((cmd, corpo))
+            if commento_alza is not None:
+                raise commento_alza
+            return (1, "HTTP 502: Bad Gateway") if commento_fallisce else (0, "")
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        if prima_dei_commenti is not None:
+            prima_dei_commenti(esito)
+        pr = runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
+        assert pr == self.URL
+        assert comandi[0][0][:3] == ["gh", "pr", "create"], "prima si apre la PR"
+        return esito, file, comandi[1:]
+
+    def test_la_pr_riceve_un_commento_per_revisione_in_ordine(self, monkeypatch):
+        _, file, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. [scope]: tocca un file fuori"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ])
+
+        assert [c[:4] for c, _ in commenti] == [["gh", "pr", "comment", self.URL]] * 2
+        assert [corpo for _, corpo in commenti] == file, "un commento per revisione, in ordine"
+        assert commenti[0][1].startswith("# Critic — revisione 0 — non pronto")
+        assert commenti[1][1].startswith("# Critic — revisione 1 — pass")
+
+    def test_un_rapporto_oltre_il_limite_si_divide_senza_perdere_caratteri(self, monkeypatch):
+        lungo = "".join(f"riga {i}: è un rilievo lungo\n" for i in range(6000))
+        assert len(lungo) > 2 * 65_536, "il limite documentato di GitHub, in caratteri"
+
+        _, file, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. breve"),
+            runner.Verdetto("pass", "", lungo),
+        ])
+
+        assert commenti, "la PR non riceve i rapporti del Critic"
+        assert commenti[0][1] == file[0], "il rapporto breve resta un commento solo"
+        parti = [corpo for _, corpo in commenti[1:]]
+        assert len(parti) >= 3
+        for i, corpo in enumerate(parti, 1):
+            assert len(corpo) <= 65_536
+            assert corpo.startswith(
+                f"**Critic — revisione 1 — pass · parte {i} di {len(parti)}**\n\n")
+        assert "".join(c.split("\n\n", 1)[1] for c in parti) == file[1], (
+            "le parti, una dopo l'altra, devono ridare il rapporto intero"
+        )
+
+    def test_un_commento_che_non_parte_non_ferma_il_giro_e_la_nota_lo_dice(self, monkeypatch):
+        esito, _, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. manca il test"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ], commento_fallisce=True)
+
+        assert esito.stato == "fatto", "un commento mancato non disfa il giro (ADR-0008)"
+        assert len(commenti) == 2, "il primo commento fallito non ferma i successivi"
+        assert "rapporto del Critic non commentato sulla PR (revisioni 0, 1)" in esito.nota
+        assert "HTTP 502" in esito.nota, "la nota dice perché"
+        for r in esito.rapporti_critic:
+            assert Path(r["percorso"]).exists(), "i file restano"
+
+    def test_un_commento_in_timeout_non_ferma_il_giro_e_la_nota_lo_dice(self, monkeypatch):
+        """Decisione 5: `esegui` lascia risalire `subprocess.TimeoutExpired`, e
+        un'eccezione in `apri_pr` arriva alla rete di `main()`, che registra
+        `rosso` senza PR un giro già pubblicato (rilievo 1 del Critic)."""
+        esito, _, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. manca il test"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ], commento_alza=subprocess.TimeoutExpired(["gh", "pr", "comment"], 300))
+
+        assert esito.stato == "fatto", "un commento in timeout non disfa il giro (ADR-0008)"
+        assert len(commenti) == 2, "il primo commento in timeout non ferma i successivi"
+        assert "rapporto del Critic non commentato sulla PR (revisioni 0, 1)" in esito.nota
+        assert "timed out" in esito.nota, "la nota dice perché"
+
+    def test_un_file_di_revisione_illeggibile_non_ferma_il_giro_e_la_nota_lo_dice(
+        self, monkeypatch
+    ):
+        """Decisione 5: `read_text` sul file di una revisione può alzare `OSError`,
+        e l'eccezione risalirebbe da `apri_pr` come il timeout."""
+        esito, _, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. manca il test"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ], prima_dei_commenti=lambda e: Path(e.rapporti_critic[0]["percorso"]).unlink())
+
+        assert esito.stato == "fatto", "un file illeggibile non disfa il giro (ADR-0008)"
+        assert len(commenti) == 1, "la revisione leggibile riceve comunque il suo commento"
+        assert "rapporto del Critic non commentato sulla PR (revisioni 0)" in esito.nota
+        assert "No such file" in esito.nota, "la nota dice perché"
+
+    def test_il_prompt_del_critic_dice_che_non_esegue_e_porta_i_gate_del_giro(
+        self, monkeypatch, git_finto
+    ):
+        """Decisione 6: il Critic ha solo `Read`, `Grep`, `Glob` e `git diff`. Su
+        PBI-365 ha scritto «non ho potuto eseguire niente io» e ha giudicato dal log
+        del giro, che si era andato a cercare: ciò che i gate hanno misurato glielo
+        passa il runner."""
+        morso = {"commit": "abc1234", "titolo": "test(ci): guardia", "prove": [],
+                 "test": "tools/tests/test_x.py::test_guardia",
+                 "mutante": "tools/asdlc_runner.py:10  `==` → `!=`", "tipo": "AssertionError"}
+
+        def rosso(visti, morsi):
+            morsi.append(morso)
+            return []
+
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", rosso)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        [file] = runner.LOG_DIR.glob("*_critic_prompt.txt")
+        prompt = file.read_text(encoding="utf-8")
+        assert "giudichi dal diff e dai rapporti dei gate" in prompt
+        assert "non provi a eseguire" in prompt
+        for g in runner.GATE:
+            assert f"`{g.nome}`: verde" in prompt, f"il prompt non porta il gate {g.nome}"
+        assert "gate del rosso: verde" in prompt
+        assert morso["test"] in prompt and morso["mutante"] in prompt, (
+            "il test che morde arriva al Critic con il suo mutante"
+        )
+
+    def _prompt_del_critic(self, monkeypatch) -> str:
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda visti, morsi: [])
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        [file] = runner.LOG_DIR.glob("*_critic_prompt.txt")
+        return file.read_text(encoding="utf-8")
+
+    def test_un_gate_che_il_diff_non_tocca_arriva_al_critic_come_non_girato(
+        self, configura, monkeypatch, git_finto
+    ):
+        """Decisione 6: un gate mai girato che il prompt chiamasse «verde» è la
+        confusione di `gate_s = 0` su PBI-208, detta al Critic."""
+        configura(toml_di_prova(gate=(
+            ("pytest", ("pytest", "-q"), "backend", ()),
+            ("asdlc", ("pytest", "-q", "tools/tests"), ".", ("tools/", "asdlc.toml")),
+        )))
+
+        prompt = self._prompt_del_critic(monkeypatch)
+
+        assert "- `pytest`: verde" in prompt
+        assert "- `asdlc`: non girato, il diff non tocca tools/, asdlc.toml" in prompt
+        assert "- `asdlc`: verde" not in prompt
+
+    def test_il_gate_del_rosso_spento_arriva_al_critic_come_spento(
+        self, configura, monkeypatch, git_finto
+    ):
+        configura(toml_di_prova(gate_del_rosso=False))
+
+        prompt = self._prompt_del_critic(monkeypatch)
+
+        assert "- gate del rosso: spento da asdlc.toml" in prompt
+        assert "gate del rosso: verde" not in prompt
+
+    def test_il_nome_e_revisione_avversariale_del_diff_nel_prompt_e_nella_pr(
+        self, monkeypatch
+    ):
+        """Decisione 7: il nome dice quello che il Critic fa, non di più."""
+        assert runner.PROMPT_CRITIC.startswith(
+            "Sei un **Critic Agent** e fai una revisione avversariale del diff.")
+
+        catturato: dict[str, list[str]] = {}
+
+        def _esegui(cmd, cwd, timeout=0, **k):
+            catturato.setdefault("cmd", cmd)
+            return 0, self.URL
+
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371",
+                       runner.Esito("PBI-371", "fatto"))
+
+        cmd = catturato["cmd"]
+        assert ("Gate deterministici verdi · revisione avversariale del diff PASS."
+                in cmd[cmd.index("--body") + 1])
+
+    def test_il_prompt_del_critic_chiede_il_rapporto_in_italiano(self):
+        """Decisione 8: il PASS di PBI-366 (#263) è arrivato in inglese, e chi legge
+        la PR prima del merge legge in italiano."""
+        assert "Scrivi il rapporto in italiano" in runner.PROMPT_CRITIC

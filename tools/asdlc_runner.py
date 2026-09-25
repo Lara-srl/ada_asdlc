@@ -372,7 +372,7 @@ domanda, come prima.
 # I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
 # `PROMPT_RIMEDIO` nascono in `configura()`, col ramo di `asdlc.toml` al posto di
 # `{base}` e `{pbi_path}` / `{rapporto}` lasciati a chi chiama.
-MODELLO_CRITIC = """Sei un **Critic Agent** e fai una revisione avversariale secondo ASDLC.
+MODELLO_CRITIC = """Sei un **Critic Agent** e fai una revisione avversariale del diff.
 
 Il tuo ruolo è scettico per costruzione: respingi il codice che viola la spec o i confini
 di AGENTS.md **anche se funziona e anche se i test passano**. Preferisci un falso positivo
@@ -386,6 +386,11 @@ a un falso negativo. Non sei qui per essere utile: sei qui per trovare ciò che 
 ## Artefatto da giudicare
 Il diff del branch corrente: `git diff {base}...HEAD`
 I commit: `git log --oneline {base}..HEAD`
+
+Tu giudichi dal diff e dai rapporti dei gate, e non provi a eseguire niente: i tuoi
+strumenti sono `Read`, `Grep`, `Glob` e `git diff`. Ciò che si esegue l'hanno già
+eseguito i gate deterministici, e i loro esiti te li passa il runner in fondo a questo
+prompt, sotto «I gate di questo giro»: non andarli a cercare nei log.
 
 ## Cosa controllare, in quest'ordine
 1. **Criteri di verifica del PBI**: uno per uno, spuntato o no.
@@ -407,7 +412,7 @@ Il runner legge l'esito **solo** dalla tua chiamata a uno dei due strumenti, e l
 chiamata valida è definitiva: il testo della risposta non decide niente.
 
 Chiama `fatto` con il verdetto e con il rapporto intero nel riepilogo: è l'unico testo
-che arriva al Builder e a chi mergia.
+che arriva al Builder e a chi mergia. Scrivi il rapporto in italiano, qualunque sia l'esito.
 
 - Se non ci sono violazioni, il verdetto è `pass`.
 - Altrimenti elenca nel rapporto ogni violazione come
@@ -553,7 +558,11 @@ class Esito:
     commit: int = 0
     nota: str = ""
     pr: str = ""
-    rapporto_critic: str = ""
+    # Un puntatore per revisione del Critic, in ordine: `{"revisione", "verdetto",
+    # "percorso"}`. Il testo sta intero nel file (`scrivi_rapporto_critic`), e non
+    # qui: nel JSON era tagliato a 6000 caratteri e riscritto a ogni revisione, e
+    # dei `NON PRONTO` che portano al `PASS` non restava niente (PBI-371).
+    rapporti_critic: list[dict] = field(default_factory=list)
     # La domanda di un `fermato` del Builder o di un `sospeso` del Critic, intera:
     # nella nota le sue righe si uniscono con « / », qui restano com'erano.
     domanda: str = ""
@@ -2228,8 +2237,32 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     return mancati
 
 
-def revisione_critica(pbi_path: Path) -> Verdetto:
-    """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
+def gate_per_il_critic(attivi: set[str], morsi: list[dict]) -> str:
+    """Ciò che i gate hanno misurato, per il prompt del Critic (PBI-371, decisione 6).
+
+    Il Critic non esegue niente: senza questo testo, su PBI-365, è andato a
+    cercarsi il log del giro. Si chiama dopo i gate verdi e il gate del rosso
+    passato, quindi i gate che hanno girato sono verdi."""
+    toccati = file_toccati() if any(g.solo_se_tocca for g in GATE) else set()
+    righe = ["", "## I gate di questo giro", "",
+             "Misurati dal runner su `HEAD`, prima di chiamarti.", ""]
+    for g in GATE:
+        righe.append(f"- `{g.nome}`: verde" if acceso(g, attivi, toccati) else
+                     f"- `{g.nome}`: non girato, il diff non tocca {', '.join(g.solo_se_tocca)}")
+    righe.append("- gate del rosso: " + ("verde" if GATE_DEL_ROSSO_ATTIVO else
+                                         "spento da asdlc.toml"))
+    if morsi:
+        righe += ["", "Test nati verdi che il gate del rosso ha lasciato passare perché "
+                  "mordono un mutante:", ""]
+        for m in morsi:
+            righe += [f"- `{m['commit']}` {m['titolo']}", f"  {m['test']}",
+                      descrizione_del_morso(m, "  ")]
+    return "\n".join(righe) + "\n"
+
+
+def revisione_critica(pbi_path: Path, gate: str = "") -> Verdetto:
+    """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder.
+    `gate` è ciò che i gate del giro hanno misurato, in coda al prompt."""
     print("    critic … ", end="", flush=True)
     try:
         percorso = pbi_path.relative_to(REPO)
@@ -2237,7 +2270,7 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
         percorso = pbi_path
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
     prompt_file, file_esito = file_dell_invocazione("critic")
-    prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
+    prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso) + gate, encoding="utf-8")
     _, out, dichiarato, registro = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
@@ -2257,6 +2290,78 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
         verdetto = Verdetto(dichiarato["verdetto"], "", dichiarato["riepilogo"], registro)
     print(verdetto.esito.upper())
     return verdetto
+
+
+# Il limite documentato di GitHub per il corpo di un commento, in caratteri. Un
+# rapporto più lungo si divide in commenti consecutivi, e non si tronca (PBI-371).
+LIMITE_COMMENTO_GITHUB = 65_536
+
+
+def parti_del_commento(titolo: str, testo: str,
+                       limite: int = LIMITE_COMMENTO_GITHUB) -> list[str]:
+    """Il testo in commenti da al più `limite` caratteri, senza perderne uno.
+
+    Se sta in un commento resta com'è. Altrimenti ogni parte comincia con
+    «**titolo · parte i di k**» e una riga vuota, e le parti, una dopo l'altra,
+    ridanno il testo intero. La testata più lunga è quella con `i = k`: si
+    ricalcola `k` finché il passo che le lascia posto non cambia più."""
+    if len(testo) <= limite:
+        return [testo]
+    k = 1
+    while True:
+        passo = limite - len(f"**{titolo} · parte {k} di {k}**\n\n")
+        necessarie = -(-len(testo) // passo)
+        if necessarie <= k:
+            break
+        k = necessarie
+    pezzi = [testo[i:i + passo] for i in range(0, len(testo), passo)]
+    return [f"**{titolo} · parte {i} di {len(pezzi)}**\n\n{pezzo}"
+            for i, pezzo in enumerate(pezzi, 1)]
+
+
+def commenta_i_rapporti(url: str, e: Esito) -> None:
+    """Un commento sulla PR per ogni revisione del Critic, in ordine, col testo
+    intero del suo file (PBI-371): chi decide il merge lo legge lì, e non in
+    `runs/` dentro il worktree del runner. Il corpo passa da un file, perché un
+    argomento di 65.536 caratteri accentati sfiora il limite di un argomento.
+
+    Un commento che non parte non ferma niente: la PR è aperta, i file restano,
+    e la nota dice quali revisioni mancano e perché (`ADR-0008`). Vale anche per
+    un `gh` in timeout e per un file che non si legge, **senza alzare**: da qui
+    un'eccezione arriverebbe a `main()`, che registra `rosso` e senza PR un giro
+    già pubblicato."""
+    mancate: list[str] = []
+    ragione = ""
+
+    def mancata(r: dict, perche: str) -> None:
+        nonlocal ragione
+        print(f"    ⚠️  commento della revisione {r['revisione']} non partito: {perche}")
+        if str(r["revisione"]) not in mancate:
+            mancate.append(str(r["revisione"]))
+        ragione = ragione or perche
+
+    with tempfile.TemporaryDirectory() as cartella:
+        for r in e.rapporti_critic:
+            try:
+                testo = Path(r["percorso"]).read_text(encoding="utf-8")
+            except OSError as exc:
+                mancata(r, str(exc)[:200])
+                continue
+            titolo = f"Critic — revisione {r['revisione']} — {r['verdetto']}"
+            for i, parte in enumerate(parti_del_commento(titolo, testo)):
+                corpo = Path(cartella) / f"{r['revisione']}-{i}.md"
+                try:
+                    corpo.write_text(parte, encoding="utf-8")
+                    code, out = esegui(["gh", "pr", "comment", url, "--body-file", str(corpo)],
+                                       REPO, timeout=300)
+                except (subprocess.TimeoutExpired, OSError) as exc:
+                    code, out = 1, str(exc)
+                if code != 0:
+                    mancata(r, out.strip()[:200])
+    if mancate:
+        nota = (f"rapporto del Critic non commentato sulla PR (revisioni {', '.join(mancate)}): "
+                f"{ragione} — i file restano in {LOG_DIR}")
+        e.nota = " · ".join(t for t in (e.nota, nota) if t)
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
@@ -2304,7 +2409,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
            f"di questo lavoro non esiste una lettura avversariale, e la revisione è "
            f"tutta qui.\n"
            if e.critic_saltato else
-           f"Gate deterministici verdi · revisione avversariale PASS.\n")
+           f"Gate deterministici verdi · revisione avversariale del diff PASS.\n")
         + f"Tempo macchina: **{hms(e.durata_s)}** "
         f"(agente {hms(e.tempi['builder'] + e.tempi['critic'])}, gate {hms(e.tempi['gate'])}).\n\n"
         f"Manca l'unica cosa che uno script non può dare: **l'accettazione umana**.\n"
@@ -2329,6 +2434,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     if url is None:
         print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
         return ""
+    commenta_i_rapporti(url.group(0), e)
     return url.group(0)
 
 
@@ -2518,9 +2624,29 @@ def salva_il_traceback(pbi: str) -> Path:
     return file
 
 
+def scrivi_rapporto_critic(run: str, pbi: str, revisione: int, verdetto: Verdetto) -> Path:
+    """Il rapporto di una revisione del Critic, intero, nel suo file di `LOG_DIR`:
+    `<run>-<PBI>-critic-<n>.md` (PBI-371). Nel JSON del giro stava tagliato agli
+    ultimi 6000 caratteri, e un rapporto più lungo perdeva la testa.
+
+    In testa il verdetto e l'ora. Il rapporto di un sospeso è la sua domanda, con
+    il testo finale del Critic sotto come contesto, come in PBI-367."""
+    ora = datetime.now().isoformat(timespec="seconds")
+    domanda = f"## Domanda\n\n{verdetto.domanda}\n\n## Contesto\n\n" if verdetto.domanda else ""
+    file = LOG_DIR / f"{run}-{pbi}-critic-{revisione}.md"
+    file.write_text(
+        f"# Critic — revisione {revisione} — {verdetto.esito}\n\n{ora}\n\n"
+        f"{domanda}{verdetto.rapporto}\n",
+        encoding="utf-8",
+    )
+    return file
+
+
 def esegui_pbi(
-    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
+    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True,
+    run: str = "",
 ) -> Esito:
+    run = run or datetime.now().strftime("%Y%m%d-%H%M%S")
     pbi_path = trova_pbi(pbi)
     if pbi_path is None:
         return Esito(pbi, "saltato", nota=f"PBI inesistente in {BACKLOG}/ su {BASE}")
@@ -2736,11 +2862,14 @@ def esegui_pbi(
                 break
 
             with misura(e, "critic"):
-                verdetto = revisione_critica(pbi_path)
+                verdetto = revisione_critica(
+                    pbi_path, gate=gate_per_il_critic(attivi, e.test_che_mordono))
             if verdetto.registro is not None:
                 e.invocazioni.append(verdetto.registro)
             rapporto = verdetto.rapporto
-            e.rapporto_critic = rapporto[-6000:]
+            file = scrivi_rapporto_critic(run, pbi, revisione, verdetto)
+            e.rapporti_critic.append(
+                {"revisione": revisione, "verdetto": verdetto.esito, "percorso": str(file)})
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
@@ -2759,12 +2888,14 @@ def esegui_pbi(
                 # Chi legge runs/tempi.csv deve poter distinguere un PBI difficile da uno mal
                 # posto, altrimenti il registro misura la fatica e non la causa.
                 return chiudi("non convergente",
-                              f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
-                              f"del Critic nel rapporto JSON. Serve una lettura umana.")
+                              f"{MAX_REVISIONI + 1} revisioni senza convergere — i rilievi "
+                              f"del Critic in {LOG_DIR / f'{run}-{pbi}-critic-*.md'}. "
+                              f"Serve una lettura umana.")
             # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
-            # letto, e un assoluto qui lo farebbe sembrare un altro file.
+            # letto, e un assoluto qui lo farebbe sembrare un altro file. Il rapporto
+            # va intero: tagliato, il Builder non leggeva i primi rilievi (PBI-371).
             prompt = PROMPT_RIMEDIO.format(
-                rapporto=rapporto[-6000:], pbi_path=pbi_path.relative_to(REPO)
+                rapporto=rapporto, pbi_path=pbi_path.relative_to(REPO)
             )
 
         print(f"    commit sul branch: {e.commit} · "
@@ -3336,7 +3467,7 @@ def main() -> int:
         for pbi in a.pbi:
             try:
                 e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
-                               con_critic=not a.senza_critic)
+                               con_critic=not a.senza_critic, run=run)
             except Exception as exc:  # noqa: BLE001 — qui si cattura per non perdere il resto
                 # Un guasto dentro un PBI è un esito di **quel** PBI. Prima usciva
                 # da `main()` col traceback e si portava via la sequenza intera, e
