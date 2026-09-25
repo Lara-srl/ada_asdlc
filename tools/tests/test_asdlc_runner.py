@@ -5518,3 +5518,41 @@ class TestAlloScadereNonRestanoProcessiDelGruppo:
         finally:
             if vivo(nipote):
                 os.kill(nipote, 9)
+
+
+class TestOgniChiamataLasciaDurataECodice:
+    """PBI-369, decisione 7: il registro sommava le chiamate di un giro in
+    `tempi.builder` e `tempi.critic`, e i tetti sono stati ricavati per via
+    indiretta. Ogni chiamata lascia ora ruolo, durata e codice d'uscita in
+    `runs/<run>.json`, qualunque sia l'esito: sono i dati per rileggerli."""
+
+    @pytest.mark.parametrize(
+        "caso, ruolo",
+        [
+            pytest.param("fatto", "builder", id="builder-fatto"),
+            pytest.param("fatto", "critic", id="critic-pass"),
+            pytest.param("scaduto", "builder", id="builder-scaduto"),
+        ],
+    )
+    def test_la_voce_della_chiamata_nel_rapporto_del_giro(
+        self, monkeypatch, git_finto, caso, ruolo
+    ):
+        finto = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        if caso == "scaduto":
+            monkeypatch.setattr(runner, "BUILDER", ["sh", "-c", AGENTE_CHE_DORME, "agente"])
+            monkeypatch.setattr(runner, "MINUTI_BUILDER", 0.02)
+        else:
+            monkeypatch.setattr(runner, "esegui", finto)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        rapporto = json.loads(
+            runner.scrivi_rapporto("20260925-120000", [esito], "finito").read_text())
+
+        voce = next(v for v in rapporto["esiti"][0]["invocazioni"] if v["ruolo"] == ruolo)
+        assert isinstance(voce["durata_s"], (int, float)) and voce["durata_s"] >= 0
+        if caso == "scaduto":
+            assert voce["durata_s"] >= 0.02 * 60, "la chiamata scaduta dura il suo tetto"
+            assert voce["codice"] == -15, "il codice di una chiamata scaduta è il segnale"
+        else:
+            assert voce["codice"] == 0
