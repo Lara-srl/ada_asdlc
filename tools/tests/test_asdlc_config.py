@@ -139,6 +139,19 @@ def test_i_tetti_per_chiamata_si_leggono_da_soglie(tmp_path):
     assert (cfg.soglie.minuti_builder, cfg.soglie.minuti_critic) == (45, 12)
 
 
+@pytest.mark.parametrize("chiave", ["minuti_builder", "minuti_critic"])
+@pytest.mark.parametrize("valore", [0, -5])
+def test_un_tetto_non_positivo_si_ferma_nominando_la_chiave(tmp_path, chiave, valore):
+    """Un tetto di zero minuti scadrebbe a ogni chiamata: ogni giro chiuderebbe
+    `senza esito` dopo un lancio, e la ragione sarebbe un numero nel TOML."""
+    sbagliato = TOML_DI_PROVA.replace("revisioni = 7\n", f"revisioni = 7\n{chiave} = {valore}\n")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, sbagliato))
+
+    assert f"[soglie].{chiave}" in str(fermata.value)
+
+
 def test_l_asdlc_toml_del_repository_dichiara_i_tetti():
     """I due valori stanno scritti nel TOML, con la loro ragione accanto: un
     default del lettore non si vede da chi apre il file."""
