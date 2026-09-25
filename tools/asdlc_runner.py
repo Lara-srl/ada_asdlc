@@ -372,7 +372,7 @@ domanda, come prima.
 # I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
 # `PROMPT_RIMEDIO` nascono in `configura()`, col ramo di `asdlc.toml` al posto di
 # `{base}` e `{pbi_path}` / `{rapporto}` lasciati a chi chiama.
-MODELLO_CRITIC = """Sei un **Critic Agent** e fai una revisione avversariale secondo ASDLC.
+MODELLO_CRITIC = """Sei un **Critic Agent** e fai una revisione avversariale del diff.
 
 Il tuo ruolo è scettico per costruzione: respingi il codice che viola la spec o i confini
 di AGENTS.md **anche se funziona e anche se i test passano**. Preferisci un falso positivo
@@ -2395,7 +2395,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
            f"di questo lavoro non esiste una lettura avversariale, e la revisione è "
            f"tutta qui.\n"
            if e.critic_saltato else
-           f"Gate deterministici verdi · revisione avversariale PASS.\n")
+           f"Gate deterministici verdi · revisione avversariale del diff PASS.\n")
         + f"Tempo macchina: **{hms(e.durata_s)}** "
         f"(agente {hms(e.tempi['builder'] + e.tempi['critic'])}, gate {hms(e.tempi['gate'])}).\n\n"
         f"Manca l'unica cosa che uno script non può dare: **l'accettazione umana**.\n"
