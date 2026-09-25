@@ -5671,3 +5671,66 @@ class TestIlRapportoDelCriticArrivaIntero:
         giri = [f.stem for f in runner.LOG_DIR.glob("*.json")]
         assert len(giri) == 1
         assert ricevuti == giri, "esegui_pbi non riceve il nome del giro"
+
+    URL = "https://github.com/Lara-srl/ada_controller/pull/371"
+
+    def _pr_con_i_rapporti(self, monkeypatch, verdetti, commento_fallisce=False):
+        """Apre la PR di un giro le cui revisioni hanno dato i `verdetti`, con `gh`
+        sostituito. Torna l'esito, i testi dei file delle revisioni e i comandi
+        `gh pr comment` ricevuti, ognuno col testo del suo corpo."""
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        esito = runner.Esito("PBI-371", "fatto")
+        file = []
+        for n, v in enumerate(verdetti):
+            percorso = runner.scrivi_rapporto_critic("giro", "PBI-371", n, v)
+            esito.rapporti_critic.append(
+                {"revisione": n, "verdetto": v.esito, "percorso": str(percorso)})
+            file.append(percorso.read_text(encoding="utf-8"))
+        comandi: list[tuple[list[str], str]] = []
+
+        def _esegui(cmd, cwd, timeout=0, **k):
+            if cmd[:3] == ["gh", "pr", "create"]:
+                comandi.append((cmd, ""))
+                return 0, self.URL + "\n"
+            corpo = Path(cmd[cmd.index("--body-file") + 1]).read_text(encoding="utf-8")
+            comandi.append((cmd, corpo))
+            return (1, "HTTP 502: Bad Gateway") if commento_fallisce else (0, "")
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        pr = runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
+        assert pr == self.URL
+        assert comandi[0][0][:3] == ["gh", "pr", "create"], "prima si apre la PR"
+        return esito, file, comandi[1:]
+
+    def test_la_pr_riceve_un_commento_per_revisione_in_ordine(self, monkeypatch):
+        _, file, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. [scope]: tocca un file fuori"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ])
+
+        assert [c[:4] for c, _ in commenti] == [["gh", "pr", "comment", self.URL]] * 2
+        assert [corpo for _, corpo in commenti] == file, "un commento per revisione, in ordine"
+        assert commenti[0][1].startswith("# Critic — revisione 0 — non pronto")
+        assert commenti[1][1].startswith("# Critic — revisione 1 — pass")
+
+    def test_un_rapporto_oltre_il_limite_si_divide_senza_perdere_caratteri(self, monkeypatch):
+        lungo = "".join(f"riga {i}: è un rilievo lungo\n" for i in range(6000))
+        assert len(lungo) > 2 * 65_536, "il limite documentato di GitHub, in caratteri"
+
+        _, file, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. breve"),
+            runner.Verdetto("pass", "", lungo),
+        ])
+
+        assert commenti, "la PR non riceve i rapporti del Critic"
+        assert commenti[0][1] == file[0], "il rapporto breve resta un commento solo"
+        parti = [corpo for _, corpo in commenti[1:]]
+        assert len(parti) >= 3
+        for i, corpo in enumerate(parti, 1):
+            assert len(corpo) <= 65_536
+            assert corpo.startswith(
+                f"**Critic — revisione 1 — pass · parte {i} di {len(parti)}**\n\n")
+        assert "".join(c.split("\n\n", 1)[1] for c in parti) == file[1], (
+            "le parti, una dopo l'altra, devono ridare il rapporto intero"
+        )
