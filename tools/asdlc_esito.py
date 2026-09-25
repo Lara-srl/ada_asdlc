@@ -235,10 +235,12 @@ def main() -> int:
         print("ASDLC_ESITO manca o è vuota: deve nominare il file dell'esito.",
               file=sys.stderr)
         return 2
-    # Dei byte che non sono UTF-8 diventano caratteri di sostituzione, e la
-    # riga si rifiuta come non JSON invece di far cadere la lettura.
+    # Dei byte che non sono UTF-8 diventano surrogati isolati invece di far
+    # cadere la lettura: fuori da una stringa la riga si rifiuta come non JSON,
+    # dentro un campo li rifiuta `chiama()`, e il testo non si altera in
+    # silenzio come farebbe un carattere di sostituzione (`PBI-372`).
     if hasattr(sys.stdin, "reconfigure"):
-        sys.stdin.reconfigure(errors="replace")
+        sys.stdin.reconfigure(errors="surrogateescape")
     for riga in sys.stdin:
         if not riga.strip():
             continue
