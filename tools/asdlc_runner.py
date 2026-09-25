@@ -2774,9 +2774,10 @@ def esegui_pbi(
                               f"{MAX_REVISIONI + 1} revisioni senza convergere — ultimi rilievi "
                               f"del Critic nel rapporto JSON. Serve una lettura umana.")
             # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
-            # letto, e un assoluto qui lo farebbe sembrare un altro file.
+            # letto, e un assoluto qui lo farebbe sembrare un altro file. Il rapporto
+            # va intero: tagliato, il Builder non leggeva i primi rilievi (PBI-371).
             prompt = PROMPT_RIMEDIO.format(
-                rapporto=rapporto[-6000:], pbi_path=pbi_path.relative_to(REPO)
+                rapporto=rapporto, pbi_path=pbi_path.relative_to(REPO)
             )
 
         print(f"    commit sul branch: {e.commit} · "
