@@ -5293,3 +5293,25 @@ class TestITestNonScrivonoNellaCartellaVeraDeiGiri:
 
         dopo = set(os.listdir(cartella)) if cartella.exists() else set()
         assert sorted(dopo - prima) == [], "i test hanno scritto nella runs/ del repository"
+
+
+class TestDentroUnTestNessunPercorsoDelRunnerPuntaSottoRuns:
+    """PBI-370, decisione 2: si sposta l'intera `LOG_DIR`, non la sola costante.
+    `configura()` ne ricava altri percorsi — `CSV_TEMPI` — e un file che nasce
+    da loro ripeterebbe il difetto. Vale anche dopo che un test ha riapplicato
+    un `asdlc.toml`: la fixture `configura` lo fa, e i giri che seguono
+    scrivevano di nuovo nella `runs/` vera."""
+
+    @staticmethod
+    def _percorsi_sotto_runs() -> list[str]:
+        vera = REPO / "runs"
+        return sorted(nome for nome, valore in vars(runner).items()
+                      if isinstance(valore, Path) and valore.is_relative_to(vera))
+
+    def test_nessuna_costante_del_runner_e_un_percorso_sotto_runs(self):
+        assert self._percorsi_sotto_runs() == []
+
+    def test_nemmeno_dopo_aver_riapplicato_un_asdlc_toml(self, configura):
+        configura(toml_di_prova())
+
+        assert self._percorsi_sotto_runs() == []
