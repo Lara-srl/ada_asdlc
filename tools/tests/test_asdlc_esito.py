@@ -512,3 +512,28 @@ def test_un_eccezione_non_prevista_diventa_un_errore_interno_e_il_server_continu
     assert per_id.get(1, {}).get("error", {}).get("code") == -32603
     assert per_id.get(2, {}).get("result", {}).get("tools")
     assert "guasto di prova" in stderr
+
+
+def test_una_scrittura_interrotta_non_lascia_il_file_d_esito(monkeypatch, tmp_path):
+    """Decisione 7 di `PBI-372`: su `main` il file nasceva con `O_EXCL` e poi si
+    riempiva. Ucciso fra i due passi, il server lasciava `{"esito": "fa`, che il
+    runner non legge, e ogni richiamata si rifiutava come «già dichiarato»."""
+    server = carica_il_server()
+    esito = tmp_path / "esito.json"
+
+    def muore_a_meta(_oggetto, file, **_nominali):
+        file.write('{"esito": "fa')
+        file.flush()
+        raise KeyboardInterrupt("ucciso a metà della scrittura")
+
+    with monkeypatch.context() as sostituzioni:
+        sostituzioni.setattr(json, "dump", muore_a_meta)
+        with pytest.raises(KeyboardInterrupt):
+            server.chiama("fatto", {"riepilogo": "finito"}, "builder", str(esito))
+
+    assert not esito.exists(), f"resta un file a metà: {esito.read_text()!r}"
+    assert not list(tmp_path.iterdir()), "il temporaneo non si è cancellato"
+    risultato = server.chiama("fatto", {"riepilogo": "finito"}, "builder", str(esito))
+    assert risultato["isError"] is False, parole_della_risposta(risultato)
+    assert leggi_esito(esito) == {"esito": "fatto", "riepilogo": "finito"}
+    assert [f.name for f in tmp_path.iterdir()] == ["esito.json"]
