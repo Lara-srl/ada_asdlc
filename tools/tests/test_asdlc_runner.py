@@ -3894,10 +3894,13 @@ class TestIlGiroSiApreInTestOnly:
         monkeypatch.setattr(runner, "esegui",
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("basta")))
 
-        with pytest.raises(RuntimeError):
-            runner.esegui_pbi("PBI-333", set(), dry=False, con_pr=False)
+        # Dal PBI-369 l'eccezione non esce più da `esegui_pbi`: passa dalla
+        # chiusura, che spegne la fase anche sul giro interrotto.
+        esito = runner.esegui_pbi("PBI-333", set(), dry=False, con_pr=False)
 
+        assert esito.stato == "rosso"
         assert visto.get("aperta"), "il giro deve aprire la fase prima del Builder"
+        assert visto.get("chiusa"), "un giro interrotto lascia il worktree fuori fase"
 
 
 class TestIlBuilderSaComeSiApreLaProduzione:
