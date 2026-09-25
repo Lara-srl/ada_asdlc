@@ -83,6 +83,54 @@ def git_finto(monkeypatch):
     return chiamate
 
 
+# --- L'agente finto: l'esito passa dal file, come col server (PBI-367) -------
+
+FATTO = {"esito": "fatto", "riepilogo": "fatto"}
+
+
+def fermati(domanda: str) -> dict:
+    """Ciò che il server scrive dopo una chiamata valida a `fermati`."""
+    return {"esito": "fermati", "domanda": domanda}
+
+
+def verdetto(valore: str, rapporto: str = "rapporto") -> dict:
+    """Ciò che il server scrive dopo il `fatto` del Critic."""
+    return {"esito": "fatto", "verdetto": valore, "riepilogo": rapporto}
+
+
+def ruolo_ed_esito(cmd: list[str]) -> tuple[str | None, Path | None]:
+    """Il ruolo e il file d'esito di un'invocazione, dalla config che il runner
+    passa con `--mcp-config`. Senza config il file d'esito non c'è, e il ruolo
+    si legge dal nome del file del prompt."""
+    if "--mcp-config" in cmd:
+        config = json.loads(Path(cmd[cmd.index("--mcp-config") + 1]).read_text(encoding="utf-8"))
+        ambiente = config["mcpServers"]["asdlc"]["env"]
+        return ambiente["ASDLC_RUOLO"], Path(ambiente["ASDLC_ESITO"])
+    ultimo = cmd[-1] if cmd else ""
+    ruolo = next((r for r in ("builder", "critic") if f"_{r}_prompt" in ultimo), None)
+    return ruolo, None
+
+
+def agente_finto(esiti: dict, testo: str | dict = "", codice: int = 0):
+    """Un `esegui` che fa l'agente. Per il ruolo dell'invocazione scrive nel file
+    d'esito ciò che il server scriverebbe dopo una chiamata valida — `None`, o un
+    ruolo assente, è un agente che non chiama niente — e rende `testo` come
+    uscita: una stringa, o un dizionario da ruolo a stringa. I comandi ricevuti
+    restano in `.comandi`."""
+    comandi: list[list[str]] = []
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        comandi.append(cmd)
+        ruolo, file_esito = ruolo_ed_esito(cmd)
+        if file_esito is not None and esiti.get(ruolo) is not None:
+            file_esito.write_text(json.dumps(esiti[ruolo], ensure_ascii=False), encoding="utf-8")
+        uscita = testo.get(ruolo, "") if isinstance(testo, dict) else testo
+        return codice, uscita
+
+    _esegui.comandi = comandi
+    return _esegui
+
+
 class TestIlCriticPuoSospendere:
     """Un rilievo che aspetta una persona non è «non pronto»: è un'altra diagnosi."""
 
@@ -123,37 +171,283 @@ class TestIlCriticPuoSospendere:
                 "la applica alla lettera e il caso torna"
             )
 
-    def test_riconosce_il_verdetto_sospeso_e_ne_prende_la_domanda(self, monkeypatch):
-        uscita = (
-            "**1. [processo] Il CHIEDI sulla migrazione è stato saltato**\n"
-            "- Violato: AGENTS.md, CHIEDI prima di una migrazione su tabelle con dati\n"
-            "STOP: si può eseguire 0011 su `pratiche`, che ha 46 righe?\n"
-            "VERDETTO: SOSPESO\n"
+
+class TestLEsitoVieneDallaChiamata:
+    """PBI-367, primo criterio: il runner decide dal file d'esito, non dal testo.
+
+    `ADR-0027`. Il testo libero del modello resta contenuto per le persone. I
+    quattro casi sono i difetti 32, 34, 35 e 36 di `PBI-102` visti dal giro
+    intero: un marcatore citato nel testo non deve più contare niente, e il
+    difetto 36 — un `NON PRONTO` che cita il `PASS` letto come `pass` — avrebbe
+    aperto la PR su un lavoro respinto.
+    """
+
+    @pytest.mark.parametrize(
+        "esiti, testi, stato, nota, domanda, rapporto",
+        [
+            pytest.param(
+                {"builder": FATTO, "critic": verdetto("pass")},
+                {"builder": "Il controllo sta dopo quello dello stop.\n"
+                            "STOP: la migrazione si esegue?\n",
+                 "critic": "VERDETTO: PASS\n"},
+                "fatto", None, "", None,
+                id="builder-fatto-con-stop-nel-testo",
+            ),
+            pytest.param(
+                {"builder": fermati("la spec dice netto,\nil PBI lordo: quale vale?"),
+                 "critic": verdetto("pass")},
+                {"builder": "Tutto verde.\nFATTO: i criteri sono chiusi\n",
+                 "critic": "VERDETTO: PASS\n"},
+                "fermato",
+                "domanda dell'agente: la spec dice netto, / il PBI lordo: quale vale?",
+                "la spec dice netto,\nil PBI lordo: quale vale?", None,
+                id="builder-fermati-con-fatto-nel-testo",
+            ),
+            pytest.param(
+                {"builder": FATTO, "critic": verdetto("non pronto", "1. manca il test")},
+                {"builder": "FATTO: fatto\n",
+                 "critic": "Non posso dare VERDETTO: PASS senza il test.\n"
+                           "VERDETTO: NON PRONTO\n"},
+                "non convergente", None, "", "1. manca il test",
+                id="critic-non-pronto-che-cita-pass",
+            ),
+            pytest.param(
+                {"builder": FATTO, "critic": fermati("la 0011 tocca pratiche:\nla eseguo?")},
+                {"builder": "FATTO: fatto\n", "critic": "Ho letto il diff e i commit.\n"},
+                "sospeso", "domanda del critic: la 0011 tocca pratiche: / la eseguo?",
+                "la 0011 tocca pratiche:\nla eseguo?", "Ho letto il diff e i commit.",
+                id="critic-fermati-senza-marcatori",
+            ),
+        ],
+    )
+    def test_decide_il_file_d_esito(
+        self, monkeypatch, tmp_path, esiti, testi, stato, nota, domanda, rapporto
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "MAX_REVISIONI", 0)
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("3" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
         )
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita))
+        gate: list[str] = []
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: gate.append("gate") or [])
+        monkeypatch.setattr(runner, "esegui", agente_finto(esiti, testi))
 
-        verdetto = runner.revisione_critica(REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md")
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-        assert verdetto.esito == "sospeso"
-        assert verdetto.domanda == "si può eseguire 0011 su `pratiche`, che ha 46 righe?"
+        assert esito.stato == stato, (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: ha deciso il testo, "
+            "non la chiamata"
+        )
+        if nota is not None:
+            assert esito.nota.split(" · ")[0] == nota, (
+                "la domanda arriva intera, con le righe unite da « / »"
+            )
+        assert esito.domanda == domanda, "nel rapporto JSON la domanda sta intera"
+        if rapporto is not None:
+            assert rapporto in esito.rapporto_critic
+        if stato == "fermato":
+            assert gate == [], "dopo un fermati del Builder i gate non partono"
 
-    def test_un_sospeso_senza_domanda_e_un_guasto_non_un_giudizio(self, monkeypatch):
-        """Sospendere senza dire cosa si aspetta lascia la persona davanti a un muro.
 
-        Stessa regola del verdetto mancante: un guasto dello strumento deve
-        somigliare a un guasto, non a un giudizio.
-        """
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "VERDETTO: SOSPESO\n"))
+class TestSenzaChiamataLoStatoESenzaEsito:
+    """PBI-367, secondo criterio: nessun ripiego sul testo (`ADR-0027`, decisione 2).
 
-        with pytest.raises(RuntimeError, match="domanda"):
-            runner.revisione_critica(REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md")
+    Un agente che non ha fatto una chiamata valida non ha detto niente che il
+    runner possa leggere, qualunque cosa ci sia nel testo. Si chiude al primo
+    lancio, senza igiene e senza gate: il limite d'uso con l'albero sporco oggi
+    spende i tre giri d'igiene (difetto 27, giro 5 di PBI-333).
+    """
 
-    def test_pass_e_non_pronto_restano_quelli_di_prima(self, monkeypatch):
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "VERDETTO: PASS\n"))
-        assert runner.revisione_critica(Path("backlog/x.md")).esito == "pass"
+    @pytest.mark.parametrize(
+        "esiti, testi, codice, sporco, invocazioni, gate_attesi",
+        [
+            pytest.param({"critic": verdetto("pass")}, {"builder": "FATTO: fatto\n"},
+                         0, False, 1, 0, id="builder-fatto-solo-testo"),
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "STOP: la migrazione si esegue?\n"},
+                         0, False, 1, 0, id="builder-stop-solo-testo"),
+            pytest.param({"critic": verdetto("pass")}, {}, 0, False, 1, 0, id="builder-muto"),
+            pytest.param({"builder": FATTO}, {"critic": "VERDETTO: PASS\n"},
+                         0, False, 2, 1, id="critic-pass-solo-testo"),
+            pytest.param({"critic": verdetto("pass")},
+                         {"builder": "You've hit your usage limit · resets 3am\n"},
+                         1, True, 1, 0, id="limite-d-uso"),
+        ],
+    )
+    def test_il_giro_chiude_senza_esito(
+        self, monkeypatch, tmp_path, esiti, testi, codice, sporco, invocazioni, gate_attesi
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        # Il primo `status` è quello d'ingresso, prima che il PBI cominci.
+        stati = [""] + ([" M backend/app/marginalita.py"] * 20 if sporco else [])
 
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "VERDETTO: NON PRONTO\n"))
-        assert runner.revisione_critica(Path("backlog/x.md")).esito == "non pronto"
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return stati.pop(0) if stati else ""
+            if args[:2] == ("rev-list", "--count"):
+                return "2"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        gate: list[str] = []
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: gate.append("gate") or [])
+        agente = agente_finto(esiti, testi, codice=codice)
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito", (
+            f"chiuso {esito.stato} con la nota «{esito.nota}»: senza una chiamata "
+            "valida il testo non deve decidere niente"
+        )
+        assert len(agente.comandi) == invocazioni, (
+            "un senza esito non rilancia l'agente: né igiene né un altro tentativo"
+        )
+        assert len(gate) == gate_attesi, "dopo un Builder senza esito i gate non partono"
+
+
+class TestUnSenzaEsitoFermaLaCoda:
+    """PBI-367, decisione 10: dopo un `senza esito` la coda si ferma, come dopo un `fermato`.
+
+    Un `senza esito` dovuto al limite d'uso colpirebbe anche il PBI dopo, e quello
+    dopo ancora: una catena di `senza esito` che consuma la coda senza fare
+    niente. Il ramo si pubblica anche vuoto, perché il tick trovi su `origin` il
+    segno che il PBI aspetta, come per `pbi/pbi-360` il 22/09.
+    """
+
+    def test_pubblica_il_ramo_anche_con_zero_commit(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        chiamate: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args[:2] == ("rev-list", "--count"):
+                return "0"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "senza esito"
+        assert esito.commit == 0
+        assert any(c[0] == "push" for c in chiamate), (
+            "senza il ramo su origin il tick non vede che il PBI aspetta, e lo rilancia"
+        )
+
+    def test_la_sequenza_non_va_avanti(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        eseguiti: list[str] = []
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            eseguiti.append(pbi)
+            return runner.Esito(pbi, "senza esito")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv",
+                            ["asdlc_runner", "PBI-212", "PBI-213", "--in-primo-piano"])
+
+        runner.main()
+
+        assert eseguiti == ["PBI-212"], (
+            "un senza esito del limite d'uso colpirebbe anche il PBI dopo"
+        )
+
+
+class TestNelSenzaEsitoRestaLUscitaGrezza:
+    """PBI-367, decisioni 7 e 11: con cosa si distingue un limite d'uso da un crash.
+
+    `esegui()` rendeva `stdout + stderr` concatenati, e le due chiamate agli
+    agenti scartavano il codice d'uscita. Sono i dati con cui si distingue un
+    limite d'uso da un crash della CLI o da un modello che non ha chiamato
+    niente — e `PBI-363` li legge. Il log delle chiamate al server dice quelle
+    rifiutate, che il file d'esito non vede.
+    """
+
+    def test_esegui_scrive_stdout_e_stderr_in_due_file(self, tmp_path):
+        fuori, dentro = tmp_path / "x.stdout", tmp_path / "x.stderr"
+
+        codice, _ = runner.esegui(["sh", "-c", "echo fuori; echo errore >&2; exit 3"],
+                                  tmp_path, flussi=(fuori, dentro))
+
+        assert codice == 3
+        assert fuori.read_text(encoding="utf-8") == "fuori\n"
+        assert dentro.read_text(encoding="utf-8") == "errore\n"
+
+    def test_il_rapporto_e_la_nota_portano_i_file_e_il_codice(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(
+            runner, "git",
+            lambda *a: ("2" if a[:2] == ("rev-list", "--count")
+                        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+                        else ""),
+        )
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({}, "You've hit your usage limit\n", codice=1))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
+
+        assert esito.stato == "senza esito"
+        ultima = rapporto["esiti"][0]["invocazioni"][-1]
+        assert ultima["ruolo"] == "builder"
+        assert ultima["codice"] == 1, "il codice d'uscita di claude -p non si scarta"
+        assert ultima["stdout"] != ultima["stderr"], "i due flussi stanno in due file"
+        assert Path(ultima["stdout"]).parent == tmp_path == Path(ultima["stderr"]).parent
+        assert ultima["chiamate"].endswith(".chiamate.jsonl"), (
+            "le chiamate rifiutate si vedono solo nel log del server"
+        )
+        for voce in ("codice d'uscita 1", ultima["stdout"], ultima["stderr"]):
+            assert voce in esito.nota, f"la nota non dice {voce}"
+
+
+class TestITestiChiedonoGliStrumenti:
+    """PBI-367, sesto criterio: i testi rivolti al modello chiedono `fatto` e `fermati`.
+
+    Un prompt che chiede ancora una riga di fatto o di fermata insegna al
+    modello un protocollo che il runner non legge più: l'agente obbedisce, non
+    chiama niente, e il giro chiude `senza esito`. Il contratto «la domanda sta
+    su una riga» cade insieme al parser che lo imponeva (decisione 6).
+    """
+
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param(lambda: runner.PROMPT_BUILDER.format(pbi_path="backlog/x.md"),
+                         id="builder"),
+            pytest.param(lambda: runner.PROMPT_IGIENE.format(sporco="?? nuovo.tsx"),
+                         id="igiene"),
+            pytest.param(lambda: runner.PROMPT_RIPROVA.format(esiti="## pytest\n1 failed"),
+                         id="riprova"),
+            pytest.param(lambda: runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md"),
+                         id="critic"),
+            pytest.param(lambda: runner.PROMPT_RIMEDIO.format(rapporto="1. [scope]: x",
+                                                              pbi_path="backlog/x.md"),
+                         id="rimedio"),
+            pytest.param(lambda: runner.guardia_di_fase(runner.FASE_IMPL,
+                                                        "backend/tests/test_x.py"),
+                         id="guardia-di-fase"),
+        ],
+    )
+    def test_nessun_marcatore_e_i_due_strumenti_nominati(self, testo):
+        scritto = testo()
+        for marcatore in ("STOP:", "FATTO:", "VERDETTO:"):
+            assert marcatore not in scritto, (
+                f"il testo istruisce ancora con {marcatore}, che il runner non legge più"
+            )
+        for strumento in ("`fatto`", "`fermati`"):
+            assert strumento in scritto, f"il testo non nomina lo strumento {strumento}"
 
 
 class TestIlSospesoChiudeAlPrimoGiro:
@@ -169,7 +463,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
             giri["critic"] += 1
             return runner.Verdetto("sospeso", "chi decide se la migrazione si esegue?", "rapporto")
 
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica", critic_sospende)
 
@@ -188,7 +482,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         quale lato è arrivata la domanda, perché il rimedio è diverso: la prima si
         chiude riscrivendo il PBI, la seconda rispondendo.
         """
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
@@ -214,7 +508,7 @@ class TestIlBranchNasceDaOriginMain:
         `git()` alza: il PBI muore prima di cominciare. Ramificare direttamente da
         `origin/main` non tocca nessun branch locale e non può collidere.
         """
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
@@ -240,7 +534,7 @@ class TestIlBranchNasceDaOriginMain:
         """Il `main` locale del worktree può essere indietro di giorni: da quando
         non lo si estrae più, nessuno lo aggiorna. Contare `main..HEAD` gonfierebbe
         i commit del PBI con quelli che main ha ricevuto nel frattempo."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
@@ -278,7 +572,7 @@ class TestIlPbiSiCercaSuOriginMain:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
@@ -369,7 +663,7 @@ class TestLIgieneGuardaTuttoLAlbero:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
@@ -435,9 +729,11 @@ class TestLaSessioneRuotaFraLeRevisioni:
         gate = {"chiamate": 0}
         critic = {"chiamate": 0}
 
-        def esegui_finto(cmd, cwd):
+        agente = agente_finto({"builder": FATTO})
+
+        def esegui_finto(cmd, cwd, **k):
             comandi.append(cmd)
-            return 0, "FATTO: fatto\n"
+            return agente(cmd, cwd, **k)
 
         def gira_gate_finto(attivi):
             gate["chiamate"] += 1
@@ -605,7 +901,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "gira_gate", _gate)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
@@ -678,7 +974,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
@@ -710,7 +1006,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
                 return runner.Verdetto("non pronto", "", "manca una deroga")
             return runner.Verdetto("pass", "", "")
 
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica", _critic)
         monkeypatch.setattr(
@@ -741,7 +1037,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
     decide se buttare il branch guardando quella colonna.
     """
 
-    def _mondo(self, monkeypatch, uscita_builder: str, commit: str = "8"):
+    def _mondo(self, monkeypatch, esito_builder: dict, commit: str = "8"):
         def _git(*args: str) -> str:
             if args[:2] == ("status", "--porcelain"):
                 return ""
@@ -752,14 +1048,14 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita_builder))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": esito_builder}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
         )
 
     def test_uno_stop_del_builder_conta_i_suoi_commit(self, monkeypatch):
-        self._mondo(monkeypatch, "STOP: la migrazione tocca una tabella con dati sopra\n")
+        self._mondo(monkeypatch, fermati("la migrazione tocca una tabella con dati sopra"))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
@@ -770,7 +1066,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
         )
 
     def test_un_sospeso_del_critic_conta_i_suoi_commit(self, monkeypatch):
-        self._mondo(monkeypatch, "FATTO: fatto\n", commit="4")
+        self._mondo(monkeypatch, FATTO, commit="4")
         monkeypatch.setattr(
             runner, "revisione_critica",
             lambda p: runner.Verdetto("sospeso", "il CHIEDI sulla migrazione", "rapporto"),
@@ -780,160 +1076,6 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
 
         assert esito.stato == "sospeso"
         assert esito.commit == 4
-
-
-class TestLaFermataDelBuilderEUnaRiga:
-    """Difetto 32 di PBI-102, misurato su PBI-363 il 23/09/2026.
-
-    Il runner fermava il giro se `STOP:` compariva in un punto qualunque della
-    risposta, mentre il prompt chiede al Builder di *terminare con la riga
-    esatta*. Il Builder di PBI-363 aveva finito — 14 commit, otto criteri — e
-    nel riepilogo ha citato il marcatore fra due backtick: `fermato` in 9
-    minuti, gate e Critic mai partiti, e per nota mezza frase
-    (`runs/20260923-103007.json`).
-    """
-
-    # Il riepilogo del 23/09, ricostruito dalla nota del rapporto: ciò che la
-    # nota riporta è quanto seguiva la citazione.
-    RIEPILOGO_DI_PBI_363 = (
-        "Il controllo del limite d'uso sta subito dopo quello dello `STOP:`, prima "
-        "dell'igiene e dei gate. Il giro chiude `fermato` senza rilanciare `-c` e "
-        "senza consumare tentativi.\n"
-        "\n"
-        "FATTO: il limite d'uso conta solo se apre l'ultima riga\n"
-    )
-
-    def _mondo(self, monkeypatch, uscita_builder: str) -> None:
-        def _git(*args: str) -> str:
-            if args[:2] == ("status", "--porcelain"):
-                return ""
-            if args[:2] == ("rev-list", "--count"):
-                return "14"
-            if args[:2] == ("ls-tree", "--name-only"):
-                return elenco_backlog()
-            return ""
-
-        monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita_builder))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(
-            runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "ok")
-        )
-
-    @pytest.mark.parametrize(
-        "uscita, stato, domanda",
-        [
-            pytest.param(RIEPILOGO_DI_PBI_363, "fatto", None, id="citazione-del-23-09"),
-            pytest.param(
-                "Ho letto i due prompt.\n"
-                "STOP: il prompt del Critic cita `STOP:` a metà riga, lo tocco?\n",
-                "fermato",
-                "il prompt del Critic cita `STOP:` a metà riga, lo tocco?",
-                id="domanda-che-contiene-il-marcatore",
-            ),
-            pytest.param(
-                "STOP: la migrazione tocca una tabella con dati sopra, la eseguo?\n"
-                "Il prompt chiede di chiudere con la riga `STOP:` e l'ho messa sopra.\n",
-                "fermato",
-                "la migrazione tocca una tabella con dati sopra, la eseguo?",
-                id="citazione-dopo-la-riga-di-fermata",
-            ),
-        ],
-    )
-    def test_una_fermata_e_la_riga_che_il_marcatore_apre(
-        self, monkeypatch, uscita, stato, domanda
-    ):
-        self._mondo(monkeypatch, uscita)
-
-        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
-
-        assert esito.stato == stato, (
-            f"chiuso {esito.stato} con la nota «{esito.nota}»: conta solo la riga che "
-            "si apre col marcatore, non la parola citata a metà riga"
-        )
-        if domanda is not None:
-            assert esito.nota.split(" · ")[0] == f"domanda dell'agente: {domanda}", (
-                "la nota porta il resto della riga di fermata, intero e su una riga sola"
-            )
-
-    def test_un_fatto_sull_ultima_riga_vince_sul_protocollo_ricopiato_sopra(
-        self, monkeypatch
-    ):
-        """Decisione 2 di PBI-364: il `FATTO:` che chiude la risposta è la parola
-        definitiva del Builder. Un riepilogo che ricopia il protocollo del prompt
-        in un blocco rientrato ha una riga che si apre col marcatore, e non è
-        una domanda."""
-        self._mondo(
-            monkeypatch,
-            "Il prompt chiede di chiudere così, se c'è un'ambiguità:\n"
-            "\n"
-            "    STOP: <la domanda>\n"
-            "\n"
-            "Non ce n'erano, e i criteri sono tutti verdi.\n"
-            "FATTO: la fermata del Builder è la riga che il marcatore apre\n",
-        )
-
-        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
-
-        assert esito.stato == "fatto", (
-            f"chiuso {esito.stato} con la nota «{esito.nota}»: il FATTO sull'ultima "
-            "riga vale più di una riga di fermata ricopiata sopra"
-        )
-
-    def test_i_prompt_dicono_che_la_domanda_sta_tutta_sulla_riga_di_fermata(self):
-        """Decisione 7 di PBI-364: il runner prende della domanda una riga sola,
-        e l'agente che si ferma deve saperlo — ciò che va a capo non arriva alla
-        persona."""
-        builder = runner.PROMPT_BUILDER.format(pbi_path="backlog/x.md")
-        critic = runner.PROMPT_CRITIC.format(pbi_path="backlog/x.md")
-        for nome, prompt, riga in (
-            ("PROMPT_BUILDER", builder, "    STOP: <la domanda>\n"),
-            ("PROMPT_CRITIC", critic, "    STOP: <la domanda per la persona>\n"),
-        ):
-            dopo = prompt.split(riga, 1)[1]
-            assert "la domanda sta tutta su quella riga" in dopo[:400], (
-                f"{nome} chiede la riga di fermata senza dire, lì accanto, che la "
-                "domanda sta su una riga sola: il resto non arriva alla persona"
-            )
-
-    def test_con_piu_righe_di_fermata_la_nota_porta_l_ultima(self, monkeypatch):
-        """Decisione 3 di PBI-364: la più vicina alla fine è quella con cui il
-        prompt chiede di terminare. Guardia: nasce verde."""
-        self._mondo(
-            monkeypatch,
-            "STOP: la spec dice netto, il PBI lordo: quale vale?\n"
-            "Rileggendo, la spec è stata aggiornata ieri e vale netto.\n"
-            "STOP: la migrazione 0012 tocca `righe_ricambio`, che ha dati sopra: la eseguo?\n",
-        )
-
-        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
-
-        assert esito.stato == "fermato"
-        assert esito.nota.split(" · ")[0] == (
-            "domanda dell'agente: la migrazione 0012 tocca `righe_ricambio`, che ha "
-            "dati sopra: la eseguo?"
-        ), "fra più righe di fermata vale l'ultima, non la prima"
-
-    def test_una_riga_rientrata_che_si_apre_col_marcatore_ferma_il_giro(self, monkeypatch):
-        """Decisione 8 di PBI-364: lo `strip()` viene prima del prefisso, e un
-        Builder che rientra per sbaglio la sua domanda non la perde. Guardia:
-        nasce verde."""
-        self._mondo(
-            monkeypatch,
-            "Mi fermo qui, i criteri 1 e 2 sono verdi.\n"
-            "\n"
-            "    STOP: la decisione 4 contraddice la 2 sul FATTO finale, quale vale?\n",
-        )
-
-        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
-
-        assert esito.stato == "fermato", (
-            f"chiuso {esito.stato}: una riga di fermata rientrata è una fermata"
-        )
-        assert esito.nota.split(" · ")[0] == (
-            "domanda dell'agente: la decisione 4 contraddice la 2 sul FATTO finale, "
-            "quale vale?"
-        )
 
 
 class TestDiUnGateRossoRestaLaRagione:
@@ -957,7 +1099,7 @@ class TestDiUnGateRossoRestaLaRagione:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "gira_gate",
             lambda attivi: [("pytest", "E   assert 496.51 == 609.00\ntest_riga_12 FAILED")],
@@ -1158,7 +1300,7 @@ class TestSiPuoSaltareIlCritic:
 
     @pytest.fixture
     def builder_verde(self, monkeypatch):
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
@@ -1186,7 +1328,7 @@ class TestSiPuoSaltareIlCritic:
 
     def test_senza_il_flag_il_critic_gira_come_sempre(self, monkeypatch, git_finto):
         """Il default non si sposta: chi non chiede niente ha i tre gate."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         giri = {"critic": 0}
 
@@ -1383,7 +1525,7 @@ class TestIlBranchLoPubblicaIlRunner:
 
     def test_un_giro_sospeso_pubblica_lo_stesso_il_suo_branch(self, monkeypatch, git_finto):
         """Il lavoro c'è: sta su un ramo che nessuno vedrà mai, se resta locale."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
@@ -1397,7 +1539,7 @@ class TestIlBranchLoPubblicaIlRunner:
 
     def test_un_giro_fatto_non_pubblica_due_volte(self, monkeypatch, git_finto):
         """Sulla strada buona a pubblicare è `apri_pr`, e una volta sola."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "rapporto")
@@ -1593,7 +1735,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
             return ""
 
         monkeypatch.setattr(runner, "git", _g)
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(runner, "revisione_critica",
                             lambda p: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
@@ -3115,7 +3257,7 @@ class TestIlGateDelRossoStaNelGiro:
                         else ""),
         )
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(
             runner, "revisione_critica", critic or (lambda p: runner.Verdetto("pass", "", "ok"))
@@ -3985,6 +4127,85 @@ class TestIlBuilderGiraDoveGliHookScattano:
         assert runner.BUILDER.index("--allowedTools") < len(runner.BUILDER) - 2
 
 
+class TestIComandiPortanoIlServerDellEsito:
+    """PBI-367, decisioni 4 e 5: ogni invocazione ha la sua config e il suo file d'esito.
+
+    Il server di PBI-366 si ferma già all'avvio con un ruolo sconosciuto, ma
+    dentro un giro quella fermata arriverebbe come «senza esito», dopo i minuti
+    del Builder. Un errore nella config si deve vedere qui, in un test del
+    runner, e non dopo un giro intero (Francesco, 24/09).
+    """
+
+    VARIADICI = ("--mcp-config", "--allowedTools")
+
+    @staticmethod
+    def valori(cmd: list[str], flag: str) -> list[str]:
+        """Gli argomenti che seguono `flag` fino al flag successivo."""
+        dopo = cmd[cmd.index(flag) + 1:]
+        fine = next((i for i, a in enumerate(dopo) if a.startswith("-")), len(dopo))
+        return dopo[:fine]
+
+    @pytest.mark.parametrize("ruolo", ["builder", "critic"])
+    def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
+        self, monkeypatch, git_finto, tmp_path, ruolo
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == ruolo)
+        assert "--mcp-config" in cmd and "--strict-mcp-config" in cmd, (
+            "senza la config il server dell'esito non parte, e l'agente non ha "
+            "strumenti da chiamare"
+        )
+        config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
+        server = config["mcpServers"]["asdlc"]
+        assert any(a.endswith("asdlc_esito.py") for a in [server["command"], *server["args"]])
+        ambiente = server["env"]
+        assert ambiente["ASDLC_RUOLO"] == ruolo
+        assert Path(ambiente["ASDLC_ESITO"]).parent == tmp_path, (
+            "il file d'esito sta in LOG_DIR, accanto al prompt"
+        )
+        esiti = [str(ruolo_ed_esito(c)[1]) for c in agente.comandi]
+        assert len(set(esiti)) == len(esiti), "ogni invocazione ha il suo file d'esito"
+
+        permessi = {t for v in self.valori(cmd, "--allowedTools") for t in v.split(",")}
+        assert {"mcp__asdlc__fatto", "mcp__asdlc__fermati"} <= permessi, (
+            "senza l'allowlist `-p` nega gli strumenti, e il file non si scrive"
+        )
+        prompt = next(i for i, a in enumerate(cmd) if a.startswith("@"))
+        flag_prima = next(a for a in reversed(cmd[:prompt]) if a.startswith("-"))
+        assert flag_prima not in self.VARIADICI, (
+            f"il prompt segue {flag_prima}, che è variadico e se lo mangia"
+        )
+
+    @pytest.mark.parametrize(
+        "ruolo, esito",
+        [
+            pytest.param(None, "esito.json", id="ruolo-mancante"),
+            pytest.param("critico", "esito.json", id="ruolo-sbagliato"),
+            pytest.param("builder", None, id="esito-mancante"),
+        ],
+    )
+    def test_una_config_sbagliata_ferma_prima_del_lancio(
+        self, monkeypatch, tmp_path, ruolo, esito
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        agente = agente_finto({})
+        monkeypatch.setattr(runner, "esegui", agente)
+        prompt = tmp_path / "prompt.txt"
+        prompt.write_text("x", encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            runner.invoca_agente(ruolo, runner.BUILDER, prompt,
+                                 tmp_path / esito if esito else None)
+
+        assert agente.comandi == [], "claude non si lancia con una config che non regge"
+
+
 class TestIMutantiSiFannoDalleRigheCambiate:
     """La quarta lettura del gate: `PBI-105`.
 
@@ -4264,7 +4485,7 @@ class TestITestCheMordonoFinisconoNelRapporto:
                         else ""),
         )
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(runner, "revisione_critica",
                             lambda p: runner.Verdetto("pass", "", "ok"))
@@ -4844,7 +5065,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
     def test_un_giro_intero_non_nomina_mai_origin_main(self, su_master, git_finto, monkeypatch):
         """Il conteggio dei commit, l'elenco dei file e il gate del rosso: sono
         le letture dentro `esegui_pbi`, e si guardano da fuori tutte insieme."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p: runner.Verdetto("pass", "", "PASS"))
@@ -4967,7 +5188,7 @@ class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
 
     def _giro(self, monkeypatch, con_critic=True):
         chiamati: list[str] = []
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "FATTO: fatto\n"))
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi: chiamati.append("gate") or [])
         monkeypatch.setattr(runner, "gate_del_rosso",
                             lambda **k: chiamati.append("rosso") or [])

@@ -99,13 +99,24 @@ AGENTI = ("claude", "asdlc_runner")
 # dall'hook; `Bash` va permesso per nome, o gira in una sandbox che non scrive
 # fuori dalla working directory. `--allowedTools` è variadico e non deve restare
 # in coda: il prompt si concatena subito dopo, e se lo mangia.
-BUILDER = ["claude", "-p", "--allowedTools", "Bash", "--permission-mode", "acceptEdits"]
+# I due strumenti del server dell'esito vanno permessi per nome, come `Bash`: senza,
+# `-p` li nega (`permission_denials`) e il file d'esito non si scrive (PBI-367).
+BUILDER = ["claude", "-p", "--allowedTools", "Bash", "mcp__asdlc__fatto", "mcp__asdlc__fermati",
+           "--permission-mode", "acceptEdits"]
 # Model routing (patterns/model-routing.md): il giudizio costa più della generazione,
-# e il Critic non scrive niente — solo lettura e `git diff`.
+# e il Critic non scrive niente — solo lettura e `git diff`, più i due strumenti
+# con cui dichiara l'esito.
 # ⚠️ `--allowedTools <tools...>` è **variadico**: se resta in coda si mangia il prompt,
 # che viene concatenato subito dopo, e `-p` parte senza input. Il flag variadico non
-# deve mai essere l'ultimo. Il Builder non ne soffre perché i suoi flag sono booleani.
-CRITIC = ["claude", "-p", "--allowedTools", "Read,Grep,Glob,Bash(git diff:*)", "--model", "opus"]
+# deve mai essere l'ultimo, e lo stesso vale per `--mcp-config` (`invoca_agente`).
+CRITIC = ["claude", "-p", "--allowedTools",
+          "Read,Grep,Glob,Bash(git diff:*),mcp__asdlc__fatto,mcp__asdlc__fermati",
+          "--model", "opus"]
+
+# Il server dell'esito (`PBI-366`, `ADR-0027`): sta accanto al runner, e si
+# estrae con lui. I ruoli sono i suoi: un altro valore lo ferma all'avvio.
+SERVER_DELL_ESITO = Path(__file__).resolve().parent / "asdlc_esito.py"
+RUOLI = ("builder", "critic")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
 # il numero; la ragione di ognuno sta lì accanto, dove chi lo cambia la legge.
@@ -115,7 +126,11 @@ MAX_REVISIONI: int
 
 # Gli stati dopo i quali non si prosegue. `sospeso` sta qui insieme a `fermato`
 # per la stessa ragione — sono tutti e due «fermo su una domanda» — e la domanda
-# aperta è precisamente ciò che non si supera andando avanti.
+# aperta è precisamente ciò che non si supera andando avanti. `senza esito` ci sta
+# per un'altra ragione: se l'ha causato il limite d'uso, colpirebbe anche il PBI
+# dopo, e una catena di `senza esito` consumerebbe la coda senza fare niente
+# (PBI-367, decisione 10). Come gli altri, pubblica il ramo anche vuoto: è il
+# segno su `origin` che il tick legge per non rilanciare il PBI.
 # ⚠️ `respinto` non è assegnato da nessuna parte: PBI-102 lo ha sostituito con
 # `non convergente` sul caso «revisioni esaurite», e la diagnosi che gli resterebbe —
 # *il PBI non era pronto a partire*, riconosciuta al primo giro invece che all'ultimo —
@@ -123,7 +138,8 @@ MAX_REVISIONI: int
 # toglie perché è un'intenzione, non codice morto: cancellarlo perderebbe la distinzione
 # che PBI-102 ha introdotto, e chi legge `runs/tempi.csv` deve sapere che quello stato
 # esiste e che nessuna run lo porta ancora.
-STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso")
+STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso",
+                          "senza esito")
 
 COLONNE_CSV = [
     "run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
@@ -245,7 +261,7 @@ Esegui il PBI con queste regole non negoziabili:
      file dello Scope le righe che parlano di ciò che hai spostato o tolto.
   In fase `IMPL` sono i **test** a essere in sola lettura: il verde si ottiene scrivendo
   il codice, mai ammorbidendo l'asserzione. Se un test è davvero sbagliato, fermati e
-  dillo con `STOP:`.
+  dillo con lo strumento `fermati`.
 - **Un modulo nuovo nasce vuoto, in un commit suo.** Il primo test di un file che non
   esiste non fallisce: esplode in raccolta, e un errore di import non è un rosso — non
   dimostra che il test morde, e `--chiedi-impl` lo rifiuta dicendolo. Fai prima lo
@@ -306,8 +322,8 @@ Esegui il PBI con queste regole non negoziabili:
   - Disattivare test, marcare `skip`, allargare tolleranze per far passare il gate
   - Modificare asserzioni per renderle meno stringenti
   Se un gate è rosso, la causa è nel **codice di dominio**, non nell'infrastruttura di
-  test. L'unica eccezione: se il gate fallisce per un bug nel gate stesso, fermati e
-  scrivi `STOP:` con la diagnosi.
+  test. L'unica eccezione: se il gate fallisce per un bug nel gate stesso, chiama
+  `fermati` con la diagnosi.
 - **Non pubblicare niente**: nessun `git push`, nessun `gh pr create`. Al branch e alla PR
   ci pensa il runner, quando il Critic ha finito. Un branch pushato a metà giro è una
   promessa fatta su lavoro che nessuno ha ancora accettato — su PBI-324 quella promessa è
@@ -315,15 +331,13 @@ Esegui il PBI con queste regole non negoziabili:
   checklist spuntata.
 
 Se incontri un'ambiguità che il protocollo di rifinitura non copre, NON scegliere in
-silenzio: fermati, scrivi la domanda, e termina con la riga esatta
+silenzio: chiama lo strumento `fermati` con la domanda, per intero.
 
-    STOP: <la domanda>
+Quando hai finito, chiama lo strumento `fatto` con il riepilogo del lavoro.
 
-e la domanda sta tutta su quella riga: ciò che va a capo non arriva alla persona.
-
-Quando hai finito, termina con la riga esatta
-
-    FATTO: <riepilogo in una riga>
+L'esito il runner lo legge **solo** da una di queste due chiamate, e la prima valida è
+definitiva: il testo della tua risposta resta per le persone e non decide niente. Una
+risposta che non chiama né `fatto` né `fermati` chiude il giro senza esito.
 """
 
 PROMPT_IGIENE = """Ci sono modifiche non committate:
@@ -333,7 +347,8 @@ PROMPT_IGIENE = """Ci sono modifiche non committate:
 Committale con micro-commit coerenti. **`git add` esplicito**, o `git add -A`: i file nuovi
 non sono tracciati, e `git commit -am` li lascia fuori senza dire niente — è così che una
 pagina intera è rimasta a un `git add` dal non esistere. Finché l'albero è sporco il lavoro
-non è giudicabile e i gate non partono. Termina con FATTO: oppure STOP: come prima.
+non è giudicabile e i gate non partono. Poi chiama `fatto`, oppure `fermati` con la
+domanda, come prima.
 """
 
 PROMPT_RIPROVA = """I gate sono rossi. Output (troncato):
@@ -342,7 +357,8 @@ PROMPT_RIPROVA = """I gate sono rossi. Output (troncato):
 
 Correggi la causa, non il sintomo: se un test è sbagliato lo si corregge, se è giusto si
 corregge il codice. Non disattivare test, non marcare skip, non allargare tolleranze.
-Committa la correzione con un commit suo. Termina con FATTO: oppure STOP: come prima.
+Committa la correzione con un commit suo. Poi chiama `fatto`, oppure `fermati` con la
+domanda, come prima.
 """
 
 # I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
@@ -378,38 +394,30 @@ I commit: `git log --oneline {base}..HEAD`
    che allude invece di dire cosa è cambiato è un rilievo da chiudere con un rebase dei
    messaggi, non una questione di gusto.
 
-## Formato di uscita
-Se non ci sono violazioni, termina con la riga esatta:
+## Come si dichiara l'esito
+Il runner legge l'esito **solo** dalla tua chiamata a uno dei due strumenti, e la prima
+chiamata valida è definitiva: il testo della risposta non decide niente.
 
-    VERDETTO: PASS
+Chiama `fatto` con il verdetto e con il rapporto intero nel riepilogo: è l'unico testo
+che arriva al Builder e a chi mergia.
+
+- Se non ci sono violazioni, il verdetto è `pass`.
+- Altrimenti elenca nel rapporto ogni violazione come
+
+      **N. [categoria]: descrizione breve**
+      - Violato: <clausola della spec o di AGENTS.md>
+      - Impatto: <perché conta>
+      - Rimedio: <come si chiude>
+
+  e il verdetto è `non pronto`.
 
 Se invece trovi un rilievo che **nessuna correzione può chiudere** — perché la risposta è
 di una persona: una decisione di dominio, un `CHIEDI` di AGENTS.md saltato, una violazione
 *ex ante* che chi l'ha commessa non può annullare — non mandare il Builder a girare a
-vuoto. Scrivi la domanda e termina con le due righe esatte:
+vuoto: chiama `fermati` con la domanda per la persona, per intero. È la stessa diagnosi
+che il Builder produce quando incontra un'ambiguità, raggiunta dall'altro lato.
 
-    STOP: <la domanda per la persona>
-    VERDETTO: SOSPESO
-
-Ciò che va a capo non arriva alla persona: la domanda sta tutta su quella riga, la prima
-delle due.
-
-È la stessa diagnosi che il Builder produce quando incontra un'ambiguità, raggiunta
-dall'altro lato. Un sospeso senza la riga `STOP:` non è una diagnosi: lascia una persona
-davanti a un muro, e vale come guasto.
-
-Altrimenti elenca ogni violazione come
-
-    **N. [categoria]: descrizione breve**
-    - Violato: <clausola della spec o di AGENTS.md>
-    - Impatto: <perché conta>
-    - Rimedio: <come si chiude>
-
-e termina con la riga esatta:
-
-    VERDETTO: NON PRONTO
-
-**Un commento falso non fa `NON PRONTO` da solo**, né in produzione né in un file di test.
+**Un commento falso non fa `non pronto` da solo**, né in produzione né in un file di test.
 Un commento non ha comportamento — nessun rosso lo produce, nessuna asserzione
 cambia — e spendere un giro intero, Builder e gate e Critic, per una frase è un giro
 buttato ovunque quella frase stia (PBI-335, giro 4, 03/09/2026; PBI-342, giro 5,
@@ -420,7 +428,7 @@ e riga, sotto il titolo
 
     ## Note per chi mergia
 
-fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `PASS` e la nota
+fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `pass` e la nota
 va nel rapporto, dove chi mergia la legge.
 """
 
@@ -486,7 +494,8 @@ proteggeva: se una violazione si chiude solo così, non è una violazione da chi
 caso qui sotto.
 
 Se ritieni che una violazione sia infondata, NON ignorarla: spiega perché nella risposta e
-lasciala aperta. Termina con FATTO: oppure STOP: come prima.
+lasciala aperta. Poi chiama `fatto` con il riepilogo, oppure `fermati` con la domanda:
+l'esito il runner lo legge solo da quella chiamata, non dal testo della risposta.
 """
 
 PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
@@ -504,7 +513,8 @@ except asdlc_config.ErroreDiConfigurazione as guasto:
 
 @dataclass
 class Verdetto:
-    """Cosa ha detto il Critic. Tre esiti, non due.
+    """Cosa ha detto il Critic. Tre esiti, non due — più `senza esito`, che è
+    il Critic che non ha detto niente.
 
     ``non pronto`` e ``sospeso`` sembrano vicini e sono opposti: il primo dice
     «c'è del lavoro da fare», il secondo «il lavoro non può proseguire finché
@@ -512,20 +522,23 @@ class Verdetto:
     nessuna correzione chiude — su PBI-203 sono stati quattro giri buttati.
     """
 
-    esito: str  # pass | non pronto | sospeso
+    esito: str  # pass | non pronto | sospeso | senza esito
     domanda: str  # valorizzata solo su `sospeso`
     rapporto: str
+    registro: dict | None = None  # la voce dell'invocazione, come `Invocazione.registro`
 
 
 @dataclass
 class Esito:
     pbi: str
-    # fatto | rosso | respinto | non convergente | fermato | sospeso | saltato
+    # fatto | rosso | respinto | non convergente | fermato | sospeso | senza esito | saltato
     #
     # `fermato` e `sospeso` sono tutti e due «aspetta una persona», e restano
     # distinti perché il rimedio è diverso: `fermato` arriva dal Builder e si
     # chiude riscrivendo il PBI che era ambiguo; `sospeso` arriva dal Critic e si
-    # chiude rispondendo alla domanda.
+    # chiude rispondendo alla domanda. `senza esito` è l'agente, dell'uno o
+    # dell'altro ruolo, che non ha fatto nessuna chiamata valida: non aspetta una
+    # risposta, è un'anomalia da guardare (`ADR-0027`).
     stato: str
     tentativi: int = 0
     revisioni: int = 0
@@ -533,6 +546,11 @@ class Esito:
     nota: str = ""
     pr: str = ""
     rapporto_critic: str = ""
+    # La domanda di un `fermato` del Builder o di un `sospeso` del Critic, intera:
+    # nella nota le sue righe si uniscono con « / », qui restano com'erano.
+    domanda: str = ""
+    # Una voce per invocazione di un agente, nell'ordine: `Invocazione.registro`.
+    invocazioni: list[dict] = field(default_factory=list)
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -820,7 +838,8 @@ def misura(e: Esito, voce: str):
         e.tempi[voce] += time.monotonic() - t0
 
 
-def esegui(cmd: list[str], cwd: Path, timeout: int = 7200) -> tuple[int, str]:
+def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
+           flussi: tuple[Path, Path] | None = None) -> tuple[int, str]:
     """Il varco verso il mondo. Un comando che non esiste torna `127`, non alza.
 
     `subprocess.run` alza `FileNotFoundError`, e l'eccezione saliva fino a
@@ -828,13 +847,112 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200) -> tuple[int, str]:
     rapporto — un `pytest` non installato spegneva la sequenza invece di essere
     il gate rosso con la diagnosi più ovvia che ci sia (difetto 11). `127` è la
     convenzione della shell per «comando non trovato», e la nota dice quale.
+
+    Con `flussi`, stdout e stderr si scrivono anche in due file separati: nel
+    testo reso sono concatenati, e per un agente senza esito sono ciò che
+    distingue un limite d'uso da un crash della CLI (PBI-367, decisione 11).
     """
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
         return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
                      f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
+    if flussi is not None:
+        flussi[0].write_text(p.stdout, encoding="utf-8")
+        flussi[1].write_text(p.stderr, encoding="utf-8")
     return p.returncode, (p.stdout + p.stderr)
+
+
+def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
+    """Il prompt e il file d'esito di un'invocazione, in `LOG_DIR` e con lo
+    stesso prefisso: sono la stessa invocazione vista da due parti."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    return (LOG_DIR / f"{timestamp}_{ruolo}_prompt.txt",
+            LOG_DIR / f"{timestamp}_{ruolo}_esito.json")
+
+
+def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
+    """Scrive la config MCP che fa partire il server dell'esito per questa
+    invocazione, accanto al suo file d'esito, e ne torna il percorso.
+
+    Un ruolo che non è `builder` o `critic`, o un file d'esito mancante,
+    sollevano `ValueError` **prima** del lancio. Il server si fermerebbe da sé
+    all'avvio, ma dentro un giro quella fermata arriverebbe come un agente
+    senza esito, dopo i minuti del Builder (PBI-367, decisione 4).
+
+    Il file d'esito non si crea qui: lo crea il server alla prima chiamata
+    valida, con `O_EXCL`, e un file già presente la rifiuterebbe.
+    """
+    if ruolo not in RUOLI:
+        raise ValueError(f"ruolo {ruolo!r}: il server dell'esito conosce solo {RUOLI}")
+    if esito is None:
+        raise ValueError(f"il {ruolo} non ha un file d'esito in cui il server possa scrivere")
+    config = esito.with_suffix(".mcp.json")
+    config.write_text(json.dumps({"mcpServers": {"asdlc": {
+        "command": sys.executable,
+        "args": [str(SERVER_DELL_ESITO)],
+        "env": {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)},
+    }}}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return config
+
+
+class Invocazione(NamedTuple):
+    """Cosa resta di un'invocazione: il codice d'uscita di `claude -p`, il suo
+    testo, l'esito che il server ha scritto — `None` se l'agente non ha fatto
+    nessuna chiamata valida — e la voce per `runs/<run>.json`: ruolo, codice e
+    i percorsi di stdout, stderr e del log delle chiamate al server, dove si
+    vedono anche quelle rifiutate (PBI-367, decisioni 7 e 11)."""
+
+    codice: int
+    uscita: str
+    dichiarato: dict | None
+    registro: dict
+
+
+def esito_dichiarato(percorso: Path) -> dict | None:
+    """L'esito che il server ha scritto nel file di questa invocazione, o `None`.
+
+    È l'unica lettura dell'esito, per il Builder e per il Critic, e non ha un
+    ripiego sul testo: il testo libero del modello non decide niente
+    (`ADR-0027`). Prima c'erano due parser di marcatori, e ogni forma nuova
+    che un modello scriveva chiedeva una regola in più (difetti 32, 34, 35 e
+    36 di `PBI-102`).
+    """
+    try:
+        return json.loads(percorso.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def una_riga(testo: str) -> str:
+    """Un testo su più righe nella nota, che è una colonna di `runs/tempi.csv`:
+    le righe si uniscono con « / », e non se ne perde nessuna."""
+    return " / ".join(r.strip() for r in testo.splitlines() if r.strip())
+
+
+def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
+                  esito: Path | None) -> Invocazione:
+    """Lancia un agente con il server dell'esito accanto, e legge l'esito.
+
+    `--mcp-config` è variadico come `--allowedTools`: lo chiude
+    `--strict-mcp-config`, un flag booleano, e il prompt viene dopo. Nella
+    prima prova il prompt in coda a `--mcp-config` è stato preso per un'altra
+    config, e `-p` è partito senza input.
+    """
+    config = config_del_server(ruolo, esito)
+    fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
+    codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
+                                       f"@{prompt}"], REPO, flussi=(fuori, dentro))
+    registro = {"ruolo": ruolo, "codice": codice, "stdout": str(fuori),
+                "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl"}
+    return Invocazione(codice, uscita, esito_dichiarato(esito), registro)
+
+
+def nota_senza_esito(registro: dict) -> str:
+    """La nota di un `senza esito`: chi non ha chiamato, e dove guardare."""
+    return (f"il {registro['ruolo']} non ha chiamato né fatto né fermati · "
+            f"codice d'uscita {registro['codice']} · stdout {registro['stdout']} · "
+            f"stderr {registro['stderr']}")
 
 
 def git(*args: str) -> str:
@@ -1045,7 +1163,8 @@ def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
         if e_file_di_test(percorso):
             return (f"{percorso} è un test e il giro è in {FASE_IMPL}: il verde si "
                     f"ottiene scrivendo il codice, non ammorbidendo l'asserzione. "
-                    f"Se il test è davvero sbagliato, fermati e dillo con STOP:.")
+                    f"Se il test è davvero sbagliato, non chiamare `fatto`: chiama "
+                    f"`fermati` e dillo.")
         return None
     return (f"fase «{fase}» sconosciuta in {FILE_DELLA_FASE}: la guardia si chiude. "
             f"Un file scritto a metà non vale come «nessun giro in corso».")
@@ -2004,11 +2123,6 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     return mancati
 
 
-VERDETTI = {"VERDETTO: PASS": "pass",
-            "VERDETTO: NON PRONTO": "non pronto",
-            "VERDETTO: SOSPESO": "sospeso"}
-
-
 def revisione_critica(pbi_path: Path) -> Verdetto:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder."""
     print("    critic … ", end="", flush=True)
@@ -2017,33 +2131,27 @@ def revisione_critica(pbi_path: Path) -> Verdetto:
     except ValueError:
         percorso = pbi_path
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    prompt_file = LOG_DIR / f"{timestamp}_critic_prompt.txt"
+    prompt_file, file_esito = file_dell_invocazione("critic")
     prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso), encoding="utf-8")
-    _, out = esegui(CRITIC + [f"@{prompt_file}"], REPO)
+    _, out, dichiarato, registro = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
     # trattarla come "NON PRONTO" rimanda il Builder a correggere violazioni che nessuno
-    # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio.
-    esito = next((v for riga, v in VERDETTI.items() if riga in out), None)
-    if esito is None:
-        print("GUASTO")
-        raise RuntimeError(f"il Critic non ha emesso un verdetto — output:\n{out[-2000:]}")
+    # ha trovato. Un guasto dello strumento deve somigliare a un guasto, non a un giudizio:
+    # è `senza esito`, come per il Builder, e non più un'eccezione (`ADR-0027`).
+    if dichiarato is None:
+        print("SENZA ESITO")
+        return Verdetto("senza esito", "", out, registro)
 
-    domanda = ""
-    if esito == "sospeso":
-        if "STOP:" not in out:
-            # Stessa regola del verdetto mancante, per la stessa ragione: sospendere
-            # senza dire cosa si aspetta lascia una persona davanti a un muro, e un
-            # muro non è una diagnosi.
-            print("GUASTO")
-            raise RuntimeError(
-                f"il Critic ha sospeso senza scrivere la domanda — output:\n{out[-2000:]}"
-            )
-        domanda = out.split("STOP:")[-1].strip().splitlines()[0]
-
-    print({"pass": "PASS", "non pronto": "NON PRONTO", "sospeso": "SOSPESO"}[esito])
-    return Verdetto(esito, domanda, out)
+    # Il sospeso senza domanda non arriva fin qui: lo rifiuta lo strumento. Il
+    # rapporto è il riepilogo della chiamata; per il sospeso, che non ne ha, il
+    # testo finale entra come contesto per chi legge, e non decide niente.
+    if dichiarato["esito"] == "fermati":
+        verdetto = Verdetto("sospeso", dichiarato["domanda"], out, registro)
+    else:
+        verdetto = Verdetto(dichiarato["verdetto"], "", dichiarato["riepilogo"], registro)
+    print(verdetto.esito.upper())
+    return verdetto
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
@@ -2295,30 +2403,6 @@ def trova_pbi(pbi: str) -> Path | None:
     return REPO / nome if nome else None
 
 
-def fermata_del_builder(uscita: str) -> str | None:
-    """La domanda con cui il Builder si è fermato, o `None` se non si è fermato.
-
-    Una fermata è una **riga** che, dopo lo `strip()`, si apre con `STOP:`; la
-    domanda è il resto di quella riga, e le righe dopo non ne fanno parte. Prima
-    bastava la stringa in un punto qualunque della risposta: il 23/09/2026 il
-    Builder di PBI-363 aveva finito, ha citato il marcatore fra due backtick nel
-    riepilogo, e il giro ha chiuso `fermato` con mezza frase per domanda
-    (`runs/20260923-103007.json`, difetto 32 di PBI-102).
-
-    Se l'ultima riga si apre con `FATTO:` il Builder ha finito, qualunque cosa ci
-    sia sopra: un riepilogo che ricopia il protocollo del prompt non è una domanda.
-    """
-    righe = uscita.strip().splitlines()
-    if righe and righe[-1].strip().startswith("FATTO:"):
-        return None
-    domanda = None
-    for riga in righe:
-        riga = riga.strip()
-        if riga.startswith("STOP:"):
-            domanda = riga.removeprefix("STOP:").strip()
-    return domanda
-
-
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
 ) -> Esito:
@@ -2363,7 +2447,7 @@ def esegui_pbi(
 
     def chiudi(stato: str, nota: str = "") -> Esito:
         # Il conteggio sta **qui** e non dopo il giro dei gate: ogni uscita
-        # anticipata — lo `STOP` del Builder, l'albero che resta sporco — scriveva
+        # anticipata — il `fermati` del Builder, l'albero che resta sporco — scriveva
         # `commit = 0` mentre sul branch c'era il lavoro. Su PBI-209 erano otto
         # commit e 2.174 righe, e la colonna del registro diceva zero: è quella
         # che si guarda per decidere se un branch fermato si butta (difetto 10).
@@ -2416,16 +2500,24 @@ def esegui_pbi(
         while gate_falliti < MAX_TENTATIVI:
             print(f"  builder — giro {e.tentativi + igiene + 1}")
             # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-            prompt_file = LOG_DIR / f"{timestamp}_builder_prompt.txt"
+            prompt_file, file_esito = file_dell_invocazione("builder")
             prompt_file.write_text(prompt, encoding="utf-8")
-            cmd = BUILDER + ([] if primo_del_giro else ["-c"]) + [f"@{prompt_file}"]
+            cmd = BUILDER + ([] if primo_del_giro else ["-c"])
             primo_del_giro = False
             with misura(e, "builder"):
-                _, out = esegui(cmd, REPO)
+                invocazione = invoca_agente("builder", cmd, prompt_file, file_esito)
+            e.invocazioni.append(invocazione.registro)
+            dichiarato = invocazione.dichiarato
 
-            if (domanda := fermata_del_builder(out)) is not None:
-                return chiudi("fermato", f"domanda dell'agente: {domanda}")
+            # Senza una chiamata valida il Builder non ha detto niente che si possa
+            # leggere, qualunque cosa ci sia nel suo testo: si chiude qui, senza
+            # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
+            # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
+            if dichiarato is None:
+                return chiudi("senza esito", nota_senza_esito(invocazione.registro))
+            if dichiarato["esito"] == "fermati":
+                e.domanda = dichiarato["domanda"]
+                return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
 
             # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
             # il registro non si scrive più dal branch (`ADR-0020`).
@@ -2523,16 +2615,21 @@ def esegui_pbi(
 
         with misura(e, "critic"):
             verdetto = revisione_critica(pbi_path)
+        if verdetto.registro is not None:
+            e.invocazioni.append(verdetto.registro)
         rapporto = verdetto.rapporto
         e.rapporto_critic = rapporto[-6000:]
         if verdetto.esito == "pass":
             break
+        if verdetto.esito == "senza esito":
+            return chiudi("senza esito", nota_senza_esito(verdetto.registro))
         if verdetto.esito == "sospeso":
             # Non si consuma una revisione e non si richiama il Critic: la sua
             # diagnosi non cambia riprovando, perché ciò che manca non è nel
             # repository. Riprovare qui è esattamente ciò che è costato a PBI-203
             # cinque giri e 1h26m per tornare al punto di partenza.
-            return chiudi("sospeso", f"domanda del critic: {verdetto.domanda}")
+            e.domanda = verdetto.domanda
+            return chiudi("sospeso", f"domanda del critic: {una_riga(verdetto.domanda)}")
         if revisione == MAX_REVISIONI:
             # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
             # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
