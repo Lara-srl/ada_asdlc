@@ -177,18 +177,32 @@ def rispondi(messaggio, ruolo: str, esito: str) -> dict | None:
     return {"jsonrpc": "2.0", "id": messaggio["id"], "result": risultato}
 
 
-def _rispondi_senza_cadere(messaggio, ruolo: str, esito: str) -> dict | None:
-    """`rispondi()` con la rete sotto: un'eccezione che nessuno ha previsto non
-    esce dal ciclo di lettura. Va su stderr, e la richiesta riceve `-32603`; una
-    notifica non ha risposta nemmeno così (`PBI-372`, decisione 6)."""
+def _risposta_alla_riga(riga: str, ruolo: str, esito: str) -> str | None:
+    """La riga da scrivere su stdout per una riga letta, o `None` se non ha
+    risposta. La rete avvolge tutta la gestione, parse e serializzazione
+    comprese: un'eccezione che nessuno ha previsto non esce dal ciclo di
+    lettura. Va su stderr, e la richiesta riceve `-32603`; una notifica non ha
+    risposta nemmeno così (`PBI-372`, decisione 6).
+
+    Il parse rifiuta con `-32700` anche ciò che non è un `JSONDecodeError`: una
+    riga annidata oltre la ricorsione, un intero oltre il limite di cifre. La
+    risposta si scrive in ASCII, così un surrogato isolato ripetuto dal
+    messaggio non fa cadere la scrittura."""
+    messaggio = None
     try:
-        return rispondi(messaggio, ruolo, esito)
+        try:
+            messaggio = json.loads(riga)
+        except (ValueError, RecursionError) as errore:
+            risposta = _errore(None, -32700, f"la riga non è JSON: {errore}")
+        else:
+            risposta = rispondi(messaggio, ruolo, esito)
+        return None if risposta is None else json.dumps(risposta)
     except Exception as errore:
         traceback.print_exc(file=sys.stderr)
         if isinstance(messaggio, dict) and "id" not in messaggio:
             return None
         id_ = messaggio.get("id") if isinstance(messaggio, dict) else None
-        return _errore(id_, -32603, f"errore interno del server: {errore}")
+        return json.dumps(_errore(id_, -32603, f"errore interno del server: {errore}"))
 
 
 def main() -> int:
@@ -207,17 +221,16 @@ def main() -> int:
         print("ASDLC_ESITO manca o è vuota: deve nominare il file dell'esito.",
               file=sys.stderr)
         return 2
+    # Dei byte che non sono UTF-8 diventano caratteri di sostituzione, e la
+    # riga si rifiuta come non JSON invece di far cadere la lettura.
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(errors="replace")
     for riga in sys.stdin:
         if not riga.strip():
             continue
-        try:
-            messaggio = json.loads(riga)
-        except json.JSONDecodeError as errore:
-            risposta = _errore(None, -32700, f"la riga non è JSON: {errore}")
-        else:
-            risposta = _rispondi_senza_cadere(messaggio, ruolo, esito)
+        risposta = _risposta_alla_riga(riga, ruolo, esito)
         if risposta is not None:
-            sys.stdout.write(json.dumps(risposta, ensure_ascii=False) + "\n")
+            sys.stdout.write(risposta + "\n")
             sys.stdout.flush()
     return 0
 
