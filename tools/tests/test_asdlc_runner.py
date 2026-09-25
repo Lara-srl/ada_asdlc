@@ -5406,3 +5406,24 @@ class TestLaChiusuraGiraSempre:
         assert traccia.parent == runner.LOG_DIR, "il traceback sta accanto al log del giro"
         assert "Traceback" in traccia.read_text(encoding="utf-8")
         assert tipo in traccia.read_text(encoding="utf-8")
+
+    def test_una_chiusura_che_fallisce_sale_e_dice_perche(self, monkeypatch, git_finto):
+        """Protocollo di rifinitura di PBI-369: se `chiudi()` stessa alza, quella
+        eccezione non si inghiotte. Sale alla rete di `main()`, e il messaggio dice
+        che la chiusura è fallita, perché, e quale eccezione aveva interrotto il giro."""
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+
+        def gate_che_scade(attivi):
+            raise subprocess.TimeoutExpired(["pytest", "-q"], 3600)
+
+        def fase_che_non_si_chiude():
+            raise OSError("disco pieno")
+
+        monkeypatch.setattr(runner, "gira_gate", gate_che_scade)
+        monkeypatch.setattr(runner, "chiudi_la_fase", fase_che_non_si_chiude)
+
+        with pytest.raises(RuntimeError, match="chiusura del giro fallita") as alzata:
+            runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert "disco pieno" in str(alzata.value)
+        assert "TimeoutExpired" in str(alzata.value)
