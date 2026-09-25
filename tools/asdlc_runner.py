@@ -865,10 +865,25 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
 
 def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
     """Il prompt e il file d'esito di un'invocazione, in `LOG_DIR` e con lo
-    stesso prefisso: sono la stessa invocazione vista da due parti."""
+    stesso prefisso: sono la stessa invocazione vista da due parti.
+
+    Il nome si **prenota** creando il prompt con `O_EXCL` (PBI-370): i
+    microsecondi non bastano a distinguere due invocazioni a pochi microsecondi
+    l'una dall'altra, e due con lo stesso nome si sovrascrivono prompt e config
+    mentre la seconda legge l'esito della prima. Un nome preso ne fa provare un
+    altro con un suffisso (`-1`, `-2`…) prima di `_<ruolo>_`, senza toccare il
+    file che c'è: i pattern di `.gitignore` restano validi."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    return (LOG_DIR / f"{timestamp}_{ruolo}_prompt.txt",
-            LOG_DIR / f"{timestamp}_{ruolo}_esito.json")
+    tentativo = 0
+    while True:
+        prefisso = timestamp if tentativo == 0 else f"{timestamp}-{tentativo}"
+        prompt = LOG_DIR / f"{prefisso}_{ruolo}_prompt.txt"
+        try:
+            os.close(os.open(prompt, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            tentativo += 1
+            continue
+        return prompt, LOG_DIR / f"{prefisso}_{ruolo}_esito.json"
 
 
 def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
