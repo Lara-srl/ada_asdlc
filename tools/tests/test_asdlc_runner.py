@@ -675,6 +675,29 @@ class TestLInventarioDelGiro:
                    or c[0] == "clean" or (c[0] == "branch" and {"-d", "-D"} & set(c))]
         assert toccati == [], f"il giro ha toccato un residuo non suo: {toccati}"
 
+    def test_il_rapporto_conta_gli_alberi_usa_e_getta_montati_e_smontati(
+        self, monkeypatch, tmp_path
+    ):
+        """Decisione 6: gli alberi si contano. È la metà robusta della cura del
+        difetto 28, e vale anche se la strada che salta lo smontaggio non si
+        riesce a riprodurre."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_dell_inventario())
+        agente = agente_finto({})
+
+        def _esegui(*a, **k):
+            # Due gate del rosso dentro il giro: due alberi montati e smontati.
+            for sha in ("abc123", "def456"):
+                with runner.worktree_usa_e_getta(sha):
+                    pass
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.inventario.get("usa_e_getta") == {"montati": 2, "smontati": 2}
+
     def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
         """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
         che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
