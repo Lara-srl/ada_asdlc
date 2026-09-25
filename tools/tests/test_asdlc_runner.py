@@ -1356,11 +1356,16 @@ class TestSiPuoSaltareIlCritic:
         merge — e la lezione del 25/08 su PBI-212 è esattamente questa: chi
         rilegge deve sapere quali gate non ci sono stati **prima** di guardare il
         diff, non dopo.
+
+        E non commenta (PBI-371): senza revisioni non c'è un rapporto da mettere
+        sulla PR, né un commento mancato da dichiarare nella nota.
         """
         catturato: dict[str, list[str]] = {}
+        comandi: list[list[str]] = []
 
         def finto_esegui(cmd, cwd, timeout=7200):
-            catturato["cmd"] = cmd
+            comandi.append(cmd)
+            catturato.setdefault("cmd", cmd)
             return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
 
         monkeypatch.setattr(runner, "esegui", finto_esegui)
@@ -1373,6 +1378,12 @@ class TestSiPuoSaltareIlCritic:
         corpo = cmd[cmd.index("--body") + 1]
         assert "PASS" not in corpo, "non si dichiara un verdetto che nessuno ha emesso"
         assert "--senza-critic" in corpo
+        assert [c[:3] for c in comandi] == [["gh", "pr", "create"]], (
+            "un giro senza Critic non commenta la PR"
+        )
+        assert "non commentato" not in esito.nota, (
+            "un giro senza Critic non ha commenti mancati da dichiarare"
+        )
 
 
 class TestIlRunnerSiStaccaDaSolo:
