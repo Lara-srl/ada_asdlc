@@ -136,11 +136,12 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
 
 def registra(nome, argomenti, esito: str) -> None:
     """Una riga del log per chiamata, prima di validarla: anche quelle
-    rifiutate ci finiscono."""
+    rifiutate ci finiscono. La riga si scrive in ASCII, così un surrogato
+    isolato negli argomenti non fa fallire la scrittura (`PBI-372`)."""
     riga = {"ora": datetime.now().astimezone().isoformat(), "nome": nome,
             "argomenti": argomenti}
     with open(f"{esito}.chiamate.jsonl", "a", encoding="utf-8") as log:
-        log.write(json.dumps(riga, ensure_ascii=False) + "\n")
+        log.write(json.dumps(riga) + "\n")
 
 
 def _errore(id_, codice: int, testo: str) -> dict:
