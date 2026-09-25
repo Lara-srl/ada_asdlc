@@ -2686,7 +2686,16 @@ def esegui_pbi(
     except Exception as exc:  # noqa: BLE001 — si cattura per chiudere, non per tacere
         traceback.print_exc()
         e.file_traceback = str(salva_il_traceback(pbi))
-        return chiudi("rosso", f"eccezione nel giro: {type(exc).__name__}: {exc}"[:300])
+        interruzione = f"{type(exc).__name__}: {exc}"
+        try:
+            return chiudi("rosso", f"eccezione nel giro: {interruzione}"[:300])
+        except Exception as guasto:  # noqa: BLE001
+            # Una chiusura che fallisce non si inghiotte: sale alla rete di
+            # `main()`, e la nota dice perché e che cosa aveva interrotto il giro.
+            raise RuntimeError(
+                f"chiusura del giro fallita: {type(guasto).__name__}: {guasto} "
+                f"(il giro era stato interrotto da {interruzione})"[:300]
+            ) from guasto
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
     if con_pr:
