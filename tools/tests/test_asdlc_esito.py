@@ -455,6 +455,46 @@ def test_un_arguments_che_non_e_un_oggetto_si_rifiuta_e_finisce_nel_log(tmp_path
     assert per_id.get(2, {}).get("result", {}).get("tools")
 
 
+
+@pytest.mark.parametrize("params", [
+    pytest.param([], id="lista-vuota"),
+    pytest.param("", id="stringa-vuota"),
+    pytest.param(0, id="zero"),
+    pytest.param(False, id="false"),
+])
+def test_dei_params_vuoti_o_falsi_che_non_sono_un_oggetto_ricevono_invalid_request(
+        params, tmp_path):
+    """Rilievo 2 del Critic su `PBI-372`, decisione 2: `params or {}` cambiava
+    in `{}` i valori falsi prima del controllo, e la chiamata arrivava allo
+    strumento come «lo strumento None non esiste» invece di ricevere -32600."""
+    riga = _json({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
+    _risponde_con_un_errore_e_poi_ancora(riga, 1, -32600, tmp_path)
+
+
+@pytest.mark.parametrize("argomenti", [
+    pytest.param([], id="lista-vuota"),
+    pytest.param("", id="stringa-vuota"),
+    pytest.param(0, id="zero"),
+    pytest.param(False, id="false"),
+])
+def test_degli_arguments_vuoti_o_falsi_si_rifiutano_come_non_oggetto_e_nel_log_restano_come_arrivati(
+        argomenti, tmp_path):
+    """Rilievo 2 del Critic su `PBI-372`, decisione 3 e difetto 41:
+    `arguments or {}` cambiava in `{}` i valori falsi, il rifiuto diceva «è
+    vuoto» invece di «non un oggetto», e nel log finiva `{}` al posto di ciò
+    che il modello aveva mandato."""
+    esito = tmp_path / "esito.json"
+    risposte = parla("builder", esito, [*apertura(), chiamata(1, "fatto", argomenti)])
+
+    risultato = risposte[1].get("result", {})
+    assert risultato.get("isError") is True
+    parole = parole_della_risposta(risultato)
+    assert "non un oggetto" in parole
+    assert "vuoto" not in parole
+    assert not esito.exists()
+    righe = Path(f"{esito}.chiamate.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(r)["argomenti"] for r in righe] == [argomenti]
+
 @pytest.mark.parametrize("nome, argomenti, campo", [
     pytest.param("fatto", {"riepilogo": 42}, "riepilogo", id="riepilogo-numero"),
     pytest.param("fermati", {"domanda": ["e ora?"]}, "domanda", id="domanda-lista"),
