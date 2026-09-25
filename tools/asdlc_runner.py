@@ -2539,7 +2539,10 @@ def inventario() -> dict:
 
     Il giro lo fa all'inizio e alla fine, e non tocca niente di ciò che trova.
     Osserva e non decide (`ADR-0008`): una voce che `git` non sa dire diventa
-    `{"errore": …}`, e le altre si leggono lo stesso.
+    `{"errore": …}`, e le altre si leggono lo stesso. Anche quando `git` scade:
+    `ls-remote` va in rete, e `esegui` lascia salire `TimeoutExpired`. Alla fine
+    del giro l'inventario sta prima di `pubblica`, e un'eccezione qui lasciava il
+    ramo fuori da `origin` (difetti 8 e 37 di PBI-102).
     """
     voci = {"rami": rami_dell_inventario, "alberi": alberi_dell_inventario,
             "file": file_dell_inventario}
@@ -2547,7 +2550,7 @@ def inventario() -> dict:
     for voce, leggi in voci.items():
         try:
             fotografia[voce] = leggi()
-        except RuntimeError as exc:
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
             fotografia[voce] = {"errore": str(exc)[:300]}
     return fotografia
 
