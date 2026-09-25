@@ -596,6 +596,9 @@ class Esito:
     # Il file col traceback di un'eccezione che ha interrotto il giro: la nota ne
     # porta tipo e messaggio, e il resto sta lì (PBI-369, decisione 2).
     file_traceback: str = ""
+    # Rami, alberi e file com'erano all'inizio del giro e come sono alla fine:
+    # `{"inizio": inventario(), "fine": inventario()}` (PBI-363, decisione 7).
+    inventario: dict = field(default_factory=dict)
 
 
 def apri_rapporto(run: str, pbi: list[str]) -> Path:
@@ -2516,6 +2519,37 @@ def rami_locali(pbi: str) -> set[str]:
     return {r.strip() for r in dentro.splitlines() if r.strip()}
 
 
+def inventario() -> dict:
+    """Ciò che sta intorno al giro, in tre voci (PBI-363, decisione 7).
+
+    - `rami`: i `pbi/pbi-*` locali e quelli su `origin`, chiesti con `ls-remote` e
+      non al tracking, che resta indietro;
+    - `alberi`: i percorsi di `git worktree list`, compresi gli usa e getta
+      `ada-rosso-*` di un gate;
+    - `file`: ciò che `git status --ignored` elenca — i non tracciati, gli ignorati
+      e i tracciati modificati — contato per cartella.
+
+    Il giro lo fa all'inizio e alla fine, e non tocca niente di ciò che trova.
+    """
+    prefisso = f"{CFG.git.prefisso_ramo}*"
+    locali = git("branch", "--list", prefisso, "--format=%(refname:short)")
+    remoti = git("ls-remote", "--heads", REMOTO, prefisso)
+    alberi = git("worktree", "list", "--porcelain")
+    file: Counter[str] = Counter()
+    for riga in git("status", "--ignored", "--porcelain").splitlines():
+        percorso = riga[3:].strip()
+        if percorso:
+            file[percorso.split("/")[0] if "/" in percorso else "."] += 1
+    return {
+        "rami": {"locali": sorted(r.strip() for r in locali.splitlines() if r.strip()),
+                 "origin": sorted(r.split("refs/heads/")[-1].strip()
+                                  for r in remoti.splitlines() if "refs/heads/" in r)},
+        "alberi": [r.removeprefix("worktree ").strip()
+                   for r in alberi.splitlines() if r.startswith("worktree ")],
+        "file": dict(sorted(file.items())),
+    }
+
+
 def ramo_del_pbi(pbi: str) -> str:
     """`pbi/pbi-322` da `PBI-322`: `[git].prefisso_ramo` più il numero, letto
     dal modello `[backlog].id`. È **l'unico** posto in cui la forma del ramo si
@@ -2692,6 +2726,9 @@ def esegui_pbi(
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
     t0 = time.monotonic()
+    # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
+    # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
+    e.inventario["inizio"] = inventario()
     branch = crea_branch(pbi)
     apri_la_fase()
 
@@ -2718,6 +2755,7 @@ def esegui_pbi(
         # che si guarda per decidere se un branch fermato si butta (difetto 10).
         chiudi_la_fase()
         e.commit = conta_commit()
+        e.inventario["fine"] = inventario()
         e.stato, e.durata_s = stato, time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
         if nota:

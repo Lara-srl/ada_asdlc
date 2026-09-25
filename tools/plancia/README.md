@@ -62,6 +62,12 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
     testo **non** sta nel JSON: sta intero nel file `percorso`, ed è lì che sta il «perché
     NON PRONTO / PASS» (PBI-371). Fino a PBI-371 c'era `rapporto_critic`, il testo tagliato
     agli ultimi 6000 caratteri e riscritto a ogni revisione: i giri passati restano così.
+  - `inventario` — **ciò che stava intorno al giro**, `{inizio, fine}` (PBI-363): ognuno ha
+    `rami: {locali, origin}` (i `pbi/pbi-*`, quelli di `origin` letti con `ls-remote`),
+    `alberi` (i percorsi di `git worktree list`, compresi gli usa e getta `ada-rosso-*`) e
+    `file` (i non tracciati, gli ignorati e i tracciati modificati, contati per cartella:
+    `{"data": 1, "runs": 12}`).
+    `fine` si scrive quando il giro chiude; un esito `saltato` non ha inventario.
   - `critic_saltato` (bool), `tempi.{builder,gate,critic}` (secondi), ecc.
 
 ### `runs/<run>-<PBI>-critic-<n>.md` — il rapporto di una revisione del Critic
