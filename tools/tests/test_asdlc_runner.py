@@ -698,6 +698,38 @@ class TestLInventarioDelGiro:
 
         assert esito.inventario.get("usa_e_getta") == {"montati": 2, "smontati": 2}
 
+    def test_un_albero_montato_e_mai_smontato_va_nel_log_e_nella_nota(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Decisione 6: se la differenza fra montati e smontati non è zero, il log
+        lo dice. Il 02/09 la strada che ha lasciato tre alberi in `/tmp` non è
+        passata dal `finally`, e l'avviso che ci sta dentro non è partito: qui la
+        si imita entrando nell'albero senza uscirne."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_dell_inventario())
+        monkeypatch.setattr(runner.tempfile, "mkdtemp",
+                            lambda prefix: str(Path(tmp_path, f"{prefix}x").resolve()))
+        agente = agente_finto({})
+        appesi = []
+
+        def _esegui(*a, **k):
+            if not appesi:
+                albero = runner.worktree_usa_e_getta("abc123")
+                albero.__enter__()  # e il `finally` non arriva mai
+                appesi.append(albero)
+            return agente(*a, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        log = capsys.readouterr().out
+
+        appesi[0].__exit__(None, None, None)  # con `git` ancora sostituito
+
+        avviso = "1 albero usa e getta montato e non smontato"
+        assert avviso in esito.nota, f"la nota «{esito.nota}» non dice l'albero perso"
+        assert avviso in log, "il log non dice l'albero perso"
+
     def test_una_voce_che_git_non_sa_dire_non_ferma_il_giro(self, monkeypatch, tmp_path):
         """L'inventario osserva e non decide (`ADR-0008`): un `git worktree list`
         che fallisce toglie una voce, non il giro. All'inizio sta fuori dal `try`
