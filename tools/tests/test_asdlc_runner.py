@@ -5734,3 +5734,16 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert "".join(c.split("\n\n", 1)[1] for c in parti) == file[1], (
             "le parti, una dopo l'altra, devono ridare il rapporto intero"
         )
+
+    def test_un_commento_che_non_parte_non_ferma_il_giro_e_la_nota_lo_dice(self, monkeypatch):
+        esito, _, commenti = self._pr_con_i_rapporti(monkeypatch, [
+            runner.Verdetto("non pronto", "", "1. manca il test"),
+            runner.Verdetto("pass", "", "nessun rilievo"),
+        ], commento_fallisce=True)
+
+        assert esito.stato == "fatto", "un commento mancato non disfa il giro (ADR-0008)"
+        assert len(commenti) == 2, "il primo commento fallito non ferma i successivi"
+        assert "rapporto del Critic non commentato sulla PR (revisioni 0, 1)" in esito.nota
+        assert "HTTP 502" in esito.nota, "la nota dice perché"
+        for r in esito.rapporti_critic:
+            assert Path(r["percorso"]).exists(), "i file restano"
