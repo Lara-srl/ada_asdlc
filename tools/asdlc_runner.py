@@ -1057,16 +1057,38 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     return Invocazione(codice, uscita, dichiarato, registro)
 
 
-def nota_senza_esito(registro: dict) -> str:
-    """La nota di un `senza esito`: chi non ha chiamato, o chi è scaduto, e dove
-    guardare."""
+# Ciò che la CLI risponde quando l'account esaurisce il limite d'uso, e l'ora del
+# reset dentro quella frase: «You've hit your session limit · resets 1:30am» (giro
+# 5 di PBI-333, 02/09/2026). Stanno nel sorgente e non in `asdlc.toml`: cambiano
+# quando cambia l'agente, non il progetto (PBI-363, decisione 5). È un testo letto
+# da uno strumento, un'eccezione dichiarata: se la CLI esporrà l'ora in un campo,
+# si leggerà da lì.
+FRASE_DEL_LIMITE = re.compile(r"You've hit your \w+ limit")
+ORA_DEL_RESET = re.compile(r"resets\s+(\d{1,2}(?::\d{2})?\s?[ap]m)", re.IGNORECASE)
+
+
+def limite_d_uso(uscita: str) -> str:
+    """Ciò che la nota aggiunge quando l'uscita porta la frase del limite d'uso,
+    o `""`. La lettura aggiunge e non cambia niente (PBI-363, decisione 3)."""
+    if not FRASE_DEL_LIMITE.search(uscita):
+        return ""
+    if ora := ORA_DEL_RESET.search(uscita):
+        return f"limite d'uso dell'account, reset alle {ora.group(1)}"
+    return ""
+
+
+def nota_senza_esito(registro: dict, uscita: str = "") -> str:
+    """La nota di un `senza esito`: chi non ha chiamato, o chi è scaduto, dove
+    guardare e, se l'uscita dell'agente lo dice, il limite d'uso con l'ora del
+    reset."""
     if "tetto_minuti" in registro:
         chi = f"tetto di {registro['tetto_minuti']:g} minuti superato ({registro['ruolo']})"
     else:
         chi = f"il {registro['ruolo']} non ha chiamato né fatto né fermati"
-    return (f"{chi} · "
+    nota = (f"{chi} · "
             f"codice d'uscita {registro['codice']} · stdout {registro['stdout']} · "
             f"stderr {registro['stderr']}")
+    return " · ".join(t for t in (nota, limite_d_uso(uscita)) if t)
 
 
 def git(*args: str) -> str:
@@ -2762,7 +2784,8 @@ def esegui_pbi(
                 # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
                 # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
                 if dichiarato is None:
-                    return chiudi("senza esito", nota_senza_esito(invocazione.registro))
+                    return chiudi("senza esito", nota_senza_esito(invocazione.registro,
+                                                                  invocazione.uscita))
                 if dichiarato["esito"] == "fermati":
                     e.domanda = dichiarato["domanda"]
                     return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
@@ -2873,7 +2896,8 @@ def esegui_pbi(
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
-                return chiudi("senza esito", nota_senza_esito(verdetto.registro))
+                return chiudi("senza esito",
+                              nota_senza_esito(verdetto.registro, verdetto.rapporto))
             if verdetto.esito == "sospeso":
                 # Non si consuma una revisione e non si richiama il Critic: la sua
                 # diagnosi non cambia riprovando, perché ciò che manca non è nel
