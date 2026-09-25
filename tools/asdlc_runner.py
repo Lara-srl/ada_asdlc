@@ -123,6 +123,10 @@ RUOLI = ("builder", "critic")
 MAX_TENTATIVI: int
 MAX_IGIENE: int
 MAX_REVISIONI: int
+# E i tetti di una chiamata a un agente, in minuti: `[soglie].minuti_builder` e
+# `[soglie].minuti_critic` (PBI-369).
+MINUTI_BUILDER: float
+MINUTI_CRITIC: float
 
 # Gli stati dopo i quali non si prosegue. `sospeso` sta qui insieme a `fermato`
 # per la stessa ragione — sono tutti e due «fermo su una domanda» — e la domanda
@@ -171,7 +175,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     decisione 1). Il guadagno — un posto solo — è lo stesso.
     """
     global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI
-    global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI
+    global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
     global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
@@ -227,6 +231,9 @@ def configura(cfg: asdlc_config.Config) -> None:
     # quinto giro. Con 2 il runner avrebbe chiuso prima di vederli, dichiarando
     # «il PBI non era pronto»: vero e fuorviante insieme.
     MAX_REVISIONI = cfg.soglie.revisioni
+    # Il tetto di una chiamata, per ruolo: la ragione dei due valori sta nel TOML.
+    MINUTI_BUILDER = cfg.soglie.minuti_builder
+    MINUTI_CRITIC = cfg.soglie.minuti_critic
 
 
 PROMPT_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.

@@ -117,6 +117,9 @@ class Soglie:
     tentativi: int
     igiene: int
     revisioni: int
+    # I tetti di una chiamata a un agente, in minuti (PBI-369, decisione 6).
+    minuti_builder: int = 90
+    minuti_critic: int = 25
 
 
 @dataclass(frozen=True)
@@ -194,7 +197,9 @@ def interpreta(dati: dict, file: str) -> Config:
         ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti")),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
-                      revisioni=soglie.intero("revisioni")),
+                      revisioni=soglie.intero("revisioni"),
+                      minuti_builder=soglie.intero("minuti_builder", default=90),
+                      minuti_critic=soglie.intero("minuti_critic", default=25)),
         gate_del_rosso=GateDelRosso(attivo=gate_del_rosso.booleano("attivo")),
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
     )
@@ -254,8 +259,8 @@ class _Sezione:
                 f"{self.file}: `{self._chiave(chiave)}` deve essere un elenco di stringhe")
         return tuple(elenco)
 
-    def intero(self, chiave: str) -> int:
-        return self._valore(chiave, int, "un numero intero")
+    def intero(self, chiave: str, default=_MANCA) -> int:
+        return self._valore(chiave, int, "un numero intero", default)
 
     def booleano(self, chiave: str) -> bool:
         return self._valore(chiave, bool, "`true` o `false`")
