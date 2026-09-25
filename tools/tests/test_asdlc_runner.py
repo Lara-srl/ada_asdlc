@@ -5591,3 +5591,18 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert rapporto in file[0].read_text(encoding="utf-8"), (
             "il rapporto nel file non è intero: la testa è andata persa"
         )
+
+    def test_il_prompt_di_rimedio_del_builder_riceve_il_rapporto_intero(
+        self, monkeypatch, git_finto
+    ):
+        rapporto = "1. [scope]: la testa del rapporto\n" + "x" * 6970
+        assert len(rapporto) > 6000
+
+        self._giro(monkeypatch, [runner.Verdetto("non pronto", "", rapporto),
+                                 runner.Verdetto("pass", "", "ok")])
+
+        prompt = sorted(runner.LOG_DIR.glob("*_builder_prompt.txt"))
+        assert len(prompt) == 2, "una revisione di rimedio, un secondo prompt del Builder"
+        assert rapporto in prompt[1].read_text(encoding="utf-8"), (
+            "il Builder di rimedio riceve il rapporto tagliato: la testa è andata persa"
+        )
