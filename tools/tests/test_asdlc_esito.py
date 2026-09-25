@@ -495,6 +495,22 @@ def test_degli_arguments_vuoti_o_falsi_si_rifiutano_come_non_oggetto_e_nel_log_r
     righe = Path(f"{esito}.chiamate.jsonl").read_text(encoding="utf-8").splitlines()
     assert [json.loads(r)["argomenti"] for r in righe] == [argomenti]
 
+
+def test_una_chiamata_con_un_surrogato_isolato_negli_argomenti_finisce_nel_log(tmp_path):
+    """Rilievo 1 del Critic sul secondo giro di `PBI-372`, decisione 3: il log si
+    scriveva in UTF-8 e un surrogato isolato lo faceva fallire con
+    `UnicodeEncodeError`, così la chiamata non ci finiva."""
+    esito = tmp_path / "esito.json"
+    argomenti = {"riepilogo": "\ud800 finito"}
+    parla_a_righe("builder", esito, [
+        *map(_json, apertura()), _json(chiamata(1, "fatto", argomenti)),
+    ])
+
+    log = Path(f"{esito}.chiamate.jsonl")
+    righe = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+    assert [json.loads(r)["argomenti"] for r in righe] == [argomenti]
+
+
 @pytest.mark.parametrize("nome, argomenti, campo", [
     pytest.param("fatto", {"riepilogo": 42}, "riepilogo", id="riepilogo-numero"),
     pytest.param("fermati", {"domanda": ["e ora?"]}, "domanda", id="domanda-lista"),
