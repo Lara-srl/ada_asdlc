@@ -2294,7 +2294,12 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
     """Un commento sulla PR per ogni revisione del Critic, in ordine, col testo
     intero del suo file (PBI-371): chi decide il merge lo legge lì, e non in
     `runs/` dentro il worktree del runner. Il corpo passa da un file, perché un
-    argomento di 65.536 caratteri accentati sfiora il limite di un argomento."""
+    argomento di 65.536 caratteri accentati sfiora il limite di un argomento.
+
+    Un commento che non parte non ferma niente: la PR è aperta, i file restano,
+    e la nota dice quali revisioni mancano e perché (`ADR-0008`)."""
+    mancate: list[str] = []
+    ragione = ""
     with tempfile.TemporaryDirectory() as cartella:
         for r in e.rapporti_critic:
             testo = Path(r["percorso"]).read_text(encoding="utf-8")
@@ -2302,8 +2307,18 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
             for i, parte in enumerate(parti_del_commento(titolo, testo)):
                 corpo = Path(cartella) / f"{r['revisione']}-{i}.md"
                 corpo.write_text(parte, encoding="utf-8")
-                esegui(["gh", "pr", "comment", url, "--body-file", str(corpo)],
-                       REPO, timeout=300)
+                code, out = esegui(["gh", "pr", "comment", url, "--body-file", str(corpo)],
+                                   REPO, timeout=300)
+                if code != 0:
+                    print(f"    ⚠️  commento della revisione {r['revisione']} non partito: "
+                          f"{out.strip()[:200]}")
+                    if str(r["revisione"]) not in mancate:
+                        mancate.append(str(r["revisione"]))
+                    ragione = ragione or out.strip()[:200]
+    if mancate:
+        nota = (f"rapporto del Critic non commentato sulla PR (revisioni {', '.join(mancate)}): "
+                f"{ragione} — i file restano in {LOG_DIR}")
+        e.nota = " · ".join(t for t in (e.nota, nota) if t)
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
