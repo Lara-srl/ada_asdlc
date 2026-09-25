@@ -24,6 +24,7 @@ variabili lo rende inutilizzabile.
 import json
 import os
 import sys
+import tempfile
 import traceback
 from datetime import datetime
 
@@ -85,8 +86,11 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
 
     Una chiamata che non passa la validazione riceve `isError` con il motivo, e
     il file non si scrive: il modello legge l'errore e può richiamare. La prima
-    chiamata valida è definitiva: il file nasce con `O_EXCL`, e dopo di lei
-    ogni chiamata si rifiuta e lo lascia com'è.
+    chiamata valida è definitiva, e il file non è mai a metà: si scrive un
+    temporaneo nella stessa cartella e lo si collega al nome definitivo con
+    `os.link`, che fallisce se il nome c'è già. Dopo la prima, ogni chiamata si
+    rifiuta e lo lascia com'è. Il temporaneo finisce in `.json`, così uno che
+    sopravvive a un server ucciso lo ignora `runs/*.json` (`PBI-372`, decisione 7).
 
     Nel file entrano solo i campi dello schema del ruolo: la CLI non lo fa
     rispettare, e un argomento in più non deve riscrivere l'esito."""
@@ -114,13 +118,19 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     if ruolo == "critic" and nome == "fatto":
         dichiarato["verdetto"] = argomenti["verdetto"]
     dichiarato[campo] = testo
+    cartella, nome_esito = os.path.split(os.path.abspath(esito))
+    descrittore, temporaneo = tempfile.mkstemp(dir=cartella, prefix=f"{nome_esito}.",
+                                               suffix=".json")
     try:
-        descrittore = os.open(esito, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        os.chmod(temporaneo, 0o644)
+        with os.fdopen(descrittore, "w", encoding="utf-8") as file:
+            json.dump(dichiarato, file, ensure_ascii=False)
+        os.link(temporaneo, esito)
     except FileExistsError:
         return _contenuto("Esito già dichiarato: la prima chiamata valida è "
                           "definitiva, e questa non cambia niente.", errore=True)
-    with os.fdopen(descrittore, "w", encoding="utf-8") as file:
-        json.dump(dichiarato, file, ensure_ascii=False)
+    finally:
+        os.unlink(temporaneo)
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
 
 
