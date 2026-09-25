@@ -549,6 +549,44 @@ def git_dell_inventario(rami_locali: str = "pbi/pbi-102-giro1\n",
     return _git
 
 
+class TestLAlberoSporcoVeroNonDiventaUnLimite:
+    """PBI-363, decisione 2: la frase del limite si legge solo dentro un `senza
+    esito`. Un Builder che ha chiamato `fatto` ha dichiarato il suo esito, e se
+    lascia file non committati è l'albero sporco di sempre — anche se nel suo
+    testo cita «You've hit your session limit»."""
+
+    def test_consuma_i_giri_d_igiene_e_la_nota_dice_l_albero_sporco(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        sporco = " M backend/app/marginalita.py"
+        stati = [""]  # il controllo d'ingresso, prima del PBI
+
+        def _git(*args: str) -> str:
+            if args[:2] == ("status", "--porcelain"):
+                return stati.pop(0) if stati else sporco
+            return git_del_senza_esito(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        agente = agente_finto(
+            {"builder": FATTO},
+            {"builder": "Ho finito. Prima mi era apparso «You've hit your session "
+                        "limit · resets 1:30am», poi ho ripreso.\n"},
+        )
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert len(agente.comandi) == runner.MAX_IGIENE, (
+            "l'albero sporco vero spende i giri d'igiene esattamente come prima"
+        )
+        assert esito.nota == (
+            f"l'albero resta sporco dopo {runner.MAX_IGIENE} giri del Builder: "
+            f"il lavoro c'è ma non è committato ({sporco})"
+        ), f"la nota «{esito.nota}» non è quella dell'albero sporco, e basta"
+
+
 class TestLInventarioDelGiro:
     """PBI-363, decisione 7 e difetto 28 di `PBI-102`: il giro conta rami, alberi
     e file all'inizio e alla fine, e li scrive nel suo rapporto.
