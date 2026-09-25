@@ -2518,9 +2518,20 @@ def salva_il_traceback(pbi: str) -> Path:
     return file
 
 
+def scrivi_rapporto_critic(run: str, pbi: str, revisione: int, verdetto: Verdetto) -> Path:
+    """Il rapporto di una revisione del Critic, intero, nel suo file di `LOG_DIR`:
+    `<run>-<PBI>-critic-<n>.md` (PBI-371). Nel JSON del giro stava tagliato agli
+    ultimi 6000 caratteri, e un rapporto più lungo perdeva la testa."""
+    file = LOG_DIR / f"{run}-{pbi}-critic-{revisione}.md"
+    file.write_text(verdetto.rapporto, encoding="utf-8")
+    return file
+
+
 def esegui_pbi(
-    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True
+    pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True,
+    run: str = "",
 ) -> Esito:
+    run = run or datetime.now().strftime("%Y%m%d-%H%M%S")
     pbi_path = trova_pbi(pbi)
     if pbi_path is None:
         return Esito(pbi, "saltato", nota=f"PBI inesistente in {BACKLOG}/ su {BASE}")
@@ -2741,6 +2752,7 @@ def esegui_pbi(
                 e.invocazioni.append(verdetto.registro)
             rapporto = verdetto.rapporto
             e.rapporto_critic = rapporto[-6000:]
+            scrivi_rapporto_critic(run, pbi, revisione, verdetto)
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
