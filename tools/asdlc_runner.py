@@ -412,7 +412,7 @@ Il runner legge l'esito **solo** dalla tua chiamata a uno dei due strumenti, e l
 chiamata valida è definitiva: il testo della risposta non decide niente.
 
 Chiama `fatto` con il verdetto e con il rapporto intero nel riepilogo: è l'unico testo
-che arriva al Builder e a chi mergia.
+che arriva al Builder e a chi mergia. Scrivi il rapporto in italiano, qualunque sia l'esito.
 
 - Se non ci sono violazioni, il verdetto è `pass`.
 - Altrimenti elenca nel rapporto ogni violazione come
