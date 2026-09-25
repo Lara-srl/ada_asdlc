@@ -80,7 +80,7 @@ TIPI_JSON = {int: "un numero", float: "un numero", bool: "un booleano",
              list: "una lista", dict: "un oggetto"}
 
 
-def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
+def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
     """Scrive l'esito della chiamata nel file `esito`: l'oggetto che il runner
     leggerà, con il nome dello strumento sotto `esito` e i campi dello schema accanto.
 
@@ -134,7 +134,7 @@ def chiama(nome: str, argomenti: dict, ruolo: str, esito: str) -> dict:
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
 
 
-def registra(nome: str, argomenti: dict, esito: str) -> None:
+def registra(nome, argomenti, esito: str) -> None:
     """Una riga del log per chiamata, prima di validarla: anche quelle
     rifiutate ci finiscono."""
     riga = {"ora": datetime.now().astimezone().isoformat(), "nome": nome,
@@ -157,7 +157,11 @@ def rispondi(messaggio, ruolo: str, esito: str) -> dict | None:
     if "id" not in messaggio:
         return None
     metodo = messaggio.get("method")
-    parametri = messaggio.get("params") or {}
+    # Il default vale solo per un campo assente o `null`: `or {}` cambierebbe
+    # in un oggetto anche `[]`, `""`, `0` e `false`, che vanno rifiutati.
+    parametri = messaggio.get("params")
+    if parametri is None:
+        parametri = {}
     if not isinstance(parametri, dict):
         return _errore(messaggio["id"], -32600, "i params non sono un oggetto JSON")
     if metodo == "initialize":
@@ -169,7 +173,9 @@ def rispondi(messaggio, ruolo: str, esito: str) -> dict | None:
     elif metodo == "tools/list":
         risultato = {"tools": strumenti(ruolo)}
     elif metodo == "tools/call":
-        nome, argomenti = parametri.get("name"), parametri.get("arguments") or {}
+        nome, argomenti = parametri.get("name"), parametri.get("arguments")
+        if argomenti is None:
+            argomenti = {}
         registra(nome, argomenti, esito)
         risultato = chiama(nome, argomenti, ruolo, esito)
     else:
