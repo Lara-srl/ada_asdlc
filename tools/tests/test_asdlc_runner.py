@@ -5780,3 +5780,26 @@ class TestIlRapportoDelCriticArrivaIntero:
         assert morso["test"] in prompt and morso["mutante"] in prompt, (
             "il test che morde arriva al Critic con il suo mutante"
         )
+
+    def test_il_nome_e_revisione_avversariale_del_diff_nel_prompt_e_nella_pr(
+        self, monkeypatch
+    ):
+        """Decisione 7: il nome dice quello che il Critic fa, non di più."""
+        assert runner.PROMPT_CRITIC.startswith(
+            "Sei un **Critic Agent** e fai una revisione avversariale del diff.")
+
+        catturato: dict[str, list[str]] = {}
+
+        def _esegui(cmd, cwd, timeout=0, **k):
+            catturato.setdefault("cmd", cmd)
+            return 0, self.URL
+
+        monkeypatch.setattr(runner, "git", lambda *a: "")
+        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371",
+                       runner.Esito("PBI-371", "fatto"))
+
+        cmd = catturato["cmd"]
+        assert ("Gate deterministici verdi · revisione avversariale del diff PASS."
+                in cmd[cmd.index("--body") + 1])
