@@ -69,7 +69,8 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
     `{"data": 1, "runs": 12}`).
     Una voce che `git` non ha saputo leggere vale `{"errore": …}`. `fine` si scrive quando
     il giro chiude; un esito `saltato` non ha inventario. Ciò che `fine` ha in più di
-    `inizio` il giro lo scrive nel log e in coda alla `nota`: «il giro lascia: albero …, ramo
+    `inizio`, fuori da ciò che è suo per contratto (il suo ramo, i suoi file in `runs/`), il giro
+    lo scrive nel log e in coda alla `nota`: «il giro lascia: albero …, ramo
     … (origin), file data +2».
   - `critic_saltato` (bool), `tempi.{builder,gate,critic}` (secondi), ecc.
 

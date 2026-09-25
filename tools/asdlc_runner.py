@@ -2570,10 +2570,14 @@ def file_dell_inventario() -> dict[str, int]:
     return dict(sorted(file.items()))
 
 
-def lasciato(inizio: dict, fine: dict) -> list[str]:
+def lasciato(inizio: dict, fine: dict, ramo: str) -> list[str]:
     """Ciò che l'inventario di fine ha in più di quello d'inizio, una voce per
     cosa: `albero …`, `ramo …`, `file <cartella> +n` (PBI-363, decisione 8). Una
-    voce che una delle due fotografie non ha saputo leggere non si confronta."""
+    voce che una delle due fotografie non ha saputo leggere non si confronta.
+
+    Resta fuori ciò che il giro lascia per contratto: il suo `ramo`, locale e su
+    `origin`, e i suoi file nella cartella del registro — rapporto, log, prompt.
+    Segnalati in ogni nota, renderebbero la nota rumore."""
     voci: list[str] = []
     prima, dopo = inizio.get("alberi"), fine.get("alberi")
     if isinstance(prima, list) and isinstance(dopo, list):
@@ -2581,11 +2585,12 @@ def lasciato(inizio: dict, fine: dict) -> list[str]:
     prima, dopo = inizio.get("rami", {}), fine.get("rami", {})
     for dove in ("locali", "origin"):
         if isinstance(prima.get(dove), list) and isinstance(dopo.get(dove), list):
-            voci += [f"ramo {r} ({dove})" for r in dopo[dove] if r not in prima[dove]]
+            voci += [f"ramo {r} ({dove})" for r in dopo[dove]
+                     if r not in prima[dove] and r != ramo]
     prima, dopo = inizio.get("file", {}), fine.get("file", {})
     if "errore" not in prima and "errore" not in dopo:
         voci += [f"file {c} +{n - prima.get(c, 0)}" for c, n in dopo.items()
-                 if n > prima.get(c, 0)]
+                 if n > prima.get(c, 0) and c != CFG.registro.cartella]
     return voci
 
 
@@ -2797,7 +2802,7 @@ def esegui_pbi(
         e.inventario["fine"] = inventario()
         # Contare vale anche quando la strada che lascia il residuo non si riesce a
         # riprodurre: un albero appeso che si vede nella nota non si perde in /tmp.
-        if resti := lasciato(e.inventario["inizio"], e.inventario["fine"]):
+        if resti := lasciato(e.inventario["inizio"], e.inventario["fine"], branch):
             print(f"    ⚠️  il giro lascia: {', '.join(resti)}")
             dichiara(f"il giro lascia: {', '.join(resti)}")
         e.stato, e.durata_s = stato, time.monotonic() - t0
