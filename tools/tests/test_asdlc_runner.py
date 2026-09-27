@@ -7160,3 +7160,32 @@ class TestUnPushCheScadeENonPubblicato:
         assert esito.stato == "sospeso", "lo stato resta quello del motivo"
         assert runner.NON_PUBBLICATO in esito.nota, esito.nota
         assert "timeout, stato di origin da verificare" in esito.nota, esito.nota
+
+    def test_guardia_un_push_fallito_resta_non_pubblicato_senza_timeout_nella_nota(
+            self, monkeypatch):
+        """Guardia dichiarata: un push **rifiutato** dice «su origin non c'è», e la
+        nota resta quella di `PBI-362` — `NON_PUBBLICATO`, senza l'avviso del
+        timeout, che vale solo quando il push scade."""
+        def _g(*args: str) -> str:
+            if args[:1] == ("push",):
+                raise RuntimeError("git push → ! [rejected] pbi/pbi-102 (stale info)")
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p, **_: runner.Verdetto("pass", "", "rapporto"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto", "un push rifiutato non disfa il giro"
+        assert esito.pr == ""
+        assert esito.nota.endswith(runner.NON_PUBBLICATO), esito.nota
+        assert "timeout" not in esito.nota, esito.nota
+        assert "dopo la chiusura" not in esito.nota
