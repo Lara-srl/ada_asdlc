@@ -23,6 +23,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -207,7 +208,8 @@ class TestLEsitoVieneDallaChiamata:
                 {"builder": "Tutto verde.\nFATTO: i criteri sono chiusi\n",
                  "critic": "VERDETTO: PASS\n"},
                 "fermato",
-                "domanda dell'agente: la spec dice netto, / il PBI lordo: quale vale?",
+                "domanda-del-builder: domanda dell'agente — "
+                "la spec dice netto, / il PBI lordo: quale vale?",
                 "la spec dice netto,\nil PBI lordo: quale vale?", None,
                 id="builder-fermati-con-fatto-nel-testo",
             ),
@@ -222,7 +224,8 @@ class TestLEsitoVieneDallaChiamata:
             pytest.param(
                 {"builder": FATTO, "critic": fermati("la 0011 tocca pratiche:\nla eseguo?")},
                 {"builder": "FATTO: fatto\n", "critic": "Ho letto il diff e i commit.\n"},
-                "sospeso", "domanda del critic: la 0011 tocca pratiche: / la eseguo?",
+                "sospeso",
+                "domanda-del-critic: domanda del critic — la 0011 tocca pratiche: / la eseguo?",
                 "la 0011 tocca pratiche:\nla eseguo?", "Ho letto il diff e i commit.",
                 id="critic-fermati-senza-marcatori",
             ),
@@ -522,6 +525,7 @@ class TestIlSenzaEsitoDiceLOraDelReset:
         registro = esito.invocazioni[-1]
         assert esito.stato == "senza esito"
         assert esito.nota == (
+            "builder-senza-esito: il builder non ha fatto nessuna chiamata valida — "
             "il builder non ha chiamato né fatto né fermati · codice d'uscita 1 · "
             f"stdout {registro['stdout']} · stderr {registro['stderr']}"
         )
@@ -589,8 +593,8 @@ class TestLAlberoSporcoVeroNonDiventaUnLimite:
             "l'albero sporco vero spende i giri d'igiene esattamente come prima"
         )
         assert esito.nota == (
-            f"l'albero resta sporco dopo {runner.MAX_IGIENE} giri del Builder: "
-            f"il lavoro c'è ma non è committato ({sporco})"
+            "albero-sporco-dopo-igiene: il lavoro c'è ma non è committato — "
+            f"l'albero resta sporco dopo {runner.MAX_IGIENE} giri del Builder ({sporco})"
         ), f"la nota «{esito.nota}» non è quella dell'albero sporco, e basta"
 
 
@@ -655,7 +659,7 @@ class TestLInventarioDelGiro:
         for residuo in (ALBERO_APPESO, "pbi/pbi-999", "data"):
             assert residuo in esito.nota, f"la nota «{esito.nota}» non dice che resta {residuo}"
             assert residuo in log, f"il log non dice che resta {residuo}"
-        assert esito.nota.startswith("il builder non ha chiamato"), (
+        assert esito.nota.startswith("builder-senza-esito: "), (
             "la diagnosi del giro resta davanti: ciò che lascia si aggiunge dietro"
         )
 
@@ -6614,3 +6618,360 @@ class TestUnaBasePerGiro:
             "senza la risposta di origin il ramo non nasce: non si inventa un nome"
         )
         assert pubblicati == [], "non c'è un ramo del giro da pubblicare"
+
+
+# --- PBI-375: ogni via d'uscita del giro ha il suo motivo ---------------------
+
+HEAD_DELLE_USCITE = "c0ffee0000000000000000000000000000000375"
+
+
+def git_delle_uscite(monkeypatch, risposte: dict | None = None):
+    """Un `git` finto con le risposte di `git_finto`, e in più quelle di
+    `risposte`: da un prefisso degli argomenti a una stringa, a una funzione
+    degli argomenti, o a un'eccezione da alzare."""
+    risposte = risposte or {}
+
+    def _git(*args: str) -> str:
+        for prefisso, risposta in risposte.items():
+            if args[:len(prefisso)] == prefisso:
+                if isinstance(risposta, BaseException):
+                    raise risposta
+                return risposta(args) if callable(risposta) else risposta
+        if args == ("rev-parse", runner.BASE):
+            return SHA_DELLA_BASE
+        if args[:2] == ("rev-list", "--count"):
+            return "3"
+        if args[:2] == ("ls-tree", "--name-only"):
+            return elenco_backlog()
+        return ""
+
+    monkeypatch.setattr(runner, "git", _git)
+
+
+def _pbi_inesistente(mp):
+    return {"pbi": "PBI-99999"}
+
+
+def _dry_run(mp):
+    return {"dry": True}
+
+
+def _albero_sporco_all_ingresso(mp):
+    git_delle_uscite(mp, {("status", "--porcelain"): " M backend/app/status.py"})
+    return {}
+
+
+def _origin_muto(mp):
+    git_delle_uscite(mp, {("ls-remote", "--heads"):
+                          RuntimeError("git ls-remote → fatal: unable to access")})
+    return {}
+
+
+def _builder_senza_esito(mp):
+    mp.setattr(runner, "esegui", agente_finto({}))
+    return {}
+
+
+def _domanda_del_builder(mp):
+    mp.setattr(runner, "esegui", agente_finto({"builder": fermati("netto o lordo?")}))
+    return {}
+
+
+def _albero_sporco_dopo_igiene(mp):
+    stati = [""]  # il controllo d'ingresso, pulito
+    git_delle_uscite(mp, {("status", "--porcelain"):
+                          lambda a: stati.pop(0) if stati else "?? appunti.txt"})
+    return {}
+
+
+def _ref_diverso_da_head(mp):
+    git_delle_uscite(mp, {("rev-parse", "HEAD"): HEAD_DELLE_USCITE,
+                          ("rev-parse", "refs/heads/pbi/pbi-102"): SHA_DELLA_BASE})
+    return {}
+
+
+def _gate_rossi(mp):
+    mp.setattr(runner, "gira_gate", lambda attivi, base=None: [("pytest", "1 failed")])
+    return {}
+
+
+def _gate_del_rosso_guasto(mp):
+    def rotto(**k):
+        raise runner.GuastoDelGate("`pytest -q` in backend → uscita 127")
+    mp.setattr(runner, "gate_del_rosso", rotto)
+    return {}
+
+
+def _rosso_mai_visto(mp):
+    mp.setattr(runner, "gate_del_rosso", lambda **k: [
+        {"commit": "abc1234", "titolo": "feat: x", "test": "t::test_x", "esito": "nato verde"}])
+    return {}
+
+
+def _critic_senza_esito(mp):
+    mp.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+    return {}
+
+
+def _domanda_del_critic(mp):
+    mp.setattr(runner, "esegui",
+               agente_finto({"builder": FATTO, "critic": fermati("la 0011 la eseguo?")}))
+    return {}
+
+
+def _revisioni_esaurite(mp):
+    mp.setattr(runner, "MAX_REVISIONI", 0)
+    mp.setattr(runner, "esegui",
+               agente_finto({"builder": FATTO, "critic": verdetto("non pronto", "1. manca")}))
+    return {}
+
+
+def _eccezione_nel_giro(mp):
+    def esploso(attivi, base=None):
+        raise RuntimeError("gate esploso")
+    mp.setattr(runner, "gira_gate", esploso)
+    return {}
+
+
+def _fatto(mp):
+    return {}
+
+
+def _head_non_su_origin(mp):
+    git_delle_uscite(mp, {("rev-parse", "HEAD"): HEAD_DELLE_USCITE,
+                          ("rev-parse", "refs/heads/pbi/pbi-102"): HEAD_DELLE_USCITE,
+                          ("ls-remote", runner.REMOTO, "refs/heads/pbi/pbi-102"):
+                              f"{SHA_DELLA_BASE}\trefs/heads/pbi/pbi-102"})
+    return {"con_pr": True}
+
+
+# Una via d'uscita per motivo: lo stato che la tabella deve dargli, e come la
+# si percorre davvero.
+USCITE_DEL_GIRO = {
+    "pbi-inesistente": ("saltato", _pbi_inesistente),
+    "dry-run": ("saltato", _dry_run),
+    "albero-sporco-all-ingresso": ("fermato", _albero_sporco_all_ingresso),
+    "origin-muto": ("fermato", _origin_muto),
+    "builder-senza-esito": ("senza esito", _builder_senza_esito),
+    "domanda-del-builder": ("fermato", _domanda_del_builder),
+    "albero-sporco-dopo-igiene": ("fermato", _albero_sporco_dopo_igiene),
+    "ref-diverso-da-head": ("fermato", _ref_diverso_da_head),
+    "gate-rossi": ("rosso", _gate_rossi),
+    "gate-del-rosso-guasto": ("rosso", _gate_del_rosso_guasto),
+    "rosso-mai-visto": ("fermato", _rosso_mai_visto),
+    "critic-senza-esito": ("senza esito", _critic_senza_esito),
+    "domanda-del-critic": ("sospeso", _domanda_del_critic),
+    "revisioni-esaurite": ("non convergente", _revisioni_esaurite),
+    "eccezione-nel-giro": ("rosso", _eccezione_nel_giro),
+    "fatto": ("fatto", _fatto),
+    "head-non-su-origin": ("fermato", _head_non_su_origin),
+}
+
+
+class TestOgniUscitaHaIlSuoMotivo:
+    """PBI-375, decisioni 1, 2, 4 e 5: ogni via d'uscita del giro ha un motivo,
+    preso dalla tabella chiusa `USCITE`, che ne dà lo stato e il testo della nota.
+
+    È la causa `diagnosi-confusa` di `PBI-102` (difetti 2, 3, 6, 27 e 48): otto
+    stati per quindici uscite. `fermato` valeva per cinque situazioni diverse e
+    `rosso` per tre — i gate rossi, cioè il codice sbagliato; il gate del rosso
+    che non ha potuto girare, cioè lo strumento guasto; e un'eccezione nel giro,
+    cioè il runner guasto — e chi legge il rapporto le distingueva solo dal testo
+    libero della nota."""
+
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_ogni_uscita_chiude_col_suo_motivo_e_con_lo_stato_della_tabella(
+            self, monkeypatch, motivo):
+        stato, percorri = USCITE_DEL_GIRO[motivo]
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        assert getattr(esito, "motivo", None) == motivo, (
+            f"chiuso {esito.stato} con la nota «{esito.nota}», senza il suo motivo"
+        )
+        assert esito.stato == stato
+        assert runner.USCITE[motivo][0] == stato, "lo stato viene dalla tabella"
+        assert esito.nota.startswith(f"{motivo}: {runner.USCITE[motivo][1]}"), (
+            f"la nota «{esito.nota}» non comincia con il motivo e il testo della tabella"
+        )
+
+    def test_ogni_motivo_della_tabella_ha_il_suo_caso(self):
+        """Decisione 5: il giorno in cui si aggiunge un'uscita alla tabella senza
+        il suo caso nel test di sopra, fallisce questo."""
+        assert set(getattr(runner, "USCITE", {})) == set(USCITE_DEL_GIRO)
+
+    def test_un_motivo_fuori_tabella_alza_value_error(self):
+        """Decisione 2: la tabella è chiusa come il vocabolario delle cause. Un
+        motivo che non c'è è un errore di chi scrive il runner, e deve dirlo con
+        il nome del motivo, non con un `KeyError` muto."""
+        with pytest.raises(ValueError, match="motivo-inventato"):
+            runner.uscita("motivo-inventato")
+
+
+class TestUnaChiusuraCheFallisceNonCambiaLoStato:
+    """PBI-375, decisione 3, difetto 48 di `PBI-102`. Un giro `sospeso` la cui
+    chiusura fallisce **una volta** — un push che non passa al primo tentativo —
+    finiva nell'`except` del giro, che richiudeva come `rosso` «eccezione nel
+    giro»: la seconda chiusura riusciva, e lo stato vero si perdeva. Lo ha
+    trovato il Critic su #272 (`PBI-369`)."""
+
+    def test_un_sospeso_con_pubblica_che_alza_una_volta_sale_con_il_suo_motivo(
+            self, monkeypatch, git_finto):
+        monkeypatch.setattr(runner, "esegui", agente_finto(
+            {"builder": FATTO, "critic": fermati("la 0011 tocca pratiche: la eseguo?")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        tentativi: list[str] = []
+
+        def pubblica_che_alza_una_volta(branch, e=None):
+            tentativi.append(branch)
+            if len(tentativi) == 1:
+                raise subprocess.TimeoutExpired(["git", "push"], 120)
+            return True
+
+        monkeypatch.setattr(runner, "pubblica", pubblica_che_alza_una_volta)
+
+        with pytest.raises(RuntimeError, match="chiusura del giro fallita") as alzata:
+            runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert getattr(alzata.value, "motivo", None) == "domanda-del-critic", (
+            "la chiusura sale con il motivo che stava chiudendo, non come rosso"
+        )
+        assert "domanda-del-critic" in str(alzata.value)
+        assert "TimeoutExpired" in str(alzata.value), "il messaggio dice perché"
+        assert len(tentativi) == 1, (
+            "la chiusura gira una volta: una seconda che riesce cancella lo stato vero"
+        )
+
+
+class TestLAvvisoDellaBaseStaNellaNotaDiOgniUscita:
+    """PBI-375, decisione 6. Se il `fetch` iniziale non risponde, `base_del_giro()`
+    di `PBI-374` restituisce un avviso, e la sua decisione 3 lo vuole «a schermo e
+    nella nota». Dopo 374 `pbi-inesistente` e `albero-sporco-all-ingresso` escono
+    con una nota fissa, e l'avviso lo vedeva solo lo schermo (nota del Critic su
+    #287)."""
+
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_con_il_fetch_che_non_risponde_l_avviso_e_nella_nota(self, monkeypatch, motivo):
+        _, percorri = USCITE_DEL_GIRO[motivo]
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+        git_del_caso = runner.git
+
+        def fetch_muto(*args: str) -> str:
+            if args[:1] == ("fetch",):
+                raise RuntimeError("git fetch → fatal: unable to access")
+            return git_del_caso(*args)
+
+        monkeypatch.setattr(runner, "git", fetch_muto)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        avviso = f"fetch di {runner.BASE} non riuscito"
+        assert esito.nota.count(avviso) == 1, (
+            f"la nota «{esito.nota}» di {motivo} deve dire una volta che il giro è "
+            "partito dalla base che c'era"
+        )
+
+
+class TestLeGuardieDelMotivo:
+    """PBI-375, le guardie dichiarate: il motivo si **aggiunge** allo stato e non
+    lo sostituisce. Il tick legge `STATI_CHE_INTERROMPONO`, `--registra` unisce
+    `runs/tempi.csv` dai rami con le sue colonne (`ADR-0020`), e la rete di
+    `main()` raccoglie una chiusura che fallisce."""
+
+    STATI_DI_OGGI = ("rosso", "respinto", "non convergente", "fermato", "sospeso",
+                     "senza esito")
+    COLONNE_DI_OGGI = ["run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
+                       "builder_s", "gate_s", "critic_s", "tentativi", "revisioni",
+                       "commit", "pr", "nota"]
+
+    @staticmethod
+    def _mondo(monkeypatch):
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_gli_stati_che_interrompono_sono_quelli_di_oggi(self, monkeypatch, motivo):
+        """Ogni uscita ferma la catena se e solo se non è `fatto` o `saltato`,
+        con gli stessi sei stati che il tick legge oggi."""
+        stato, percorri = USCITE_DEL_GIRO[motivo]
+        self._mondo(monkeypatch)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        assert runner.STATI_CHE_INTERROMPONO == self.STATI_DI_OGGI
+        assert (esito.stato in runner.STATI_CHE_INTERROMPONO) == (
+            stato not in ("fatto", "saltato")), (
+            f"{motivo} chiude «{esito.stato}»: la catena si ferma dove si fermava"
+        )
+
+    def test_il_registro_ha_le_colonne_di_oggi_e_il_motivo_in_testa_alla_nota(
+            self, monkeypatch, tmp_path):
+        """Il motivo va in `runs/<run>.json` e in testa alla nota, non in una
+        colonna nuova di `runs/tempi.csv`."""
+        self._mondo(monkeypatch)
+        _gate_rossi(monkeypatch)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        rapporti = tmp_path / "rapporti"
+        rapporti.mkdir()
+        monkeypatch.setattr(runner, "LOG_DIR", rapporti)
+        runner.scrivi_rapporto("giro", [esito], "finito")
+
+        runner.registra(rapporti)
+
+        with (tmp_path / "tempi.csv").open(encoding="utf-8") as f:
+            lettore = csv.DictReader(f)
+            [riga] = list(lettore)
+        assert lettore.fieldnames == self.COLONNE_DI_OGGI
+        assert riga["stato"] == "rosso"
+        assert riga["nota"].startswith("gate-rossi: "), riga["nota"]
+
+    def test_una_chiusura_che_fallisce_sempre_arriva_alla_rete_di_main_e_dice_perche(
+            self, monkeypatch, tmp_path):
+        """Come oggi: `main()` scrive `rosso` e la nota dice che la chiusura è
+        fallita, perché, e — da PBI-375 — con quale motivo stava chiudendo."""
+        self._mondo(monkeypatch)
+        _domanda_del_builder(monkeypatch)
+
+        def fase_che_non_si_chiude():
+            raise OSError("disco pieno")
+
+        monkeypatch.setattr(runner, "chiudi_la_fase", fase_che_non_si_chiude)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
+
+        runner.main()
+
+        # Il rapporto è `<run>.json`; accanto ci sono gli esiti e le config MCP
+        # delle invocazioni.
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        [voce] = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert voce["stato"] == "rosso"
+        assert "chiusura del giro fallita (domanda-del-builder)" in voce["nota"], voce["nota"]
+        assert "disco pieno" in voce["nota"]

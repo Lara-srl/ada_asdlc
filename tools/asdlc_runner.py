@@ -146,6 +146,51 @@ MINUTI_CRITIC: float
 STATI_CHE_INTERROMPONO = ("rosso", "respinto", "non convergente", "fermato", "sospeso",
                           "senza esito")
 
+# Le vie d'uscita di un giro, una riga ciascuna: `motivo → (stato, testo)`
+# (PBI-375, causa `diagnosi-confusa` di PBI-102). Gli stati sono otto e le uscite
+# di più: `fermato` valeva per cinque situazioni e `rosso` per tre, e chi legge
+# il rapporto le distingueva solo dal testo libero della nota. Il motivo le
+# distingue, e lo stato si ricava da qui, non si scrive a mano. Un'uscita nuova è
+# una riga nuova, con il suo caso in `TestOgniUscitaHaIlSuoMotivo`.
+USCITE: dict[str, tuple[str, str]] = {
+    # Prima del giro: il ramo non c'è ancora.
+    "pbi-inesistente": ("saltato", "PBI inesistente nel backlog della base del giro"),
+    "dry-run": ("saltato", "dry-run: il prompt a schermo, nessun giro"),
+    "albero-sporco-all-ingresso": ("fermato",
+                                   "albero di lavoro sporco: committa o pulisci prima"),
+    "origin-muto": ("fermato", "il ramo non è nato"),
+    # Il Builder.
+    "builder-senza-esito": ("senza esito", "il builder non ha fatto nessuna chiamata valida"),
+    "domanda-del-builder": ("fermato", "domanda dell'agente"),
+    "albero-sporco-dopo-igiene": ("fermato", "il lavoro c'è ma non è committato"),
+    # I gate: il codice sbagliato, lo strumento guasto, il ciclo mancato.
+    "ref-diverso-da-head": ("fermato", "gate non girati: il ramo non è HEAD"),
+    "gate-rossi": ("rosso", "gate ancora rossi dopo i tentativi previsti"),
+    "gate-del-rosso-guasto": ("rosso", "il gate del rosso non ha potuto girare"),
+    "rosso-mai-visto": ("fermato", "il rosso non si è mai visto: il ciclo mancato è ex ante "
+                                   "e nessuna fix lo annulla"),
+    # Il Critic.
+    "critic-senza-esito": ("senza esito", "il critic non ha fatto nessuna chiamata valida"),
+    "domanda-del-critic": ("sospeso", "domanda del critic"),
+    "revisioni-esaurite": ("non convergente",
+                           "revisioni senza convergere: serve una lettura umana"),
+    # Il runner guasto, che non è il lavoro sbagliato (difetto 11).
+    "eccezione-nel-giro": ("rosso", "eccezione nel giro"),
+    "fatto": ("fatto", "giro chiuso"),
+    # Dopo il giro, in `apri_pr()`.
+    "head-non-su-origin": ("fermato", "PR non aperta: su origin non c'è l'HEAD misurato"),
+}
+
+
+def uscita(motivo: str, dettaglio: str = "") -> tuple[str, str]:
+    """Lo stato e la nota di una via d'uscita: `<motivo>: <testo> — <dettaglio>`.
+    Un motivo che non è in `USCITE` alza: la tabella è chiusa."""
+    if motivo not in USCITE:
+        raise ValueError(f"motivo d'uscita fuori dalla tabella USCITE: {motivo!r} — "
+                         f"un'uscita nuova è una riga nuova, con il suo caso nel test")
+    stato, testo = USCITE[motivo]
+    return stato, f"{motivo}: {testo}" + (f" — {dettaglio}" if dettaglio else "")
+
 COLONNE_CSV = [
     "run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
     "builder_s", "gate_s", "critic_s", "tentativi", "revisioni", "commit", "pr", "nota",
@@ -555,6 +600,8 @@ class Esito:
     # dell'altro ruolo, che non ha fatto nessuna chiamata valida: non aspetta una
     # risposta, è un'anomalia da guardare (`ADR-0027`).
     stato: str
+    # La via d'uscita, una chiave di `USCITE`: è lei a dare lo stato (PBI-375).
+    motivo: str = ""
     tentativi: int = 0
     revisioni: int = 0
     commit: int = 0
@@ -2421,8 +2468,8 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     misurato: lo si chiede al remoto con `ls-remote`, non a un remote-tracking.
     Su PBI-358 (difetto 30) il push è riuscito e ha mandato un ref fermo
     diciannove commit indietro, e la PR #237 è nata su un `(RED)` con il giro
-    `fatto`. Se i due sha non coincidono il giro chiude `fermato` e li nomina.
-    Se il remoto non risponde, cosa ci sia sopra non si sa: è la stessa promessa
+    `fatto`. Se i due sha non coincidono il giro chiude `head-non-su-origin`, e
+    la nota li nomina. Se il remoto non risponde, cosa ci sia sopra non si sa: è la stessa promessa
     non verificata, e chiude allo stesso modo — **senza alzare**, perché
     un'eccezione qui registrerebbe `rosso` e zero commit un giro già pubblicato.
     """
@@ -2441,10 +2488,11 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     if su_origin is None or su_origin != head:
         visto = ("non verificabile" if su_origin is None
                  else su_origin or "assente")
-        diagnosi = (f"PR non aperta: su {REMOTO} {branch} è {visto}, "
-                    f"i gate hanno misurato HEAD {head or 'illeggibile'}")
-        print(f"    ⚠️  {diagnosi}")
-        e.stato = "fermato"
+        visti = (f"su {REMOTO} {branch} è {visto}, "
+                 f"i gate hanno misurato HEAD {head or 'illeggibile'}")
+        print(f"    ⚠️  PR non aperta: {visti}")
+        e.stato, diagnosi = uscita("head-non-su-origin", visti)
+        e.motivo = "head-non-su-origin"
         e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
         return ""
     corpo = (
@@ -2481,6 +2529,16 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         return ""
     commenta_i_rapporti(url.group(0), e)
     return url.group(0)
+
+
+class ChiusuraFallita(RuntimeError):
+    """`chiudi()` ha alzato: sale alla rete di `main()` con il motivo che stava
+    chiudendo, e il messaggio dice perché (PBI-375, decisione 3)."""
+
+    def __init__(self, motivo: str, dettaglio: str, guasto: BaseException):
+        super().__init__(f"chiusura del giro fallita ({motivo}): {type(guasto).__name__}: "
+                         f"{guasto} (il giro chiudeva: {dettaglio})"[:300])
+        self.motivo = motivo
 
 
 class OriginMuto(RuntimeError):
@@ -2848,19 +2906,33 @@ def esegui_pbi(
     # La base del giro, una volta: da qui in poi nessuno fa più `fetch`, e ogni
     # lettura nomina questo sha e non `BASE` (PBI-374).
     base, avviso = base_del_giro()
+
+    def motiva(e: Esito, motivo: str, dettaglio: str = "") -> Esito:
+        """Il motivo nell'esito, con lo stato che `USCITE` gli dà e la sua nota
+        davanti a ciò che il giro aveva già dichiarato di sé.
+
+        L'avviso della base entra qui, nel dettaglio, e non nella nota d'inizio
+        del giro: così lo porta anche un'uscita che arriva prima che il giro
+        esista (PBI-375, decisione 6)."""
+        dettaglio = " · ".join(t for t in (dettaglio, avviso) if t)
+        e.stato, diagnosi = uscita(motivo, dettaglio)
+        e.motivo = motivo
+        e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
+        return e
+
     pbi_path = trova_pbi(pbi, base)
     if pbi_path is None:
-        return Esito(pbi, "saltato", base=base,
-                     nota=f"PBI inesistente in {BACKLOG}/ su {BASE} ({base[:12]})")
+        return motiva(Esito(pbi, "", base=base), "pbi-inesistente",
+                      f"in {BACKLOG}/ su {BASE} ({base[:12]})")
 
     print(f"\n=== {pbi} — {pbi_path.name}")
     prompt = PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
     if dry:
         print(prompt)
-        return Esito(pbi, "saltato", nota="dry-run")
+        return motiva(Esito(pbi, ""), "dry-run")
 
     if git("status", "--porcelain"):
-        return Esito(pbi, "fermato", nota="albero di lavoro sporco: committa o pulisci prima")
+        return motiva(Esito(pbi, ""), "albero-sporco-all-ingresso")
 
     # Il controllo guarda **tutto** l'albero, senza eccezioni. `runs/` è stato
     # escluso finché il runner scriveva `runs/tempi.csv` a fine invocazione: da
@@ -2869,7 +2941,7 @@ def esegui_pbi(
     # dai branch — quindi torna a valere la regola intera: ciò che non è
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
-              base=base, nota=avviso)
+              base=base)
     t0 = time.monotonic()
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
@@ -2899,7 +2971,7 @@ def esegui_pbi(
         deve restare leggibile in `runs/tempi.csv` qualunque sia l'esito."""
         e.nota = " · ".join(t for t in (e.nota, testo) if t)
 
-    def chiudi(stato: str, nota: str = "") -> Esito:
+    def chiudi(motivo: str, dettaglio: str = "") -> Esito:
         # Il conteggio sta **qui** e non dopo il giro dei gate: ogni uscita
         # anticipata — il `fermati` del Builder, l'albero che resta sporco — scriveva
         # `commit = 0` mentre sul branch c'era il lavoro. Su PBI-209 erano otto
@@ -2919,39 +2991,28 @@ def esegui_pbi(
         if resti:
             print(f"    ⚠️  il giro lascia: {', '.join(resti)}")
             dichiara(f"il giro lascia: {', '.join(resti)}")
-        e.stato, e.durata_s = stato, time.monotonic() - t0
+        e.durata_s = time.monotonic() - t0
         e.finito = datetime.now().isoformat(timespec="seconds")
-        if nota:
-            # La diagnosi davanti, e dietro ciò che il giro aveva già dichiarato di
-            # sé — un gate spento, il Critic saltato: la fermata non lo cancella.
-            e.nota = " · ".join(t for t in (nota, e.nota) if t)
+        # La diagnosi davanti, e dietro ciò che il giro aveva già dichiarato di
+        # sé — un gate spento, il Critic saltato: la fermata non lo cancella.
+        motiva(e, motivo, dettaglio)
         # Un giro che si ferma ha comunque prodotto commit, e lasciarli solo nel
         # worktree vuol dire non farli guardare a nessuno: su PBI-320 sono rimasti
         # lì, su PBI-322 li ha salvati a mano una persona prima di chiudere il
         # terminale. Difetto 8 di PBI-102. Sulla strada buona non si pubblica qui:
         # a quello ci pensa `apri_pr`, una volta sola. E un ramo che non è nato,
         # perché `origin` non ha risposto, non ha niente da pubblicare.
-        if stato in STATI_CHE_INTERROMPONO and branch and not pubblica(branch, e):
+        if e.stato in STATI_CHE_INTERROMPONO and branch and not pubblica(branch, e):
             dichiara(NON_PUBBLICATO)
         print(f"    tempo: {hms(e.durata_s)} "
               f"(builder {hms(e.tempi['builder'])} · gate {hms(e.tempi['gate'])} · "
               f"critic {hms(e.tempi['critic'])})")
         return e
 
-    try:
-        branch = crea_branch(pbi, base)
-    except OriginMuto as muto:
-        print(f"    ⚠️  {muto}")
-        return chiudi("fermato", str(muto))
-    apri_la_fase()
-
-    # Il giro sta in un `try` perché ogni strada d'uscita passi da `chiudi()`:
-    # un'eccezione — il timeout di un gate, un guasto dentro il gate del rosso —
-    # usciva da qui, la raccoglieva la rete di `main()`, e il ramo restava solo
-    # nel worktree con i commit non contati. Senza ramo su `origin` il tick
-    # rilanciava lo stesso PBI (difetto 37). La rete di `main()` resta, come
-    # ultima difesa e non come strada.
-    try:
+    def giro() -> tuple[str, str]:
+        """Builder, gate e Critic. Torna il motivo d'uscita e il dettaglio, e non
+        chiude: la chiusura è di chi lo chiama, una volta sola (PBI-375)."""
+        nonlocal prompt
         # I commit già passati sotto il gate del rosso. Vive fuori dal ciclo delle
         # revisioni apposta: alla seconda revisione i commit del primo giro sono gli
         # stessi, e rigirarne i test moltiplicherebbe il tempo macchina per le revisioni.
@@ -2995,11 +3056,11 @@ def esegui_pbi(
                 # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
                 # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
                 if dichiarato is None:
-                    return chiudi("senza esito", nota_senza_esito(invocazione.registro,
-                                                                  invocazione.uscita))
+                    return "builder-senza-esito", nota_senza_esito(invocazione.registro,
+                                                                    invocazione.uscita)
                 if dichiarato["esito"] == "fermati":
                     e.domanda = dichiarato["domanda"]
-                    return chiudi("fermato", f"domanda dell'agente: {una_riga(e.domanda)}")
+                    return "domanda-del-builder", una_riga(e.domanda)
 
                 # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
                 # il registro non si scrive più dal branch (`ADR-0020`).
@@ -3010,10 +3071,10 @@ def esegui_pbi(
                     # che gli servivano (PBI-208, notte del 24/08).
                     igiene += 1
                     if igiene >= MAX_IGIENE:
-                        return chiudi(
-                            "fermato",
-                            f"l'albero resta sporco dopo {MAX_IGIENE} giri del Builder: "
-                            f"il lavoro c'è ma non è committato ({sporco.splitlines()[0][:120]})",
+                        return (
+                            "albero-sporco-dopo-igiene",
+                            f"l'albero resta sporco dopo {MAX_IGIENE} giri del Builder "
+                            f"({sporco.splitlines()[0][:120]})",
                         )
                     prompt = PROMPT_IGIENE.format(sporco=sporco[:1500])
                     continue
@@ -3026,8 +3087,7 @@ def esegui_pbi(
                 # dà per `origin` (PBI-374, decisione 4).
                 if diversi := ramo_diverso_da_head(branch):
                     ref, head = diversi
-                    return chiudi("fermato", f"gate non girati: il ramo {branch} è {ref}, "
-                                             f"HEAD è {head}")
+                    return "ref-diverso-da-head", f"il ramo {branch} è {ref}, HEAD è {head}"
 
                 with misura(e, "gate"):
                     rossi = gira_gate(attivi, base)
@@ -3041,7 +3101,7 @@ def esegui_pbi(
                 e.gate_rossi = [{"gate": n, "coda": o[-2000:]} for n, o in rossi]
                 for g in e.gate_rossi:
                     print(f"    ── {g['gate']} ──\n{g['coda']}")
-                return chiudi("rosso", "gate ancora rossi dopo i tentativi previsti")
+                return "gate-rossi", ""
 
             # --- Quality Gate, seconda domanda: quei test sono mai stati rossi? ---
             # Sta qui e non prima: finché i quattro sono rossi il lavoro non è finito, e
@@ -3068,7 +3128,7 @@ def esegui_pbi(
                     # accusa nessun commit, perché il gate non ne ha guardato nessuno.
                     print(f"GUASTO ({hms(time.monotonic() - t_rosso)})")
                     print(f"    ── gate del rosso ──\n{guasto}")
-                    return chiudi("rosso", f"il gate del rosso non ha potuto girare: {guasto}")
+                    return "gate-del-rosso-guasto", str(guasto)
                 print(f"{'FERMA' if senza_rosso else 'verde'} ({hms(time.monotonic() - t_rosso)})")
             # I nati verdi che mordono si scrivono **prima** dell'eventuale fermata: sono
             # passati, e il rapporto lo dice anche quando un altro commit ferma il giro.
@@ -3085,11 +3145,11 @@ def esegui_pbi(
                 for m in senza_rosso:
                     print(f"    ── {m['commit']} {m['titolo']} ──\n"
                           f"       {m['test']}\n       → {m['esito']}")
-                return chiudi(
-                    "fermato",
-                    f"il rosso non si è mai visto su {len(senza_rosso)} commit "
+                return (
+                    "rosso-mai-visto",
+                    f"{len(senza_rosso)} commit "
                     f"({', '.join(m['commit'] for m in senza_rosso[:5])}): elenco nel rapporto "
-                    f"del giro. Il ciclo mancato è ex ante e nessuna fix lo annulla",
+                    f"del giro",
                 )
 
             # --- Review Gate (probabilistico, sessione separata) ---
@@ -3116,25 +3176,24 @@ def esegui_pbi(
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
-                return chiudi("senza esito",
-                              nota_senza_esito(verdetto.registro, verdetto.rapporto))
+                return "critic-senza-esito", nota_senza_esito(verdetto.registro,
+                                                              verdetto.rapporto)
             if verdetto.esito == "sospeso":
                 # Non si consuma una revisione e non si richiama il Critic: la sua
                 # diagnosi non cambia riprovando, perché ciò che manca non è nel
                 # repository. Riprovare qui è esattamente ciò che è costato a PBI-203
                 # cinque giri e 1h26m per tornare al punto di partenza.
                 e.domanda = verdetto.domanda
-                return chiudi("sospeso", f"domanda del critic: {una_riga(verdetto.domanda)}")
+                return "domanda-del-critic", una_riga(verdetto.domanda)
             if revisione == MAX_REVISIONI:
                 # **Non convergente, non respinto.** Sono due diagnosi diverse e confonderle
                 # manda a correggere la cosa sbagliata: `respinto` dice che il PBI era scritto
                 # male, `non convergente` che il lavoro non si è chiuso e serve una persona.
                 # Chi legge runs/tempi.csv deve poter distinguere un PBI difficile da uno mal
                 # posto, altrimenti il registro misura la fatica e non la causa.
-                return chiudi("non convergente",
-                              f"{MAX_REVISIONI + 1} revisioni senza convergere — i rilievi "
-                              f"del Critic in {LOG_DIR / f'{run}-{pbi}-critic-*.md'}. "
-                              f"Serve una lettura umana.")
+                return ("revisioni-esaurite",
+                        f"{MAX_REVISIONI + 1} revisioni, i rilievi del Critic in "
+                        f"{LOG_DIR / f'{run}-{pbi}-critic-*.md'}")
             # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
             # letto, e un assoluto qui lo farebbe sembrare un altro file. Il rapporto
             # va intero: tagliato, il Builder non leggeva i primi rilievi (PBI-371).
@@ -3144,20 +3203,39 @@ def esegui_pbi(
 
         print(f"    commit sul branch: {e.commit} · "
               f"file: {git('diff', '--name-only', f'{base}...HEAD')}")
-        chiudi("fatto")
-    except Exception as exc:  # noqa: BLE001 — si cattura per chiudere, non per tacere
-        traceback.print_exc()
-        e.file_traceback = str(salva_il_traceback(pbi))
-        interruzione = f"{type(exc).__name__}: {exc}"
+        return "fatto", ""
+
+    try:
+        branch = crea_branch(pbi, base)
+    except OriginMuto as muto:
+        print(f"    ⚠️  {muto}")
+        motivo, dettaglio = "origin-muto", str(muto)
+    else:
+        apri_la_fase()
+        # Il giro sta in un `try` perché ogni strada d'uscita passi da `chiudi()`:
+        # un'eccezione — il timeout di un gate, un guasto dentro il gate del rosso
+        # — usciva da qui, la raccoglieva la rete di `main()`, e il ramo restava
+        # solo nel worktree con i commit non contati. Senza ramo su `origin` il
+        # tick rilanciava lo stesso PBI (difetto 37). La rete di `main()` resta,
+        # come ultima difesa e non come strada.
         try:
-            return chiudi("rosso", f"eccezione nel giro: {interruzione}"[:300])
-        except Exception as guasto:  # noqa: BLE001
-            # Una chiusura che fallisce non si inghiotte: sale alla rete di
-            # `main()`, e la nota dice perché e che cosa aveva interrotto il giro.
-            raise RuntimeError(
-                f"chiusura del giro fallita: {type(guasto).__name__}: {guasto} "
-                f"(il giro era stato interrotto da {interruzione})"[:300]
-            ) from guasto
+            motivo, dettaglio = giro()
+        except Exception as exc:  # noqa: BLE001 — si cattura per chiudere, non per tacere
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            motivo, dettaglio = "eccezione-nel-giro", f"{type(exc).__name__}: {exc}"[:300]
+
+    # La chiusura sta **fuori** dal `try` del giro, e gira una volta (difetto 48):
+    # quando stava dentro, un push che falliva chiudendo un `sospeso` finiva
+    # nell'`except`, che richiudeva `rosso` — e la seconda chiusura, riuscita,
+    # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
+    # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
+    try:
+        chiudi(motivo, dettaglio)
+    except Exception as guasto:  # noqa: BLE001
+        raise ChiusuraFallita(motivo, dettaglio, guasto) from guasto
+    if motivo != "fatto":
+        return e
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
     if con_pr:
