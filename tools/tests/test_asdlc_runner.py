@@ -856,7 +856,7 @@ class TestLInventarioDelGiro:
 
         # Scade solo l'`ls-remote` dell'inventario, quello con il pattern di tutti i
         # rami `pbi/pbi-*`. Quello di `rami_su_origin()` dentro `crea_branch()` è il
-        # difetto 52 di PBI-102, di PBI-374 (decisione 9 di PBI-363).
+        # difetto 52 di PBI-102, e ha il suo test in `TestUnaBasePerGiro` (PBI-374).
         def _git(*args: str) -> str:
             if args[:2] == ("ls-remote", "--heads") and args[-1] == "pbi/pbi-*":
                 raise subprocess.TimeoutExpired(["git", *args], 120)
@@ -6574,3 +6574,43 @@ class TestUnaBasePerGiro:
         assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota, (
             "la pubblicazione di HEAD al posto del ramo si scrive nella nota"
         )
+
+    @pytest.mark.parametrize("guasto", [
+        pytest.param(subprocess.TimeoutExpired(["git", "ls-remote"], 120), id="scade"),
+        pytest.param(RuntimeError("git ls-remote → fatal: unable to access"), id="rifiuta"),
+    ])
+    def test_un_ls_remote_che_non_risponde_in_crea_branch_chiude_il_giro_fermato(
+            self, monkeypatch, tmp_path, guasto):
+        """Decisione 7, difetto 52 di PBI-102. La domanda di `crea_branch()` è sul
+        presente — il nome è già preso su `origin`? — e senza risposta non si sa.
+        Oggi l'eccezione esce da `esegui_pbi()` e il giro sparisce senza passare da
+        `chiudi()`. Deve chiudere `fermato` e dire che `origin` non ha risposto,
+        senza inventare un nome e senza ripiegare sui rami locali."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        chiamate: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args[:2] == ("ls-remote", "--heads") and args[-1] == "pbi/pbi-102*":
+                raise guasto
+            if args == ("rev-parse", runner.BASE):
+                return SHA_DELLA_BASE
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        pubblicati: list[str] = []
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "pubblica",
+                            lambda branch, e=None: pubblicati.append(branch) or True)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato", f"chiuso {esito.stato}: {esito.nota}"
+        assert "origin non ha risposto" in esito.nota
+        assert esito.finito and "fine" in esito.inventario, "il giro passa da chiudi()"
+        assert not [c for c in chiamate if c[:2] == ("switch", "-c")], (
+            "senza la risposta di origin il ramo non nasce: non si inventa un nome"
+        )
+        assert pubblicati == [], "non c'è un ramo del giro da pubblicare"
