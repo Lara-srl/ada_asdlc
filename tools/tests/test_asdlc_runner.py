@@ -864,7 +864,7 @@ class TestLInventarioDelGiro:
 
         pubblicati: list[str] = []
 
-        def _pubblica(branch: str) -> bool:
+        def _pubblica(branch: str, e=None) -> bool:
             pubblicati.append(branch)
             return True
 
@@ -2660,7 +2660,7 @@ class TestLUrlDellaPrSiRiconoscePerForma:
 
     def _crea_pr(self, monkeypatch, uscita: str) -> str:
         monkeypatch.setattr(runner, "git", lambda *a: "")
-        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, uscita))
         return runner.apri_pr(
             "PBI-212", runner.REPO / "backlog" / "PBI-212-margine-costo-e-ricavo.md",
@@ -3762,7 +3762,7 @@ class TestIlGateDelRossoStaNelGiro:
         )
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         monkeypatch.setattr(
             runner, "revisione_critica", critic or (lambda p, **_: runner.Verdetto("pass", "", "ok"))
         )
@@ -4993,7 +4993,7 @@ class TestITestCheMordonoFinisconoNelRapporto:
         )
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         monkeypatch.setattr(runner, "revisione_critica",
                             lambda p, **_: runner.Verdetto("pass", "", "ok"))
 
@@ -5624,7 +5624,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
 
     def test_la_pr_si_apre_verso_il_ramo_del_toml(self, su_master, git_finto, monkeypatch):
         comandi: list[list[str]] = []
-        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         monkeypatch.setattr(
             runner, "esegui",
             lambda cmd, cwd, timeout=0: comandi.append(cmd) or (0, "https://x/pull/1\n"))
@@ -6169,7 +6169,7 @@ class TestIlRapportoDelCriticArrivaIntero:
         sostituito. Torna l'esito, i testi dei file delle revisioni e i comandi
         `gh pr comment` ricevuti, ognuno col testo del suo corpo."""
         monkeypatch.setattr(runner, "git", lambda *a: "")
-        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         esito = runner.Esito("PBI-371", "fatto")
         file = []
         for n, v in enumerate(verdetti):
@@ -6355,7 +6355,7 @@ class TestIlRapportoDelCriticArrivaIntero:
             return 0, self.URL
 
         monkeypatch.setattr(runner, "git", lambda *a: "")
-        monkeypatch.setattr(runner, "pubblica", lambda branch: True)
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         monkeypatch.setattr(runner, "esegui", _esegui)
         runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371",
                        runner.Esito("PBI-371", "fatto"))
@@ -6527,4 +6527,50 @@ class TestUnaBasePerGiro:
         assert esito.stato == "fermato", f"chiuso {esito.stato}: {esito.nota}"
         assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota, (
             "la nota nomina i due sha, come la diagnosi di apri_pr() per origin"
+        )
+
+    def test_una_pubblicazione_con_il_ref_diverso_da_head_lo_scrive_nella_nota(
+            self, monkeypatch):
+        """Decisione 5, sulla strada buona. Il ripiego del difetto 30 resta — si
+        manda HEAD e si riallinea il ref — ma dopo la decisione 4 può capitare solo
+        se il ref si è mosso dopo l'ultimo gate, e deve lasciare traccia nella nota,
+        non solo a schermo."""
+        finto_git = self._git_col_ref_staccato(monkeypatch, ramo="pbi/pbi-374")
+        git_del_ramo = runner.git
+
+        def _git(*args: str) -> str:
+            if args[:1] == ("ls-remote",):
+                return f"{self.HEAD}\trefs/heads/pbi/pbi-374"
+            return git_del_ramo(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", lambda cmd, cwd, timeout=0, **k:
+                            (0, "https://github.com/x/y/pull/374\n"))
+        esito = runner.Esito("PBI-374", "fatto")
+
+        pr = runner.apri_pr("PBI-374", REPO / "backlog" / "PBI-374-x.md", "pbi/pbi-374", esito)
+
+        assert pr, "HEAD è su origin: la PR si apre"
+        assert ("push", "--force-with-lease", "-u", "origin",
+                "HEAD:refs/heads/pbi/pbi-374") in finto_git
+        assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota, (
+            "la pubblicazione di HEAD al posto del ramo si scrive nella nota"
+        )
+
+    def test_la_pubblicazione_di_un_giro_fermato_con_il_ref_diverso_lo_scrive_nella_nota(
+            self, monkeypatch, tmp_path):
+        """Decisione 5, sulla strada di `chiudi()`: un giro che si ferma pubblica
+        il ramo, e anche lì il ref diverso da HEAD deve restare nella nota."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        chiamate = self._git_col_ref_staccato(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": fermati("la spec dice netto, il PBI lordo?")}))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fermato"
+        assert ("push", "--force-with-lease", "-u", "origin",
+                "HEAD:refs/heads/pbi/pbi-102") in chiamate
+        assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota, (
+            "la pubblicazione di HEAD al posto del ramo si scrive nella nota"
         )
