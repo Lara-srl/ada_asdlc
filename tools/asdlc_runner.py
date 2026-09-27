@@ -358,6 +358,13 @@ Esegui il PBI con queste regole non negoziabili:
   righe — un'asserzione vera comunque, un dato costruito perché il guasto non si veda —
   ferma il giro come un nato verde qualsiasi.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
+- **Una regressione che vedi in `IMPL` è una fermata, non una docstring.** Se ti accorgi
+  che il tuo codice peggiora un caso che prima era gestito — uno stato che prima fermava
+  la coda e ora la lascia passare, un errore che prima si vedeva e ora finisce in una
+  nota — e il PBI non dice cosa farne, chiama `fermati` e descrivilo. Scriverlo in un
+  commento o in una docstring non lo ferma: il tick, il registro e i gate non leggono i
+  commenti. Nel giro 1 di PBI-377 (27/09/2026) un push scaduto è diventato `fatto` con la
+  sua regressione spiegata in una docstring, e a fermare il giro è stato il Critic.
 - Se il PBI cambia un contratto, aggiorna la spec NELLO STESSO commit del codice.
 - Non lasciare modifiche non committate: ciò che non è committato non esiste.
 - Non toccare .github/workflows/ (il push verrebbe rifiutato dal token).
