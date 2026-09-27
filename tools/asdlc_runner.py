@@ -2675,6 +2675,18 @@ def nome_libero(pbi: str, presi: set[str]) -> str:
     return f"{base}-giro{n}"
 
 
+def ramo_diverso_da_head(branch: str) -> tuple[str, str] | None:
+    """`(ref, head)` se `refs/heads/<branch>` non è `HEAD`, `None` se coincidono.
+
+    Ciò che si sta per misurare o mandare deve essere ciò che il ramo dice
+    (PBI-374, decisioni 4 e 5). Su PBI-358 il pre-flight rieseguito a giro
+    partito ha staccato `HEAD` dal ramo, e i due sono andati ognuno per conto
+    suo per ventiquattro commit (difetto 30)."""
+    head = git("rev-parse", "HEAD")
+    ref = git("rev-parse", f"refs/heads/{branch}")
+    return None if ref == head else (ref, head)
+
+
 # Ciò che la nota del giro dice quando `pubblica()` torna False: stato e commit
 # restano quelli che erano, e questa è la riga che lo fa sapere al registro.
 NON_PUBBLICATO = "branch non pubblicato: i commit restano nel worktree"
@@ -2972,6 +2984,14 @@ def esegui_pbi(
 
                 e.tentativi += 1
                 gate_falliti += 1
+
+                # Un gate che misura un `HEAD` diverso dal ramo misura un lavoro che il
+                # ramo non contiene: non si gira, e la diagnosi è quella che `apri_pr()`
+                # dà per `origin` (PBI-374, decisione 4).
+                if diversi := ramo_diverso_da_head(branch):
+                    ref, head = diversi
+                    return chiudi("fermato", f"gate non girati: il ramo {branch} è {ref}, "
+                                             f"HEAD è {head}")
 
                 with misura(e, "gate"):
                     rossi = gira_gate(attivi, base)
