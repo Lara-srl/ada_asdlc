@@ -7034,3 +7034,36 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
         assert "Traceback" in err and "corpo della PR illeggibile" in err, (
             "a schermo l'eccezione si dice come la dice la rete di main()"
         )
+
+    def test_se_la_pr_era_gia_aperta_il_suo_url_resta_nellesito(self, monkeypatch, git_finto):
+        """Decisione 5: l'eccezione arriva dopo `gh pr create`, nei commenti del
+        Critic. La PR esiste su GitHub, e l'esito deve poterla nominare."""
+        url = "https://github.com/Lara-srl/ada-controller/pull/377"
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if cmd[:3] == ["gh", "pr", "create"]:
+                return 0, url
+            return agente(cmd, cwd, timeout, **k)
+
+        def commenti_che_alzano(u, e):
+            raise ValueError("rapporto con un carattere non codificabile")
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        monkeypatch.setattr(runner, "git", lambda *a: (
+            "3" if a[:2] == ("rev-list", "--count")
+            else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+            else SHA_DELLA_BASE if a[:1] in (("rev-parse",), ("ls-remote",))
+            else ""))
+        monkeypatch.setattr(runner, "commenta_i_rapporti", commenti_che_alzano)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto"
+        assert esito.pr == url, "la PR aperta prima dell'eccezione resta nell'esito"
+        assert esito.nota.endswith(
+            "dopo la chiusura: ValueError: rapporto con un carattere non codificabile"), (
+            esito.nota)
