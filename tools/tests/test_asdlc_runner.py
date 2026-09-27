@@ -23,6 +23,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -6885,3 +6886,92 @@ class TestLAvvisoDellaBaseStaNellaNotaDiOgniUscita:
             f"la nota «{esito.nota}» di {motivo} deve dire una volta che il giro è "
             "partito dalla base che c'era"
         )
+
+
+class TestLeGuardieDelMotivo:
+    """PBI-375, le guardie dichiarate: il motivo si **aggiunge** allo stato e non
+    lo sostituisce. Il tick legge `STATI_CHE_INTERROMPONO`, `--registra` unisce
+    `runs/tempi.csv` dai rami con le sue colonne (`ADR-0020`), e la rete di
+    `main()` raccoglie una chiusura che fallisce."""
+
+    STATI_DI_OGGI = ("rosso", "respinto", "non convergente", "fermato", "sospeso",
+                     "senza esito")
+    COLONNE_DI_OGGI = ["run", "pbi", "stato", "iniziato", "finito", "durata_s", "durata_hms",
+                       "builder_s", "gate_s", "critic_s", "tentativi", "revisioni",
+                       "commit", "pr", "nota"]
+
+    @staticmethod
+    def _mondo(monkeypatch):
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_gli_stati_che_interrompono_sono_quelli_di_oggi(self, monkeypatch, motivo):
+        """Ogni uscita ferma la catena se e solo se non è `fatto` o `saltato`,
+        con gli stessi sei stati che il tick legge oggi."""
+        stato, percorri = USCITE_DEL_GIRO[motivo]
+        self._mondo(monkeypatch)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        assert runner.STATI_CHE_INTERROMPONO == self.STATI_DI_OGGI
+        assert (esito.stato in runner.STATI_CHE_INTERROMPONO) == (
+            stato not in ("fatto", "saltato")), (
+            f"{motivo} chiude «{esito.stato}»: la catena si ferma dove si fermava"
+        )
+
+    def test_il_registro_ha_le_colonne_di_oggi_e_il_motivo_in_testa_alla_nota(
+            self, monkeypatch, tmp_path):
+        """Il motivo va in `runs/<run>.json` e in testa alla nota, non in una
+        colonna nuova di `runs/tempi.csv`."""
+        self._mondo(monkeypatch)
+        _gate_rossi(monkeypatch)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+        rapporti = tmp_path / "rapporti"
+        rapporti.mkdir()
+        monkeypatch.setattr(runner, "LOG_DIR", rapporti)
+        runner.scrivi_rapporto("giro", [esito], "finito")
+
+        runner.registra(rapporti)
+
+        with (tmp_path / "tempi.csv").open(encoding="utf-8") as f:
+            lettore = csv.DictReader(f)
+            [riga] = list(lettore)
+        assert lettore.fieldnames == self.COLONNE_DI_OGGI
+        assert riga["stato"] == "rosso"
+        assert riga["nota"].startswith("gate-rossi: "), riga["nota"]
+
+    def test_una_chiusura_che_fallisce_sempre_arriva_alla_rete_di_main_e_dice_perche(
+            self, monkeypatch, tmp_path):
+        """Come oggi: `main()` scrive `rosso` e la nota dice che la chiusura è
+        fallita, perché, e — da PBI-375 — con quale motivo stava chiudendo."""
+        self._mondo(monkeypatch)
+        _domanda_del_builder(monkeypatch)
+
+        def fase_che_non_si_chiude():
+            raise OSError("disco pieno")
+
+        monkeypatch.setattr(runner, "chiudi_la_fase", fase_che_non_si_chiude)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
+
+        runner.main()
+
+        # Il rapporto è `<run>.json`; accanto ci sono gli esiti e le config MCP
+        # delle invocazioni.
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        [voce] = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert voce["stato"] == "rosso"
+        assert "chiusura del giro fallita (domanda-del-builder)" in voce["nota"], voce["nota"]
+        assert "disco pieno" in voce["nota"]
