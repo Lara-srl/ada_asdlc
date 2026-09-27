@@ -183,7 +183,11 @@ USCITE: dict[str, tuple[str, str]] = {
 
 
 def uscita(motivo: str, dettaglio: str = "") -> tuple[str, str]:
-    """Lo stato e la nota di una via d'uscita: `<motivo>: <testo> — <dettaglio>`."""
+    """Lo stato e la nota di una via d'uscita: `<motivo>: <testo> — <dettaglio>`.
+    Un motivo che non è in `USCITE` alza: la tabella è chiusa."""
+    if motivo not in USCITE:
+        raise ValueError(f"motivo d'uscita fuori dalla tabella USCITE: {motivo!r} — "
+                         f"un'uscita nuova è una riga nuova, con il suo caso nel test")
     stato, testo = USCITE[motivo]
     return stato, f"{motivo}: {testo}" + (f" — {dettaglio}" if dettaglio else "")
 
