@@ -2426,7 +2426,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     non verificata, e chiude allo stesso modo — **senza alzare**, perché
     un'eccezione qui registrerebbe `rosso` e zero commit un giro già pubblicato.
     """
-    if not pubblica(branch):
+    if not pubblica(branch, e):
         # L'esito resta quello che era: un push mancato non disfa il giro, ma la
         # riga del registro lo deve dire — il log da solo non lo guarda nessuno.
         e.nota = " · ".join(t for t in (e.nota, NON_PUBBLICATO) if t)
@@ -2692,7 +2692,7 @@ def ramo_diverso_da_head(branch: str) -> tuple[str, str] | None:
 NON_PUBBLICATO = "branch non pubblicato: i commit restano nel worktree"
 
 
-def pubblica(branch: str) -> bool:
+def pubblica(branch: str, e: Esito | None = None) -> bool:
     """Manda il branch su `origin`. Non alza mai: pubblicare è l'ultimo gesto.
 
     Due cose, che sono le due cause del difetto 18. **`--force-with-lease`**
@@ -2717,24 +2717,35 @@ def pubblica(branch: str) -> bool:
     un'altra. Con `HEAD` attaccato non serve, ed è bene: `branch -f` rifiuta di
     muovere un ramo estratto. Se lo rifiuta lo stesso — il ramo estratto in un
     terzo worktree — il push è comunque riuscito, e l'etichetta rimasta indietro
-    si dichiara nel log invece di far sembrare fallita la pubblicazione.
+    si dichiara invece di far sembrare fallita la pubblicazione.
+
+    La divergenza si scrive anche nella nota di `e`, non solo a schermo (PBI-374,
+    decisione 5): dopo la verifica prima dei gate può capitare solo se il ref si
+    è mosso dopo l'ultimo gate, e deve lasciare traccia nel registro.
     """
     try:
-        etichetta = git("rev-parse", f"refs/heads/{branch}")
-        if git("rev-parse", "HEAD") == etichetta:
+        diversi = ramo_diverso_da_head(branch)
+        if diversi is None:
             git("push", "--force-with-lease", "-u", REMOTO, branch)
             return True
+        etichetta, head = diversi
         git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
     except RuntimeError as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
         print(f"       i commit restano in locale su {branch}: `git push` a mano quando "
               f"hai guardato cosa c'è sul remoto.")
         return False
+    nota = f"pubblicato HEAD {head} al posto del ramo {branch}, che era {etichetta}"
     try:
         git("branch", "-f", branch, "HEAD")
+        nota += ": ref riallineato"
     except RuntimeError as exc:
         print(f"    ⚠️  HEAD pubblicato, ma il ref locale {branch} è rimasto indietro a "
               f"{etichetta[:12]}: {str(exc)[:200]}")
+        nota += ": il ref locale è rimasto indietro"
+    print(f"    ⚠️  {nota}")
+    if e is not None:
+        e.nota = " · ".join(t for t in (e.nota, nota) if t)
     return True
 
 
@@ -2902,7 +2913,7 @@ def esegui_pbi(
         # lì, su PBI-322 li ha salvati a mano una persona prima di chiudere il
         # terminale. Difetto 8 di PBI-102. Sulla strada buona non si pubblica qui:
         # a quello ci pensa `apri_pr`, una volta sola.
-        if stato in STATI_CHE_INTERROMPONO and not pubblica(branch):
+        if stato in STATI_CHE_INTERROMPONO and not pubblica(branch, e):
             dichiara(NON_PUBBLICATO)
         print(f"    tempo: {hms(e.durata_s)} "
               f"(builder {hms(e.tempi['builder'])} · gate {hms(e.tempi['gate'])} · "
