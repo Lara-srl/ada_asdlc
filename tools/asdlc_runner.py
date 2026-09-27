@@ -2536,8 +2536,11 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     if url is None:
         print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
         return ""
-    commenta_i_rapporti(url.group(0), e)
-    return url.group(0)
+    # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR esiste già
+    # e l'esito la deve nominare (PBI-377, decisione 5).
+    e.pr = url.group(0)
+    commenta_i_rapporti(e.pr, e)
+    return e.pr
 
 
 class ChiusuraFallita(RuntimeError):
