@@ -50,7 +50,8 @@ ma lancia lo stesso (ADR-0008) — vedi `asdlc_coda.avviso_domande`.
 ### `runs/tempi.csv` — il registro dei giri (versionato, è il dato su cui si fattura)
 Colonne: `run,pbi,stato,iniziato,finito,durata_s,durata_hms,builder_s,gate_s,critic_s,tentativi,revisioni,commit,pr,nota`.
 Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde, …};
-`nota` porta il motivo dello STOP o l'esito.
+`nota` porta il motivo dello STOP o l'esito. Da PBI-375 la `nota` comincia con il `motivo`
+del giro, `<motivo>: <testo> — <dettaglio>`: il motivo non ha una colonna sua.
 
 ### `runs/<run>.json` — il rapporto del giro
 - **Mentre è in corso: uno STUB** → chiavi `{run, stato:"in-corso", iniziato, pbi}` (~120 byte).
@@ -81,6 +82,21 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
     nato il ramo e contro cui si contano i commit e si legge il diff del Critic. Se il
     `fetch` non ha risposto è lo sha dell'`origin/main` che c'era, e la `nota` lo dice. I
     giri prima di PBI-374 non ce l'hanno.
+  - `motivo` — **la via d'uscita del giro** (PBI-375): una chiave della tabella chiusa
+    `USCITE` di `tools/asdlc_runner.py`, che ne dà lo `stato` e il testo in testa alla
+    `nota`. Distingue ciò che lo stato confonde: `rosso` può essere `gate-rossi` (il codice
+    sbagliato), `gate-del-rosso-guasto` (lo strumento guasto) o `eccezione-nel-giro` (il
+    runner guasto); `fermato` può essere, fra gli altri, `domanda-del-builder`,
+    `albero-sporco-all-ingresso`, `rosso-mai-visto`, `ref-diverso-da-head` o
+    `head-non-su-origin`. I motivi sono: `pbi-inesistente`, `dry-run`,
+    `albero-sporco-all-ingresso`, `origin-muto`, `builder-senza-esito`,
+    `domanda-del-builder`, `albero-sporco-dopo-igiene`, `ref-diverso-da-head`, `gate-rossi`,
+    `gate-del-rosso-guasto`, `rosso-mai-visto`, `critic-senza-esito`, `domanda-del-critic`,
+    `revisioni-esaurite`, `eccezione-nel-giro`, `fatto`, `head-non-su-origin`. Un esito
+    scritto dalla rete di `main()` — un guasto fuori dal giro, o una chiusura fallita — ha
+    `motivo` vuoto e stato `rosso`; per una chiusura fallita il motivo che stava chiudendo è
+    nella `nota`, «chiusura del giro fallita (<motivo>)». I giri prima di PBI-375 non ce
+    l'hanno.
   - `critic_saltato` (bool), `tempi.{builder,gate,critic}` (secondi), ecc.
 
 ### `runs/<run>-<PBI>-critic-<n>.md` — il rapporto di una revisione del Critic
