@@ -20,6 +20,7 @@ import fcntl
 import importlib.util
 import datetime
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -438,28 +439,31 @@ def test_il_lucchetto_tenuto_nel_worktree_ferma_il_tick(tmp_path, monkeypatch):
         assert coda.decidi(repo, albero) == coda.Occupato()
 
 
-def test_un_runner_vivo_nellalbero_ferma_il_tick_anche_senza_lucchetto(
-    tmp_path, monkeypatch
-):
-    """La rete sotto al lucchetto: chi lavora lì si vede da `/proc`.
+def test_un_processo_che_nomina_il_runner_non_occupa_lalbero(tmp_path, monkeypatch):
+    """Il lucchetto libero dice che non c'è nessun giro, chiunque lavori lì.
 
-    Il lucchetto lo prende il runner; una sessione avviata a mano no, e nemmeno
-    un giro più vecchio del lucchetto. L'unico segnale comune ai due è **dove**
-    lavorano, ed è la stessa lettura di `agenti_estranei()`.
+    Il 07/09 e due volte il 25/09 un poller o un Monitor di Claude, con la
+    cartella corrente nel worktree e `asdlc_runner` nel comando, hanno fatto
+    dire `occupato` al tick senza essere un runner (difetto 47 di PBI-102). Qui
+    il processo è vero: un `python3` che dorme dentro l'albero e ha
+    `tools/asdlc_runner.py` fra gli argomenti, col lucchetto che nessuno tiene.
     """
     repo = scrivi_coda(tmp_path, "- PBI-337\n")
     albero = tmp_path / "albero"
-    albero.mkdir()
-    finto_proc = tmp_path / "proc"
-    (finto_proc / "4242").mkdir(parents=True)
-    (finto_proc / "4242" / "cwd").symlink_to(albero)
-    (finto_proc / "4242" / "cmdline").write_bytes(
-        b"python3\x00tools/asdlc_runner.py\x00PBI-337\x00"
-    )
-    monkeypatch.setattr(coda, "PROC", finto_proc)
-    monkeypatch.setattr(coda, "esegui", nessun_comando)
+    (albero / "runs").mkdir(parents=True)
+    (albero / "runs" / ".runner.lock").touch()
+    monkeypatch.setattr(coda, "esegui", mondo())
 
-    assert coda.decidi(repo, albero) == coda.Occupato()
+    impostore = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)", "tools/asdlc_runner.py"],
+        cwd=albero,
+    )
+    try:
+        assert coda.giro_in_corso(albero) is False
+        assert coda.decidi(repo, albero) != coda.Occupato()
+    finally:
+        impostore.kill()
+        impostore.wait()
 
 
 def test_un_gh_che_non_risponde_non_produce_lancia(tmp_path, monkeypatch):
