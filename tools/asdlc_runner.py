@@ -2426,9 +2426,10 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
 
     Un commento che non parte non ferma niente: la PR è aperta, i file restano,
     e la nota dice quali revisioni mancano e perché (`ADR-0008`). Vale anche per
-    un `gh` in timeout e per un file che non si legge, **senza alzare**: da qui
-    un'eccezione arriverebbe a `main()`, che registra `rosso` e senza PR un giro
-    già pubblicato."""
+    un `gh` in timeout e per un file che non si legge, **senza alzare**: qui la
+    nota nomina le revisioni mancate, mentre un'eccezione arriverebbe a
+    `esegui_pbi()` come «dopo la chiusura» generico, e i commenti dopo il primo
+    non partirebbero."""
     mancate: list[str] = []
     ragione = ""
 
@@ -2477,8 +2478,9 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     diciannove commit indietro, e la PR #237 è nata su un `(RED)` con il giro
     `fatto`. Se i due sha non coincidono il giro chiude `head-non-su-origin`, e
     la nota li nomina. Se il remoto non risponde, cosa ci sia sopra non si sa: è la stessa promessa
-    non verificata, e chiude allo stesso modo — **senza alzare**, perché
-    un'eccezione qui registrerebbe `rosso` e zero commit un giro già pubblicato.
+    non verificata, e chiude allo stesso modo — **senza alzare**: un'eccezione
+    che sale a `esegui_pbi()` si scrive soltanto in fondo alla nota, e non
+    produce lo stato che dice cosa c'è su `origin`.
     """
     if not pubblica(branch, e):
         # L'esito resta quello che era: un push mancato non disfa il giro, ma la
@@ -3245,8 +3247,18 @@ def esegui_pbi(
         return e
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
+    # Dopo `chiudi()` l'esito esiste, e un'eccezione non lo sostituisce: gli si
+    # aggiunge in fondo alla nota. Usciva da qui, e la rete di `main()` scriveva
+    # un `rosso` nuovo al posto del giro chiuso, con stato, commit, rapporti del
+    # Critic e invocazioni persi (difetto 50). Il `try` è per l'imprevisto: i
+    # guasti della pubblicazione hanno il loro stato dentro `apri_pr()`.
     if con_pr:
-        e.pr = apri_pr(pbi, pbi_path, branch, e)
+        try:
+            e.pr = apri_pr(pbi, pbi_path, branch, e)
+        except Exception as exc:  # noqa: BLE001 — si aggiunge all'esito, non si tace
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            dichiara(f"dopo la chiusura: {type(exc).__name__}: {exc}"[:300])
         if e.pr:
             print(f"    PR aperta: {e.pr}")
     return e
