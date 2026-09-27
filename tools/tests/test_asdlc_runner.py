@@ -7137,6 +7137,42 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
             f"HTTP 502: Bad Gateway — i file restano in {runner.LOG_DIR}"), esito.nota
         assert "dopo la chiusura" not in esito.nota
 
+    def test_guardia_un_eccezione_prima_dellesito_arriva_ancora_alla_rete_di_main(
+            self, monkeypatch, git_finto, tmp_path):
+        """Guardia dichiarata: la rete di `main()` resta l'ultima difesa per ciò che
+        alza **prima** che un esito esista, come `crea_branch()`. Due PBI in fila:
+        il primo chiude `fatto` e `apri_pr()` alza, e l'eccezione gli si aggiunge;
+        il secondo alza in `crea_branch()`, e la rete scrive il suo `rosso`."""
+        self._giro_fatto(monkeypatch)
+
+        def apri_pr_che_alza(pbi, pbi_path, branch, e):
+            raise ValueError("corpo della PR illeggibile")
+
+        def crea_branch(pbi, base):
+            if pbi == "PBI-377":
+                raise ValueError("nome del ramo illeggibile")
+            return f"pbi/{pbi.lower()}"
+
+        monkeypatch.setattr(runner, "apri_pr", apri_pr_che_alza)
+        monkeypatch.setattr(runner, "crea_branch", crea_branch)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv",
+                            ["asdlc_runner", "PBI-102", "PBI-377", "--in-primo-piano"])
+
+        runner.main()
+
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        primo, secondo = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert (primo["pbi"], primo["stato"]) == ("PBI-102", "fatto")
+        assert primo["nota"].endswith(
+            "dopo la chiusura: ValueError: corpo della PR illeggibile"), primo["nota"]
+        assert (secondo["pbi"], secondo["stato"]) == ("PBI-377", "rosso")
+        assert secondo["nota"] == "eccezione nel runner: nome del ramo illeggibile"
+
 
 class TestUnPushCheScadeENonPubblicato:
     """PBI-377, difetto 57 di `PBI-102`, decisione 2. `git()` passa per `esegui()`,
