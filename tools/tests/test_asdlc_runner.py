@@ -6806,3 +6806,10 @@ class TestOgniUscitaHaIlSuoMotivo:
         """Decisione 5: il giorno in cui si aggiunge un'uscita alla tabella senza
         il suo caso nel test di sopra, fallisce questo."""
         assert set(getattr(runner, "USCITE", {})) == set(USCITE_DEL_GIRO)
+
+    def test_un_motivo_fuori_tabella_alza_value_error(self):
+        """Decisione 2: la tabella è chiusa come il vocabolario delle cause. Un
+        motivo che non c'è è un errore di chi scrive il runner, e deve dirlo con
+        il nome del motivo, non con un `KeyError` muto."""
+        with pytest.raises(ValueError, match="motivo-inventato"):
+            runner.uscita("motivo-inventato")
