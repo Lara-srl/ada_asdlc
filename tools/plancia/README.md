@@ -119,7 +119,8 @@ Aggiornato **a ogni fase**, quindi ottimo per il tempo reale:
     critic … NON PRONTO
   builder — giro 2
     …
-  → fermato (domanda dell'agente: …)        # oppure: → fermato (albero di lavoro sporco: …)
+  → fermato (domanda-del-builder: domanda dell'agente — …)
+                                  # oppure: → fermato (albero-sporco-dopo-igiene: …)
 ```
 Nota: durante una fase builder il log può restare **vuoto** finché la fase non chiude — non
 è un blocco, è normale.
