@@ -2327,6 +2327,35 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         assert self.HEAD in esito.nota
 
 
+    def test_se_ls_remote_scade_chiude_head_non_su_origin_senza_alzare(self, monkeypatch):
+        """PBI-377, decisione 3. `git()` lascia salire `subprocess.TimeoutExpired`, e
+        l'`except` della verifica intercettava solo `RuntimeError`: il remoto che
+        non risponde in tempo usciva da `apri_pr()`, e il giro restava `fatto` con
+        una testa su origin che nessuno aveva verificato (difetto 57). Chiude come
+        il remoto che risponde con un errore, come fa `base_del_giro()`."""
+        self._git(monkeypatch, head=self.HEAD, ref=self.HEAD)
+        finto = runner.git
+
+        def _g(*args: str) -> str:
+            if args[:1] == ("ls-remote",):
+                raise subprocess.TimeoutExpired(["git", *args], 120)
+            return finto(*args)
+
+        monkeypatch.setattr(runner, "git", _g)
+        comandi: list[list[str]] = []
+        monkeypatch.setattr(runner, "esegui", lambda cmd, cwd, timeout=0:
+                            comandi.append(cmd) or (0, "https://x/pull/237\n"))
+        esito = runner.Esito("PBI-358", "fatto")
+
+        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+
+        assert pr == ""
+        assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
+        assert esito.stato == "fermato"
+        assert esito.motivo == "head-non-su-origin"
+        assert "non verificabile" in esito.nota, esito.nota
+
+
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
 
