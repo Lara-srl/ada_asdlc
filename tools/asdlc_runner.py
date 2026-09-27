@@ -2477,10 +2477,13 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     Su PBI-358 (difetto 30) il push è riuscito e ha mandato un ref fermo
     diciannove commit indietro, e la PR #237 è nata su un `(RED)` con il giro
     `fatto`. Se i due sha non coincidono il giro chiude `head-non-su-origin`, e
-    la nota li nomina. Se il remoto non risponde, cosa ci sia sopra non si sa: è la stessa promessa
-    non verificata, e chiude allo stesso modo — **senza alzare**: un'eccezione
-    che sale a `esegui_pbi()` si scrive soltanto in fondo alla nota, e non
-    produce lo stato che dice cosa c'è su `origin`.
+    la nota li nomina. Se il remoto non risponde — un errore o un **timeout**,
+    come in `base_del_giro()` — cosa ci sia sopra non si sa: è la stessa promessa
+    non verificata, e chiude allo stesso modo, con la testa «non verificabile» e
+    **senza alzare**: un'eccezione che sale a `esegui_pbi()` si scrive soltanto
+    in fondo alla nota, e non produce lo stato che dice cosa c'è su `origin`.
+    Un push che scade non arriva fin qui: `pubblica()` torna `False`, e la nota
+    porta `NON_PUBBLICATO` con `PUSH_SCADUTO` (PBI-377, decisioni 2 e 3).
     """
     if not pubblica(branch, e):
         # L'esito resta quello che era: un push mancato non disfa il giro, ma la
@@ -2492,7 +2495,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         head = git("rev-parse", "HEAD")
         fuori = git("ls-remote", REMOTO, f"refs/heads/{branch}").split()
         su_origin = fuori[0] if fuori else ""
-    except RuntimeError as exc:
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"    ⚠️  {REMOTO} non verificabile: {str(exc)[:200]}")
     if su_origin is None or su_origin != head:
         visto = ("non verificabile" if su_origin is None
