@@ -6813,3 +6813,39 @@ class TestOgniUscitaHaIlSuoMotivo:
         il nome del motivo, non con un `KeyError` muto."""
         with pytest.raises(ValueError, match="motivo-inventato"):
             runner.uscita("motivo-inventato")
+
+
+class TestUnaChiusuraCheFallisceNonCambiaLoStato:
+    """PBI-375, decisione 3, difetto 48 di `PBI-102`. Un giro `sospeso` la cui
+    chiusura fallisce **una volta** — un push che non passa al primo tentativo —
+    finiva nell'`except` del giro, che richiudeva come `rosso` «eccezione nel
+    giro»: la seconda chiusura riusciva, e lo stato vero si perdeva. Lo ha
+    trovato il Critic su #272 (`PBI-369`)."""
+
+    def test_un_sospeso_con_pubblica_che_alza_una_volta_sale_con_il_suo_motivo(
+            self, monkeypatch, git_finto):
+        monkeypatch.setattr(runner, "esegui", agente_finto(
+            {"builder": FATTO, "critic": fermati("la 0011 tocca pratiche: la eseguo?")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        tentativi: list[str] = []
+
+        def pubblica_che_alza_una_volta(branch, e=None):
+            tentativi.append(branch)
+            if len(tentativi) == 1:
+                raise subprocess.TimeoutExpired(["git", "push"], 120)
+            return True
+
+        monkeypatch.setattr(runner, "pubblica", pubblica_che_alza_una_volta)
+
+        with pytest.raises(RuntimeError, match="chiusura del giro fallita") as alzata:
+            runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert getattr(alzata.value, "motivo", None) == "domanda-del-critic", (
+            "la chiusura sale con il motivo che stava chiudendo, non come rosso"
+        )
+        assert "domanda-del-critic" in str(alzata.value)
+        assert "TimeoutExpired" in str(alzata.value), "il messaggio dice perché"
+        assert len(tentativi) == 1, (
+            "la chiusura gira una volta: una seconda che riesce cancella lo stato vero"
+        )
