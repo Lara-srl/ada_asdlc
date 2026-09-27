@@ -6480,3 +6480,51 @@ class TestUnaBasePerGiro:
             "il Critic legge il diff dalla base del giro"
         )
         assert "origin/main" not in prompt_del_critic[0]
+
+    HEAD = "c0ffee0000000000000000000000000000000374"
+    ETICHETTA = "bbec6a4000000000000000000000000000000374"
+
+    def _git_col_ref_staccato(self, monkeypatch, *, ramo: str = "pbi/pbi-102"):
+        """Un git in cui `refs/heads/<ramo>` e `HEAD` sono due commit diversi, come
+        su PBI-358 dopo il pre-flight rieseguito a giro partito (difetto 30)."""
+        chiamate: list[tuple[str, ...]] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args == ("rev-parse", runner.BASE):
+                return SHA_DELLA_BASE
+            if args == ("rev-parse", "HEAD"):
+                return self.HEAD
+            if args == ("rev-parse", f"refs/heads/{ramo}"):
+                return self.ETICHETTA
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _git)
+        return chiamate
+
+    def test_con_il_ref_diverso_da_head_i_gate_non_girano_e_il_giro_si_ferma(
+            self, monkeypatch, tmp_path):
+        """Decisione 4. Un gate che misura un `HEAD` diverso dal ramo misura un
+        lavoro che il ramo non contiene: oggi i gate girano lo stesso e il giro
+        chiude `fatto`, e la divergenza si scopre solo alla pubblicazione."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        self._git_col_ref_staccato(monkeypatch)
+        girati: list[str] = []
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate",
+                            lambda attivi, base=None: girati.append("gate") or [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: girati.append("rosso") or [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, *a, **k: True)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert girati == [], "con il ref del ramo diverso da HEAD i gate non girano"
+        assert esito.stato == "fermato", f"chiuso {esito.stato}: {esito.nota}"
+        assert self.HEAD in esito.nota and self.ETICHETTA in esito.nota, (
+            "la nota nomina i due sha, come la diagnosi di apri_pr() per origin"
+        )
