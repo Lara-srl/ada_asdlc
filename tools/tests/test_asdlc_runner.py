@@ -4389,10 +4389,10 @@ class TestIlGiroSiApreInTestOnly:
     def test_il_giro_apre_la_fase_e_la_chiude(self, tmp_path, monkeypatch):
         """Il PBI non si esegue mai senza lucchetto: aprirlo è del runner."""
         visto: dict[str, object] = {}
-        monkeypatch.setattr(runner, "trova_pbi", lambda pbi: tmp_path / "backlog" / f"{pbi}.md")
+        monkeypatch.setattr(runner, "trova_pbi", lambda pbi, base: tmp_path / "backlog" / f"{pbi}.md")
         monkeypatch.setattr(runner, "REPO", tmp_path)
         monkeypatch.setattr(runner, "git", lambda *a: "")
-        monkeypatch.setattr(runner, "crea_branch", lambda pbi: f"pbi/{pbi.lower()}")
+        monkeypatch.setattr(runner, "crea_branch", lambda pbi, base: f"pbi/{pbi.lower()}")
         monkeypatch.setattr(runner, "apri_la_fase", lambda: visto.__setitem__("aperta", True))
         monkeypatch.setattr(runner, "chiudi_la_fase", lambda: visto.__setitem__("chiusa", True))
         monkeypatch.setattr(runner, "esegui",
@@ -6282,7 +6282,7 @@ class TestIlRapportoDelCriticArrivaIntero:
                  "test": "tools/tests/test_x.py::test_guardia",
                  "mutante": "tools/asdlc_runner.py:10  `==` → `!=`", "tipo": "AssertionError"}
 
-        def rosso(visti, morsi):
+        def rosso(visti, morsi, base=None):
             morsi.append(morso)
             return []
 
@@ -6308,7 +6308,7 @@ class TestIlRapportoDelCriticArrivaIntero:
         monkeypatch.setattr(runner, "esegui",
                             agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
-        monkeypatch.setattr(runner, "gate_del_rosso", lambda visti, morsi: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda visti, morsi, base=None: [])
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
