@@ -6849,3 +6849,39 @@ class TestUnaChiusuraCheFallisceNonCambiaLoStato:
         assert len(tentativi) == 1, (
             "la chiusura gira una volta: una seconda che riesce cancella lo stato vero"
         )
+
+
+class TestLAvvisoDellaBaseStaNellaNotaDiOgniUscita:
+    """PBI-375, decisione 6. Se il `fetch` iniziale non risponde, `base_del_giro()`
+    di `PBI-374` restituisce un avviso, e la sua decisione 3 lo vuole «a schermo e
+    nella nota». Dopo 374 `pbi-inesistente` e `albero-sporco-all-ingresso` escono
+    con una nota fissa, e l'avviso lo vedeva solo lo schermo (nota del Critic su
+    #287)."""
+
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_con_il_fetch_che_non_risponde_l_avviso_e_nella_nota(self, monkeypatch, motivo):
+        _, percorri = USCITE_DEL_GIRO[motivo]
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+        git_del_caso = runner.git
+
+        def fetch_muto(*args: str) -> str:
+            if args[:1] == ("fetch",):
+                raise RuntimeError("git fetch → fatal: unable to access")
+            return git_del_caso(*args)
+
+        monkeypatch.setattr(runner, "git", fetch_muto)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        avviso = f"fetch di {runner.BASE} non riuscito"
+        assert esito.nota.count(avviso) == 1, (
+            f"la nota «{esito.nota}» di {motivo} deve dire una volta che il giro è "
+            "partito dalla base che c'era"
+        )
