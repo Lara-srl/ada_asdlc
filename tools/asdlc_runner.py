@@ -2483,6 +2483,11 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     return url.group(0)
 
 
+class OriginMuto(RuntimeError):
+    """`origin` non ha risposto alla domanda sui rami già presi: il nome del
+    branch non si può scegliere (difetto 52 di PBI-102)."""
+
+
 def crea_branch(pbi: str, base: str) -> str:
     """Il branch del PBI, sempre dalla base del giro: lo sha che `base_del_giro`
     ha preso da `origin/main` appena aggiornato.
@@ -2505,8 +2510,19 @@ def crea_branch(pbi: str, base: str) -> str:
 
     Qui non si fa un altro `fetch`: con due, un merge fra l'uno e l'altro faceva
     leggere il PBI su un commit e nascere il ramo da un altro (PBI-374).
+
+    Se `origin` non risponde alla domanda sui nomi presi si alza `OriginMuto`:
+    la domanda è sul presente, e senza risposta non si sa. Non si inventa un
+    nome e non si ripiega sui rami locali, che sarebbe scegliere una fonte in
+    silenzio (PBI-374, decisione 7).
     """
-    branch = nome_libero(pbi, rami_su_origin(pbi) | rami_locali(pbi))
+    try:
+        su_origin = rami_su_origin(pbi)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        raise OriginMuto(f"{REMOTO} non ha risposto a ls-remote, e senza risposta non si "
+                         f"sa se il nome del ramo è libero: ramo non creato "
+                         f"({str(exc)[:120]})") from exc
+    branch = nome_libero(pbi, su_origin | rami_locali(pbi))
     git("switch", "-c", branch, base)
     return branch
 
@@ -2863,8 +2879,9 @@ def esegui_pbi(
     # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
     if trovati := residui(e.inventario["inizio"], pbi):
         print(f"    residui dei giri prima (non li tocco): {', '.join(trovati)}")
-    branch = crea_branch(pbi, base)
-    apri_la_fase()
+    # Il ramo nasce dopo `chiudi()`, perché anche un ramo che non nasce passi da
+    # lì (difetto 52): finché è `None` non c'è niente da pubblicare.
+    branch: str | None = None
 
     def conta_commit() -> int:
         """`<base>..HEAD` — lo sha da cui il ramo è nato — e non `main..HEAD`: da
@@ -2895,7 +2912,7 @@ def esegui_pbi(
                                                for k in ("montati", "smontati")}
         # Contare vale anche quando la strada che lascia il residuo non si riesce a
         # riprodurre: un albero appeso che si vede nella nota non si perde in /tmp.
-        resti = lasciato(e.inventario["inizio"], e.inventario["fine"], branch)
+        resti = lasciato(e.inventario["inizio"], e.inventario["fine"], branch or "")
         if (persi := conto["montati"] - conto["smontati"]) > 0:
             resti.append(f"{persi} albero usa e getta montato e non smontato" if persi == 1
                          else f"{persi} alberi usa e getta montati e non smontati")
@@ -2912,13 +2929,21 @@ def esegui_pbi(
         # worktree vuol dire non farli guardare a nessuno: su PBI-320 sono rimasti
         # lì, su PBI-322 li ha salvati a mano una persona prima di chiudere il
         # terminale. Difetto 8 di PBI-102. Sulla strada buona non si pubblica qui:
-        # a quello ci pensa `apri_pr`, una volta sola.
-        if stato in STATI_CHE_INTERROMPONO and not pubblica(branch, e):
+        # a quello ci pensa `apri_pr`, una volta sola. E un ramo che non è nato,
+        # perché `origin` non ha risposto, non ha niente da pubblicare.
+        if stato in STATI_CHE_INTERROMPONO and branch and not pubblica(branch, e):
             dichiara(NON_PUBBLICATO)
         print(f"    tempo: {hms(e.durata_s)} "
               f"(builder {hms(e.tempi['builder'])} · gate {hms(e.tempi['gate'])} · "
               f"critic {hms(e.tempi['critic'])})")
         return e
+
+    try:
+        branch = crea_branch(pbi, base)
+    except OriginMuto as muto:
+        print(f"    ⚠️  {muto}")
+        return chiudi("fermato", str(muto))
+    apri_la_fase()
 
     # Il giro sta in un `try` perché ogni strada d'uscita passi da `chiudi()`:
     # un'eccezione — il timeout di un gate, un guasto dentro il gate del rosso —
