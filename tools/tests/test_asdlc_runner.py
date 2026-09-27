@@ -65,6 +65,11 @@ def elenco_backlog() -> str:
     del PBI (difetto 7), quindi ogni finto `git` deve saperlo dire."""
     return "\n".join(f"backlog/{f.name}" for f in sorted((REPO / "backlog").glob("*.md")))
 
+# Lo sha a cui il finto `git` risolve il ramo di base: il giro lo prende una volta
+# (PBI-374), e da lì in poi ogni lettura deve nominare questo e non `origin/main`.
+SHA_DELLA_BASE = "ba5e374000000000000000000000000000000001"
+
+
 @pytest.fixture
 def git_finto(monkeypatch):
     """Registra i comandi git invece di eseguirli, e risponde il minimo indispensabile."""
@@ -72,6 +77,8 @@ def git_finto(monkeypatch):
 
     def _git(*args: str) -> str:
         chiamate.append(args)
+        if args == ("rev-parse", runner.BASE):
+            return SHA_DELLA_BASE
         if args[:2] == ("status", "--porcelain"):
             return ""  # albero pulito
         if args[:2] == ("rev-list", "--count"):
@@ -233,7 +240,7 @@ class TestLEsitoVieneDallaChiamata:
                         else ""),
         )
         gate: list[str] = []
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: gate.append("gate") or [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: gate.append("gate") or [])
         monkeypatch.setattr(runner, "esegui", agente_finto(esiti, testi))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -302,7 +309,7 @@ class TestSenzaChiamataLoStatoESenzaEsito:
 
         monkeypatch.setattr(runner, "git", _git)
         gate: list[str] = []
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: gate.append("gate") or [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: gate.append("gate") or [])
         agente = agente_finto(esiti, testi, codice=codice)
         monkeypatch.setattr(runner, "esegui", agente)
 
@@ -455,7 +462,7 @@ class TestIlSenzaEsitoDiceLOraDelReset:
     def test_la_nota_nomina_il_limite_e_l_ora(self, monkeypatch, tmp_path, esiti, testi, ora):
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "git", git_del_senza_esito)
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "esegui", agente_finto(esiti, testi, codice=1))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -931,7 +938,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
             return runner.Verdetto("sospeso", "chi decide se la migrazione si esegue?", "rapporto")
 
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "revisione_critica", critic_sospende)
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -950,7 +957,7 @@ class TestIlSospesoChiudeAlPrimoGiro:
         chiude riscrivendo il PBI, la seconda rispondendo.
         """
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
             lambda p, **_: runner.Verdetto("sospeso", "la migrazione si esegue?", "rapporto"),
@@ -976,7 +983,7 @@ class TestIlBranchNasceDaOriginMain:
         `origin/main` non tocca nessun branch locale e non può collidere.
         """
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
@@ -986,8 +993,9 @@ class TestIlBranchNasceDaOriginMain:
         comandi = [" ".join(c) for c in git_finto]
         crea = next(i for i, c in enumerate(comandi) if c.startswith("switch -c pbi/pbi-102"))
 
-        assert comandi[crea] == "switch -c pbi/pbi-102 origin/main", (
-            "il punto di partenza va scritto nel comando, non lasciato a «dove mi trovo»"
+        assert comandi[crea] == f"switch -c pbi/pbi-102 {SHA_DELLA_BASE}", (
+            "il punto di partenza va scritto nel comando, non lasciato a «dove mi trovo», "
+            "ed è lo sha della base del giro (PBI-374)"
         )
         assert any(c.startswith("fetch") for c in comandi[:crea]), (
             "un origin/main vecchio è lo stesso difetto con un nome diverso"
@@ -1002,7 +1010,7 @@ class TestIlBranchNasceDaOriginMain:
         non lo si estrae più, nessuno lo aggiorna. Contare `main..HEAD` gonfierebbe
         i commit del PBI con quelli che main ha ricevuto nel frattempo."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
@@ -1011,7 +1019,7 @@ class TestIlBranchNasceDaOriginMain:
 
         conteggi = [c for c in git_finto if c[:2] == ("rev-list", "--count")]
         assert conteggi, "il conteggio dei commit non è stato fatto"
-        assert all("origin/main..HEAD" in c for c in conteggi)
+        assert all(f"{SHA_DELLA_BASE}..HEAD" in c for c in conteggi)
 
 
 class TestIlPbiSiCercaSuOriginMain:
@@ -1040,7 +1048,7 @@ class TestIlPbiSiCercaSuOriginMain:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
@@ -1061,25 +1069,43 @@ class TestIlPbiSiCercaSuOriginMain:
         assert esito.stato == "saltato"
         assert "inesistente" in esito.nota
 
-    def test_senza_rete_si_ripiega_sullalbero_estratto(self, monkeypatch, capsys):
+    def test_senza_rete_si_parte_dall_origin_main_che_si_ha_e_lo_si_dichiara(
+            self, monkeypatch, capsys):
         """Il fetch che non parte non è una ragione per non fare il PBI che si ha
-        già in casa: si ripiega, e lo si dice."""
+        già in casa: si prende lo sha dell'`origin/main` che c'è, e lo si dice a
+        schermo e nella nota (PBI-374, decisione 3). Non si cerca nell'albero
+        estratto: il ramo nascerebbe comunque da `origin/main`, e sarebbero di
+        nuovo due fonti."""
+        chiamate: list[tuple[str, ...]] = []
 
         def _git(*args: str) -> str:
-            if args[:1] == ("fetch",) or args[:2] == ("ls-tree", "--name-only"):
+            chiamate.append(args)
+            if args[:1] == ("fetch",):
                 raise RuntimeError("Could not resolve host: github.com")
-            if args[:2] == ("status", "--porcelain"):
-                return ""
+            if args == ("rev-parse", "origin/main"):
+                return SHA_DELLA_BASE
             if args[:2] == ("rev-list", "--count"):
                 return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok"))
 
-        trovato = runner.trova_pbi("PBI-102")
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-        assert trovato is not None and trovato.name.startswith("PBI-102-")
+        assert esito.stato == "fatto", esito.nota
+        assert ("ls-tree", "--name-only", SHA_DELLA_BASE, "backlog/") in chiamate, (
+            "il PBI si cerca sullo sha dell'origin/main che si ha, non nell'albero estratto"
+        )
         assert "origin/main" in capsys.readouterr().out
+        assert "fetch" in esito.nota and "origin/main" in esito.nota, (
+            "una base presa senza fetch si dichiara anche nella nota, non solo a schermo"
+        )
 
 
 class TestIlRiepilogoNonSommaStatiDiversi:
@@ -1131,7 +1157,7 @@ class TestLIgieneGuardaTuttoLAlbero:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
@@ -1202,7 +1228,7 @@ class TestLaSessioneRuotaFraLeRevisioni:
             comandi.append(cmd)
             return agente(cmd, cwd, **k)
 
-        def gira_gate_finto(attivi):
+        def gira_gate_finto(attivi, base=None):
             gate["chiamate"] += 1
             return [("pytest", "1 failed")] if gate["chiamate"] == 1 else []
 
@@ -1362,7 +1388,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
                 return elenco_backlog()
             return ""
 
-        def _gate(attivi):
+        def _gate(attivi, base=None):
             eseguiti.append("gate")
             return rimasti_gate.pop(0) if rimasti_gate else []
 
@@ -1440,7 +1466,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
@@ -1474,7 +1500,7 @@ class TestUnGiroSpesoACommittareNonEUnGateRosso:
             return runner.Verdetto("pass", "", "")
 
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "revisione_critica", _critic)
         monkeypatch.setattr(
             runner, "git",
@@ -1516,7 +1542,7 @@ class TestUnFermatoDiceQuantiCommitHaFatto:
 
         monkeypatch.setattr(runner, "git", _git)
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": esito_builder}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "ok")
         )
@@ -1569,7 +1595,7 @@ class TestDiUnGateRossoRestaLaRagione:
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(
             runner, "gira_gate",
-            lambda attivi: [("pytest", "E   assert 496.51 == 609.00\ntest_riga_12 FAILED")],
+            lambda attivi, base=None: [("pytest", "E   assert 496.51 == 609.00\ntest_riga_12 FAILED")],
         )
 
     def test_la_coda_delloutput_finisce_nel_rapporto(self, monkeypatch, tmp_path):
@@ -1768,7 +1794,7 @@ class TestSiPuoSaltareIlCritic:
     @pytest.fixture
     def builder_verde(self, monkeypatch):
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
             lambda *a, **k: pytest.fail("il Critic non deve girare con --senza-critic"),
@@ -1796,7 +1822,7 @@ class TestSiPuoSaltareIlCritic:
     def test_senza_il_flag_il_critic_gira_come_sempre(self, monkeypatch, git_finto):
         """Il default non si sposta: chi non chiede niente ha i tre gate."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         giri = {"critic": 0}
 
         def critic(_p, **_):
@@ -1954,8 +1980,8 @@ class TestIlBranchLoPubblicaIlRunner:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        assert runner.crea_branch("PBI-322") == "pbi/pbi-322-giro2"
-        assert ("switch", "-c", "pbi/pbi-322-giro2", "origin/main") in chiamate
+        assert runner.crea_branch("PBI-322", SHA_DELLA_BASE) == "pbi/pbi-322-giro2"
+        assert ("switch", "-c", "pbi/pbi-322-giro2", SHA_DELLA_BASE) in chiamate
 
     def test_crea_branch_conta_anche_i_rami_locali(self, monkeypatch):
         """Difetto 29, misurato su PBI-335 la sera del 02/09/2026.
@@ -1980,7 +2006,7 @@ class TestIlBranchLoPubblicaIlRunner:
             return ""
 
         monkeypatch.setattr(runner, "git", _git)
-        assert runner.crea_branch("PBI-335") == "pbi/pbi-335-giro2", (
+        assert runner.crea_branch("PBI-335", SHA_DELLA_BASE) == "pbi/pbi-335-giro2", (
             "un nome che `switch -c` non può prendere è un nome occupato, "
             "qualunque sia il ref che lo occupa"
         )
@@ -2004,7 +2030,7 @@ class TestIlBranchLoPubblicaIlRunner:
     def test_un_giro_sospeso_pubblica_lo_stesso_il_suo_branch(self, monkeypatch, git_finto):
         """Il lavoro c'è: sta su un ramo che nessuno vedrà mai, se resta locale."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica",
             lambda p, **_: runner.Verdetto("sospeso", "chi decide?", "rapporto"),
@@ -2018,7 +2044,7 @@ class TestIlBranchLoPubblicaIlRunner:
     def test_un_giro_fatto_non_pubblica_due_volte(self, monkeypatch, git_finto):
         """Sulla strada buona a pubblicare è `apri_pr`, e una volta sola."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "rapporto")
         )
@@ -2214,7 +2240,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
 
         monkeypatch.setattr(runner, "git", _g)
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "revisione_critica",
                             lambda p, **_: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
         return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
@@ -3734,7 +3760,7 @@ class TestIlGateDelRossoStaNelGiro:
                         else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
                         else ""),
         )
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(
@@ -4631,7 +4657,7 @@ class TestIComandiPortanoIlServerDellEsito:
         self, monkeypatch, git_finto, tmp_path, ruolo
     ):
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
         monkeypatch.setattr(runner, "esegui", agente)
 
@@ -4965,7 +4991,7 @@ class TestITestCheMordonoFinisconoNelRapporto:
                         else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
                         else ""),
         )
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
         monkeypatch.setattr(runner, "pubblica", lambda branch: True)
         monkeypatch.setattr(runner, "revisione_critica",
@@ -5516,12 +5542,12 @@ class TestLeSoglieEIPercorsiVengonoDaAsdlcToml:
         assert runner.venv_sul_path() == str(bin_venv)
 
     def test_la_cartella_del_backlog_segue_il_toml(self, configura, git_finto):
-        """`trova_pbi` chiede a `origin/main` l'elenco di **quella** cartella."""
+        """`trova_pbi` chiede alla base del giro l'elenco di **quella** cartella."""
         configura(toml_di_prova(cartella="storie"))
 
-        runner.trova_pbi("PBI-102")
+        runner.trova_pbi("PBI-102", SHA_DELLA_BASE)
 
-        assert ("ls-tree", "--name-only", "origin/main", "storie/") in git_finto
+        assert ("ls-tree", "--name-only", SHA_DELLA_BASE, "storie/") in git_finto
 
 
 class TestIlRamoDiBaseVieneDaAsdlcToml:
@@ -5534,31 +5560,33 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
     def su_master(self, configura):
         configura(toml_di_prova(base="origin/master"))
 
-    def test_crea_branch_ramifica_dal_ramo_del_toml(self, su_master, git_finto):
-        assert runner.crea_branch("PBI-102") == "pbi/pbi-102"
-        assert ("fetch", "origin", "master") in git_finto
-        assert ("switch", "-c", "pbi/pbi-102", "origin/master") in git_finto
+    def test_crea_branch_ramifica_dalla_base_senza_un_altro_fetch(self, su_master, git_finto):
+        assert runner.crea_branch("PBI-102", SHA_DELLA_BASE) == "pbi/pbi-102"
+        assert not [c for c in git_finto if c[:1] == ("fetch",)], (
+            "il fetch del giro è uno, quello che prende la base (PBI-374)"
+        )
+        assert ("switch", "-c", "pbi/pbi-102", SHA_DELLA_BASE) in git_finto
 
-    def test_trova_pbi_cerca_il_file_sul_ramo_del_toml(self, su_master, git_finto):
-        runner.trova_pbi("PBI-102")
+    def test_la_base_del_giro_si_prende_dal_ramo_del_toml(self, su_master, git_finto):
+        assert runner.base_del_giro() == (SHA_DELLA_BASE, "")
 
-        assert ("fetch", "origin", "master") in git_finto
-        assert ("ls-tree", "--name-only", "origin/master", "backlog/") in git_finto
+        assert git_finto == [("fetch", "origin", "master"), ("rev-parse", "origin/master")]
 
     def test_un_giro_intero_non_nomina_mai_origin_main(self, su_master, git_finto, monkeypatch):
         """Il conteggio dei commit, l'elenco dei file e il gate del rosso: sono
         le letture dentro `esegui_pbi`, e si guardano da fuori tutte insieme."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(
             runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "PASS"))
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
         assert esito.stato == "fatto"
-        assert ("rev-list", "--count", "origin/master..HEAD") in git_finto
-        assert ("rev-list", "--reverse", "origin/master..HEAD") in git_finto
-        assert ("diff", "--name-only", "origin/master...HEAD") in git_finto
+        assert ("rev-parse", "origin/master") in git_finto
+        assert ("rev-list", "--count", f"{SHA_DELLA_BASE}..HEAD") in git_finto
+        assert ("rev-list", "--reverse", f"{SHA_DELLA_BASE}..HEAD") in git_finto
+        assert ("diff", "--name-only", f"{SHA_DELLA_BASE}...HEAD") in git_finto
         assert not [c for c in git_finto if any("origin/main" in arg for arg in c)], (
             "una lettura è rimasta sul ramo scritto a mano"
         )
@@ -5634,20 +5662,10 @@ class TestLIdEIlNomeFileDelPbiStannoInUnPostoSolo:
 
         monkeypatch.setattr(runner, "git", _git)
 
-        assert runner.trova_pbi("US-7") == runner.REPO / "backlog" / "US-7-somma.md"
-        assert runner.trova_pbi("PBI-7") is None, "non è un id di questo progetto"
-
-        # E il ripiego sull'albero estratto, quando `origin` non risponde.
-        (tmp_path / "backlog").mkdir()
-        (tmp_path / "backlog" / "US-7-somma.md").write_text("# US-7\n", encoding="utf-8")
-        monkeypatch.setattr(runner, "REPO", tmp_path)
-
-        def _git_muto(*args):
-            raise RuntimeError("origin non risponde")
-
-        monkeypatch.setattr(runner, "git", _git_muto)
-
-        assert runner.trova_pbi("US-7") == tmp_path / "backlog" / "US-7-somma.md"
+        assert (runner.trova_pbi("US-7", SHA_DELLA_BASE)
+                == runner.REPO / "backlog" / "US-7-somma.md")
+        assert runner.trova_pbi("PBI-7", SHA_DELLA_BASE) is None, (
+            "non è un id di questo progetto")
 
     def test_il_ramo_del_pbi_segue_il_prefisso(self, configura, git_finto):
         assert runner.nome_libero("PBI-322", set()) == "pbi/pbi-322"
@@ -5657,10 +5675,10 @@ class TestLIdEIlNomeFileDelPbiStannoInUnPostoSolo:
 
         assert runner.nome_libero("US-7", set()) == "us/us-7"
         assert runner.nome_libero("US-7", {"us/us-7"}) == "us/us-7-giro2"
-        assert runner.crea_branch("US-7") == "us/us-7"
+        assert runner.crea_branch("US-7", SHA_DELLA_BASE) == "us/us-7"
         assert ("ls-remote", "--heads", "origin", "us/us-7*") in git_finto
         assert ("branch", "--list", "us/us-7*", "--format=%(refname:short)") in git_finto
-        assert ("switch", "-c", "us/us-7", "origin/main") in git_finto
+        assert ("switch", "-c", "us/us-7", SHA_DELLA_BASE) in git_finto
 
 
 class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
@@ -5672,7 +5690,7 @@ class TestIlGateDelRossoSiSpegneDaAsdlcTomlELoDichiara:
     def _giro(self, monkeypatch, con_critic=True):
         chiamati: list[str] = []
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: chiamati.append("gate") or [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: chiamati.append("gate") or [])
         monkeypatch.setattr(runner, "gate_del_rosso",
                             lambda **k: chiamati.append("rosso") or [])
         monkeypatch.setattr(
@@ -5862,11 +5880,11 @@ class TestLaChiusuraGiraSempre:
     def test_uneccezione_nel_giro_passa_dalla_chiusura(self, monkeypatch, git_finto, caso, tipo):
         monkeypatch.setattr(runner, "esegui", self._agente_che_scade(caso))
         if caso == "gate":
-            def gate_che_scade(attivi):
+            def gate_che_scade(attivi, base=None):
                 raise subprocess.TimeoutExpired(["pytest", "-q"], 3600)
             monkeypatch.setattr(runner, "gira_gate", gate_che_scade)
         else:
-            monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+            monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         if caso == "rosso":
             def gate_del_rosso_rotto(**k):
                 raise RuntimeError("worktree usa e getta non creato")
@@ -5891,7 +5909,7 @@ class TestLaChiusuraGiraSempre:
         che la chiusura è fallita, perché, e quale eccezione aveva interrotto il giro."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
 
-        def gate_che_scade(attivi):
+        def gate_che_scade(attivi, base=None):
             raise subprocess.TimeoutExpired(["pytest", "-q"], 3600)
 
         def fase_che_non_si_chiude():
@@ -5949,7 +5967,7 @@ class TestIlTimeoutDiUnAgenteChiudeSenzaEsito:
         monkeypatch.setattr(runner, "MINUTI_BUILDER" if ruolo == "builder" else "MINUTI_CRITIC",
                             0.02)
         monkeypatch.setattr(runner, "esegui", _esegui)
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
 
         inizio = time.monotonic()
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -6021,7 +6039,7 @@ class TestOgniChiamataLasciaDurataECodice:
             monkeypatch.setattr(runner, "MINUTI_BUILDER", 0.02)
         else:
             monkeypatch.setattr(runner, "esegui", finto)
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
         rapporto = json.loads(
@@ -6049,7 +6067,7 @@ class TestIlRapportoDelCriticArrivaIntero:
         """Un giro col Builder che chiama `fatto`, i gate verdi e il Critic che
         risponde, revisione dopo revisione, i `verdetti` dati."""
         monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
         monkeypatch.setattr(runner, "MAX_REVISIONI", 5)
         coda = list(verdetti)
@@ -6270,7 +6288,7 @@ class TestIlRapportoDelCriticArrivaIntero:
 
         monkeypatch.setattr(runner, "esegui",
                             agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", rosso)
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -6289,7 +6307,7 @@ class TestIlRapportoDelCriticArrivaIntero:
     def _prompt_del_critic(self, monkeypatch) -> str:
         monkeypatch.setattr(runner, "esegui",
                             agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
-        monkeypatch.setattr(runner, "gira_gate", lambda attivi: [])
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", lambda visti, morsi: [])
 
         runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
@@ -6350,3 +6368,115 @@ class TestIlRapportoDelCriticArrivaIntero:
         """Decisione 8: il PASS di PBI-366 (#263) è arrivato in inglese, e chi legge
         la PR prima del merge legge in italiano."""
         assert "Scrivi il rapporto in italiano" in runner.PROMPT_CRITIC
+
+
+class TestUnaBasePerGiro:
+    """PBI-374: un giro ha una sola base, uno sha, e tutto ciò che il giro legge,
+    crea, misura e pubblica discende da lì.
+
+    È la causa `due-fonti` di `PBI-102`, otto difetti corretti uno per uno. Il
+    ramo di base era un **nome**, `origin/main`, e ogni funzione lo risolveva per
+    conto suo: `trova_pbi()` faceva un `fetch` e leggeva il backlog, `crea_branch()`
+    ne faceva un altro e ramificava. Un merge fra i due, e il PBI si leggeva su un
+    commit mentre il ramo nasceva da un altro.
+    """
+
+    @staticmethod
+    def sh(cwd: Path, *args: str) -> str:
+        p = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                            "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false",
+                            *args], cwd=cwd, capture_output=True, text=True, check=True)
+        return p.stdout.strip()
+
+    def test_un_solo_sha_spiega_il_pbi_letto_il_ramo_il_rapporto_e_i_conteggi(
+            self, tmp_path, monkeypatch):
+        """Decisione 6, l'invariante. Un remoto che avanza di un commit a ogni
+        `fetch`, come quando un merge arriva durante il lancio; e mentre il Builder
+        lavora qualcun altro fa `fetch` nello stesso repository — i remote-tracking
+        sono condivisi fra i worktree — e `origin/main` si sposta sotto il giro.
+
+        Alla fine un solo sha deve spiegare tutto: il commit su cui il PBI è stato
+        letto, il genitore del ramo, la `base` del rapporto, i conteggi e il diff
+        che il Critic legge. È il test che fallisce il giorno in cui una funzione
+        nuova torna a leggere `origin/main` per conto suo."""
+        sh = self.sh
+        remoto, noi, altri = tmp_path / "remoto.git", tmp_path / "noi", tmp_path / "altri"
+        sh(tmp_path, "init", "-q", "--bare", str(remoto))
+        sh(tmp_path, "clone", "-q", str(remoto), str(altri))
+        (altri / "backlog").mkdir()
+        (altri / "backlog" / "PBI-102-una-prova.md").write_text("# PBI-102\n", encoding="utf-8")
+        sh(altri, "add", "-A")
+        sh(altri, "commit", "-q", "-m", "docs: il PBI")
+        sh(altri, "push", "-q", "origin", "main")
+        sh(tmp_path, "clone", "-q", str(remoto), str(noi))
+        sh(noi, "switch", "-q", "--detach", "origin/main")  # come `ada-run` dopo il pre-flight
+
+        merge = {"n": 0}
+
+        def avanza() -> None:
+            merge["n"] += 1
+            (altri / f"merge-{merge['n']}.txt").write_text("x", encoding="utf-8")
+            sh(altri, "add", "-A")
+            sh(altri, "commit", "-q", "-m", f"merge {merge['n']}")
+            sh(altri, "push", "-q", "origin", "main")
+
+        registro = tmp_path / "runs"
+        registro.mkdir()
+        monkeypatch.setattr(runner, "REPO", noi)
+        monkeypatch.setattr(runner, "LOG_DIR", registro)
+        monkeypatch.setattr(runner, "apri_la_fase", lambda: None)  # niente hook nel repo di prova
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+
+        vero_git, vero_esegui = runner.git, runner.esegui
+        chiamate: list[tuple[str, ...]] = []
+        letto_su: list[str] = []
+
+        def _git(*args: str) -> str:
+            chiamate.append(args)
+            if args[:1] == ("fetch",):
+                avanza()
+            if args[:2] == ("ls-tree", "--name-only"):
+                letto_su.append(vero_git("rev-parse", args[2]))
+            return vero_git(*args)
+
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        prompt_del_critic: list[str] = []
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if cmd[:1] == ["git"]:
+                return vero_esegui(cmd, cwd, timeout, **k)
+            ruolo, _ = ruolo_ed_esito(cmd)
+            if ruolo == "builder":
+                (noi / "lavoro.txt").write_text("il lavoro del giro\n", encoding="utf-8")
+                sh(noi, "add", "-A")
+                sh(noi, "commit", "-q", "-m", "feat: il lavoro del giro")
+                avanza()
+                sh(noi, "fetch", "-q", "origin")  # un fetch di qualcun altro, fuori dal runner
+            if ruolo == "critic":
+                prompt_del_critic.append(Path(cmd[-1].lstrip("@")).read_text(encoding="utf-8"))
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False, run="giro")
+
+        assert esito.stato == "fatto", esito.nota
+        rapporto = json.loads(runner.scrivi_rapporto("giro", [esito], "finito")
+                              .read_text(encoding="utf-8"))
+        base = rapporto["esiti"][0].get("base")
+        assert base, "runs/<run>.json non dice da quale sha è nato il giro"
+        assert letto_su == [base], "il PBI si legge sulla base del giro, una volta"
+        assert sh(noi, "rev-parse", "HEAD^") == base, "il ramo nasce dalla base del giro"
+        assert esito.commit == 1
+        assert [c for c in chiamate if c[:1] == ("fetch",)] == [("fetch", "origin", "main")], (
+            "il fetch del giro è uno, quello che prende la base"
+        )
+        assert [c for c in chiamate if any("origin/main" in a for a in c)] == [
+            ("rev-parse", "origin/main")], (
+            "dopo aver preso la base nessuna lettura del giro nomina più origin/main"
+        )
+        assert prompt_del_critic and f"git diff {base}...HEAD" in prompt_del_critic[0], (
+            "il Critic legge il diff dalla base del giro"
+        )
+        assert "origin/main" not in prompt_del_critic[0]
