@@ -7098,6 +7098,46 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
             esito.nota)
 
 
+    URL = "https://github.com/Lara-srl/ada-controller/pull/377"
+
+    def _pr_che_si_apre(self, monkeypatch, commento: tuple[int, str]):
+        """Un giro `fatto` in cui il push riesce, `origin` ha HEAD e `gh pr create`
+        risponde con `URL`; `gh pr comment` risponde `commento`."""
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if cmd[:3] == ["gh", "pr", "create"]:
+                return 0, self.URL
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                return commento
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        monkeypatch.setattr(runner, "git", lambda *a: (
+            "3" if a[:2] == ("rev-list", "--count")
+            else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+            else SHA_DELLA_BASE if a[:1] in (("rev-parse",), ("ls-remote",))
+            else ""))
+
+    def test_guardia_un_commento_che_non_parte_resta_la_nota_di_371(self, monkeypatch):
+        """Guardia dichiarata: `commenta_i_rapporti()` cattura da sé il commento
+        che non parte (PBI-371) e lo scrive nella nota con la sua ragione. Il
+        `try` dopo la chiusura non lo vede, e la PR resta nominata."""
+        self._pr_che_si_apre(monkeypatch, commento=(1, "HTTP 502: Bad Gateway"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto"
+        assert esito.pr == self.URL
+        assert esito.nota.endswith(
+            f"rapporto del Critic non commentato sulla PR (revisioni 0): "
+            f"HTTP 502: Bad Gateway — i file restano in {runner.LOG_DIR}"), esito.nota
+        assert "dopo la chiusura" not in esito.nota
+
+
 class TestUnPushCheScadeENonPubblicato:
     """PBI-377, difetto 57 di `PBI-102`, decisione 2. `git()` passa per `esegui()`,
     che cattura soltanto `FileNotFoundError`: un push che scade alza
