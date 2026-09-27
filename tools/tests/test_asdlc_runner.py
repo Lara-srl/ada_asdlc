@@ -7120,3 +7120,14 @@ class TestUnPushCheScadeENonPubblicato:
         assert "dopo la chiusura" not in esito.nota, (
             "il timeout del push ha il suo stato, non la strada dell'imprevisto"
         )
+
+    def test_un_push_che_scade_mentre_chiudi_pubblica_un_giro_fermato_non_fa_salire_chiusura_fallita(
+            self, monkeypatch):
+        """Decisione 2, il secondo chiamante: `chiudi()` pubblica un giro che si
+        ferma. Lì il timeout diventava `ChiusuraFallita`, e la rete di `main()`
+        registrava `rosso` al posto di `sospeso`."""
+        esito = self._giro(monkeypatch, "sospeso")
+
+        assert esito.stato == "sospeso", "lo stato resta quello del motivo"
+        assert runner.NON_PUBBLICATO in esito.nota, esito.nota
+        assert "timeout, stato di origin da verificare" in esito.nota, esito.nota
