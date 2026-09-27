@@ -7067,3 +7067,56 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
         assert esito.nota.endswith(
             "dopo la chiusura: ValueError: rapporto con un carattere non codificabile"), (
             esito.nota)
+
+
+class TestUnPushCheScadeENonPubblicato:
+    """PBI-377, difetto 57 di `PBI-102`, decisione 2. `git()` passa per `esegui()`,
+    che cattura soltanto `FileNotFoundError`: un push che scade alza
+    `subprocess.TimeoutExpired`, e `pubblica()` intercettava solo `RuntimeError`.
+    Un push scaduto è `NON_PUBBLICATO` come un push fallito, ma la nota dice in
+    più che `origin` può essere stato aggiornato lo stesso: il push è atomico per
+    ref, e il client che muore non dice cosa il remoto ha ricevuto."""
+
+    @staticmethod
+    def _git_col_push_che_scade(monkeypatch):
+        def _g(*args: str) -> str:
+            if args[:1] == ("push",):
+                raise subprocess.TimeoutExpired(["git", *args], 120)
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+
+    def _giro(self, monkeypatch, verdetto: str) -> "runner.Esito":
+        self._git_col_push_che_scade(monkeypatch)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p, **_: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
+        return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+    def test_pubblica_non_alza_e_torna_false(self, monkeypatch, capsys):
+        self._git_col_push_che_scade(monkeypatch)
+        e = runner.Esito("PBI-102", "fatto")
+
+        assert runner.pubblica("pbi/pbi-102", e) is False
+        assert "timeout, stato di origin da verificare" in e.nota, e.nota
+        assert "branch non pubblicato" in capsys.readouterr().out, (
+            "a schermo il timeout si dice come il RuntimeError"
+        )
+
+    def test_un_push_che_scade_a_giro_fatto_e_non_pubblicato_e_lo_stato_non_cambia(
+            self, monkeypatch):
+        esito = self._giro(monkeypatch, "pass")
+
+        assert esito.stato == "fatto"
+        assert esito.pr == ""
+        assert runner.NON_PUBBLICATO in esito.nota, esito.nota
+        assert "timeout, stato di origin da verificare" in esito.nota, esito.nota
+        assert "dopo la chiusura" not in esito.nota, (
+            "il timeout del push ha il suo stato, non la strada dell'imprevisto"
+        )
