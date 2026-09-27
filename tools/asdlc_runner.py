@@ -2909,7 +2909,12 @@ def esegui_pbi(
 
     def motiva(e: Esito, motivo: str, dettaglio: str = "") -> Esito:
         """Il motivo nell'esito, con lo stato che `USCITE` gli dà e la sua nota
-        davanti a ciò che il giro aveva già dichiarato di sé."""
+        davanti a ciò che il giro aveva già dichiarato di sé.
+
+        L'avviso della base entra qui, nel dettaglio, e non nella nota d'inizio
+        del giro: così lo porta anche un'uscita che arriva prima che il giro
+        esista (PBI-375, decisione 6)."""
+        dettaglio = " · ".join(t for t in (dettaglio, avviso) if t)
         e.stato, diagnosi = uscita(motivo, dettaglio)
         e.motivo = motivo
         e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
@@ -2936,7 +2941,7 @@ def esegui_pbi(
     # dai branch — quindi torna a valere la regola intera: ciò che non è
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
-              base=base, nota=avviso)
+              base=base)
     t0 = time.monotonic()
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
