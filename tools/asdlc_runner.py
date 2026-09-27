@@ -2776,6 +2776,8 @@ def ramo_diverso_da_head(branch: str) -> tuple[str, str] | None:
 # Ciò che la nota del giro dice quando `pubblica()` torna False: stato e commit
 # restano quelli che erano, e questa è la riga che lo fa sapere al registro.
 NON_PUBBLICATO = "branch non pubblicato: i commit restano nel worktree"
+# E quando il push è scaduto invece di fallire, questa le va accanto (PBI-377).
+PUSH_SCADUTO = "push in timeout, stato di origin da verificare"
 
 
 def pubblica(branch: str, e: Esito | None = None) -> bool:
@@ -2791,7 +2793,9 @@ def pubblica(branch: str, e: Esito | None = None) -> bool:
     E **non alza**: un push che fallisce è una brutta notizia, non una ragione per
     buttare via l'ora precedente. Chi legge il log la trova scritta, chi la
     chiama la riporta nella nota del giro (`NON_PUBBLICATO`), e i commit
-    restano nel worktree.
+    restano nel worktree. Un push che **scade** torna `False` allo stesso modo,
+    e nella nota di `e` lascia in più `PUSH_SCADUTO`: su `origin` il ramo può
+    esserci arrivato lo stesso (PBI-377, decisione 2).
 
     Si manda **`HEAD`**, non il ref del ramo, quando i due divergono (difetto 30):
     `HEAD` è ciò che gate, gate del rosso e Critic hanno guardato, e il worktree
@@ -2816,10 +2820,15 @@ def pubblica(branch: str, e: Esito | None = None) -> bool:
             return True
         etichetta, head = diversi
         git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
-    except RuntimeError as exc:
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
         print(f"       i commit restano in locale su {branch}: `git push` a mano quando "
               f"hai guardato cosa c'è sul remoto.")
+        # Un push fallito dice «su origin non c'è»; uno scaduto dice «non si sa»:
+        # il push è atomico per ref, e il remoto può averlo ricevuto anche se il
+        # client è morto. Chi legge la nota deve guardare prima di rifarlo.
+        if isinstance(exc, subprocess.TimeoutExpired) and e is not None:
+            e.nota = " · ".join(t for t in (e.nota, PUSH_SCADUTO) if t)
         return False
     nota = f"pubblicato HEAD {head} al posto del ramo {branch}, che era {etichetta}"
     try:
