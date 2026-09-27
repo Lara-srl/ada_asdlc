@@ -6991,3 +6991,46 @@ class TestLeGuardieDelMotivo:
         assert voce["stato"] == "rosso"
         assert "chiusura del giro fallita (domanda-del-builder)" in voce["nota"], voce["nota"]
         assert "disco pieno" in voce["nota"]
+
+
+class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
+    """PBI-377, difetto 50 di `PBI-102`. Dopo `chiudi()` resta l'Acceptance Gate,
+    `apri_pr()`: un'eccezione lì usciva da `esegui_pbi()`, e la rete di `main()`
+    scriveva un `Esito` rosso nuovo al posto di quello già chiuso — stato, commit,
+    PR, rapporti del Critic e invocazioni persi. Verificato su `main` (`53da25c`)
+    il 25/09/2026 con `ValueError` in `apri_pr()`."""
+
+    @staticmethod
+    def _giro_fatto(monkeypatch):
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+
+    def test_uneccezione_in_apri_pr_lascia_lesito_chiuso_e_la_scrive_in_fondo_alla_nota(
+            self, monkeypatch, git_finto, capsys):
+        self._giro_fatto(monkeypatch)
+
+        def apri_pr_che_alza(pbi, pbi_path, branch, e):
+            raise ValueError("corpo della PR illeggibile")
+
+        monkeypatch.setattr(runner, "apri_pr", apri_pr_che_alza)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto", "lo stato del giro chiuso non cambia"
+        assert esito.motivo == "fatto"
+        assert esito.commit == 3, "i commit contati alla chiusura restano"
+        assert [r["verdetto"] for r in esito.rapporti_critic] == ["pass"], (
+            "i puntatori ai rapporti del Critic restano"
+        )
+        assert [v["ruolo"] for v in esito.invocazioni] == ["builder", "critic"]
+        assert esito.nota.endswith(
+            "dopo la chiusura: ValueError: corpo della PR illeggibile"), esito.nota
+        traccia = Path(esito.file_traceback)
+        assert traccia.parent == runner.LOG_DIR, "il traceback sta accanto al log del giro"
+        assert "ValueError" in traccia.read_text(encoding="utf-8")
+        err = capsys.readouterr().err
+        assert "Traceback" in err and "corpo della PR illeggibile" in err, (
+            "a schermo l'eccezione si dice come la dice la rete di main()"
+        )
