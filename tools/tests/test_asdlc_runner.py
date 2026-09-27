@@ -2100,6 +2100,22 @@ class TestIlBranchLoPubblicaIlRunner:
             "(PBI-335 giro 4, 03/09/2026)"
         )
 
+    def test_il_builder_sa_che_una_regressione_vista_in_impl_e_una_fermata(self):
+        """Il giro 1 di PBI-377 (27/09/2026), difetto 59 di PBI-102.
+
+        Il Builder ha visto che il suo `try` faceva chiudere `fatto` un giro con
+        il push scaduto, che prima chiudeva `rosso`. L'ha scritto nella docstring
+        di `apri_pr()` e ha chiamato `fatto`. A fermare il giro è stato il
+        Critic. Una regressione scritta in una docstring non la legge il tick,
+        non la legge il registro e non la ferma nessun gate: il prompt deve dire
+        che è una fermata.
+        """
+        prompt = runner.PROMPT_BUILDER.lower()
+        assert "regressione" in prompt and "docstring" in prompt, (
+            "una regressione vista in IMPL si dice con `fermati`, non in una "
+            "docstring (PBI-377 giro 1, 27/09/2026)"
+        )
+
 
 class TestSuOriginFinisceCioCheIGateHannoMisurato:
     """Difetto 30 di PBI-102, misurato su PBI-358 la notte del 21→22/09/2026.
