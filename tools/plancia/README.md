@@ -76,6 +76,11 @@ Una riga per giro. `stato` ∈ {`fermato`, `non convergente`, `mergiabile`/verde
     data +2». All'avvio, prima del Builder, il log nomina i residui dei giri
     prima che `inizio` contiene — alberi `ada-rosso-*`, rami dello stesso PBI, file fuori da
     `runs/` — con «residui dei giri prima (non li tocco): …»; il giro non li tocca.
+  - `base` — **lo sha da cui discende il giro** (PBI-374): il commit di `origin/main` preso
+    una volta all'inizio, con un solo `fetch`. È quello su cui si è letto il PBI, da cui è
+    nato il ramo e contro cui si contano i commit e si legge il diff del Critic. Se il
+    `fetch` non ha risposto è lo sha dell'`origin/main` che c'era, e la `nota` lo dice. I
+    giri prima di PBI-374 non ce l'hanno.
   - `critic_saltato` (bool), `tempi.{builder,gate,critic}` (secondi), ecc.
 
 ### `runs/<run>-<PBI>-critic-<n>.md` — il rapporto di una revisione del Critic
