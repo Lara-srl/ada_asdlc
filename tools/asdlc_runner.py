@@ -184,8 +184,10 @@ def configura(cfg: asdlc_config.Config) -> None:
     # `false` spegne la seconda domanda del Quality Gate — e il giro lo scrive.
     GATE_DEL_ROSSO_ATTIVO = cfg.gate_del_rosso.attivo
 
-    # Il ramo di base: da dove nasce ogni branch, e contro cui misurano il conteggio
-    # dei commit, il gate del rosso e il diff che il Critic legge.
+    # Il ramo di base, come **nome**. Dentro un giro vale una volta sola: il giro lo
+    # risolve in uno sha all'inizio (`base_del_giro`, PBI-374), e da lì nascono il
+    # branch, il conteggio dei commit, il gate del rosso e il diff che il Critic
+    # legge. Il nome resta per ciò che sta fuori dal giro, come `--gate-rosso`.
     BASE, REMOTO, RAMO_PRINCIPALE = cfg.git.base, cfg.git.remoto, cfg.git.ramo
     # I prompt che nominano il ramo lo prendono da qui, e non da una riga scritta a
     # mano: un prompt che dice all'agente un ramo diverso da quello su cui il gate
@@ -599,6 +601,9 @@ class Esito:
     # Rami, alberi e file com'erano all'inizio del giro e come sono alla fine:
     # `{"inizio": inventario(), "fine": inventario()}` (PBI-363, decisione 7).
     inventario: dict = field(default_factory=dict)
+    # Lo sha da cui discende il giro: il commit su cui si è letto il PBI, da cui è
+    # nato il branch e contro cui si contano i commit (PBI-374, decisione 1).
+    base: str = ""
 
 
 def apri_rapporto(run: str, pbi: list[str]) -> Path:
@@ -693,10 +698,11 @@ def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
     return any(t.startswith(p) for p in g.solo_se_tocca for t in toccati)
 
 
-def file_toccati() -> set[str]:
-    """I file che il branch ha cambiato rispetto al ramo di base, `BASE...HEAD`
+def file_toccati(base: str | None = None) -> set[str]:
+    """I file che il branch ha cambiato rispetto alla base, `<base>...HEAD`
     come per i mutanti: un `main` andato avanti nel frattempo non entra."""
-    return {p for p in git("diff", "--name-only", f"{BASE}...HEAD").splitlines() if p}
+    base = base if base is not None else BASE
+    return {p for p in git("diff", "--name-only", f"{base}...HEAD").splitlines() if p}
 
 
 def gate_mancanti(attivi: set[str]) -> list[str]:
@@ -1104,7 +1110,7 @@ def git(*args: str) -> str:
     return out.strip()
 
 
-def gira_gate(attivi: set[str]) -> list[tuple[str, str]]:
+def gira_gate(attivi: set[str], base: str | None = None) -> list[tuple[str, str]]:
     """Gate rossi con la coda del loro output. Lista vuota = tutto verde.
 
     `attivi` sono i nomi dei gate accesi a prescindere dal diff — oggi nessuno.
@@ -1112,7 +1118,7 @@ def gira_gate(attivi: set[str]) -> list[tuple[str, str]]:
     ne hanno bisogno, e un `git diff` a vuoto è una chiamata in più da finta.
     """
     rossi: list[tuple[str, str]] = []
-    toccati = file_toccati() if any(g.solo_se_tocca for g in GATE) else set()
+    toccati = file_toccati(base) if any(g.solo_se_tocca for g in GATE) else set()
     for g in GATE:
         if not acceso(g, attivi, toccati):
             continue
@@ -2273,13 +2279,13 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     return mancati
 
 
-def gate_per_il_critic(attivi: set[str], morsi: list[dict]) -> str:
+def gate_per_il_critic(attivi: set[str], morsi: list[dict], base: str | None = None) -> str:
     """Ciò che i gate hanno misurato, per il prompt del Critic (PBI-371, decisione 6).
 
     Il Critic non esegue niente: senza questo testo, su PBI-365, è andato a
     cercarsi il log del giro. Si chiama dopo i gate verdi e il gate del rosso
     passato, quindi i gate che hanno girato sono verdi."""
-    toccati = file_toccati() if any(g.solo_se_tocca for g in GATE) else set()
+    toccati = file_toccati(base) if any(g.solo_se_tocca for g in GATE) else set()
     righe = ["", "## I gate di questo giro", "",
              "Misurati dal runner su `HEAD`, prima di chiamarti.", ""]
     for g in GATE:
@@ -2296,9 +2302,10 @@ def gate_per_il_critic(attivi: set[str], morsi: list[dict]) -> str:
     return "\n".join(righe) + "\n"
 
 
-def revisione_critica(pbi_path: Path, gate: str = "") -> Verdetto:
+def revisione_critica(pbi_path: Path, gate: str = "", base: str | None = None) -> Verdetto:
     """Sessione NUOVA, modello diverso, sola lettura: il Critic non è il Builder.
-    `gate` è ciò che i gate del giro hanno misurato, in coda al prompt."""
+    `gate` è ciò che i gate del giro hanno misurato, in coda al prompt; `base` lo
+    sha del giro, da cui il Critic legge il diff (PBI-374)."""
     print("    critic … ", end="", flush=True)
     try:
         percorso = pbi_path.relative_to(REPO)
@@ -2306,7 +2313,9 @@ def revisione_critica(pbi_path: Path, gate: str = "") -> Verdetto:
         percorso = pbi_path
     # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
     prompt_file, file_esito = file_dell_invocazione("critic")
-    prompt_file.write_text(PROMPT_CRITIC.format(pbi_path=percorso) + gate, encoding="utf-8")
+    prompt_file.write_text(MODELLO_CRITIC.format(base=base if base is not None else BASE,
+                                                 pbi_path=percorso) + gate,
+                           encoding="utf-8")
     _, out, dichiarato, registro = invoca_agente("critic", CRITIC, prompt_file, file_esito)
 
     # Un Critic che non emette un verdetto non ha giudicato: è un'invocazione fallita, e
@@ -2474,8 +2483,9 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     return url.group(0)
 
 
-def crea_branch(pbi: str) -> str:
-    """Il branch del PBI, sempre dal ramo di base fresco — `BASE`, `origin/main`.
+def crea_branch(pbi: str, base: str) -> str:
+    """Il branch del PBI, sempre dalla base del giro: lo sha che `base_del_giro`
+    ha preso da `origin/main` appena aggiornato.
 
     ``git switch -c`` parte da dove si trova, e dove si trova è il branch del PBI
     precedente: due PBI nella stessa invocazione producevano branch **impilati**,
@@ -2492,10 +2502,12 @@ def crea_branch(pbi: str) -> str:
     Scrivere il punto di partenza dentro il comando toglie anche l'altra domanda:
     non c'è un `main` locale da allineare, quindi non c'è il caso in cui è
     disallineato.
+
+    Qui non si fa un altro `fetch`: con due, un merge fra l'uno e l'altro faceva
+    leggere il PBI su un commit e nascere il ramo da un altro (PBI-374).
     """
-    git("fetch", REMOTO, RAMO_PRINCIPALE)
     branch = nome_libero(pbi, rami_su_origin(pbi) | rami_locali(pbi))
-    git("switch", "-c", branch, BASE)
+    git("switch", "-c", branch, base)
     return branch
 
 
@@ -2714,35 +2726,48 @@ def pubblica(branch: str) -> bool:
     return True
 
 
-def trova_pbi(pbi: str) -> Path | None:
-    """Il file del PBI come lo vede il ramo di base, non come lo vede il worktree.
+def base_del_giro() -> tuple[str, str]:
+    """Lo sha da cui discende tutto il giro, e l'avviso se il `fetch` non ha
+    risposto (PBI-374, decisioni 1 e 3).
+
+    Un `fetch`, poi `rev-parse` di `BASE`: una volta, all'inizio del giro. Prima
+    la base era un nome che ogni funzione risolveva per conto suo, e fra un
+    `fetch` e l'altro un merge faceva leggere il PBI su un commit e nascere il
+    ramo da un altro — la causa `due-fonti` di otto difetti di PBI-102.
+
+    Se il remoto non risponde si prende lo sha dell'`origin/main` che si ha, e lo
+    si dice: un fetch che non parte non è una ragione per non fare un PBI che si
+    ha già in casa. L'avviso lo stampa questa funzione, e il giro lo scrive nella
+    nota."""
+    avviso = ""
+    try:
+        git("fetch", REMOTO, RAMO_PRINCIPALE)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        avviso = (f"fetch di {BASE} non riuscito, il giro parte dal {BASE} che c'era "
+                  f"({str(exc)[:120]})")
+        print(f"    ⚠️  {avviso}")
+    return git("rev-parse", BASE), avviso
+
+
+def trova_pbi(pbi: str, base: str) -> Path | None:
+    """Il file del PBI come lo vede la base del giro, non come lo vede il worktree.
 
     Il runner gira in `ada-run`, un albero che resta fermo al commit su cui
-    qualcuno l'ha messo l'ultima volta. Il branch invece nasce **sempre** da
-    `BASE` (`crea_branch`): un PBI mergiato dopo quell'ultimo `switch` c'è
+    qualcuno l'ha messo l'ultima volta. Il branch invece nasce **sempre** dalla
+    base (`crea_branch`): un PBI mergiato dopo quell'ultimo `switch` c'è
     dove il lavoro si farà e non c'è dove lo si cercava. Il giro chiudeva
     «saltato (PBI inesistente)» — venti secondi, nessun commit, e il file sotto
     il naso. Difetto 7 di PBI-102, ricaduto due volte.
 
-    Il `fetch` è lo stesso che farebbe `crea_branch` un attimo dopo, e costa una
-    chiamata: cercare su un `origin/main` vecchio sarebbe lo stesso difetto con
-    un altro nome.
-
-    Se il remoto non risponde si **ripiega sull'albero estratto** e lo si dice:
-    un fetch che non parte non è una ragione per non fare un PBI che si ha già
-    in casa. È l'unico caso in cui l'albero decide, ed è dichiarato a schermo.
+    Si cerca sullo **stesso sha** da cui il ramo nascerà, e non nell'albero
+    estratto nemmeno quando il `fetch` non ha risposto: sarebbero di nuovo due
+    fonti (PBI-374, decisione 3).
     """
     numero = CFG.backlog.numero(pbi)
     if numero is None:
         return None  # non è un id di questo progetto: `[backlog].id` dice la forma
     forma = CFG.backlog.glob_del_file(numero)
-    try:
-        git("fetch", REMOTO, RAMO_PRINCIPALE)
-        voci = git("ls-tree", "--name-only", BASE, f"{BACKLOG}/").splitlines()
-    except RuntimeError as exc:
-        print(f"    ⚠️  {BASE} non raggiungibile ({str(exc)[:120]}): "
-              f"cerco {pbi} nell'albero estratto")
-        return next(REPO.glob(f"{BACKLOG}/{forma}"), None)
+    voci = git("ls-tree", "--name-only", base, f"{BACKLOG}/").splitlines()
 
     nome = next((v.strip() for v in voci if fnmatch(Path(v.strip()).name, forma)), None)
     return REPO / nome if nome else None
@@ -2781,9 +2806,13 @@ def esegui_pbi(
     run: str = "",
 ) -> Esito:
     run = run or datetime.now().strftime("%Y%m%d-%H%M%S")
-    pbi_path = trova_pbi(pbi)
+    # La base del giro, una volta: da qui in poi nessuno fa più `fetch`, e ogni
+    # lettura nomina questo sha e non `BASE` (PBI-374).
+    base, avviso = base_del_giro()
+    pbi_path = trova_pbi(pbi, base)
     if pbi_path is None:
-        return Esito(pbi, "saltato", nota=f"PBI inesistente in {BACKLOG}/ su {BASE}")
+        return Esito(pbi, "saltato", base=base,
+                     nota=f"PBI inesistente in {BACKLOG}/ su {BASE} ({base[:12]})")
 
     print(f"\n=== {pbi} — {pbi_path.name}")
     prompt = PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
@@ -2800,7 +2829,8 @@ def esegui_pbi(
     # l'eccezione era la toppa. `ADR-0020` ha tolto la causa — il registro esce
     # dai branch — quindi torna a valere la regola intera: ciò che non è
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
-    e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"))
+    e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
+              base=base, nota=avviso)
     t0 = time.monotonic()
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
@@ -2810,16 +2840,17 @@ def esegui_pbi(
     # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
     if trovati := residui(e.inventario["inizio"], pbi):
         print(f"    residui dei giri prima (non li tocco): {', '.join(trovati)}")
-    branch = crea_branch(pbi)
+    branch = crea_branch(pbi, base)
     apri_la_fase()
 
     def conta_commit() -> int:
-        """`BASE..HEAD` — il ramo remoto — e non `main..HEAD`: da quando il main
-        locale del worktree non si estrae più, resta indietro di giorni e
-        conterebbe come commit del PBI tutto ciò che main ha ricevuto nel
-        frattempo."""
+        """`<base>..HEAD` — lo sha da cui il ramo è nato — e non `main..HEAD`: da
+        quando il main locale del worktree non si estrae più, resta indietro di
+        giorni e conterebbe come commit del PBI tutto ciò che main ha ricevuto nel
+        frattempo. E non `origin/main..HEAD`, che si sposta a ogni `fetch` di
+        chiunque nel repository (PBI-374)."""
         try:
-            return int(git("rev-list", "--count", f"{BASE}..HEAD") or 0)
+            return int(git("rev-list", "--count", f"{base}..HEAD") or 0)
         except (RuntimeError, ValueError):
             return e.commit  # un conteggio mancato non cancella quello di prima
 
@@ -2943,7 +2974,7 @@ def esegui_pbi(
                 gate_falliti += 1
 
                 with misura(e, "gate"):
-                    rossi = gira_gate(attivi)
+                    rossi = gira_gate(attivi, base)
                 if not rossi:
                     verde = True
                     break
@@ -2975,7 +3006,7 @@ def esegui_pbi(
                 t_rosso = time.monotonic()
                 try:
                     with misura(e, "gate"):
-                        senza_rosso = gate_del_rosso(visti=visti, morsi=morsi)
+                        senza_rosso = gate_del_rosso(base=base, visti=visti, morsi=morsi)
                 except GuastoDelGate as guasto:
                     # Un gate rotto è un gate **rosso**, non un ciclo mancato: qui non si
                     # accusa nessun commit, perché il gate non ne ha guardato nessuno.
@@ -3018,7 +3049,8 @@ def esegui_pbi(
 
             with misura(e, "critic"):
                 verdetto = revisione_critica(
-                    pbi_path, gate=gate_per_il_critic(attivi, e.test_che_mordono))
+                    pbi_path, gate=gate_per_il_critic(attivi, e.test_che_mordono, base),
+                    base=base)
             if verdetto.registro is not None:
                 e.invocazioni.append(verdetto.registro)
             rapporto = verdetto.rapporto
@@ -3050,12 +3082,12 @@ def esegui_pbi(
             # Relativo come nel primo giro: è lo stesso percorso che il Builder ha già
             # letto, e un assoluto qui lo farebbe sembrare un altro file. Il rapporto
             # va intero: tagliato, il Builder non leggeva i primi rilievi (PBI-371).
-            prompt = PROMPT_RIMEDIO.format(
-                rapporto=rapporto, pbi_path=pbi_path.relative_to(REPO)
+            prompt = MODELLO_RIMEDIO.format(
+                base=base, rapporto=rapporto, pbi_path=pbi_path.relative_to(REPO)
             )
 
         print(f"    commit sul branch: {e.commit} · "
-              f"file: {git('diff', '--name-only', f'{BASE}...HEAD')}")
+              f"file: {git('diff', '--name-only', f'{base}...HEAD')}")
         chiudi("fatto")
     except Exception as exc:  # noqa: BLE001 — si cattura per chiudere, non per tacere
         traceback.print_exc()
