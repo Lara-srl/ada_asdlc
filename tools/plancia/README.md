@@ -137,9 +137,8 @@ Non reimplementare: importa. Funzioni pronte (misurate/lette il 07/09):
   `LIMITE_FILE=100` da `gh`: vuoto, assente o al limite conta come **speso**.
 - `pbi_con_ramo(repo) -> set[str]` → i PBI con un ramo su origin (`git ls-remote --heads
   origin refs/heads/pbi/*`, regex `refs/heads/pbi/pbi-(\d+)`).
-- `giro_in_corso(worktree) -> bool` → `flock` sul lucchetto **+** `runner_vivo`.
-- `runner_vivo(worktree) -> bool` → scandisce `/proc`: un processo con **cwd nel worktree**
-  **e** `asdlc_runner` nella cmdline. (⚠️ vedi «Vincoli».)
+- `giro_in_corso(worktree) -> bool` → il `flock` sul lucchetto è **tenuto**. È l'unica
+  prova di un giro in corso (PBI-373): `/proc` non si guarda più.
 - `prossimo(voci, mergiati, rami, occupato) -> Decisione` → la logica del tick.
 - Tipi `Decisione`: `Occupato` · `Finita` · `Barriera(testo)` · `Attende(pbi)` · `Lancia(pbi)`.
 
@@ -167,13 +166,14 @@ aspettare i puntatori.
 La plancia sorveglia il runner: **non deve diventarne un ostacolo.** Due trappole viste dal
 vivo il 07/09 (dettaglio in memoria `tick-cron-blocchi`):
 
-1. ⚠️ **Non diventare un falso runner.** `runner_vivo()` considera «runner al lavoro»
-   qualsiasi processo con **cwd dentro `/home/laisdev/ada-run`** *e* la stringa
-   `asdlc_runner` nella cmdline. Un comando di monitoraggio che fa `cd ada-run` + `pgrep -af
-   asdlc_runner` fa scattare `occupato` e **blocca il tick**. La plancia deve derivare la
-   liveness **riusando `runner_vivo`/leggendo `/proc`**, e i suoi eventuali sottoprocessi
-   **non** devono girare con cwd nel worktree portandosi dietro quella stringa. (Il backend
-   della plancia gira in `ada_controller`, non in `ada-run`: già così è al sicuro.)
+1. ⚠️ **Non diventare un agente estraneo.** Il tick non guarda più `/proc` (PBI-373), ma
+   il runner sì: all'avvio `agenti_estranei()` censisce ogni processo con **cwd dentro
+   `/home/laisdev/ada-run`** *e* `claude` o `asdlc_runner` nella cmdline, e se ne trova
+   uno **non parte**. Un comando di monitoraggio che fa `cd ada-run` + `pgrep -af
+   asdlc_runner` non ferma più il tick, ma fa fallire il giro che il tick lancia. La
+   plancia deriva la liveness **da `giro_in_corso()`**, cioè dal lucchetto, e i suoi
+   eventuali sottoprocessi **non** girano con cwd nel worktree. (Il backend della plancia
+   gira in `ada_controller`, non in `ada-run`: già così è al sicuro.)
 2. **I blocchi del tick che la plancia deve *mostrare* (ed eventualmente aiutare a
    sciogliere, in fase «azioni»):**
    - **Ramo stantio** su origin (`pbi/pbi-XXX*` senza merge, anche se punta a un commit già
@@ -181,7 +181,8 @@ vivo il 07/09 (dettaglio in memoria `tick-cron-blocchi`):
    - **Albero sporco** nel worktree: un giro che si **ferma** lascia il lavoro non committato
      del Builder; il tick dopo dice `fermato (albero di lavoro sporco)`. Il cron **non pulisce**
      fra un giro e l'altro → gesto umano.
-   - **Lucchetto tenuto** / **runner morto ma processo-sosia vivo** (vedi punto 1).
+   - **Lucchetto tenuto** / **agente estraneo nell'albero** che fa rifiutare l'avvio al runner
+     (vedi punto 1).
    - **Node sotto cron**: il crontab senza `PATH` prende `/usr/bin/node` (v18); il progetto
      vuole ≥20 (nvm). Risolto il 07/09 con la riga `PATH=…nvm…v20.20.2…` (pinnata).
 
