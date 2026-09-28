@@ -2768,30 +2768,33 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         )
     except subprocess.TimeoutExpired:
         print("    ⚠️  gh pr create scaduto: cerco la PR sul ramo")
-        perche = "timeout"
+        come, out = "PR ritrovata dopo timeout", ""
     else:
         if code != 0:
             print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
             return ""
-        # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga
-        # finché non ha altro da dire, e un avviso di aggiornamento basta a far
-        # finire nella colonna `pr` del registro una frase che non è un indirizzo
-        # (difetto 12).
-        url = re.search(r"https://\S+/pull/\d+", out)
-        if url is not None:
-            # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR
-            # esiste già e l'esito la deve nominare (PBI-377, decisione 5).
-            e.pr = url.group(0)
-            commenta_i_rapporti(e.pr, e)
-            return e.pr
-        print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
-        perche = "output senza URL"
-    # Il client è morto o non ha detto l'URL, ma la PR può essere nata su
-    # GitHub: la si cerca di nuovo, una volta sola (PBI-381, decisione 2). Se
-    # non si trova, o `gh` tace, la colonna resta vuota — una colonna che mente
-    # costa più di una che tace — e la nota lo dice: la riga del tick risolve.
+        come = ""
+    # L'URL della PR creata lo dice il JSON di `gh pr list`: `gh pr create` non
+    # ha `--json`, e nella sua uscita stdout e stderr sono mescolati — un avviso
+    # che cita un'altra PR ha la stessa forma (PBI-376, decisione 1). Se il
+    # client è morto la PR può essere nata lo stesso su GitHub: la ricerca è una
+    # sola in tutti e due i casi (PBI-381, decisione 2).
     if ritrovate := pr_aperte(branch):
-        return adotta_pr(ritrovate, f"PR ritrovata dopo {perche}", e)
+        return adotta_pr(ritrovate, come, e)
+    # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga
+    # finché non ha altro da dire, e un avviso di aggiornamento basta a far
+    # finire nella colonna `pr` del registro una frase che non è un indirizzo
+    # (difetto 12).
+    url = re.search(r"https://\S+/pull/\d+", out)
+    if url is not None:
+        # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR
+        # esiste già e l'esito la deve nominare (PBI-377, decisione 5).
+        e.pr = url.group(0)
+        commenta_i_rapporti(e.pr, e)
+        return e.pr
+    # Se non si trova, o `gh` tace, la colonna resta vuota — una colonna che
+    # mente costa più di una che tace — e la nota lo dice: la riga del tick
+    # risolve.
     e.nota = " · ".join(t for t in (e.nota, "PR forse aperta, da verificare") if t)
     return ""
 
