@@ -765,6 +765,65 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     assert not [c for c in eseguiti if "switch" in c or "fetch" in c or "checkout" in c], eseguiti
 
 
+PR_338 = "https://github.com/Lara-srl/ada-controller/pull/338"
+PR_338_BIS = "https://github.com/Lara-srl/ada-controller/pull/339"
+
+
+def mondo_con_pr_aperte(aperte):
+    """Un `esegui()` finto per un PBI in attesa: nessuna PR mergiata, il ramo
+    `pbi/pbi-338-giro2` su `origin`, e le PR aperte `aperte` — `None` è un `gh`
+    che non risponde. Come in `mondo()`, di `gh` escono solo i campi chiesti."""
+
+    def esegui(cmd, cwd):
+        if cmd[:3] == ["gh", "pr", "list"] and "merged" in cmd:
+            return 0, "[]"
+        if cmd[:3] == ["gh", "pr", "list"] and "open" in cmd:
+            if aperte is None:
+                return 1, "HTTP 502: Bad Gateway"
+            chiesti = cmd[cmd.index("--json") + 1].split(",")
+            return 0, json.dumps([
+                {campo: valore for campo, valore in pr.items() if campo in chiesti}
+                for pr in aperte
+            ])
+        if cmd[0] == "git" and "ls-remote" in cmd:
+            return 0, f"{'0' * 40}\trefs/heads/pbi/pbi-338-giro2\n"
+        raise AssertionError(f"comando non previsto: {cmd}")
+
+    return esegui
+
+
+@pytest.mark.parametrize("aperte, coda_della_riga", [
+    ([{"url": PR_338, "headRefName": "pbi/pbi-338-giro2"},
+      {"url": "https://github.com/Lara-srl/ada-controller/pull/3380",
+       "headRefName": "pbi/pbi-3380"}],
+     f"— PR {PR_338}"),
+    ([{"url": PR_338, "headRefName": "pbi/pbi-338"},
+      {"url": PR_338_BIS, "headRefName": "pbi/pbi-338-giro2"}],
+     f"— PR {PR_338}, {PR_338_BIS}"),
+    ([{"url": "https://github.com/Lara-srl/ada-controller/pull/3380",
+       "headRefName": "pbi/pbi-3380"}],
+     "— nessuna PR sul ramo: crearla o rilanciare"),
+    (None, "— GitHub non ha risposto: PR da verificare"),
+], ids=["una-pr", "piu-pr", "nessuna-pr", "gh-muto"])
+def test_la_riga_di_attesa_dice_cosa_ce_sul_ramo(
+    tmp_path, monkeypatch, capsys, aperte, coda_della_riga
+):
+    """PBI-381, decisioni 3 e 4. «Tocca a un umano» non diceva perché la coda
+    fosse ferma: chi leggeva cercava una domanda di un giro fermato, e intanto
+    una PR nata senza URL era aperta e nessuno la nominava. La riga fa la
+    ricerca sul ramo del PBI — col suffisso di un secondo giro, e non sul ramo
+    di un PBI che ne ha il numero come prefisso — e dice cosa c'è."""
+    repo = scrivi_coda(tmp_path, "- PBI-338\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(coda, "esegui", mondo_con_pr_aperte(aperte))
+
+    assert coda.main(["--repo", str(repo), "--worktree", str(albero), "--dry-run"]) == 0
+
+    assert capsys.readouterr().out.strip() == (
+        f"attende: PBI-338 ha un ramo su origin e non è in main {coda_della_riga}")
+
+
 def test_ogni_tick_lascia_una_riga_nel_log(tmp_path, monkeypatch):
     """Il tick gira senza nessuno davanti: ciò che ha deciso deve restare scritto.
 
