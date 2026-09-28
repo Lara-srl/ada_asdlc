@@ -2801,6 +2801,23 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto"
         assert "PR già aperta sul ramo" in esito.nota, esito.nota
 
+    @pytest.mark.parametrize("risposta", [
+        (1, "HTTP 502: Bad Gateway"),
+        subprocess.TimeoutExpired(["gh", "pr", "list"], 300),
+        (0, "A new release of gh is available"),
+    ], ids=["errore", "timeout", "non-json"])
+    def test_gh_pr_list_muto_non_fa_partire_gh_pr_create(self, monkeypatch, risposta):
+        """Decisione 1: senza una risposta non si sa se una PR c'è già, e creare
+        alla cieca è il doppione che PBI-381 toglie. È la regola di
+        `crea_branch()` con `OriginMuto` (PBI-374, decisione 7)."""
+        pr, esito, comandi, commentate = self._apri(monkeypatch, list=[risposta])
+
+        assert not self._create(comandi), "senza risposta alla ricerca non si crea"
+        assert pr == esito.pr == ""
+        assert commentate == []
+        assert esito.stato == "fatto", "il lavoro del giro resta fatto"
+        assert "PR non aperta: GitHub non ha risposto alla ricerca" in esito.nota, esito.nota
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
