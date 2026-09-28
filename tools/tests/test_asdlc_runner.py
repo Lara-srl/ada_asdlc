@@ -2962,6 +2962,21 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto"
 
 
+    def test_un_create_uscito_con_0_senza_pr_ritrovata_non_prende_lurl_dalluscita(
+            self, monkeypatch):
+        """PBI-376, decisione 1: `gh pr create` esce con 0 e scrive un URL, ma la
+        ricerca dopo non trova la PR. L'URL a schermo non si usa — è la stessa
+        lettura sul testo che la decisione toglie — e il giro chiude con la
+        colonna vuota e la PR forse aperta, come dopo un timeout."""
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch, list=[(0, "[]"), (0, "[]")], create=[(0, self.URL + "\n")])
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"]
+        assert pr == esito.pr == ""
+        assert commentate == []
+        assert esito.stato == "fatto"
+        assert "PR forse aperta, da verificare" in esito.nota, esito.nota
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
