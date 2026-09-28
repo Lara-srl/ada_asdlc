@@ -2675,9 +2675,18 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         visti = (f"su {REMOTO} {branch} è {visto}, "
                  f"i gate hanno misurato HEAD {head or 'illeggibile'}")
         print(f"    ⚠️  PR non aperta: {visti}")
+        # La diagnosi di `head-non-su-origin` **prende il posto** di quella del
+        # giro chiuso, non le si mette davanti (PBI-380, decisione 1): si toglie
+        # la testa «<motivo>: <testo>», e resta il suo dettaglio — l'avviso della
+        # base — con ciò che il giro aveva dichiarato di sé, una volta.
+        resto = e.nota
+        if e.motivo in USCITE:
+            prima = f"{e.motivo}: {USCITE[e.motivo][1]}"
+            if resto.startswith(prima):
+                resto = resto.removeprefix(prima).removeprefix(" — ").removeprefix(" · ")
         e.stato, diagnosi = uscita("head-non-su-origin", visti)
         e.motivo = "head-non-su-origin"
-        e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
+        e.nota = " · ".join(t for t in (diagnosi, resto) if t)
         return ""
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
