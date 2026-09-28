@@ -2186,8 +2186,49 @@ def morde(c: ComandoDiProva, chiave: str) -> tuple[str, str]:
     return UCCISO, next(tipo for tipo in tipi if tipo in TIPI_DI_ASSERZIONE)
 
 
+# `Guardia-su: backend/app/m.py::Classe.metodo`, una per riga nel corpo del commit.
+RE_GUARDIA_SU = re.compile(r"^Guardia-su:\s*(\S+?)::(\S+)\s*$", re.MULTILINE)
+
+
+def funzione_nominata(sorgente: str, nome: str) -> tuple[int, int] | None:
+    """Le righe `(prima, ultima)` di `funzione` o `Classe.metodo` nel modulo, o
+    `None` se lì non c'è o il sorgente non si analizza."""
+    try:
+        corpo = ast.parse(sorgente).body
+    except SyntaxError:
+        return None
+    trovato: ast.stmt | None = None
+    for parte in nome.split("."):
+        trovato = next((n for n in corpo if isinstance(n, (ast.ClassDef, ast.FunctionDef,
+                                                             ast.AsyncFunctionDef))
+                        and n.name == parte), None)
+        if trovato is None:
+            return None
+        corpo = trovato.body
+    if not isinstance(trovato, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None
+    return trovato.lineno, trovato.end_lineno or trovato.lineno
+
+
+def funzioni_nominate(albero: Path, sha: str) -> tuple[dict[str, set[int]], list[str]]:
+    """Le righe delle funzioni che il commit nomina con `Guardia-su:`, cercate nel
+    file a quel commit, e una nota per ogni nome che non si trova (PBI-378,
+    decisione 3: si segnala, non si blocca — `ADR-0008`)."""
+    righe: dict[str, set[int]] = defaultdict(set)
+    note: list[str] = []
+    for percorso, nome in RE_GUARDIA_SU.findall(git("show", "--no-patch", "--format=%B", sha)):
+        sorgente = leggi_sorgente(albero / percorso) if percorso.endswith(".py") else None
+        trovata = funzione_nominata(sorgente, nome) if sorgente is not None else None
+        if trovata is None:
+            note.append(f"`{percorso}::{nome}`: funzione nominata non trovata")
+            continue
+        righe[percorso].update(range(trovata[0], trovata[1] + 1))
+    return dict(righe), note
+
+
 def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
-                   chiave: str) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
+                   chiave: str, nominate: dict[str, set[int]] | None = None
+                   ) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
     """Il test nato verde, rigirato contro i mutanti delle funzioni che il branch
     ha toccato.
 
@@ -2200,13 +2241,16 @@ def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
     Un mutante alla volta, nello stesso worktree in cui il test è stato visto
     verde: il file si riscrive con la riga guasta, il test gira da solo, e si esce
     al primo kill perché uno basta — il gate chiede che il test osservi il codice
-    toccato, non che lo copra tutto.
+    toccato, non che lo copra tutto. `nominate` sono le righe delle funzioni che
+    il commit nomina con `Guardia-su:` (`funzioni_nominate`): entrano nel
+    perimetro anche se il branch non le tocca.
     """
     test = comando.origine[chiave]
     da_solo, _ = comandi_dei_test(albero, [test])
     prove: list[dict[str, str]] = []
     cambiate, cancellate = righe_cambiate(base, sha), cancellazioni(base, sha)
-    for percorso in sorted(cambiate.keys() | cancellate.keys()):
+    nominate = nominate or {}
+    for percorso in sorted(cambiate.keys() | cancellate.keys() | nominate.keys()):
         if linguaggio_del_file(percorso) != test.linguaggio:
             continue  # un test Python non morde un .ts, e rigirarlo lì è tempo perso
         file = albero / percorso
@@ -2215,6 +2259,7 @@ def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
             continue
         righe = righe_del_perimetro(percorso, sorgente, cambiate.get(percorso, set()),
                                     cancellate.get(percorso, set()))
+        righe = righe | nominate.get(percorso, set())
         try:
             for m in mutanti_del_sorgente(sorgente, righe):
                 guasto = sorgente_del_mutante(percorso, sorgente, m)
@@ -2304,6 +2349,7 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
     mancati: list[dict[str, str]] = []
     morsi = morsi if morsi is not None else []
     with worktree_usa_e_getta(sha) as albero:
+        nominate, note = funzioni_nominate(albero, sha)
         comandi, orfani = comandi_dei_test(albero, nuovi)
         if orfani:
             mancati.append(voce_mancata(sha, titolo, orfani, ESITI_MANCATI["nessuno"],
@@ -2319,13 +2365,14 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                     continue
                 lettura = ESITI_MANCATI[esiti[chiave]]
                 if esiti[chiave] == "verde":
-                    ucciso, prove = quarta_lettura(albero, base, sha, comando, chiave)
+                    ucciso, prove = quarta_lettura(albero, base, sha, comando, chiave,
+                                                   nominate)
                     if ucciso is not None:
                         morsi.append({"commit": sha[:7], "titolo": titolo,
                                       "test": etichetta, "mutante": ucciso["mutante"],
                                       "tipo": ucciso["tipo"], "prove": prove})
                         continue
-                    lettura = lettura_del_verde(prove)
+                    lettura = "; ".join([lettura_del_verde(prove), *note])
                 per_lettura[lettura].append(etichetta)
             for lettura, elenco in per_lettura.items():
                 mancati.append(voce_mancata(sha, titolo, elenco, lettura, coda))
