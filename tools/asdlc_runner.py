@@ -4010,9 +4010,13 @@ def main() -> int:
                 # da `main()` col traceback e si portava via la sequenza intera, e
                 # con lei i rilievi del Critic dei PBI già chiusi (difetto 17).
                 # Lo stato è `rosso` perché è già nella regola che decide se
-                # proseguire: non serve un'eccezione al posto di una regola.
+                # proseguire: non serve un'eccezione al posto di una regola. Una
+                # `ChiusuraFallita` porta il motivo che stava chiudendo, e il
+                # rapporto lo ha anche nel suo campo; ogni altra eccezione no
+                # (PBI-380, decisione 2).
                 traceback.print_exc()
                 e = Esito(pbi, "rosso", nota=f"eccezione nel runner: {exc}"[:300],
+                          motivo=exc.motivo if isinstance(exc, ChiusuraFallita) else "",
                           iniziato=datetime.now().isoformat(timespec="seconds"),
                           finito=datetime.now().isoformat(timespec="seconds"))
             esiti.append(e)
