@@ -4443,7 +4443,8 @@ class TestIlGiroSiApreInTestOnly:
         monkeypatch.setattr(runner, "REPO", tmp_path)
         monkeypatch.setattr(runner, "git", lambda *a: "")
         monkeypatch.setattr(runner, "crea_branch", lambda pbi, base: f"pbi/{pbi.lower()}")
-        monkeypatch.setattr(runner, "apri_la_fase", lambda: visto.__setitem__("aperta", True))
+        monkeypatch.setattr(runner, "apri_la_fase",
+                            lambda base="": visto.__setitem__("aperta", True))
         monkeypatch.setattr(runner, "chiudi_la_fase", lambda: visto.__setitem__("chiusa", True))
         monkeypatch.setattr(runner, "esegui",
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("basta")))
@@ -4636,6 +4637,21 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
 
         assert runner.main() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_conta_dalla_base_del_giro_anche_se_origin_main_ha_ricevuto_il_ramo(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-380, decisione 3 (difetto 56 di `PBI-102`). Il giro nasce da uno
+        sha, e un `origin/main` che dopo riceve il ramo stesso — un merge veloce —
+        rende `BASE..HEAD` vuoto: contato da `BASE`, il commit RED appena fatto
+        sparisce e la fase non si apre. Contato dalla base del giro, no."""
+        base = repo_di_prova._git("rev-parse", "HEAD")
+        repo_di_prova.commit("test(analisi): il clic apre la pratica (RED)", {self.TEST: self.ROSSO})
+        runner.apri_la_fase(base)
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 0, capsys.readouterr().out
+        assert self._fase(repo_di_prova) == runner.FASE_IMPL
 
 
 class TestIlPromptDiceDiCommittareIlRossoPrima:
@@ -6826,7 +6842,7 @@ class TestUnaBasePerGiro:
         registro.mkdir()
         monkeypatch.setattr(runner, "REPO", noi)
         monkeypatch.setattr(runner, "LOG_DIR", registro)
-        monkeypatch.setattr(runner, "apri_la_fase", lambda: None)  # niente hook nel repo di prova
+        monkeypatch.setattr(runner, "apri_la_fase", lambda base="": None)  # niente hook nel repo di prova
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
 
         vero_git, vero_esegui = runner.git, runner.esegui
