@@ -355,9 +355,9 @@ Esegui il PBI con queste regole non negoziabili:
   `--chiedi-impl`. Il gate lo rigira contro i **mutanti** delle funzioni che il branch ha
   toccato — la riga cancellata, `===` che diventa `!==`, `&&` che diventa `||` — e lo
   lascia passare solo se almeno uno lo fa fallire. Se il comportamento che la guardia
-  presidia vive in una funzione che il branch non tocca, il commit la **nomina** con una
-  riga `Guardia-su: <percorso>::<funzione>` nel corpo (`Classe.metodo` per un metodo), e
-  il gate la aggiunge ai mutanti. Una guardia che non guarda quelle funzioni — un'asserzione
+  presidia vive in una funzione di produzione che il branch non tocca, il commit la
+  **nomina** con una riga `Guardia-su: <percorso>::<funzione>` nel corpo (`Classe.metodo`
+  per un metodo), e il gate la aggiunge ai mutanti. Una guardia che non guarda quelle funzioni — un'asserzione
   vera comunque, un dato costruito perché il guasto non si veda — ferma il giro come un
   nato verde qualsiasi.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
@@ -539,9 +539,9 @@ giusto, manca la guardia:
 - a dire se quel test vale non sei tu, è il gate: lo rigira contro i **mutanti** delle
   funzioni che il branch ha toccato — la riga cancellata, `===` che diventa `!==`, `&&` che
   diventa `||` — e lo lascia passare solo se almeno uno lo fa fallire (`ADR-0022`);
-- se il comportamento vive in una funzione che il branch non tocca, il messaggio la
-  **nomina** con una riga `Guardia-su: <percorso>::<funzione>` nel corpo (`Classe.metodo`
-  per un metodo): il gate la aggiunge ai mutanti di quel commit;
+- se il comportamento vive in una funzione di produzione che il branch non tocca, il
+  messaggio la **nomina** con una riga `Guardia-su: <percorso>::<funzione>` nel corpo
+  (`Classe.metodo` per un metodo): il gate la aggiunge ai mutanti di quel commit;
 - se non morde, il difetto è **nel test**: un'asserzione vera comunque, un dato costruito
   perché il guasto non si veda. Riscrivilo perché guardi quelle funzioni.
 
@@ -2238,11 +2238,20 @@ def funzioni_nominate(albero: Path, sha: str
                       ) -> tuple[dict[str, dict[str, set[int]]], list[str]]:
     """Le funzioni che il commit nomina con `Guardia-su:`, per file e per nome con
     le loro righe, cercate nel file a quel commit; e una nota per ogni nome che non
-    si trova (PBI-378, decisione 3: si segnala, non si blocca — `ADR-0008`)."""
+    si trova (PBI-378, decisione 3: si segnala, non si blocca — `ADR-0008`).
+
+    Entra solo codice di produzione dentro il worktree. Un test che nomina sé
+    stesso muore del proprio `==`→`!=` e passerebbe sempre; un percorso assoluto,
+    con `..` o dietro un link farebbe scrivere i mutanti fuori dal worktree
+    usa-e-getta. Lì va una nota, come per il nome non trovato."""
     nominate: dict[str, dict[str, set[int]]] = defaultdict(dict)
     note: list[str] = []
     for percorso, nome in RE_GUARDIA_SU.findall(git("show", "--no-patch", "--format=%B", sha)):
-        sorgente = leggi_sorgente(albero / percorso) if percorso.endswith(".py") else None
+        dentro = (albero / percorso).resolve().is_relative_to(albero.resolve())
+        if not (dentro and e_file_di_produzione(percorso)):
+            note.append(f"{percorso}::{nome} (funzione nominata fuori dalla produzione)")
+            continue
+        sorgente =leggi_sorgente(albero / percorso) if percorso.endswith(".py") else None
         trovata = funzione_nominata(sorgente, nome) if sorgente is not None else None
         if trovata is None:
             note.append(f"{percorso}::{nome} (funzione nominata non trovata)")
