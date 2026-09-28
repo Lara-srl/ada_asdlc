@@ -4040,6 +4040,36 @@ class TestUnGateGuastoNonEUnCicloMancato:
         assert esiti == {"mostra le commesse del foglio": "nessuno"}
 
 
+    @pytest.mark.parametrize("schermo, conti", [
+        ("\n Tests  1 failed (1)\n", {"numFailedTests": 1}),
+        ("\n Tests  1 passed (1)\n", {"numPassedTests": 1}),
+        ("\n Tests  1 skipped (1)\n", {"numPendingTests": 1}),
+        ("\n Tests  1 skipped (1)\n", {"numTodoTests": 1}),
+        ("\n Tests  1 passed (1)\n", {"numFailedTests": 1}),
+        ("\n RUN  v3.2.4\n", {"numFailedTests": 1}),
+        ("\n RUN  v3.2.4\n", {"numPassedTests": 1}),
+    ], ids=["failed", "passed", "pending", "todo", "riepilogo-verde-json-rosso",
+            "senza-riepilogo-json-rosso", "senza-riepilogo-json-verde"])
+    def test_i_totali_del_comando_non_decidono_per_un_test_senza_voce(
+            self, monkeypatch, tmp_path, schermo, conti):
+        """PBI-376, decisione 2. Il comando mette in OR i test chiesti di un file
+        (`-t "A|B"`), e i totali — quelli a schermo e `numFailedTests`,
+        `numPassedTests`, `numPendingTests`, `numTodoTests` del rapporto — sono
+        di tutto il comando. Se decidessero per un test che nel rapporto non ha
+        una voce sua, quel test erediterebbe l'esito dei vicini: un falso rosso
+        osservato (ADR-0021), un falso nato verde, o un «rosso non osservabile»
+        al posto di «non isolabile» (`ESITI_MANCATI`). Resta `nessuno`."""
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({**conti, "testResults": [
+            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+             "assertionResults": []},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": "nessuno"}
+
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
 
