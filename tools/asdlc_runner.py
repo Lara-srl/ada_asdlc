@@ -2050,28 +2050,50 @@ def cancellazioni(base: str, sha: str) -> dict[str, set[int]]:
     return posizioni
 
 
+def funzioni_del_modulo(albero: ast.AST) -> list[tuple[str, int, int]]:
+    """Ogni `def` e `async def` del modulo come `(nome, prima, ultima)`, col nome
+    qualificato dalle classi e dalle funzioni che la contengono: `Classe.metodo`."""
+    trovate: list[tuple[str, int, int]] = []
+
+    def visita(nodo: ast.AST, prefisso: str) -> None:
+        for figlio in ast.iter_child_nodes(nodo):
+            if isinstance(figlio, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                nome = prefisso + figlio.name
+                if not isinstance(figlio, ast.ClassDef):
+                    trovate.append((nome, figlio.lineno, figlio.end_lineno or figlio.lineno))
+                visita(figlio, nome + ".")
+            else:
+                visita(figlio, prefisso)
+
+    visita(albero, "")
+    return trovate
+
+
 def righe_del_perimetro(percorso: str, sorgente: str, righe: set[int],
-                        posizioni: set[int]) -> set[int]:
-    """Le righe da mutare di un file: tutte quelle delle funzioni toccate, e le
-    righe cambiate che stanno fuori da ogni funzione (PBI-378).
+                        posizioni: set[int]) -> tuple[set[int], list[str]]:
+    """Le righe da mutare di un file — tutte quelle delle funzioni toccate, e le
+    righe cambiate che stanno fuori da ogni funzione — e i nomi di quelle
+    funzioni, per il rapporto (PBI-378).
 
     Una funzione è toccata se contiene una riga cambiata o la posizione di una
     cancellazione, e vale la più interna — un metodo, una funzione annidata — dai
     `lineno`/`end_lineno` dell'AST. Un file che non è Python resta per riga.
     """
     if not percorso.endswith(".py"):
-        return righe
-    funzioni = [n for n in ast.walk(ast.parse(sorgente))
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        return righe, []
+    funzioni = funzioni_del_modulo(ast.parse(sorgente))
     perimetro: set[int] = set()
-    for riga in righe | posizioni:
-        dentro = [f for f in funzioni if f.lineno <= riga <= (f.end_lineno or f.lineno)]
+    toccate: list[str] = []
+    for riga in sorted(righe | posizioni):
+        dentro = [f for f in funzioni if f[1] <= riga <= f[2]]
         if dentro:
-            piu_interna = max(dentro, key=lambda f: f.lineno)
-            perimetro.update(range(piu_interna.lineno, (piu_interna.end_lineno or 0) + 1))
+            nome, prima, ultima = max(dentro, key=lambda f: f[1])
+            perimetro.update(range(prima, ultima + 1))
+            if nome not in toccate:
+                toccate.append(nome)
         elif riga in righe:
             perimetro.add(riga)
-    return perimetro
+    return perimetro, toccate
 
 
 def righe_delle_docstring(sorgente: str) -> set[int]:
@@ -2200,40 +2222,33 @@ def funzione_nominata(sorgente: str, nome: str) -> tuple[int, int] | None:
     """Le righe `(prima, ultima)` di `funzione` o `Classe.metodo` nel modulo, o
     `None` se lì non c'è o il sorgente non si analizza."""
     try:
-        corpo = ast.parse(sorgente).body
+        albero = ast.parse(sorgente)
     except SyntaxError:
         return None
-    trovato: ast.stmt | None = None
-    for parte in nome.split("."):
-        trovato = next((n for n in corpo if isinstance(n, (ast.ClassDef, ast.FunctionDef,
-                                                             ast.AsyncFunctionDef))
-                        and n.name == parte), None)
-        if trovato is None:
-            return None
-        corpo = trovato.body
-    if not isinstance(trovato, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return None
-    return trovato.lineno, trovato.end_lineno or trovato.lineno
+    return next(((prima, ultima) for trovato, prima, ultima in funzioni_del_modulo(albero)
+                 if trovato == nome), None)
 
 
-def funzioni_nominate(albero: Path, sha: str) -> tuple[dict[str, set[int]], list[str]]:
-    """Le righe delle funzioni che il commit nomina con `Guardia-su:`, cercate nel
-    file a quel commit, e una nota per ogni nome che non si trova (PBI-378,
-    decisione 3: si segnala, non si blocca — `ADR-0008`)."""
-    righe: dict[str, set[int]] = defaultdict(set)
+def funzioni_nominate(albero: Path, sha: str
+                      ) -> tuple[dict[str, dict[str, set[int]]], list[str]]:
+    """Le funzioni che il commit nomina con `Guardia-su:`, per file e per nome con
+    le loro righe, cercate nel file a quel commit; e una nota per ogni nome che non
+    si trova (PBI-378, decisione 3: si segnala, non si blocca — `ADR-0008`)."""
+    nominate: dict[str, dict[str, set[int]]] = defaultdict(dict)
     note: list[str] = []
     for percorso, nome in RE_GUARDIA_SU.findall(git("show", "--no-patch", "--format=%B", sha)):
         sorgente = leggi_sorgente(albero / percorso) if percorso.endswith(".py") else None
         trovata = funzione_nominata(sorgente, nome) if sorgente is not None else None
         if trovata is None:
-            note.append(f"`{percorso}::{nome}`: funzione nominata non trovata")
+            note.append(f"{percorso}::{nome} (funzione nominata non trovata)")
             continue
-        righe[percorso].update(range(trovata[0], trovata[1] + 1))
-    return dict(righe), note
+        nominate[percorso][nome] = set(range(trovata[0], trovata[1] + 1))
+    return dict(nominate), note
 
 
 def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
-                   chiave: str, nominate: dict[str, set[int]] | None = None
+                   chiave: str, nominate: dict[str, dict[str, set[int]]] | None = None,
+                   perimetro: list[str] | None = None
                    ) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
     """Il test nato verde, rigirato contro i mutanti delle funzioni che il branch
     ha toccato.
@@ -2247,15 +2262,19 @@ def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
     Un mutante alla volta, nello stesso worktree in cui il test è stato visto
     verde: il file si riscrive con la riga guasta, il test gira da solo, e si esce
     al primo kill perché uno basta — il gate chiede che il test osservi il codice
-    toccato, non che lo copra tutto. `nominate` sono le righe delle funzioni che
-    il commit nomina con `Guardia-su:` (`funzioni_nominate`): entrano nel
-    perimetro anche se il branch non le tocca.
+    toccato, non che lo copra tutto. `nominate` sono le funzioni che il commit
+    nomina con `Guardia-su:` (`funzioni_nominate`): entrano nel perimetro anche se
+    il branch non le tocca. `perimetro`, se c'è, si riempie con le funzioni mutate
+    e da dove sono entrate — `dal diff` o `nominata` — **prima** di mutare, così il
+    rapporto lo dice intero anche quando si esce al primo kill (PBI-378).
     """
     test = comando.origine[chiave]
     da_solo, _ = comandi_dei_test(albero, [test])
     prove: list[dict[str, str]] = []
+    perimetro = perimetro if perimetro is not None else []
     cambiate, cancellate = righe_cambiate(base, sha), cancellazioni(base, sha)
     nominate = nominate or {}
+    piano: list[tuple[str, Path, str, set[int]]] = []
     for percorso in sorted(cambiate.keys() | cancellate.keys() | nominate.keys()):
         if linguaggio_del_file(percorso) != test.linguaggio:
             continue  # un test Python non morde un .ts, e rigirarlo lì è tempo perso
@@ -2263,9 +2282,14 @@ def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
         sorgente = leggi_sorgente(file)
         if sorgente is None:
             continue
-        righe = righe_del_perimetro(percorso, sorgente, cambiate.get(percorso, set()),
-                                    cancellate.get(percorso, set()))
-        righe = righe | nominate.get(percorso, set())
+        righe, toccate = righe_del_perimetro(percorso, sorgente, cambiate.get(percorso, set()),
+                                             cancellate.get(percorso, set()))
+        perimetro += [f"{percorso}::{nome} (dal diff)" for nome in toccate]
+        for nome, sue in nominate.get(percorso, {}).items():
+            perimetro.append(f"{percorso}::{nome} (nominata)")
+            righe = righe | sue
+        piano.append((percorso, file, sorgente, righe))
+    for percorso, file, sorgente, righe in piano:
         try:
             for m in mutanti_del_sorgente(sorgente, righe):
                 guasto = sorgente_del_mutante(percorso, sorgente, m)
@@ -2371,14 +2395,17 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                     continue
                 lettura = ESITI_MANCATI[esiti[chiave]]
                 if esiti[chiave] == "verde":
+                    perimetro: list[str] = []
                     ucciso, prove = quarta_lettura(albero, base, sha, comando, chiave,
-                                                   nominate)
+                                                   nominate, perimetro)
+                    perimetro += note
                     if ucciso is not None:
                         morsi.append({"commit": sha[:7], "titolo": titolo,
                                       "test": etichetta, "mutante": ucciso["mutante"],
-                                      "tipo": ucciso["tipo"], "prove": prove})
+                                      "tipo": ucciso["tipo"], "prove": prove,
+                                      "perimetro": perimetro})
                         continue
-                    lettura = "; ".join([lettura_del_verde(prove), *note])
+                    lettura = lettura_del_verde(prove, perimetro)
                 per_lettura[lettura].append(etichetta)
             for lettura, elenco in per_lettura.items():
                 mancati.append(voce_mancata(sha, titolo, elenco, lettura, coda))
@@ -2390,33 +2417,39 @@ def descrizione_del_morso(m: dict, rientro: str) -> str:
     prove fatte fino al kill, una per riga: `mutante: esito (tipo)`."""
     tipo = f" ({m['tipo']})" if m.get("tipo") else ""
     righe = [f"{rientro}→ nato verde, ma morde: {m['mutante']}{tipo}"]
+    if m.get("perimetro"):
+        righe.append(f"{rientro}  perimetro: {', '.join(m['perimetro'])}")
     for p in m.get("prove", []):
         tipo = f" ({p['tipo']})" if p["tipo"] else ""
         righe.append(f"{rientro}  · {p['mutante']}: {p['esito']}{tipo}")
     return "\n".join(righe)
 
 
-def lettura_del_verde(prove: list[dict[str, str]]) -> str:
+def lettura_del_verde(prove: list[dict[str, str]], perimetro: list[str] | None = None) -> str:
     """Cosa si scrive di un nato verde dopo la quarta lettura.
 
     Con dei mutanti provati la lettura è più forte di «il codice c'era già»: dice
-    che il test **non guarda** le righe che il branch ha scritto. Senza — il branch
-    non ha righe di produzione, o i suoi mutanti non compilano — resta quella di
-    prima, e lo dice: zero provati non è «nessuno lo fa fallire».
+    che il test **non guarda** le funzioni che il branch ha toccato. Senza — il
+    branch non ha righe di produzione, o i suoi mutanti non compilano — resta quella
+    di prima, e lo dice: zero provati non è «nessuno lo fa fallire».
 
     I mutanti che l'hanno fatto fallire per eccezione si contano a parte, col tipo:
     chi legge un «non morde» deve vedere che un guasto il test l'ha sentito, e
-    perché non conta (PBI-365).
+    perché non conta (PBI-365). E il `perimetro`, se c'è, chiude la lettura: chi
+    legge «non morde» deve vedere dove il gate ha guardato (PBI-378).
     """
     if not prove:
-        return f"{ESITI_MANCATI['verde']} — e nessun mutante da provare sulle righe cambiate"
-    quanti = "1 mutante provato" if len(prove) == 1 else f"{len(prove)} mutanti provati"
-    lettura = (f"nato verde e non morde: a quel commit il test passa, e {quanti} sulle "
-               f"righe che il branch ha cambiato non lo fanno fallire")
-    tipi = [p["tipo"] for p in prove if p["esito"] == PER_ECCEZIONE]
-    if tipi:
-        lettura += (f" per asserzione; {len(tipi)} {PER_ECCEZIONE} "
-                    f"({', '.join(sorted(set(tipi)))}), che non è un morso")
+        lettura = f"{ESITI_MANCATI['verde']} — e nessun mutante da provare nel perimetro"
+    else:
+        quanti = "1 mutante provato" if len(prove) == 1 else f"{len(prove)} mutanti provati"
+        lettura = (f"nato verde e non morde: a quel commit il test passa, e {quanti} nelle "
+                   f"funzioni che il branch ha toccato non lo fanno fallire")
+        tipi = [p["tipo"] for p in prove if p["esito"] == PER_ECCEZIONE]
+        if tipi:
+            lettura += (f" per asserzione; {len(tipi)} {PER_ECCEZIONE} "
+                        f"({', '.join(sorted(set(tipi)))}), che non è un morso")
+    if perimetro:
+        lettura += f"; perimetro: {', '.join(perimetro)}"
     return lettura
 
 
