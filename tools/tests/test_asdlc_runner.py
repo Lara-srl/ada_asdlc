@@ -7396,6 +7396,32 @@ class TestLeGuardieDelMotivo:
         assert "chiusura del giro fallita (domanda-del-builder)" in voce["nota"], voce["nota"]
         assert "disco pieno" in voce["nota"]
 
+    def test_una_chiusura_fallita_arriva_nel_rapporto_col_suo_motivo(
+            self, monkeypatch, tmp_path):
+        """PBI-380, decisione 2 (difetto 55 di `PBI-102`): `ChiusuraFallita` porta
+        il motivo che la chiusura stava scrivendo, e la rete di `main()` lo
+        copiava solo nel testo della nota, lasciando il campo `motivo` vuoto."""
+        self._mondo(monkeypatch)
+        _domanda_del_builder(monkeypatch)
+
+        def fase_che_non_si_chiude():
+            raise OSError("disco pieno")
+
+        monkeypatch.setattr(runner, "chiudi_la_fase", fase_che_non_si_chiude)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
+
+        runner.main()
+
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        [voce] = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert voce["motivo"] == "domanda-del-builder", voce
+        assert voce["stato"] == "rosso", "lo stato resta quello della rete"
+
 
 class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
     """PBI-377, difetto 50 di `PBI-102`. Dopo `chiudi()` resta l'Acceptance Gate,
