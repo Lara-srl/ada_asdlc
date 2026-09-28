@@ -2849,6 +2849,28 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto"
         assert "PR ritrovata dopo output senza URL" in esito.nota, esito.nota
 
+    @pytest.mark.parametrize("creazione", [
+        subprocess.TimeoutExpired(["gh", "pr", "create"], 300),
+        (0, "A new release of gh is available\n"),
+    ], ids=["timeout", "senza-url"])
+    @pytest.mark.parametrize("ricerca", [
+        (0, "[]"),
+        subprocess.TimeoutExpired(["gh", "pr", "list"], 300),
+    ], ids=["nessuna-pr", "gh-muto"])
+    def test_un_create_che_non_ritrova_la_pr_la_dice_forse_aperta(
+            self, monkeypatch, creazione, ricerca):
+        """Decisione 2: la seconda ricerca non trova la PR, o `gh` non risponde.
+        Il giro resta `fatto`, `pr` vuoto, e la nota lo dice invece di lasciare
+        salire l'eccezione alla rete di PBI-377."""
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch, list=[(0, "[]"), ricerca], create=[creazione])
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"], "una ricerca sola"
+        assert pr == esito.pr == ""
+        assert commentate == []
+        assert esito.stato == "fatto"
+        assert "PR forse aperta, da verificare" in esito.nota, esito.nota
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
