@@ -2426,9 +2426,10 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
 
     Un commento che non parte non ferma niente: la PR è aperta, i file restano,
     e la nota dice quali revisioni mancano e perché (`ADR-0008`). Vale anche per
-    un `gh` in timeout e per un file che non si legge, **senza alzare**: da qui
-    un'eccezione arriverebbe a `main()`, che registra `rosso` e senza PR un giro
-    già pubblicato."""
+    un `gh` in timeout e per un file che non si legge, **senza alzare**: qui la
+    nota nomina le revisioni mancate, mentre un'eccezione arriverebbe a
+    `esegui_pbi()` come «dopo la chiusura» generico, e i commenti dopo il primo
+    non partirebbero."""
     mancate: list[str] = []
     ragione = ""
 
@@ -2476,9 +2477,13 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     Su PBI-358 (difetto 30) il push è riuscito e ha mandato un ref fermo
     diciannove commit indietro, e la PR #237 è nata su un `(RED)` con il giro
     `fatto`. Se i due sha non coincidono il giro chiude `head-non-su-origin`, e
-    la nota li nomina. Se il remoto non risponde, cosa ci sia sopra non si sa: è la stessa promessa
-    non verificata, e chiude allo stesso modo — **senza alzare**, perché
-    un'eccezione qui registrerebbe `rosso` e zero commit un giro già pubblicato.
+    la nota li nomina. Se il remoto non risponde — un errore o un **timeout**,
+    come in `base_del_giro()` — cosa ci sia sopra non si sa: è la stessa promessa
+    non verificata, e chiude allo stesso modo, con la testa «non verificabile» e
+    **senza alzare**: un'eccezione che sale a `esegui_pbi()` si scrive soltanto
+    in fondo alla nota, e non produce lo stato che dice cosa c'è su `origin`.
+    Un push che scade non arriva fin qui: `pubblica()` torna `False`, e la nota
+    porta `NON_PUBBLICATO` con `PUSH_SCADUTO` (PBI-377, decisioni 2 e 3).
     """
     if not pubblica(branch, e):
         # L'esito resta quello che era: un push mancato non disfa il giro, ma la
@@ -2490,7 +2495,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         head = git("rev-parse", "HEAD")
         fuori = git("ls-remote", REMOTO, f"refs/heads/{branch}").split()
         su_origin = fuori[0] if fuori else ""
-    except RuntimeError as exc:
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"    ⚠️  {REMOTO} non verificabile: {str(exc)[:200]}")
     if su_origin is None or su_origin != head:
         visto = ("non verificabile" if su_origin is None
@@ -2534,8 +2539,11 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     if url is None:
         print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
         return ""
-    commenta_i_rapporti(url.group(0), e)
-    return url.group(0)
+    # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR esiste già
+    # e l'esito la deve nominare (PBI-377, decisione 5).
+    e.pr = url.group(0)
+    commenta_i_rapporti(e.pr, e)
+    return e.pr
 
 
 class ChiusuraFallita(RuntimeError):
@@ -2771,6 +2779,8 @@ def ramo_diverso_da_head(branch: str) -> tuple[str, str] | None:
 # Ciò che la nota del giro dice quando `pubblica()` torna False: stato e commit
 # restano quelli che erano, e questa è la riga che lo fa sapere al registro.
 NON_PUBBLICATO = "branch non pubblicato: i commit restano nel worktree"
+# E quando il push è scaduto invece di fallire, questa le va accanto (PBI-377).
+PUSH_SCADUTO = "push in timeout, stato di origin da verificare"
 
 
 def pubblica(branch: str, e: Esito | None = None) -> bool:
@@ -2786,7 +2796,9 @@ def pubblica(branch: str, e: Esito | None = None) -> bool:
     E **non alza**: un push che fallisce è una brutta notizia, non una ragione per
     buttare via l'ora precedente. Chi legge il log la trova scritta, chi la
     chiama la riporta nella nota del giro (`NON_PUBBLICATO`), e i commit
-    restano nel worktree.
+    restano nel worktree. Un push che **scade** torna `False` allo stesso modo,
+    e nella nota di `e` lascia in più `PUSH_SCADUTO`: su `origin` il ramo può
+    esserci arrivato lo stesso (PBI-377, decisione 2).
 
     Si manda **`HEAD`**, non il ref del ramo, quando i due divergono (difetto 30):
     `HEAD` è ciò che gate, gate del rosso e Critic hanno guardato, e il worktree
@@ -2811,10 +2823,15 @@ def pubblica(branch: str, e: Esito | None = None) -> bool:
             return True
         etichetta, head = diversi
         git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
-    except RuntimeError as exc:
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
         print(f"       i commit restano in locale su {branch}: `git push` a mano quando "
               f"hai guardato cosa c'è sul remoto.")
+        # Un push fallito dice «su origin non c'è»; uno scaduto dice «non si sa»:
+        # il push è atomico per ref, e il remoto può averlo ricevuto anche se il
+        # client è morto. Chi legge la nota deve guardare prima di rifarlo.
+        if isinstance(exc, subprocess.TimeoutExpired) and e is not None:
+            e.nota = " · ".join(t for t in (e.nota, PUSH_SCADUTO) if t)
         return False
     nota = f"pubblicato HEAD {head} al posto del ramo {branch}, che era {etichetta}"
     try:
@@ -3245,8 +3262,18 @@ def esegui_pbi(
         return e
 
     # --- Acceptance Gate (umano): si apre la PR, non si mergia ---
+    # Dopo `chiudi()` l'esito esiste, e un'eccezione non lo sostituisce: gli si
+    # aggiunge in fondo alla nota. Usciva da qui, e la rete di `main()` scriveva
+    # un `rosso` nuovo al posto del giro chiuso, con stato, commit, rapporti del
+    # Critic e invocazioni persi (difetto 50). Il `try` è per l'imprevisto: i
+    # guasti della pubblicazione hanno il loro stato dentro `apri_pr()`.
     if con_pr:
-        e.pr = apri_pr(pbi, pbi_path, branch, e)
+        try:
+            e.pr = apri_pr(pbi, pbi_path, branch, e)
+        except Exception as exc:  # noqa: BLE001 — si aggiunge all'esito, non si tace
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            dichiara(f"dopo la chiusura: {type(exc).__name__}: {exc}"[:300])
         if e.pr:
             print(f"    PR aperta: {e.pr}")
     return e

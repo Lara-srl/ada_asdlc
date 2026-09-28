@@ -2327,6 +2327,35 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
         assert self.HEAD in esito.nota
 
 
+    def test_se_ls_remote_scade_chiude_head_non_su_origin_senza_alzare(self, monkeypatch):
+        """PBI-377, decisione 3. `git()` lascia salire `subprocess.TimeoutExpired`, e
+        l'`except` della verifica intercettava solo `RuntimeError`: il remoto che
+        non risponde in tempo usciva da `apri_pr()`, e il giro restava `fatto` con
+        una testa su origin che nessuno aveva verificato (difetto 57). Chiude come
+        il remoto che risponde con un errore, come fa `base_del_giro()`."""
+        self._git(monkeypatch, head=self.HEAD, ref=self.HEAD)
+        finto = runner.git
+
+        def _g(*args: str) -> str:
+            if args[:1] == ("ls-remote",):
+                raise subprocess.TimeoutExpired(["git", *args], 120)
+            return finto(*args)
+
+        monkeypatch.setattr(runner, "git", _g)
+        comandi: list[list[str]] = []
+        monkeypatch.setattr(runner, "esegui", lambda cmd, cwd, timeout=0:
+                            comandi.append(cmd) or (0, "https://x/pull/237\n"))
+        esito = runner.Esito("PBI-358", "fatto")
+
+        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+
+        assert pr == ""
+        assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
+        assert esito.stato == "fermato"
+        assert esito.motivo == "head-non-su-origin"
+        assert "non verificabile" in esito.nota, esito.nota
+
+
 class TestUnGiroLasciaTracciaAppenaComincia:
     """Difetto 20 di PBI-102: un giro che muore a metà non deve sparire.
 
@@ -6991,3 +7020,248 @@ class TestLeGuardieDelMotivo:
         assert voce["stato"] == "rosso"
         assert "chiusura del giro fallita (domanda-del-builder)" in voce["nota"], voce["nota"]
         assert "disco pieno" in voce["nota"]
+
+
+class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
+    """PBI-377, difetto 50 di `PBI-102`. Dopo `chiudi()` resta l'Acceptance Gate,
+    `apri_pr()`: un'eccezione lì usciva da `esegui_pbi()`, e la rete di `main()`
+    scriveva un `Esito` rosso nuovo al posto di quello già chiuso — stato, commit,
+    PR, rapporti del Critic e invocazioni persi. Verificato su `main` (`53da25c`)
+    il 25/09/2026 con `ValueError` in `apri_pr()`."""
+
+    @staticmethod
+    def _giro_fatto(monkeypatch):
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+
+    def test_uneccezione_in_apri_pr_lascia_lesito_chiuso_e_la_scrive_in_fondo_alla_nota(
+            self, monkeypatch, git_finto, capsys):
+        self._giro_fatto(monkeypatch)
+
+        def apri_pr_che_alza(pbi, pbi_path, branch, e):
+            raise ValueError("corpo della PR illeggibile")
+
+        monkeypatch.setattr(runner, "apri_pr", apri_pr_che_alza)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto", "lo stato del giro chiuso non cambia"
+        assert esito.motivo == "fatto"
+        assert esito.commit == 3, "i commit contati alla chiusura restano"
+        assert [r["verdetto"] for r in esito.rapporti_critic] == ["pass"], (
+            "i puntatori ai rapporti del Critic restano"
+        )
+        assert [v["ruolo"] for v in esito.invocazioni] == ["builder", "critic"]
+        assert esito.nota.endswith(
+            "dopo la chiusura: ValueError: corpo della PR illeggibile"), esito.nota
+        traccia = Path(esito.file_traceback)
+        assert traccia.parent == runner.LOG_DIR, "il traceback sta accanto al log del giro"
+        assert "ValueError" in traccia.read_text(encoding="utf-8")
+        err = capsys.readouterr().err
+        assert "Traceback" in err and "corpo della PR illeggibile" in err, (
+            "a schermo l'eccezione si dice come la dice la rete di main()"
+        )
+
+    def test_se_la_pr_era_gia_aperta_il_suo_url_resta_nellesito(self, monkeypatch, git_finto):
+        """Decisione 5: l'eccezione arriva dopo `gh pr create`, nei commenti del
+        Critic. La PR esiste su GitHub, e l'esito deve poterla nominare."""
+        url = "https://github.com/Lara-srl/ada-controller/pull/377"
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if cmd[:3] == ["gh", "pr", "create"]:
+                return 0, url
+            return agente(cmd, cwd, timeout, **k)
+
+        def commenti_che_alzano(u, e):
+            raise ValueError("rapporto con un carattere non codificabile")
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        monkeypatch.setattr(runner, "git", lambda *a: (
+            "3" if a[:2] == ("rev-list", "--count")
+            else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+            else SHA_DELLA_BASE if a[:1] in (("rev-parse",), ("ls-remote",))
+            else ""))
+        monkeypatch.setattr(runner, "commenta_i_rapporti", commenti_che_alzano)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto"
+        assert esito.pr == url, "la PR aperta prima dell'eccezione resta nell'esito"
+        assert esito.nota.endswith(
+            "dopo la chiusura: ValueError: rapporto con un carattere non codificabile"), (
+            esito.nota)
+
+
+    URL = "https://github.com/Lara-srl/ada-controller/pull/377"
+
+    def _pr_che_si_apre(self, monkeypatch, commento: tuple[int, str]):
+        """Un giro `fatto` in cui il push riesce, `origin` ha HEAD e `gh pr create`
+        risponde con `URL`; `gh pr comment` risponde `commento`."""
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if cmd[:3] == ["gh", "pr", "create"]:
+                return 0, self.URL
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                return commento
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        monkeypatch.setattr(runner, "git", lambda *a: (
+            "3" if a[:2] == ("rev-list", "--count")
+            else elenco_backlog() if a[:2] == ("ls-tree", "--name-only")
+            else SHA_DELLA_BASE if a[:1] in (("rev-parse",), ("ls-remote",))
+            else ""))
+
+    def test_guardia_un_commento_che_non_parte_resta_la_nota_di_371(self, monkeypatch):
+        """Guardia dichiarata: `commenta_i_rapporti()` cattura da sé il commento
+        che non parte (PBI-371) e lo scrive nella nota con la sua ragione. Il
+        `try` dopo la chiusura non lo vede, e la PR resta nominata."""
+        self._pr_che_si_apre(monkeypatch, commento=(1, "HTTP 502: Bad Gateway"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto"
+        assert esito.pr == self.URL
+        assert esito.nota.endswith(
+            f"rapporto del Critic non commentato sulla PR (revisioni 0): "
+            f"HTTP 502: Bad Gateway — i file restano in {runner.LOG_DIR}"), esito.nota
+        assert "dopo la chiusura" not in esito.nota
+
+    def test_guardia_un_eccezione_prima_dellesito_arriva_ancora_alla_rete_di_main(
+            self, monkeypatch, git_finto, tmp_path):
+        """Guardia dichiarata: la rete di `main()` resta l'ultima difesa per ciò che
+        alza **prima** che un esito esista, come `crea_branch()`. Due PBI in fila:
+        il primo chiude `fatto` e `apri_pr()` alza, e l'eccezione gli si aggiunge;
+        il secondo alza in `crea_branch()`, e la rete scrive il suo `rosso`."""
+        self._giro_fatto(monkeypatch)
+
+        def apri_pr_che_alza(pbi, pbi_path, branch, e):
+            raise ValueError("corpo della PR illeggibile")
+
+        def crea_branch(pbi, base):
+            if pbi == "PBI-377":
+                raise ValueError("nome del ramo illeggibile")
+            return f"pbi/{pbi.lower()}"
+
+        monkeypatch.setattr(runner, "apri_pr", apri_pr_che_alza)
+        monkeypatch.setattr(runner, "crea_branch", crea_branch)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv",
+                            ["asdlc_runner", "PBI-102", "PBI-377", "--in-primo-piano"])
+
+        runner.main()
+
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        primo, secondo = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert (primo["pbi"], primo["stato"]) == ("PBI-102", "fatto")
+        assert primo["nota"].endswith(
+            "dopo la chiusura: ValueError: corpo della PR illeggibile"), primo["nota"]
+        assert (secondo["pbi"], secondo["stato"]) == ("PBI-377", "rosso")
+        assert secondo["nota"] == "eccezione nel runner: nome del ramo illeggibile"
+
+
+class TestUnPushCheScadeENonPubblicato:
+    """PBI-377, difetto 57 di `PBI-102`, decisione 2. `git()` passa per `esegui()`,
+    che cattura soltanto `FileNotFoundError`: un push che scade alza
+    `subprocess.TimeoutExpired`, e `pubblica()` intercettava solo `RuntimeError`.
+    Un push scaduto è `NON_PUBBLICATO` come un push fallito, ma la nota dice in
+    più che `origin` può essere stato aggiornato lo stesso: il push è atomico per
+    ref, e il client che muore non dice cosa il remoto ha ricevuto."""
+
+    @staticmethod
+    def _git_col_push_che_scade(monkeypatch):
+        def _g(*args: str) -> str:
+            if args[:1] == ("push",):
+                raise subprocess.TimeoutExpired(["git", *args], 120)
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+
+    def _giro(self, monkeypatch, verdetto: str) -> "runner.Esito":
+        self._git_col_push_che_scade(monkeypatch)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p, **_: runner.Verdetto(verdetto, "chi decide?", "rapporto"))
+        return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+    def test_pubblica_non_alza_e_torna_false(self, monkeypatch, capsys):
+        self._git_col_push_che_scade(monkeypatch)
+        e = runner.Esito("PBI-102", "fatto")
+
+        assert runner.pubblica("pbi/pbi-102", e) is False
+        assert "timeout, stato di origin da verificare" in e.nota, e.nota
+        assert "branch non pubblicato" in capsys.readouterr().out, (
+            "a schermo il timeout si dice come il RuntimeError"
+        )
+
+    def test_un_push_che_scade_a_giro_fatto_e_non_pubblicato_e_lo_stato_non_cambia(
+            self, monkeypatch):
+        esito = self._giro(monkeypatch, "pass")
+
+        assert esito.stato == "fatto"
+        assert esito.pr == ""
+        assert runner.NON_PUBBLICATO in esito.nota, esito.nota
+        assert "timeout, stato di origin da verificare" in esito.nota, esito.nota
+        assert "dopo la chiusura" not in esito.nota, (
+            "il timeout del push ha il suo stato, non la strada dell'imprevisto"
+        )
+
+    def test_un_push_che_scade_mentre_chiudi_pubblica_un_giro_fermato_non_fa_salire_chiusura_fallita(
+            self, monkeypatch):
+        """Decisione 2, il secondo chiamante: `chiudi()` pubblica un giro che si
+        ferma. Lì il timeout diventava `ChiusuraFallita`, e la rete di `main()`
+        registrava `rosso` al posto di `sospeso`."""
+        esito = self._giro(monkeypatch, "sospeso")
+
+        assert esito.stato == "sospeso", "lo stato resta quello del motivo"
+        assert runner.NON_PUBBLICATO in esito.nota, esito.nota
+        assert "timeout, stato di origin da verificare" in esito.nota, esito.nota
+
+    def test_guardia_un_push_fallito_resta_non_pubblicato_senza_timeout_nella_nota(
+            self, monkeypatch):
+        """Guardia dichiarata: un push **rifiutato** dice «su origin non c'è», e la
+        nota resta quella di `PBI-362` — `NON_PUBBLICATO`, senza l'avviso del
+        timeout, che vale solo quando il push scade."""
+        def _g(*args: str) -> str:
+            if args[:1] == ("push",):
+                raise RuntimeError("git push → ! [rejected] pbi/pbi-102 (stale info)")
+            if args[:2] == ("rev-list", "--count"):
+                return "3"
+            if args[:2] == ("ls-tree", "--name-only"):
+                return elenco_backlog()
+            return ""
+
+        monkeypatch.setattr(runner, "git", _g)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "revisione_critica",
+                            lambda p, **_: runner.Verdetto("pass", "", "rapporto"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=True)
+
+        assert esito.stato == "fatto", "un push rifiutato non disfa il giro"
+        assert esito.pr == ""
+        assert esito.nota.endswith(runner.NON_PUBBLICATO), esito.nota
+        assert "timeout" not in esito.nota, esito.nota
+        assert "dopo la chiusura" not in esito.nota
