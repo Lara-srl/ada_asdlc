@@ -4096,6 +4096,25 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert esiti == {"mostra le commesse del foglio": atteso}
 
+    @pytest.mark.parametrize("contenuto", [None, "{\"testResults\": [", ""],
+                             ids=["assente", "troncato", "vuoto"])
+    def test_un_rapporto_di_vitest_che_manca_o_non_si_legge_e_un_guasto_del_gate(
+            self, monkeypatch, tmp_path, contenuto):
+        """PBI-376, decisione 3 — il difetto 25 di `PBI-102`. Senza rapporto il
+        gate non ha guardato niente: leggerlo come «nessun test» accusa il
+        Builder di un rosso mancato, mentre a non funzionare è lo strumento. Il
+        messaggio nomina il percorso dove il rapporto era atteso."""
+        rapporto = tmp_path / "vitest-0.json"
+        if contenuto is not None:
+            rapporto.write_text(contenuto, encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui",
+                            lambda *a, **k: (1, "\n Tests  1 failed (1)\n"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
 
