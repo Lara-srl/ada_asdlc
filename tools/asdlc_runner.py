@@ -3826,10 +3826,12 @@ def apri_la_fase(base: str = "") -> None:
 
 def chiudi_la_fase() -> None:
     """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
-    sessione dopo non può scrivere, e la diagnosi costerebbe più del giro."""
-    file = percorso_della_fase(REPO)
-    if file is not None:
-        file.unlink(missing_ok=True)
+    sessione dopo non può scrivere, e la diagnosi costerebbe più del giro. Con
+    la fase se ne va la base del giro: fuori da un giro si conta da `BASE`."""
+    for nome in (FILE_DELLA_FASE, FILE_DELLA_BASE):
+        file = percorso_della_fase(REPO, nome)
+        if file is not None:
+            file.unlink(missing_ok=True)
 
 
 def guardia_del_commit() -> int:
