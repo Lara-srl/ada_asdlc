@@ -1316,18 +1316,22 @@ def e_file_di_produzione(percorso: str) -> bool:
 # nell'albero accanto.
 
 FILE_DELLA_FASE = "asdlc-fase"
+# Accanto alla fase, e per la stessa strada, lo sha di base del giro: è da lì che
+# `--chiedi-impl` conta i commit del ramo (PBI-380, decisione 3).
+FILE_DELLA_BASE = "asdlc-base"
 FASE_TEST_ONLY = "TEST_ONLY"
 FASE_IMPL = "IMPL"
 
 
-def percorso_della_fase(cartella: Path) -> Path | None:
+def percorso_della_fase(cartella: Path, nome: str = FILE_DELLA_FASE) -> Path | None:
     """Dove sta la fase per l'albero che contiene `cartella`, o `None` se non c'è
-    un repository sotto — e allora non si scrive da nessuna parte."""
+    un repository sotto — e allora non si scrive da nessuna parte. Con `nome`
+    un altro file dello stesso posto: la base del giro."""
     try:
-        detto = git("-C", str(cartella), "rev-parse", "--git-path", FILE_DELLA_FASE)
+        detto = git("-C", str(cartella), "rev-parse", "--git-path", nome)
     except RuntimeError:
         return None
-    if not detto or Path(detto).name != FILE_DELLA_FASE:
+    if not detto or Path(detto).name != nome:
         return None  # sotto i test `git` torna "", e `Path("")` è la cartella corrente
     percorso = Path(detto)
     return percorso if percorso.is_absolute() else Path(cartella) / percorso
@@ -3416,7 +3420,7 @@ def esegui_pbi(
         print(f"    ⚠️  {muto}")
         motivo, dettaglio = "origin-muto", str(muto)
     else:
-        apri_la_fase()
+        apri_la_fase(base)
         # Il giro sta in un `try` perché ogni strada d'uscita passi da `chiudi()`:
         # un'eccezione — il timeout di un gate, un guasto dentro il gate del rosso
         # — usciva da qui, la raccoglieva la rete di `main()`, e il ramo restava
@@ -3659,16 +3663,24 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     rendeva cieca la richiesta. Lo ha trovato il Builder al primo giro vero, il
     01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita.
 
-    L'ultimo commit e basta, non tutto `BASE..HEAD`: dopo tre criteri i test dei
+    L'ultimo commit e basta, non tutto `<base>..HEAD`: dopo tre criteri i test dei
     primi due sono verdi, e la richiesta verrebbe rifiutata per «nato verde» su
     lavoro che il suo rosso l'aveva già avuto.
+
+    I commit del ramo si contano dallo sha di base del giro, che `apri_la_fase()`
+    lascia accanto alla fase, e non da `BASE`: un `origin/main` che riceve il ramo
+    stesso con un merge veloce renderebbe `BASE..HEAD` vuoto (PBI-380, decisione
+    3). Fuori da un giro lo sha non c'è, e si ripiega su `BASE`.
     """
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
-    if git("rev-list", "--count", f"{BASE}..HEAD") == "0":
-        # Il branch nasce da `BASE`, quindi al primo `--chiedi-impl` di ogni giro
-        # HEAD **è** il ramo di base: se lì l'ultimo commit fosse di soli test, il
+    file = percorso_della_fase(REPO, FILE_DELLA_BASE)
+    base = (file.read_text(encoding="utf-8").strip()
+            if file is not None and file.is_file() else "") or BASE
+    if git("rev-list", "--count", f"{base}..HEAD") == "0":
+        # Il branch nasce dalla base, quindi al primo `--chiedi-impl` di ogni giro
+        # HEAD **è** la base: se lì l'ultimo commit fosse di soli test, il
         # Builder otterrebbe la produzione aperta senza aver scritto una riga.
         return []
     file = file_del_commit("HEAD")
@@ -3795,8 +3807,9 @@ def installa_il_ritorno_in_test_only() -> bool:
     return installa_un_hook("post-commit", RITORNO_IN_TEST_ONLY)
 
 
-def apri_la_fase() -> None:
+def apri_la_fase(base: str = "") -> None:
     """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
+    Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`.
 
     L'hook di Claude Code non si installa qui — sta in `.claude/settings.json`,
     versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
@@ -3807,6 +3820,8 @@ def apri_la_fase() -> None:
     installa_la_guardia_del_commit()
     installa_il_ritorno_in_test_only()
     percorso_della_fase(REPO).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
+    if base:
+        percorso_della_fase(REPO, FILE_DELLA_BASE).write_text(f"{base}\n", encoding="utf-8")
 
 
 def chiudi_la_fase() -> None:
