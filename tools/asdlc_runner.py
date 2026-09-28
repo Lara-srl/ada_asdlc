@@ -2640,6 +2640,16 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
         e.nota = " · ".join(t for t in (e.nota, nota) if t)
 
 
+def pr_aperte(branch: str) -> list[str]:
+    """Gli URL delle PR aperte sul ramo, letti dal JSON di `gh pr list` e non dal
+    suo testo (PBI-381, decisione 1)."""
+    _, uscita = esegui(
+        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url"],
+        REPO, timeout=300,
+    )
+    return [pr["url"] for pr in json.loads(uscita)]
+
+
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     """Apre la PR e si ferma lì: il merge è dell'umano (micro-commits §5).
 
@@ -2692,6 +2702,14 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         e.motivo = "head-non-su-origin"
         e.nota = " · ".join(t for t in (diagnosi, resto) if t)
         return ""
+    # Prima di creare si cerca: una PR nata da un giro precedente, o da un
+    # `gh pr create` morto dopo averla aperta, non ne deve far nascere un'altra
+    # (PBI-381, decisione 1).
+    if aperte := pr_aperte(branch):
+        e.nota = " · ".join(t for t in (e.nota, "PR già aperta sul ramo") if t)
+        e.pr = aperte[0]
+        commenta_i_rapporti(e.pr, e)
+        return e.pr
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
         f"(`tools/asdlc_runner.py`).\n\n"
