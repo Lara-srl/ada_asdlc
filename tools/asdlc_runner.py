@@ -1941,6 +1941,10 @@ def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
     return "nessuno"
 
 
+# Il tetto di un comando di prova, in secondi.
+TETTO_DEI_TEST = 1800
+
+
 def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     """Gira il comando e torna l'esito di **ogni** test che gli era stato chiesto.
 
@@ -1953,12 +1957,17 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     solo file che non si carica (`esito_dei_file_di_vitest`, PBI-376, decisione 2).
     """
     try:
-        codice, uscita = esegui(c.argv, c.cartella, timeout=1800)
-    except subprocess.TimeoutExpired:
-        # Un timeout lo dicono i test: a quel commit non terminano, e il gate non
-        # indovina. Lo strumento ha girato — quindi non è un guasto. Vale per
-        # pytest: vitest fermato prima della fine il rapporto non lo scrive, e un
+        codice, uscita = esegui(c.argv, c.cartella, timeout=TETTO_DEI_TEST)
+    except subprocess.TimeoutExpired as exc:
+        # vitest fermato prima della fine il rapporto non lo scrive, e un
         # rapporto che manca è un guasto del gate (PBI-376, decisioni 3 e 5).
+        # Il file al suo posto, se c'è, è di un commit misurato prima.
+        if c.linguaggio == "vitest":
+            raise GuastoDelGate(
+                f"vitest scaduto dopo {TETTO_DEI_TEST} secondi: `{' '.join(c.argv)}` "
+                f"in {c.cartella}, rapporto non scritto in {c.rapporto}") from exc
+        # Per pytest un timeout lo dicono i test: a quel commit non terminano, e
+        # il gate non indovina. Lo strumento ha girato — quindi non è un guasto.
         codice, uscita = 0, "i test non terminano a quel commit"
     letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
     complessivo = (leggi_esito(uscita) if c.linguaggio == "python"
