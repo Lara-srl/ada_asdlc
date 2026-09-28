@@ -2640,14 +2640,22 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
         e.nota = " · ".join(t for t in (e.nota, nota) if t)
 
 
-def pr_aperte(branch: str) -> list[str]:
+def pr_aperte(branch: str) -> list[str] | None:
     """Gli URL delle PR aperte sul ramo, letti dal JSON di `gh pr list` e non dal
-    suo testo (PBI-381, decisione 1)."""
-    _, uscita = esegui(
-        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url"],
-        REPO, timeout=300,
-    )
-    return [pr["url"] for pr in json.loads(uscita)]
+    suo testo (PBI-381, decisione 1). `None` se `gh` non ha risposto — un errore,
+    un timeout, un'uscita che non è JSON — perché lì non si sa se una PR c'è."""
+    try:
+        code, uscita = esegui(
+            ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url"],
+            REPO, timeout=300,
+        )
+        if code != 0:
+            print(f"    ⚠️  gh pr list non risponde: {uscita.strip()[:200]}")
+            return None
+        return [pr["url"] for pr in json.loads(uscita)]
+    except (subprocess.TimeoutExpired, ValueError) as exc:
+        print(f"    ⚠️  gh pr list non risponde: {str(exc)[:200]}")
+        return None
 
 
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
@@ -2705,7 +2713,14 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     # Prima di creare si cerca: una PR nata da un giro precedente, o da un
     # `gh pr create` morto dopo averla aperta, non ne deve far nascere un'altra
     # (PBI-381, decisione 1).
-    if aperte := pr_aperte(branch):
+    aperte = pr_aperte(branch)
+    if aperte is None:
+        # Senza una risposta non si crea: sarebbe il doppione che la ricerca
+        # toglie, la stessa regola di `crea_branch()` con `OriginMuto`.
+        e.nota = " · ".join(
+            t for t in (e.nota, "PR non aperta: GitHub non ha risposto alla ricerca") if t)
+        return ""
+    if aperte:
         e.nota = " · ".join(t for t in (e.nota, "PR già aperta sul ramo") if t)
         e.pr = aperte[0]
         commenta_i_rapporti(e.pr, e)
