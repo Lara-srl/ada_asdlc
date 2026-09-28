@@ -4432,6 +4432,16 @@ class TestIlGiroSiApreInTestOnly:
 
         assert not runner.percorso_della_fase(repo_di_prova.radice).exists()
 
+    def test_chiudi_la_fase_toglie_anche_la_base_del_giro(self, repo_di_prova):
+        """PBI-380, decisione 3: fuori da un giro `--chiedi-impl` ripiega su
+        `BASE`. Una base lasciata nel worktree farebbe contare il giro dopo, o
+        una sessione a mano, da uno sha che non è il suo."""
+        runner.apri_la_fase(repo_di_prova._git("rev-parse", "HEAD"))
+        runner.chiudi_la_fase()
+
+        assert not runner.percorso_della_fase(repo_di_prova.radice,
+                                              runner.FILE_DELLA_BASE).exists()
+
     def test_chiudere_due_volte_non_e_un_errore(self, repo_di_prova):
         runner.chiudi_la_fase()
         runner.chiudi_la_fase()
