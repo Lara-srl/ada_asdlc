@@ -4132,6 +4132,42 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert "vitest scaduto dopo 1800 secondi" in str(guasto.value)
 
+    @pytest.mark.parametrize("schermo, atteso", [
+        ("1 failed, 2 passed in 0.10s", "rosso"),
+        ("ERROR tests/t.py\n1 error in 0.02s", "rosso"),
+        ("3 passed in 0.10s", "verde"),
+        ("2 skipped in 0.01s", "saltato"),
+        ("no tests ran in 0.01s", "nessuno"),
+    ], ids=["failed", "error", "passed", "skipped", "niente"])
+    def test_guardia_i_conteggi_di_pytest_si_leggono_ancora_dallo_schermo(
+            self, monkeypatch, schermo, atteso):
+        """Guardia dichiarata di PBI-376: pytest resta fuori scope, e i suoi
+        conteggi si leggono dalla riga di riepilogo come prima. Lo schermo non
+        ha righe per test, quindi decide l'esito del comando intero."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+
+        esiti, _ = runner.esiti_del_comando(self._comando())
+
+        assert esiti == {"tests/t.py::test_x": atteso}
+
+    def test_guardia_un_file_di_vitest_che_non_si_carica_resta_rosso_coi_totali_a_zero(
+            self, monkeypatch, tmp_path):
+        """Guardia dichiarata di PBI-376: il file che fallisce prima dei test ha
+        tutti i totali del rapporto a zero e nessun `assertionResults`, e resta
+        rosso anche ora che lo schermo non si legge più."""
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({
+            "numFailedTests": 0, "numPassedTests": 0, "numPendingTests": 0,
+            "numTodoTests": 0, "numFailedTestSuites": 1,
+            "testResults": [{"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+                             "assertionResults": []}],
+        }), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "\n RUN  v3.2.4\n"))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": "rosso"}
+
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
 
