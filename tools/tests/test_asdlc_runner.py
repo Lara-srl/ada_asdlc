@@ -4432,6 +4432,16 @@ class TestIlGiroSiApreInTestOnly:
 
         assert not runner.percorso_della_fase(repo_di_prova.radice).exists()
 
+    def test_chiudi_la_fase_toglie_anche_la_base_del_giro(self, repo_di_prova):
+        """PBI-380, decisione 3: fuori da un giro `--chiedi-impl` ripiega su
+        `BASE`. Una base lasciata nel worktree farebbe contare il giro dopo, o
+        una sessione a mano, da uno sha che non è il suo."""
+        runner.apri_la_fase(repo_di_prova._git("rev-parse", "HEAD"))
+        runner.chiudi_la_fase()
+
+        assert not runner.percorso_della_fase(repo_di_prova.radice,
+                                              runner.FILE_DELLA_BASE).exists()
+
     def test_chiudere_due_volte_non_e_un_errore(self, repo_di_prova):
         runner.chiudi_la_fase()
         runner.chiudi_la_fase()
@@ -4443,7 +4453,8 @@ class TestIlGiroSiApreInTestOnly:
         monkeypatch.setattr(runner, "REPO", tmp_path)
         monkeypatch.setattr(runner, "git", lambda *a: "")
         monkeypatch.setattr(runner, "crea_branch", lambda pbi, base: f"pbi/{pbi.lower()}")
-        monkeypatch.setattr(runner, "apri_la_fase", lambda: visto.__setitem__("aperta", True))
+        monkeypatch.setattr(runner, "apri_la_fase",
+                            lambda base="": visto.__setitem__("aperta", True))
         monkeypatch.setattr(runner, "chiudi_la_fase", lambda: visto.__setitem__("chiusa", True))
         monkeypatch.setattr(runner, "esegui",
                             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("basta")))
@@ -4636,6 +4647,36 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
 
         assert runner.main() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_conta_dalla_base_del_giro_anche_se_origin_main_ha_ricevuto_il_ramo(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-380, decisione 3 (difetto 56 di `PBI-102`). Il giro nasce da uno
+        sha, e un `origin/main` che dopo riceve il ramo stesso — un merge veloce —
+        rende `BASE..HEAD` vuoto: contato da `BASE`, il commit RED appena fatto
+        sparisce e la fase non si apre. Contato dalla base del giro, no."""
+        base = repo_di_prova._git("rev-parse", "HEAD")
+        repo_di_prova.commit("test(analisi): il clic apre la pratica (RED)", {self.TEST: self.ROSSO})
+        runner.apri_la_fase(base)
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 0, capsys.readouterr().out
+        assert self._fase(repo_di_prova) == runner.FASE_IMPL
+
+    def test_guardia_il_primo_chiedi_impl_con_head_sulla_base_del_giro_e_un_rifiuto(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-380, guardia della decisione 3. Il giro nasce su uno sha il cui
+        ultimo commit è di soli test, scritto da qualcun altro, e `origin/main`
+        è rimasto indietro: contando da `BASE` quel commit sembrerebbe del ramo.
+        Contato dalla base del giro il ramo non ha commit, e la fase non si apre."""
+        base = repo_di_prova.commit("test(analisi): un test di qualcun altro",
+                                    {self.TEST: self.ROSSO})
+        runner.apri_la_fase(base)
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 1
+        assert "nessun test nuovo" in capsys.readouterr().out
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
 
 
 class TestIlPromptDiceDiCommittareIlRossoPrima:
@@ -6826,7 +6867,7 @@ class TestUnaBasePerGiro:
         registro.mkdir()
         monkeypatch.setattr(runner, "REPO", noi)
         monkeypatch.setattr(runner, "LOG_DIR", registro)
-        monkeypatch.setattr(runner, "apri_la_fase", lambda: None)  # niente hook nel repo di prova
+        monkeypatch.setattr(runner, "apri_la_fase", lambda base="": None)  # niente hook nel repo di prova
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
 
         vero_git, vero_esegui = runner.git, runner.esegui
@@ -7201,6 +7242,28 @@ class TestOgniUscitaHaIlSuoMotivo:
             f"la nota «{esito.nota}» non comincia con il motivo e il testo della tabella"
         )
 
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_la_nota_non_porta_la_diagnosi_di_un_altro_motivo(self, monkeypatch, motivo):
+        """PBI-380, decisione 1 (difetto 54 di `PBI-102`): una nota ha un motivo
+        solo in testa. `apri_pr()` metteva la diagnosi di `head-non-su-origin`
+        davanti a quella di `fatto`, e la nota finiva con «· fatto: giro chiuso»."""
+        _, percorri = USCITE_DEL_GIRO[motivo]
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        altre = [f"{m}: {t}" for m, (_, t) in runner.USCITE.items() if m != motivo]
+        assert not [d for d in altre if d in esito.nota], (
+            f"la nota «{esito.nota}» di {motivo} porta anche la diagnosi di un altro motivo"
+        )
+
     def test_ogni_motivo_della_tabella_ha_il_suo_caso(self):
         """Decisione 5: il giorno in cui si aggiunge un'uscita alla tabella senza
         il suo caso nel test di sopra, fallisce questo."""
@@ -7373,6 +7436,55 @@ class TestLeGuardieDelMotivo:
         assert voce["stato"] == "rosso"
         assert "chiusura del giro fallita (domanda-del-builder)" in voce["nota"], voce["nota"]
         assert "disco pieno" in voce["nota"]
+
+    def test_una_chiusura_fallita_arriva_nel_rapporto_col_suo_motivo(
+            self, monkeypatch, tmp_path):
+        """PBI-380, decisione 2 (difetto 55 di `PBI-102`): `ChiusuraFallita` porta
+        il motivo che la chiusura stava scrivendo, e la rete di `main()` lo
+        copiava solo nel testo della nota, lasciando il campo `motivo` vuoto."""
+        self._mondo(monkeypatch)
+        _domanda_del_builder(monkeypatch)
+
+        def fase_che_non_si_chiude():
+            raise OSError("disco pieno")
+
+        monkeypatch.setattr(runner, "chiudi_la_fase", fase_che_non_si_chiude)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
+
+        runner.main()
+
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        [voce] = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert voce["motivo"] == "domanda-del-builder", voce
+        assert voce["stato"] == "rosso", "lo stato resta quello della rete"
+
+    def test_guardia_un_eccezione_qualsiasi_nella_rete_di_main_resta_rossa_senza_motivo(
+            self, monkeypatch, tmp_path):
+        """PBI-380, guardia della decisione 2: il motivo si copia solo da
+        `ChiusuraFallita`. Un'eccezione qualsiasi chiude `rosso` con il motivo
+        vuoto e la nota di prima."""
+        def esegui_pbi_che_alza(pbi, *a, **k):
+            raise ValueError("nome del ramo illeggibile")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_che_alza)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
+
+        assert runner.main() == 1
+
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        [voce] = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert (voce["stato"], voce["motivo"]) == ("rosso", ""), voce
+        assert voce["nota"] == "eccezione nel runner: nome del ramo illeggibile"
 
 
 class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:

@@ -1316,18 +1316,22 @@ def e_file_di_produzione(percorso: str) -> bool:
 # nell'albero accanto.
 
 FILE_DELLA_FASE = "asdlc-fase"
+# Accanto alla fase, e per la stessa strada, lo sha di base del giro: è da lì che
+# `--chiedi-impl` conta i commit del ramo (PBI-380, decisione 3).
+FILE_DELLA_BASE = "asdlc-base"
 FASE_TEST_ONLY = "TEST_ONLY"
 FASE_IMPL = "IMPL"
 
 
-def percorso_della_fase(cartella: Path) -> Path | None:
+def percorso_della_fase(cartella: Path, nome: str = FILE_DELLA_FASE) -> Path | None:
     """Dove sta la fase per l'albero che contiene `cartella`, o `None` se non c'è
-    un repository sotto — e allora non si scrive da nessuna parte."""
+    un repository sotto — e allora non si scrive da nessuna parte. Con `nome`
+    un altro file dello stesso posto: la base del giro."""
     try:
-        detto = git("-C", str(cartella), "rev-parse", "--git-path", FILE_DELLA_FASE)
+        detto = git("-C", str(cartella), "rev-parse", "--git-path", nome)
     except RuntimeError:
         return None
-    if not detto or Path(detto).name != FILE_DELLA_FASE:
+    if not detto or Path(detto).name != nome:
         return None  # sotto i test `git` torna "", e `Path("")` è la cartella corrente
     percorso = Path(detto)
     return percorso if percorso.is_absolute() else Path(cartella) / percorso
@@ -2675,9 +2679,18 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         visti = (f"su {REMOTO} {branch} è {visto}, "
                  f"i gate hanno misurato HEAD {head or 'illeggibile'}")
         print(f"    ⚠️  PR non aperta: {visti}")
+        # La diagnosi di `head-non-su-origin` **prende il posto** di quella del
+        # giro chiuso, non le si mette davanti (PBI-380, decisione 1): si toglie
+        # la testa «<motivo>: <testo>», e resta il suo dettaglio — l'avviso della
+        # base — con ciò che il giro aveva dichiarato di sé, una volta.
+        resto = e.nota
+        if e.motivo in USCITE:
+            prima = f"{e.motivo}: {USCITE[e.motivo][1]}"
+            if resto.startswith(prima):
+                resto = resto.removeprefix(prima).removeprefix(" — ").removeprefix(" · ")
         e.stato, diagnosi = uscita("head-non-su-origin", visti)
         e.motivo = "head-non-su-origin"
-        e.nota = " · ".join(t for t in (diagnosi, e.nota) if t)
+        e.nota = " · ".join(t for t in (diagnosi, resto) if t)
         return ""
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
@@ -3407,7 +3420,7 @@ def esegui_pbi(
         print(f"    ⚠️  {muto}")
         motivo, dettaglio = "origin-muto", str(muto)
     else:
-        apri_la_fase()
+        apri_la_fase(base)
         # Il giro sta in un `try` perché ogni strada d'uscita passi da `chiudi()`:
         # un'eccezione — il timeout di un gate, un guasto dentro il gate del rosso
         # — usciva da qui, la raccoglieva la rete di `main()`, e il ramo restava
@@ -3650,16 +3663,24 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     rendeva cieca la richiesta. Lo ha trovato il Builder al primo giro vero, il
     01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita.
 
-    L'ultimo commit e basta, non tutto `BASE..HEAD`: dopo tre criteri i test dei
+    L'ultimo commit e basta, non tutto `<base>..HEAD`: dopo tre criteri i test dei
     primi due sono verdi, e la richiesta verrebbe rifiutata per «nato verde» su
     lavoro che il suo rosso l'aveva già avuto.
+
+    I commit del ramo si contano dallo sha di base del giro, che `apri_la_fase()`
+    lascia accanto alla fase, e non da `BASE`: un `origin/main` che riceve il ramo
+    stesso con un merge veloce renderebbe `BASE..HEAD` vuoto (PBI-380, decisione
+    3). Fuori da un giro lo sha non c'è, e si ripiega su `BASE`.
     """
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
-    if git("rev-list", "--count", f"{BASE}..HEAD") == "0":
-        # Il branch nasce da `BASE`, quindi al primo `--chiedi-impl` di ogni giro
-        # HEAD **è** il ramo di base: se lì l'ultimo commit fosse di soli test, il
+    file = percorso_della_fase(REPO, FILE_DELLA_BASE)
+    base = (file.read_text(encoding="utf-8").strip()
+            if file is not None and file.is_file() else "") or BASE
+    if git("rev-list", "--count", f"{base}..HEAD") == "0":
+        # Il branch nasce dalla base, quindi al primo `--chiedi-impl` di ogni giro
+        # HEAD **è** la base: se lì l'ultimo commit fosse di soli test, il
         # Builder otterrebbe la produzione aperta senza aver scritto una riga.
         return []
     file = file_del_commit("HEAD")
@@ -3786,8 +3807,9 @@ def installa_il_ritorno_in_test_only() -> bool:
     return installa_un_hook("post-commit", RITORNO_IN_TEST_ONLY)
 
 
-def apri_la_fase() -> None:
+def apri_la_fase(base: str = "") -> None:
     """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
+    Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`.
 
     L'hook di Claude Code non si installa qui — sta in `.claude/settings.json`,
     versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
@@ -3798,14 +3820,18 @@ def apri_la_fase() -> None:
     installa_la_guardia_del_commit()
     installa_il_ritorno_in_test_only()
     percorso_della_fase(REPO).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
+    if base:
+        percorso_della_fase(REPO, FILE_DELLA_BASE).write_text(f"{base}\n", encoding="utf-8")
 
 
 def chiudi_la_fase() -> None:
     """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
-    sessione dopo non può scrivere, e la diagnosi costerebbe più del giro."""
-    file = percorso_della_fase(REPO)
-    if file is not None:
-        file.unlink(missing_ok=True)
+    sessione dopo non può scrivere, e la diagnosi costerebbe più del giro. Con
+    la fase se ne va la base del giro: fuori da un giro si conta da `BASE`."""
+    for nome in (FILE_DELLA_FASE, FILE_DELLA_BASE):
+        file = percorso_della_fase(REPO, nome)
+        if file is not None:
+            file.unlink(missing_ok=True)
 
 
 def guardia_del_commit() -> int:
@@ -4001,9 +4027,13 @@ def main() -> int:
                 # da `main()` col traceback e si portava via la sequenza intera, e
                 # con lei i rilievi del Critic dei PBI già chiusi (difetto 17).
                 # Lo stato è `rosso` perché è già nella regola che decide se
-                # proseguire: non serve un'eccezione al posto di una regola.
+                # proseguire: non serve un'eccezione al posto di una regola. Una
+                # `ChiusuraFallita` porta il motivo che stava chiudendo, e il
+                # rapporto lo ha anche nel suo campo; ogni altra eccezione no
+                # (PBI-380, decisione 2).
                 traceback.print_exc()
                 e = Esito(pbi, "rosso", nota=f"eccezione nel runner: {exc}"[:300],
+                          motivo=exc.motivo if isinstance(exc, ChiusuraFallita) else "",
                           iniziato=datetime.now().isoformat(timespec="seconds"),
                           finito=datetime.now().isoformat(timespec="seconds"))
             esiti.append(e)
