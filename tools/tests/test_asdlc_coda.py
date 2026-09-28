@@ -481,6 +481,36 @@ def test_un_lucchetto_che_non_si_apre_occupa_lalbero(tmp_path, monkeypatch):
     assert coda.decidi(repo, albero) == coda.Occupato()
 
 
+def test_un_lucchetto_presente_ma_libero_non_occupa_lalbero(tmp_path, monkeypatch):
+    """Il file sopravvive a ogni giro: conta se è tenuto (`PBI-379`, guardia).
+
+    Un processo vero prende il `flock` ed esce, come fa un giro finito: il
+    kernel rilascia il lucchetto e il file resta. Senza nessun processo
+    intorno, il tick lancia la testa della coda.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    (albero / "runs").mkdir(parents=True)
+    lucchetto = albero / "runs" / ".runner.lock"
+    monkeypatch.setattr(coda, "esegui", mondo())
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, sys\n"
+            "fd = open(sys.argv[1], 'a+')\n"
+            "fcntl.flock(fd, fcntl.LOCK_EX)\n",
+            str(lucchetto),
+        ],
+        check=True,
+    )
+
+    assert lucchetto.is_file()
+    assert coda.giro_in_corso(albero) is False
+    assert coda.decidi(repo, albero) == coda.Lancia("PBI-337")
+
+
 def test_un_gh_che_non_risponde_non_produce_lancia(tmp_path, monkeypatch):
     """Nel dubbio non si lancia, e si scrive perché.
 
