@@ -4934,6 +4934,30 @@ class TestIlPerimetroSonoLeFunzioniToccate:
         assert "backend/app/segno.py:3" in morsi[0]["mutante"]
         assert morsi[0]["tipo"] == "AssertionError"
 
+    def test_le_docstring_non_generano_mutanti(self):
+        """Difetto 33, punto 1: la prosa di una docstring è una riga cancellabile,
+        il suo mutante non cambia niente e ogni guardia gli sopravvive — un
+        «mutante provato» che non prova niente (primo giro di PBI-364). Le
+        docstring di modulo, di classe e di funzione si riconoscono dall'AST."""
+        sorgente = ('"""Il modulo.\n'
+                    '    seconda riga del modulo\n'
+                    '"""\n'
+                    "class Segno:\n"
+                    '    """La classe.\n'
+                    "    seconda riga della classe\n"
+                    '    """\n'
+                    "    def vale(self, x):\n"
+                    '        """Il metodo.\n'
+                    "\n"
+                    "        seconda riga del metodo\n"
+                    '        """\n'
+                    "        return x > 0\n")
+        tutte = set(range(1, sorgente.count("\n") + 1))
+
+        righe = {m.riga for m in runner.mutanti_del_sorgente(sorgente, tutte)}
+
+        assert righe == {13}
+
 
 class TestIlTestNatoVerdePassaSeMorde:
     """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
