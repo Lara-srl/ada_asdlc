@@ -4115,6 +4115,23 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert str(rapporto) in str(guasto.value)
 
+    def test_un_vitest_che_scade_senza_rapporto_e_un_guasto_del_gate(
+            self, monkeypatch, tmp_path):
+        """PBI-376, decisione 5. vitest ucciso dal tetto di `esiti_del_comando()`
+        il rapporto non lo scrive: è un rapporto assente, e come nella decisione
+        3 ferma il gate invece di diventare `nessuno`. Il messaggio dice la
+        causa, così chi legge il guasto non cerca un rapporto che vitest non ha
+        mai avuto il tempo di scrivere."""
+        def scade(argv, cartella, timeout=0, **k):
+            raise subprocess.TimeoutExpired(argv, timeout)
+
+        monkeypatch.setattr(runner, "esegui", scade)
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando_vitest(tmp_path / "vitest-0.json"))
+
+        assert "vitest scaduto dopo 1800 secondi" in str(guasto.value)
+
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
 
