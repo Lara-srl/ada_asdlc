@@ -1787,8 +1787,10 @@ def comandi_dei_test(albero: Path,
 
 
 def leggi_esito(uscita: str) -> str:
-    """`rosso` | `verde` | `saltato` | `nessuno`, dai conteggi che pytest e vitest
-    scrivono tutti e due come «N passed», «N failed», «N skipped».
+    """`rosso` | `verde` | `saltato` | `nessuno`, dai conteggi che pytest scrive
+    come «N passed», «N failed», «N skipped». Solo pytest: per vitest lo schermo
+    non si legge, e i totali del comando non decidono per un test (PBI-376,
+    decisione 2).
 
     Un **errore** conta come rosso: il caso più comune di test-first in Python è un
     `from app.x import y` che a quel commit non esiste ancora, e leggerlo come «non
@@ -1939,8 +1941,10 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     Un errore di **raccolta** — il `from app.x import y` che a quel commit non
     esiste ancora, cioè il rosso più comune del test-first — non stampa nessuna riga
     per test: lì vale l'esito del comando intero, che è la sola cosa che si sa. In
-    vitest quell'esito non è nell'output ma nel json (`esito_dei_file_di_vitest`),
-    perché il `--reporter=json` porta via da schermo anche i conteggi.
+    vitest quell'esito viene dal json e non dallo schermo, e non sono i totali:
+    il comando mette in OR i test chiesti di un file (`-t "A|B"`), e i totali di
+    tutto il comando darebbero a `B` senza una voce sua l'esito di `A`. Resta il
+    solo file che non si carica (`esito_dei_file_di_vitest`, PBI-376, decisione 2).
     """
     try:
         codice, uscita = esegui(c.argv, c.cartella, timeout=1800)
@@ -1949,9 +1953,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # indovina. Lo strumento ha girato — quindi non è un guasto.
         codice, uscita = 0, "i test non terminano a quel commit"
     letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
-    complessivo = leggi_esito(uscita)
-    if c.linguaggio == "vitest" and complessivo == "nessuno":
-        complessivo = esito_dei_file_di_vitest(c.rapporto)
+    complessivo = (leggi_esito(uscita) if c.linguaggio == "python"
+                   else esito_dei_file_di_vitest(c.rapporto))
     if complessivo == "nessuno" and codice not in CODICI_DEL_TEST[c.linguaggio]:
         raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
                             f"{uscita.strip()[-1000:]}")
