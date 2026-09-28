@@ -5143,6 +5143,64 @@ class TestIlRapportoDiceIlPerimetro:
         assert voci == ["backend/app/rotto.py (per riga: il file non si analizza)"]
 
 
+class TestIlPerimetroPerFunzioneNonCambiaIlResto:
+    """PBI-378, criterio 5: le guardie. Descrivono comportamenti che `main` ha già
+    — una riga di modulo porta solo sé stessa, un `.ts` resta per riga, un mutante
+    che fa fallire la guardia per eccezione non è un morso — e che il perimetro per
+    funzione non deve perdere. Nascono verdi, e ognuna guarda il risultato intero
+    che le righe nuove producono, così un loro guasto si vede come asserzione."""
+
+    def test_una_riga_di_modulo_cambiata_porta_solo_la_sua_riga(self):
+        sorgente = ("SOGLIA = 10\n"
+                    "\n\n"
+                    "def sopra(x):\n"
+                    "    return x > SOGLIA\n")
+
+        assert runner.righe_del_perimetro("backend/app/m.py", sorgente, {1}, set()) == (
+            {1}, [])
+
+    def test_un_file_typescript_non_allarga_alla_funzione_ne_alle_cancellazioni(self):
+        """La riga 2 cambiata e una cancellazione dopo la riga 3, dentro la stessa
+        funzione: in un `.ts` entra la riga 2 e basta."""
+        sorgente = ("export function somma(a: number, b: number) {\n"
+                    "  const totale = a + b\n"
+                    "  return totale\n"
+                    "}\n")
+
+        assert runner.righe_del_perimetro("frontend/src/lib/somma.ts", sorgente,
+                                          {2}, {3}) == (
+            {2}, ["frontend/src/lib/somma.ts (per riga: non è Python)"])
+
+    def test_nel_perimetro_per_funzione_il_mutante_per_eccezione_non_e_un_morso(
+        self, repo_di_prova
+    ):
+        """Il branch cambia solo il `return`; la riga 2 entra perché sta nella
+        stessa funzione. Cancellata, la guardia muore di `NameError`: si conta
+        come fallito per eccezione e si passa oltre, fino al `return` che la fa
+        fallire per asserzione (PBI-365)."""
+        sorgente = ("def ha_parole(uscita):\n"
+                    "    pulita = uscita.strip()\n"
+                    "    return len(pulita.split()) > 0\n")
+        vecchio = repo_di_prova.commit("feat: le parole", {"backend/app/parole.py": sorgente})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo_di_prova.commit("refactor: almeno una parola", {
+            "backend/app/parole.py": sorgente.replace("> 0", ">= 1"),
+        })
+        repo_di_prova.commit("test: presidia la stringa di soli spazi", {
+            "backend/tests/test_parole.py":
+                "from app.parole import ha_parole\n\n\n"
+                "def test_soli_spazi():\n    assert ha_parole('   ') is False\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [(p["mutante"].split("  ")[0], p["esito"], p["tipo"])
+                for p in morsi[0]["prove"]] == [
+            ("backend/app/parole.py:2", "fallito per eccezione", "NameError"),
+            ("backend/app/parole.py:3", "ucciso per asserzione", "AssertionError"),
+        ]
+
+
 class TestIlTestNatoVerdePassaSeMorde:
     """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
 
