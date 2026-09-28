@@ -4070,6 +4070,32 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert esiti == {"mostra le commesse del foglio": "nessuno"}
 
+    @pytest.mark.parametrize("schermo, voce, conti, atteso", [
+        ("\n RUN  v3.2.4\n", "passed", {}, "verde"),
+        ("\n RUN  v3.2.4\n", "failed", {}, "rosso"),
+        ("\n Tests  1 failed (1)\n", "passed", {"numFailedTests": 1}, "verde"),
+        ("\n Tests  1 passed (1)\n", "failed", {"numPassedTests": 1}, "rosso"),
+        ("\n Tests  1 passed (1)\n", "skipped", {"numPassedTests": 1}, "saltato"),
+    ], ids=["senza-riepilogo-verde", "senza-riepilogo-rosso", "riepilogo-rosso-voce-verde",
+            "riepilogo-verde-voce-rossa", "riepilogo-verde-voce-saltata"])
+    def test_guardia_un_test_con_la_sua_voce_nel_rapporto_prende_quella_voce(
+            self, monkeypatch, tmp_path, schermo, voce, conti, atteso):
+        """Guardia dichiarata di PBI-376, decisione 2: l'esito di un test di
+        vitest viene dalla sua voce in `assertionResults`, anche quando lo
+        schermo non ha la riga di riepilogo o ne ha una che dice altro, e anche
+        quando i totali del rapporto dicono altro."""
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({**conti, "testResults": [
+            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+             "assertionResults": [
+                 {"title": "mostra le commesse del foglio", "status": voce}]},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": atteso}
+
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
 
