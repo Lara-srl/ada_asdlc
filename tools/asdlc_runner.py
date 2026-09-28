@@ -361,6 +361,12 @@ Esegui il PBI con queste regole non negoziabili:
   vera comunque, un dato costruito perché il guasto non si veda — ferma il giro come un
   nato verde qualsiasi.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
+- **Una guardia è la guardia di un criterio, e sta nel PBI.** Un comportamento da
+  proteggere che il PBI non nomina è una fermata, non un commit: chiama `fermati` e
+  descrivilo. La deroga allo Scope copre il codice che un criterio richiede, non test o
+  comportamenti che nessun criterio chiede. Nel giro 2 di PBI-376 (28/09/2026) una
+  guardia sul vitest che scade, messa sotto la deroga, non mordeva, e il gate del rosso
+  ha fermato il giro.
 - **Una regressione che vedi in `IMPL` è una fermata, non una docstring.** Se ti accorgi
   che il tuo codice peggiora un caso che prima era gestito — uno stato che prima fermava
   la coda e ora la lascia passare, un errore che prima si vedeva e ora finisce in una
