@@ -3999,6 +3999,15 @@ class TestUnGateGuastoNonEUnCicloMancato:
             {nome: f"{relativo} -t {nome}"}, rapporto,
         )
 
+    @staticmethod
+    def _vitest_che_scrive(rapporto, dati, codice, schermo):
+        """Un `esegui` che fa vitest: il rapporto lo scrive **mentre gira**, come
+        `--outputFile`, e non lo trova già scritto da prima."""
+        def esegui(*a, **k):
+            rapporto.write_text(json.dumps(dati), encoding="utf-8")
+            return codice, schermo
+        return esegui
+
     def test_un_file_che_non_si_carica_e_un_rosso_anche_in_vitest(
             self, monkeypatch, tmp_path):
         """Il gemello frontend dell'import che non esiste ancora.
@@ -4010,11 +4019,11 @@ class TestUnGateGuastoNonEUnCicloMancato:
         e l'unica cosa scritta è il file `failed` con zero `assertionResults`.
         """
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({"testResults": [
-            {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
-             "assertionResults": []},
-        ]}), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "\n RUN  v3.2.4\n"))
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {"testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+                 "assertionResults": []},
+            ]}, 1, "\n RUN  v3.2.4\n"))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
@@ -4029,11 +4038,11 @@ class TestUnGateGuastoNonEUnCicloMancato:
         `nessuno`, che è quello che il gate segnala come «rosso non isolabile».
         """
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({"testResults": [
-            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
-             "assertionResults": []},
-        ]}), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "\n RUN  v3.2.4\n"))
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {"testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+                 "assertionResults": []},
+            ]}, 0, "\n RUN  v3.2.4\n"))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
@@ -4060,11 +4069,11 @@ class TestUnGateGuastoNonEUnCicloMancato:
         osservato (ADR-0021), un falso nato verde, o un «rosso non osservabile»
         al posto di «non isolabile» (`ESITI_MANCATI`). Resta `nessuno`."""
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({**conti, "testResults": [
-            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
-             "assertionResults": []},
-        ]}), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {**conti, "testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+                 "assertionResults": []},
+            ]}, 1, schermo))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
@@ -4085,12 +4094,12 @@ class TestUnGateGuastoNonEUnCicloMancato:
         schermo non ha la riga di riepilogo o ne ha una che dice altro, e anche
         quando i totali del rapporto dicono altro."""
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({**conti, "testResults": [
-            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
-             "assertionResults": [
-                 {"title": "mostra le commesse del foglio", "status": voce}]},
-        ]}), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {**conti, "testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+                 "assertionResults": [
+                     {"title": "mostra le commesse del foglio", "status": voce}]},
+            ]}, 1, schermo))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
@@ -4156,13 +4165,12 @@ class TestUnGateGuastoNonEUnCicloMancato:
         tutti i totali del rapporto a zero e nessun `assertionResults`, e resta
         rosso anche ora che lo schermo non si legge più."""
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(rapporto, {
             "numFailedTests": 0, "numPassedTests": 0, "numPendingTests": 0,
             "numTodoTests": 0, "numFailedTestSuites": 1,
             "testResults": [{"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
                              "assertionResults": []}],
-        }), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "\n RUN  v3.2.4\n"))
+        }, 1, "\n RUN  v3.2.4\n"))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
