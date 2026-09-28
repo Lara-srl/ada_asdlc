@@ -1895,7 +1895,8 @@ def esiti_di_vitest(rapporto: Path | None) -> dict[str, str]:
     """Il verdetto per test, dal `--reporter=json` di vitest, per titolo.
 
     Un rapporto che non c'è torna **vuoto** e non «tutto verde»: chi non ha letto
-    niente non ha visto niente, e allora vale l'esito del comando intero.
+    niente non ha visto niente, e allora vale l'esito del comando intero — che
+    per un rapporto che manca è `GuastoDelGate` (`esito_dei_file_di_vitest`).
     """
     try:
         dati = json.loads(rapporto.read_text(encoding="utf-8"))
@@ -1924,11 +1925,16 @@ def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
     test è il filtro `-t` che non ha matchato niente, e leggerlo come verde darebbe
     per girato un test che non è mai partito — il gate passerebbe in silenzio proprio
     dove non ha guardato.
+
+    Un rapporto che manca o non si legge è `GuastoDelGate`, col percorso atteso:
+    il gate non ha guardato niente, e «nessuno» accuserebbe il Builder di un
+    rosso mancato (PBI-376, decisione 3; difetto 25).
     """
     try:
         dati = json.loads(rapporto.read_text(encoding="utf-8"))
-    except (AttributeError, OSError, ValueError):
-        return "nessuno"
+    except (AttributeError, OSError, ValueError) as exc:
+        raise GuastoDelGate(f"rapporto di vitest assente o illeggibile: {rapporto} "
+                            f"({type(exc).__name__}: {str(exc)[:200]})") from exc
     for file in dati.get("testResults", []):
         if file.get("status") == "failed" and not file.get("assertionResults"):
             return "rosso"
@@ -1950,7 +1956,9 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         codice, uscita = esegui(c.argv, c.cartella, timeout=1800)
     except subprocess.TimeoutExpired:
         # Un timeout lo dicono i test: a quel commit non terminano, e il gate non
-        # indovina. Lo strumento ha girato — quindi non è un guasto.
+        # indovina. Lo strumento ha girato — quindi non è un guasto. Vale per
+        # pytest: vitest fermato prima della fine il rapporto non lo scrive, e un
+        # rapporto che manca è un guasto del gate (PBI-376, decisioni 3 e 5).
         codice, uscita = 0, "i test non terminano a quel commit"
     letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
     complessivo = (leggi_esito(uscita) if c.linguaggio == "python"
