@@ -466,6 +466,21 @@ def test_un_processo_che_nomina_il_runner_non_occupa_lalbero(tmp_path, monkeypat
         impostore.wait()
 
 
+def test_un_lucchetto_che_non_si_apre_occupa_lalbero(tmp_path, monkeypatch):
+    """Nel dubbio non si lancia (`PBI-350`, punto 8; `PBI-379`, guardia).
+
+    Al posto del file c'è una cartella: `open()` alza, e il tick non può sapere
+    se qualcuno ci lavora.
+    """
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    (albero / "runs" / ".runner.lock").mkdir(parents=True)
+    monkeypatch.setattr(coda, "esegui", nessun_comando)
+
+    assert coda.giro_in_corso(albero) is True
+    assert coda.decidi(repo, albero) == coda.Occupato()
+
+
 def test_un_gh_che_non_risponde_non_produce_lancia(tmp_path, monkeypatch):
     """Nel dubbio non si lancia, e si scrive perché.
 
