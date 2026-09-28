@@ -2834,6 +2834,21 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto"
         assert "PR ritrovata dopo timeout" in esito.nota, esito.nota
 
+    def test_un_create_senza_url_passa_per_la_stessa_ricerca(self, monkeypatch):
+        """Decisione 2, l'altro caso: `gh` risponde, ma nell'uscita non c'è un URL
+        riconoscibile (difetto 12). La PR c'è, e la colonna `pr` la nomina."""
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch,
+            list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
+            create=[(0, "A new release of gh is available\n")],
+        )
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"]
+        assert pr == esito.pr == self.URL
+        assert commentate == [self.URL]
+        assert esito.stato == "fatto"
+        assert "PR ritrovata dopo output senza URL" in esito.nota, esito.nota
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
