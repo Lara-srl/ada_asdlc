@@ -352,11 +352,14 @@ Esegui il PBI con queste regole non negoziabili:
 - **Una guardia nasce verde, e passa solo se morde.** Il test che presidia un comportamento
   che c'è già — quello che il Critic ti chiede quando «nessun test lo presidia» — non può
   essere rosso, e va scritto lo stesso: si committa da solo, in `TEST_ONLY`, senza
-  `--chiedi-impl`. Il gate lo rigira contro i **mutanti** delle righe che il branch ha
-  cambiato — la riga cancellata, `===` che diventa `!==`, `&&` che diventa `||` — e lo
-  lascia passare solo se almeno uno lo fa fallire. Una guardia che non guarda quelle
-  righe — un'asserzione vera comunque, un dato costruito perché il guasto non si veda —
-  ferma il giro come un nato verde qualsiasi.
+  `--chiedi-impl`. Il gate lo rigira contro i **mutanti** delle funzioni che il branch ha
+  toccato — la riga cancellata, `===` che diventa `!==`, `&&` che diventa `||` — e lo
+  lascia passare solo se almeno uno lo fa fallire. Se il comportamento che la guardia
+  presidia vive in una funzione che il branch non tocca, il commit la **nomina** con una
+  riga `Guardia-su: <percorso>::<funzione>` nel corpo (`Classe.metodo` per un metodo), e
+  il gate la aggiunge ai mutanti. Una guardia che non guarda quelle funzioni — un'asserzione
+  vera comunque, un dato costruito perché il guasto non si veda — ferma il giro come un
+  nato verde qualsiasi.
 - Resta dentro lo **scope** dichiarato dal PBI. Se ti serve toccare altro, fermati e dillo.
 - **Una regressione che vedi in `IMPL` è una fermata, non una docstring.** Se ti accorgi
   che il tuo codice peggiora un caso che prima era gestito — uno stato che prima fermava
@@ -534,10 +537,13 @@ giusto, manca la guardia:
   su quale comportamento monta la guardia. Non spacciarlo per un `(RED)`: il gate legge
   il diff, e un rosso dichiarato che non c'è stato costa il giro;
 - a dire se quel test vale non sei tu, è il gate: lo rigira contro i **mutanti** delle
-  righe che il branch ha cambiato — la riga cancellata, `===` che diventa `!==`, `&&` che
+  funzioni che il branch ha toccato — la riga cancellata, `===` che diventa `!==`, `&&` che
   diventa `||` — e lo lascia passare solo se almeno uno lo fa fallire (`ADR-0022`);
+- se il comportamento vive in una funzione che il branch non tocca, il messaggio la
+  **nomina** con una riga `Guardia-su: <percorso>::<funzione>` nel corpo (`Classe.metodo`
+  per un metodo): il gate la aggiunge ai mutanti di quel commit;
 - se non morde, il difetto è **nel test**: un'asserzione vera comunque, un dato costruito
-  perché il guasto non si veda. Riscrivilo perché guardi quelle righe.
+  perché il guasto non si veda. Riscrivilo perché guardi quelle funzioni.
 
 **Se il rilievo è che il codice è sbagliato**, il rosso c'è davvero e si chiede come
 sempre: il `test (RED)` committato da solo, `--chiedi-impl` che apre la fase perché lo
