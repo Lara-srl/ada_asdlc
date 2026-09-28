@@ -824,6 +824,21 @@ def test_la_riga_di_attesa_dice_cosa_ce_sul_ramo(
         f"attende: PBI-338 ha un ramo su origin e non è in main {coda_della_riga}")
 
 
+def test_guardia_un_lancio_non_cerca_le_pr_aperte(tmp_path, monkeypatch):
+    """Guardia dichiarata di PBI-381: la ricerca delle PR aperte è dell'attesa e
+    di nessun'altra decisione. Un PBI senza ramo su `origin` si lancia con le
+    stesse due domande al mondo di prima."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    assert coda.decidi(repo, albero) == coda.Lancia("PBI-337")
+    assert len(visti) == 2, visti
+    assert not [c for c in visti if c[:3] == ["gh", "pr", "list"] and "open" in c], visti
+
+
 def test_ogni_tick_lascia_una_riga_nel_log(tmp_path, monkeypatch):
     """Il tick gira senza nessuno davanti: ciò che ha deciso deve restare scritto.
 
