@@ -2874,13 +2874,17 @@ class TestLaPrSiCercaPrimaDiCrearla:
     def test_guardia_una_pr_creata_al_primo_colpo_porta_il_suo_url_e_i_commenti(
             self, monkeypatch):
         """Guardia dichiarata: la ricerca non trova niente, `gh pr create` apre la
-        PR e ne scrive l'URL. È la strada di sempre: una ricerca sola, l'URL del
-        create nell'esito, i commenti del Critic su quella PR, e nella nota
-        nessuna delle frasi della PR ritrovata."""
+        PR e ne scrive l'URL. È la strada di sempre, e vale anche su `main`: un
+        solo create e nessuna ricerca dopo, l'URL del create nell'esito, i
+        commenti del Critic su quella PR, e nella nota nessuna delle frasi della
+        PR ritrovata. Che la ricerca venga prima del create lo fissano gli altri
+        test di questa classe, non la guardia."""
         pr, esito, comandi, commentate = self._apri(
             monkeypatch, list=[(0, "[]")], create=[(0, self.URL + "\n")])
 
-        assert [c[2] for c in comandi] == ["list", "create"]
+        sottocomandi = [c[2] for c in comandi]
+        assert sottocomandi.count("create") == 1, sottocomandi
+        assert sottocomandi[-1] == "create", sottocomandi
         assert pr == esito.pr == self.URL
         assert commentate == [self.URL]
         assert esito.stato == "fatto"
