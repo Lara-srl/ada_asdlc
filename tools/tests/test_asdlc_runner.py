@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -4494,6 +4495,18 @@ class TestIlBuilderSaComeSiApreLaProduzione:
         assert "morde" in prompt
         assert "mutant" in prompt
 
+    def test_dice_che_si_mutano_le_funzioni_toccate_e_come_nominarne_una(self):
+        """PBI-378: il perimetro sono le funzioni toccate, non le righe, e una
+        guardia su un comportamento che il branch non cambia nomina la sua
+        funzione con `Guardia-su:`. Vale per il Builder e per il giro di rimedio,
+        che è dove il Critic chiede le guardie."""
+        rimedio = runner.PROMPT_RIMEDIO
+        for prompt in (self._prompt(), rimedio):
+            testo = " ".join(prompt.split())
+            assert "funzioni che il branch ha toccato" in testo
+            assert "Guardia-su: <percorso>::<funzione>" in testo
+            assert "righe che il branch ha cambiato" not in testo
+
     def test_non_promette_piu_un_numero_di_commit_scollegato_dai_criteri(self):
         """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
         aritmetica: due o tre coppie non coprono otto comportamenti."""
@@ -4893,6 +4906,346 @@ class TestLeRigheCambiateSiLeggonoDalDiff:
         })
 
         assert runner.righe_cambiate("origin/main", sha) == {}
+
+
+class TestIlPerimetroSonoLeFunzioniToccate:
+    """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
+    toccate dal diff, non le righe (revisione del 26/09 di ADR-0022).
+
+    Un hunk di sole cancellazioni non porta righe: il resto della funzione da cui il
+    branch ha tolto codice restava fuori, e la guardia che il Critic chiede su quel
+    comportamento nasceva verde e non poteva mordere. Il caso è il primo giro di
+    PBI-373 (26/09).
+    """
+
+    SEGNO = ("def segno(x):\n"
+             "    if x > 0:\n"
+             "        return 'positivo'\n"
+             "    print('ramo di riserva')\n"
+             "    return 'negativo'\n")
+
+    def test_una_guardia_sul_resto_della_funzione_da_cui_si_toglie_codice_morde(
+        self, repo_di_prova
+    ):
+        """Il branch cancella la stampa (riga 4): `@@ -4 +3,0 @@`. La funzione
+        `segno` contiene la riga 3, dopo cui si è cancellato, ed entra tutta. La
+        guardia asserisce il ramo che decide, e il `return 'positivo'` cambiato in
+        `pass` la fa fallire per asserzione."""
+        vecchio = repo_di_prova.commit("feat: il segno", {"backend/app/segno.py": self.SEGNO})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo_di_prova.commit("refactor: togli la stampa del ramo di riserva", {
+            "backend/app/segno.py": self.SEGNO.replace("    print('ramo di riserva')\n", ""),
+        })
+        repo_di_prova.commit("test: presidia il ramo positivo del segno", {
+            "backend/tests/test_segno.py":
+                "from app.segno import segno\n\n\n"
+                "def test_il_positivo():\n    assert segno(1) == 'positivo'\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert "backend/app/segno.py:3" in morsi[0]["mutante"]
+        assert morsi[0]["tipo"] == "AssertionError"
+
+    def test_le_docstring_non_generano_mutanti(self):
+        """Difetto 33, punto 1: la prosa di una docstring è una riga cancellabile,
+        il suo mutante non cambia niente e ogni guardia gli sopravvive — un
+        «mutante provato» che non prova niente (primo giro di PBI-364). Le
+        docstring di modulo, di classe e di funzione si riconoscono dall'AST."""
+        sorgente = ('"""Il modulo.\n'
+                    '    seconda riga del modulo\n'
+                    '"""\n'
+                    "class Segno:\n"
+                    '    """La classe.\n'
+                    "    seconda riga della classe\n"
+                    '    """\n'
+                    "    def vale(self, x):\n"
+                    '        """Il metodo.\n'
+                    "\n"
+                    "        seconda riga del metodo\n"
+                    '        """\n'
+                    "        return x > 0\n")
+        tutte = set(range(1, sorgente.count("\n") + 1))
+
+        righe = {m.riga for m in runner.mutanti_del_sorgente(sorgente, tutte)}
+
+        assert righe == {13}
+
+
+class TestLaGuardiaNominaLaFunzioneDaMutare:
+    """PBI-378, decisione 3: se il comportamento vive dove il branch non tocca, il
+    commit della guardia lo dice con `Guardia-su: <percorso>::<nome>` nel corpo, e
+    il gate aggiunge quella funzione al perimetro per i test di quel commit.
+
+    Il branch cambia `doppio`, la guardia asserisce `soglia`: senza la riga i
+    mutanti di `doppio` le sopravvivono tutti, e resta «nato verde e non morde».
+    """
+
+    MODULO = ("def soglia(x):\n"
+              "    if x > 10:\n"
+              "        return 'alta'\n"
+              "    return 'bassa'\n"
+              "\n\n"
+              "class Limite:\n"
+              "    def supera(self, x):\n"
+              "        if x > 10:\n"
+              "            return True\n"
+              "        return False\n"
+              "\n\n"
+              "def doppio(x):\n"
+              "    return x * 2\n")
+
+    def _branch_che_cambia_doppio(self, repo):
+        vecchio = repo.commit("feat: soglia, limite e doppio", {"backend/app/m.py": self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo.commit("refactor: il doppio come somma", {
+            "backend/app/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+    def test_la_funzione_nominata_entra_nel_perimetro_e_senza_la_riga_no(self, repo_di_prova):
+        self._branch_che_cambia_doppio(repo_di_prova)
+        nominata = repo_di_prova.commit(
+            "test: presidia la soglia alta\n\nGuardia-su: backend/app/m.py::soglia", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+        metodo = repo_di_prova.commit(
+            "test: presidia il limite superato\n\nGuardia-su: backend/app/m.py::Limite.supera", {
+                "backend/tests/test_limite.py":
+                    "from app.m import Limite\n\n\n"
+                    "def test_il_limite_superato():\n    assert Limite().supera(11) is True\n",
+            })
+        senza = repo_di_prova.commit("test: presidia la soglia alta, senza nominarla", {
+            "backend/tests/test_soglia_senza.py":
+                "from app.m import soglia\n\n\n"
+                "def test_la_soglia_alta_senza_nome():\n    assert soglia(11) == 'alta'\n",
+        })
+        morsi: list[dict] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert [m["commit"] for m in morsi] == [nominata[:7], metodo[:7]]
+        assert "backend/app/m.py:3" in morsi[0]["mutante"]
+        assert "backend/app/m.py:10" in morsi[1]["mutante"]
+        assert [m["commit"] for m in mancati] == [senza[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+
+    def test_la_funzione_nominata_che_non_ce_compare_nel_rapporto(self, repo_di_prova):
+        """ADR-0008: si segnala e non si blocca. La guardia si giudica sul resto del
+        perimetro, e chi legge «non morde» vede che il nome non ha trovato niente."""
+        self._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            "test: presidia la soglia alta\n\nGuardia-su: backend/app/m.py::soglie", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert "nato verde e non morde" in mancato["esito"]
+        assert "backend/app/m.py::soglie" in mancato["esito"]
+        assert "funzione nominata non trovata" in mancato["esito"]
+
+    def test_la_guardia_che_nomina_se_stessa_non_morde(self, repo_di_prova):
+        """Rilievo 1 del Critic su PBI-378: la funzione nominata entra fra i mutanti
+        **di produzione**. Un test che nomina sé stesso muore del proprio `==`→`!=`,
+        e ogni nato verde passerebbe il gate con una riga nel messaggio."""
+        self._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            "test: presidia la soglia alta\n\n"
+            "Guardia-su: backend/tests/test_soglia.py::test_la_soglia_alta", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert "nato verde e non morde" in mancato["esito"]
+        assert "backend/tests/test_soglia.py::test_la_soglia_alta" in mancato["esito"]
+        assert "funzione nominata fuori dalla produzione" in mancato["esito"]
+
+    @pytest.mark.parametrize("assoluto", [True, False], ids=["assoluto", "con-punti"])
+    def test_un_percorso_fuori_dal_worktree_non_si_tocca(self, repo_di_prova, tmp_path,
+                                                         assoluto):
+        """Il gate scrive i mutanti sul file: un percorso assoluto o con `..` lo
+        farebbe scrivere fuori dal worktree usa-e-getta, e un processo morto a metà
+        lascerebbe il file guasto. Il worktree sta in `<tmp>/ada-rosso-*/albero`,
+        da cui `../../` torna alla cartella temporanea."""
+        fuori = tmp_path / "fuori" / "m.py"
+        fuori.parent.mkdir()
+        fuori.write_text(self.MODULO, encoding="utf-8")
+        prima = fuori.stat().st_mtime_ns
+        percorso = (str(fuori) if assoluto
+                    else "../../" + os.path.relpath(fuori, tempfile.gettempdir()))
+        self._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            f"test: presidia la soglia alta\n\nGuardia-su: {percorso}::soglia", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert fuori.stat().st_mtime_ns == prima
+        assert f"{percorso}::soglia" in mancato["esito"]
+        assert "funzione nominata fuori dalla produzione" in mancato["esito"]
+
+
+class TestIlRapportoDiceIlPerimetro:
+    """PBI-378, decisione 6: per ogni guardia il rapporto dice le funzioni mutate e,
+    per ciascuna, se è entrata dal diff o perché nominata. Chi legge «non morde»
+    deve vedere dove il gate ha guardato; chi legge «morde», su cosa."""
+
+    @staticmethod
+    def _voce(perimetro, funzione: str) -> str:
+        [voce] = [p for p in perimetro if funzione in p]
+        return voce
+
+    def test_il_morso_porta_le_funzioni_dal_diff_e_quelle_nominate(self, repo_di_prova):
+        TestLaGuardiaNominaLaFunzioneDaMutare()._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            "test: presidia la soglia alta\n\nGuardia-su: backend/app/m.py::soglia", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        perimetro = morsi[0]["perimetro"]
+        assert "dal diff" in self._voce(perimetro, "backend/app/m.py::doppio")
+        assert "nominata" in self._voce(perimetro, "backend/app/m.py::soglia")
+        assert len(perimetro) == 2
+
+    def test_la_guardia_che_non_morde_dice_dove_il_gate_ha_guardato(self, repo_di_prova):
+        TestLaGuardiaNominaLaFunzioneDaMutare()._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit("test: presidia la soglia alta, senza nominarla", {
+            "backend/tests/test_soglia.py":
+                "from app.m import soglia\n\n\n"
+                "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+        })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert "backend/app/m.py::doppio" in mancato["esito"]
+        assert "dal diff" in mancato["esito"]
+        assert "soglia" not in mancato["esito"]
+
+    MORSO = {"commit": "abc1234", "titolo": "test(ci): presidia la soglia alta",
+             "test": "tests/test_soglia.py::test_la_soglia_alta",
+             "mutante": "backend/app/m.py:3  `return 'alta'` → riga cancellata",
+             "tipo": "AssertionError", "prove": [],
+             "perimetro": ["backend/app/m.py::doppio (dal diff)",
+                           "backend/app/m.py::soglia (nominata)"]}
+
+    def test_il_log_del_giro_e_il_gate_da_solo_scrivono_il_perimetro(
+        self, monkeypatch, capsys
+    ):
+        morso = self.MORSO
+        TestITestCheMordonoFinisconoNelRapporto._mondo(
+            type("Mondo", (), {"MORSO": morso})(), monkeypatch)
+
+        runner.esegui_pbi("PBI-378", attivi=set(), dry=False, con_pr=False)
+        nel_giro = capsys.readouterr().out
+
+        def _gate(base, ref, morsi=None, **k):
+            morsi.append(dict(morso))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+        runner.stampa_il_gate_del_rosso("origin/main..pbi/pbi-378")
+        da_solo = capsys.readouterr().out
+
+        for a_schermo in (nel_giro, da_solo):
+            assert "backend/app/m.py::doppio (dal diff)" in a_schermo
+            assert "backend/app/m.py::soglia (nominata)" in a_schermo
+
+    def test_un_file_typescript_resta_per_riga_e_il_rapporto_lo_dice(self):
+        """Fuori scope di PBI-378: il perimetro per funzione vale per Python, che
+        ha `ast`. Un `.ts` resta per riga come prima, e chi legge lo deve sapere."""
+        sorgente = ("export function somma(a: number, b: number) {\n"
+                    "  const totale = a + b\n"
+                    "  return totale\n"
+                    "}\n")
+
+        righe, voci = runner.righe_del_perimetro("frontend/src/lib/somma.ts", sorgente,
+                                                 {2}, set())
+
+        assert righe == {2}
+        assert voci == ["frontend/src/lib/somma.ts (per riga: non è Python)"]
+
+    def test_un_file_python_che_non_si_analizza_torna_per_riga_e_lo_dice(self):
+        """Decisione 5: non succede su un commit che ha passato pytest, ma il gate
+        non lo dà per scontato — un `SyntaxError` non deve fermare la lettura."""
+        sorgente = "def rotto(:\n    return 1\n"
+
+        righe, voci = runner.righe_del_perimetro("backend/app/rotto.py", sorgente,
+                                                 {2}, {1})
+
+        assert righe == {2}
+        assert voci == ["backend/app/rotto.py (per riga: il file non si analizza)"]
+
+
+class TestIlPerimetroPerFunzioneNonCambiaIlResto:
+    """PBI-378, criterio 5: le guardie. Descrivono comportamenti che `main` ha già
+    — una riga di modulo porta solo sé stessa, un `.ts` resta per riga, un mutante
+    che fa fallire la guardia per eccezione non è un morso — e che il perimetro per
+    funzione non deve perdere. Nascono verdi, e ognuna guarda il risultato intero
+    che le righe nuove producono, così un loro guasto si vede come asserzione."""
+
+    def test_una_riga_di_modulo_cambiata_porta_solo_la_sua_riga(self):
+        sorgente = ("SOGLIA = 10\n"
+                    "\n\n"
+                    "def sopra(x):\n"
+                    "    return x > SOGLIA\n")
+
+        assert runner.righe_del_perimetro("backend/app/m.py", sorgente, {1}, set()) == (
+            {1}, [])
+
+    def test_un_file_typescript_non_allarga_alla_funzione_ne_alle_cancellazioni(self):
+        """La riga 2 cambiata e una cancellazione dopo la riga 3, dentro la stessa
+        funzione: in un `.ts` entra la riga 2 e basta."""
+        sorgente = ("export function somma(a: number, b: number) {\n"
+                    "  const totale = a + b\n"
+                    "  return totale\n"
+                    "}\n")
+
+        assert runner.righe_del_perimetro("frontend/src/lib/somma.ts", sorgente,
+                                          {2}, {3}) == (
+            {2}, ["frontend/src/lib/somma.ts (per riga: non è Python)"])
+
+    def test_nel_perimetro_per_funzione_il_mutante_per_eccezione_non_e_un_morso(
+        self, repo_di_prova
+    ):
+        """Il branch cambia solo il `return`; la riga 2 entra perché sta nella
+        stessa funzione. Cancellata, la guardia muore di `NameError`: si conta
+        come fallito per eccezione e si passa oltre, fino al `return` che la fa
+        fallire per asserzione (PBI-365)."""
+        sorgente = ("def ha_parole(uscita):\n"
+                    "    pulita = uscita.strip()\n"
+                    "    return len(pulita.split()) > 0\n")
+        vecchio = repo_di_prova.commit("feat: le parole", {"backend/app/parole.py": sorgente})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo_di_prova.commit("refactor: almeno una parola", {
+            "backend/app/parole.py": sorgente.replace("> 0", ">= 1"),
+        })
+        repo_di_prova.commit("test: presidia la stringa di soli spazi", {
+            "backend/tests/test_parole.py":
+                "from app.parole import ha_parole\n\n\n"
+                "def test_soli_spazi():\n    assert ha_parole('   ') is False\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [(p["mutante"].split("  ")[0], p["esito"], p["tipo"])
+                for p in morsi[0]["prove"]] == [
+            ("backend/app/parole.py:2", "fallito per eccezione", "NameError"),
+            ("backend/app/parole.py:3", "ucciso per asserzione", "AssertionError"),
+        ]
 
 
 class TestIlTestNatoVerdePassaSeMorde:
