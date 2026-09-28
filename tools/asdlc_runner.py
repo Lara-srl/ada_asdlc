@@ -2068,6 +2068,27 @@ def righe_del_perimetro(percorso: str, sorgente: str, righe: set[int],
     return perimetro
 
 
+def righe_delle_docstring(sorgente: str) -> set[int]:
+    """Le righe delle docstring di modulo, classe e funzione, dall'AST: il primo
+    enunciato del corpo, se è una costante stringa. Cancellarne la prosa non cambia
+    niente, e un mutante che ogni guardia sopravvive non prova niente (PBI-378).
+    Un sorgente che non è Python valido — un `.ts` — non ne ha."""
+    try:
+        albero = ast.parse(sorgente)
+    except SyntaxError:
+        return set()
+    righe: set[int] = set()
+    for nodo in ast.walk(albero):
+        if not isinstance(nodo, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef)) or not nodo.body:
+            continue
+        primo = nodo.body[0]
+        if (isinstance(primo, ast.Expr) and isinstance(primo.value, ast.Constant)
+                and isinstance(primo.value.value, str)):
+            righe.update(range(primo.lineno, (primo.end_lineno or primo.lineno) + 1))
+    return righe
+
+
 def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
     """I mutanti delle sole `righe` (1-based) di `sorgente`, in ordine di riga.
 
@@ -2075,11 +2096,13 @@ def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
     codice che quel giro ha toccato, ed è l'unico di cui i suoi test rispondono.
     La cancellazione è l'operatore più forte e vale in tutti e due i linguaggi; una riga di sola
     punteggiatura non si cancella, perché romperebbe la sintassi e basta, e un
-    guasto di forma non è una prova che il test morda.
+    guasto di forma non è una prova che il test morda. Le righe di una docstring
+    non danno mutanti, in nessun perimetro (`righe_delle_docstring`).
     """
     mutanti: list[Mutante] = []
+    docstring = righe_delle_docstring(sorgente)
     for numero, testo in enumerate(sorgente.splitlines(), start=1):
-        if numero not in righe:
+        if numero not in righe or numero in docstring:
             continue
         if si_puo_cancellare(testo):
             mutanti.append(Mutante(numero, testo, ""))
