@@ -5117,6 +5117,31 @@ class TestIlRapportoDiceIlPerimetro:
             assert "backend/app/m.py::doppio (dal diff)" in a_schermo
             assert "backend/app/m.py::soglia (nominata)" in a_schermo
 
+    def test_un_file_typescript_resta_per_riga_e_il_rapporto_lo_dice(self):
+        """Fuori scope di PBI-378: il perimetro per funzione vale per Python, che
+        ha `ast`. Un `.ts` resta per riga come prima, e chi legge lo deve sapere."""
+        sorgente = ("export function somma(a: number, b: number) {\n"
+                    "  const totale = a + b\n"
+                    "  return totale\n"
+                    "}\n")
+
+        righe, voci = runner.righe_del_perimetro("frontend/src/lib/somma.ts", sorgente,
+                                                 {2}, set())
+
+        assert righe == {2}
+        assert voci == ["frontend/src/lib/somma.ts (per riga: non è Python)"]
+
+    def test_un_file_python_che_non_si_analizza_torna_per_riga_e_lo_dice(self):
+        """Decisione 5: non succede su un commit che ha passato pytest, ma il gate
+        non lo dà per scontato — un `SyntaxError` non deve fermare la lettura."""
+        sorgente = "def rotto(:\n    return 1\n"
+
+        righe, voci = runner.righe_del_perimetro("backend/app/rotto.py", sorgente,
+                                                 {2}, {1})
+
+        assert righe == {2}
+        assert voci == ["backend/app/rotto.py (per riga: il file non si analizza)"]
+
 
 class TestIlTestNatoVerdePassaSeMorde:
     """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
