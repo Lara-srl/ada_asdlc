@@ -7448,6 +7448,29 @@ class TestLeGuardieDelMotivo:
         assert voce["motivo"] == "domanda-del-builder", voce
         assert voce["stato"] == "rosso", "lo stato resta quello della rete"
 
+    def test_guardia_un_eccezione_qualsiasi_nella_rete_di_main_resta_rossa_senza_motivo(
+            self, monkeypatch, tmp_path):
+        """PBI-380, guardia della decisione 2: il motivo si copia solo da
+        `ChiusuraFallita`. Un'eccezione qualsiasi chiude `rosso` con il motivo
+        vuoto e la nota di prima."""
+        def esegui_pbi_che_alza(pbi, *a, **k):
+            raise ValueError("nome del ramo illeggibile")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_che_alza)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
+
+        assert runner.main() == 1
+
+        [rapporto] = [f for f in tmp_path.glob("*.json")
+                      if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
+        [voce] = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"]
+        assert (voce["stato"], voce["motivo"]) == ("rosso", ""), voce
+        assert voce["nota"] == "eccezione nel runner: nome del ramo illeggibile"
+
 
 class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
     """PBI-377, difetto 50 di `PBI-102`. Dopo `chiudi()` resta l'Acceptance Gate,
