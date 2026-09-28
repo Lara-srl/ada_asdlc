@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -5046,6 +5047,52 @@ class TestLaGuardiaNominaLaFunzioneDaMutare:
         assert "nato verde e non morde" in mancato["esito"]
         assert "backend/app/m.py::soglie" in mancato["esito"]
         assert "funzione nominata non trovata" in mancato["esito"]
+
+    def test_la_guardia_che_nomina_se_stessa_non_morde(self, repo_di_prova):
+        """Rilievo 1 del Critic su PBI-378: la funzione nominata entra fra i mutanti
+        **di produzione**. Un test che nomina sé stesso muore del proprio `==`→`!=`,
+        e ogni nato verde passerebbe il gate con una riga nel messaggio."""
+        self._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            "test: presidia la soglia alta\n\n"
+            "Guardia-su: backend/tests/test_soglia.py::test_la_soglia_alta", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert "nato verde e non morde" in mancato["esito"]
+        assert "backend/tests/test_soglia.py::test_la_soglia_alta" in mancato["esito"]
+        assert "funzione nominata fuori dalla produzione" in mancato["esito"]
+
+    @pytest.mark.parametrize("assoluto", [True, False], ids=["assoluto", "con-punti"])
+    def test_un_percorso_fuori_dal_worktree_non_si_tocca(self, repo_di_prova, tmp_path,
+                                                         assoluto):
+        """Il gate scrive i mutanti sul file: un percorso assoluto o con `..` lo
+        farebbe scrivere fuori dal worktree usa-e-getta, e un processo morto a metà
+        lascerebbe il file guasto. Il worktree sta in `<tmp>/ada-rosso-*/albero`,
+        da cui `../../` torna alla cartella temporanea."""
+        fuori = tmp_path / "fuori" / "m.py"
+        fuori.parent.mkdir()
+        fuori.write_text(self.MODULO, encoding="utf-8")
+        prima = fuori.stat().st_mtime_ns
+        percorso = (str(fuori) if assoluto
+                    else "../../" + os.path.relpath(fuori, tempfile.gettempdir()))
+        self._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            f"test: presidia la soglia alta\n\nGuardia-su: {percorso}::soglia", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert fuori.stat().st_mtime_ns == prima
+        assert f"{percorso}::soglia" in mancato["esito"]
+        assert "funzione nominata fuori dalla produzione" in mancato["esito"]
 
 
 class TestIlRapportoDiceIlPerimetro:
