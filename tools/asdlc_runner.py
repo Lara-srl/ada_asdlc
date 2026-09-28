@@ -2072,28 +2072,33 @@ def funzioni_del_modulo(albero: ast.AST) -> list[tuple[str, int, int]]:
 def righe_del_perimetro(percorso: str, sorgente: str, righe: set[int],
                         posizioni: set[int]) -> tuple[set[int], list[str]]:
     """Le righe da mutare di un file — tutte quelle delle funzioni toccate, e le
-    righe cambiate che stanno fuori da ogni funzione — e i nomi di quelle
-    funzioni, per il rapporto (PBI-378).
+    righe cambiate che stanno fuori da ogni funzione — e le voci del rapporto:
+    `<percorso>::<funzione> (dal diff)` per ogni funzione toccata (PBI-378).
 
     Una funzione è toccata se contiene una riga cambiata o la posizione di una
     cancellazione, e vale la più interna — un metodo, una funzione annidata — dai
-    `lineno`/`end_lineno` dell'AST. Un file che non è Python resta per riga.
+    `lineno`/`end_lineno` dell'AST. Un file che non è Python, o un `.py` che a quel
+    commit non si analizza, resta per riga, e la sua voce dice perché.
     """
     if not percorso.endswith(".py"):
-        return righe, []
-    funzioni = funzioni_del_modulo(ast.parse(sorgente))
+        return righe, [f"{percorso} (per riga: non è Python)"]
+    try:
+        funzioni = funzioni_del_modulo(ast.parse(sorgente))
+    except SyntaxError:
+        return righe, [f"{percorso} (per riga: il file non si analizza)"]
     perimetro: set[int] = set()
-    toccate: list[str] = []
+    voci: list[str] = []
     for riga in sorted(righe | posizioni):
         dentro = [f for f in funzioni if f[1] <= riga <= f[2]]
         if dentro:
             nome, prima, ultima = max(dentro, key=lambda f: f[1])
             perimetro.update(range(prima, ultima + 1))
-            if nome not in toccate:
-                toccate.append(nome)
+            voce = f"{percorso}::{nome} (dal diff)"
+            if voce not in voci:
+                voci.append(voce)
         elif riga in righe:
             perimetro.add(riga)
-    return perimetro, toccate
+    return perimetro, voci
 
 
 def righe_delle_docstring(sorgente: str) -> set[int]:
@@ -2265,7 +2270,8 @@ def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
     toccato, non che lo copra tutto. `nominate` sono le funzioni che il commit
     nomina con `Guardia-su:` (`funzioni_nominate`): entrano nel perimetro anche se
     il branch non le tocca. `perimetro`, se c'è, si riempie con le funzioni mutate
-    e da dove sono entrate — `dal diff` o `nominata` — **prima** di mutare, così il
+    e da dove sono entrate — `dal diff` o `nominata` — e con i file rimasti per
+    riga e il perché, **prima** di mutare, così il
     rapporto lo dice intero anche quando si esce al primo kill (PBI-378).
     """
     test = comando.origine[chiave]
@@ -2282,9 +2288,9 @@ def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
         sorgente = leggi_sorgente(file)
         if sorgente is None:
             continue
-        righe, toccate = righe_del_perimetro(percorso, sorgente, cambiate.get(percorso, set()),
-                                             cancellate.get(percorso, set()))
-        perimetro += [f"{percorso}::{nome} (dal diff)" for nome in toccate]
+        righe, voci = righe_del_perimetro(percorso, sorgente, cambiate.get(percorso, set()),
+                                          cancellate.get(percorso, set()))
+        perimetro += voci
         for nome, sue in nominate.get(percorso, {}).items():
             perimetro.append(f"{percorso}::{nome} (nominata)")
             righe = righe | sue
