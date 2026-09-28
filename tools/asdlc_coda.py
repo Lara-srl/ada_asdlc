@@ -94,9 +94,14 @@ class Barriera:
 
 @dataclass(frozen=True)
 class Attende:
-    """Il giro di questo PBI c'è già stato e si è fermato: tocca a un umano."""
+    """Il giro di questo PBI c'è già stato e si è fermato: tocca a un umano.
+
+    `pr` sono le PR aperte sul ramo del PBI, `None` se `gh` non ha risposto alla
+    ricerca: è ciò che la riga dice a chi la legge (PBI-381, decisione 3).
+    """
 
     pbi: str
+    pr: tuple[str, ...] | None = ()
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,29 @@ def pbi_con_ramo(repo: Path) -> set[str]:
     return {CFG.backlog.id_di(numero) for numero in RE_RAMO_PBI.findall(uscita)}
 
 
+def pr_sul_ramo(repo: Path, pbi: str) -> tuple[str, ...] | None:
+    """Gli URL delle PR aperte sui rami del PBI, col suffisso di un secondo giro
+    o senza, letti dal JSON di `gh`; `None` se `gh` non risponde. Non ripiega su
+    niente: la riga segnala e il tick passa (`ADR-0008`, PBI-381 decisione 3)."""
+    codice, uscita = esegui(
+        ["gh", "pr", "list", "--state", "open",
+         "--limit", str(LIMITE_PR), "--json", "url,headRefName"],
+        repo,
+    )
+    if codice != 0:
+        return None
+    try:
+        elenco = json.loads(uscita)
+    except ValueError:
+        return None
+    return tuple(
+        pr["url"]
+        for pr in elenco
+        if (ramo := RE_RAMO_PR.match(pr.get("headRefName", ""))) is not None
+        and CFG.backlog.id_di(ramo.group(1)) == pbi
+    )
+
+
 # L'intestazione di una sezione di domande dentro un PBI.
 RE_DOMANDE = re.compile(r"^#+[^\S\n]*❓.*$", re.MULTILINE)
 
@@ -396,7 +424,8 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     Fail-closed su tutto ciò che sta fuori: `gh` che non risponde, la coda che non
     si legge, un `git` che alza. Un tick che sbaglia per eccesso di prudenza costa
     dieci minuti fino al tick dopo; uno che lancia sul dubbio costa un giro e un
-    ramo da ripulire.
+    ramo da ripulire. Fa eccezione la ricerca delle PR di un PBI in attesa: lì non
+    c'è niente da lanciare, e un `gh` muto si scrive nella riga (PBI-381).
     """
     if giro_in_corso(worktree):
         return Occupato()
@@ -408,7 +437,12 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
         return Barriera(f"la coda non si legge — {file_coda.name}: {illeggibile}")
     except Guasto as guasto:
         return Barriera(str(guasto))
-    return prossimo(voci, mergiati, rami, occupato=False)
+    decisione = prossimo(voci, mergiati, rami, occupato=False)
+    # Solo sull'attesa: la riga dice cosa c'è sul ramo, e la PR nata senza URL
+    # si ritrova qui senza riscrivere il registro del giro (PBI-381).
+    if isinstance(decisione, Attende):
+        return Attende(decisione.pbi, pr_sul_ramo(repo, decisione.pbi))
+    return decisione
 
 
 def preflight() -> list[list[str]]:
@@ -498,8 +532,11 @@ def racconta(decisione: Decisione) -> str:
             return "finita: in coda non resta niente da lanciare"
         case Barriera(testo):
             return f"barriera: {testo}"
-        case Attende(pbi):
-            return f"attende: {pbi} ha un ramo su origin e non è in main — tocca a un umano"
+        case Attende(pbi, pr):
+            sul_ramo = ("GitHub non ha risposto: PR da verificare" if pr is None
+                        else f"PR {', '.join(pr)}" if pr
+                        else "nessuna PR sul ramo: crearla o rilanciare")
+            return f"attende: {pbi} ha un ramo su origin e non è in main — {sul_ramo}"
         case Lancia(pbi):
             return f"lancia: {pbi}"
     return f"decisione senza nome: {decisione}"

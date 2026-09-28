@@ -2640,6 +2640,41 @@ def commenta_i_rapporti(url: str, e: Esito) -> None:
         e.nota = " · ".join(t for t in (e.nota, nota) if t)
 
 
+def pr_aperte(branch: str) -> list[str] | None:
+    """Gli URL delle PR aperte sul ramo, letti dal JSON di `gh pr list` e non dal
+    suo testo (PBI-381, decisione 1). `None` se `gh` non ha risposto — un errore,
+    un timeout, un'uscita che non è JSON — perché lì non si sa se una PR c'è."""
+    try:
+        code, uscita = esegui(
+            ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url"],
+            REPO, timeout=300,
+        )
+        if code != 0:
+            print(f"    ⚠️  gh pr list non risponde: {uscita.strip()[:200]}")
+            return None
+        return [pr["url"] for pr in json.loads(uscita)]
+    except (subprocess.TimeoutExpired, ValueError) as exc:
+        print(f"    ⚠️  gh pr list non risponde: {str(exc)[:200]}")
+        return None
+
+
+def adotta_pr(aperte: list[str], come: str, e: Esito) -> str:
+    """La PR che la ricerca ha trovato sul ramo diventa quella del giro: l'URL
+    nell'esito, i commenti del Critic, e `come` nella nota. Con più di una non se
+    ne sceglie nessuna, e la nota le nomina tutte (PBI-381, decisione 4)."""
+    if len(aperte) > 1:
+        e.nota = " · ".join(t for t in (
+            e.nota, f"{len(aperte)} PR aperte sul ramo, nessuna scelta: {', '.join(aperte)}"
+        ) if t)
+        return ""
+    e.nota = " · ".join(t for t in (e.nota, come) if t)
+    # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR esiste già
+    # e l'esito la deve nominare (PBI-377, decisione 5).
+    e.pr = aperte[0]
+    commenta_i_rapporti(e.pr, e)
+    return e.pr
+
+
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     """Apre la PR e si ferma lì: il merge è dell'umano (micro-commits §5).
 
@@ -2692,6 +2727,18 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         e.motivo = "head-non-su-origin"
         e.nota = " · ".join(t for t in (diagnosi, resto) if t)
         return ""
+    # Prima di creare si cerca: una PR nata da un giro precedente, o da un
+    # `gh pr create` morto dopo averla aperta, non ne deve far nascere un'altra
+    # (PBI-381, decisione 1).
+    aperte = pr_aperte(branch)
+    if aperte is None:
+        # Senza una risposta non si crea: sarebbe il doppione che la ricerca
+        # toglie, la stessa regola di `crea_branch()` con `OriginMuto`.
+        e.nota = " · ".join(
+            t for t in (e.nota, "PR non aperta: GitHub non ha risposto alla ricerca") if t)
+        return ""
+    if aperte:
+        return adotta_pr(aperte, "PR già aperta sul ramo", e)
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
         f"(`tools/asdlc_runner.py`).\n\n"
@@ -2706,29 +2753,41 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         f"Prima del merge, guarda: i criteri di verifica del PBI, il diff fuori scope, "
         f"e se la spec è stata aggiornata dove il comportamento è cambiato."
     )
-    code, out = esegui(
-        ["gh", "pr", "create",
-         "--title", f"{pbi}: {pbi_path.stem.split('-', 2)[-1].replace('-', ' ')}",
-         "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
-        REPO, timeout=300,
-    )
-    if code != 0:
-        print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
-        return ""
-    # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga finché
-    # non ha altro da dire, e un avviso di aggiornamento basta a far finire nella
-    # colonna `pr` del registro una frase che non è un indirizzo (difetto 12).
-    # Se non c'è un URL la colonna resta vuota: una colonna che mente costa più
-    # di una che tace.
-    url = re.search(r"https://\S+/pull/\d+", out)
-    if url is None:
+    try:
+        code, out = esegui(
+            ["gh", "pr", "create",
+             "--title", f"{pbi}: {pbi_path.stem.split('-', 2)[-1].replace('-', ' ')}",
+             "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
+            REPO, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        print("    ⚠️  gh pr create scaduto: cerco la PR sul ramo")
+        perche = "timeout"
+    else:
+        if code != 0:
+            print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
+            return ""
+        # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga
+        # finché non ha altro da dire, e un avviso di aggiornamento basta a far
+        # finire nella colonna `pr` del registro una frase che non è un indirizzo
+        # (difetto 12).
+        url = re.search(r"https://\S+/pull/\d+", out)
+        if url is not None:
+            # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR
+            # esiste già e l'esito la deve nominare (PBI-377, decisione 5).
+            e.pr = url.group(0)
+            commenta_i_rapporti(e.pr, e)
+            return e.pr
         print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
-        return ""
-    # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR esiste già
-    # e l'esito la deve nominare (PBI-377, decisione 5).
-    e.pr = url.group(0)
-    commenta_i_rapporti(e.pr, e)
-    return e.pr
+        perche = "output senza URL"
+    # Il client è morto o non ha detto l'URL, ma la PR può essere nata su
+    # GitHub: la si cerca di nuovo, una volta sola (PBI-381, decisione 2). Se
+    # non si trova, o `gh` tace, la colonna resta vuota — una colonna che mente
+    # costa più di una che tace — e la nota lo dice: la riga del tick risolve.
+    if ritrovate := pr_aperte(branch):
+        return adotta_pr(ritrovate, f"PR ritrovata dopo {perche}", e)
+    e.nota = " · ".join(t for t in (e.nota, "PR forse aperta, da verificare") if t)
+    return ""
 
 
 class ChiusuraFallita(RuntimeError):
