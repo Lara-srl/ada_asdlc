@@ -4663,6 +4663,21 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
         assert runner.main() == 0, capsys.readouterr().out
         assert self._fase(repo_di_prova) == runner.FASE_IMPL
 
+    def test_guardia_il_primo_chiedi_impl_con_head_sulla_base_del_giro_e_un_rifiuto(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-380, guardia della decisione 3. Il giro nasce su uno sha il cui
+        ultimo commit è di soli test, scritto da qualcun altro, e `origin/main`
+        è rimasto indietro: contando da `BASE` quel commit sembrerebbe del ramo.
+        Contato dalla base del giro il ramo non ha commit, e la fase non si apre."""
+        base = repo_di_prova.commit("test(analisi): un test di qualcun altro",
+                                    {self.TEST: self.ROSSO})
+        runner.apri_la_fase(base)
+        self._chiedi(repo_di_prova, monkeypatch)
+
+        assert runner.main() == 1
+        assert "nessun test nuovo" in capsys.readouterr().out
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+
 
 class TestIlPromptDiceDiCommittareIlRossoPrima:
     """L'ordine dei passi è la metà del lucchetto.
