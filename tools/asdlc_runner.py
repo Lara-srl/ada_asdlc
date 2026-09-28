@@ -2739,12 +2739,23 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         f"Prima del merge, guarda: i criteri di verifica del PBI, il diff fuori scope, "
         f"e se la spec è stata aggiornata dove il comportamento è cambiato."
     )
-    code, out = esegui(
-        ["gh", "pr", "create",
-         "--title", f"{pbi}: {pbi_path.stem.split('-', 2)[-1].replace('-', ' ')}",
-         "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
-        REPO, timeout=300,
-    )
+    try:
+        code, out = esegui(
+            ["gh", "pr", "create",
+             "--title", f"{pbi}: {pbi_path.stem.split('-', 2)[-1].replace('-', ' ')}",
+             "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
+            REPO, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        # Il client è morto, ma la PR può essere nata su GitHub: la si cerca di
+        # nuovo, una volta sola (PBI-381, decisione 2).
+        print("    ⚠️  gh pr create scaduto: cerco la PR sul ramo")
+        if ritrovate := pr_aperte(branch):
+            e.nota = " · ".join(t for t in (e.nota, "PR ritrovata dopo timeout") if t)
+            e.pr = ritrovate[0]
+            commenta_i_rapporti(e.pr, e)
+            return e.pr
+        raise
     if code != 0:
         print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
         return ""
