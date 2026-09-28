@@ -153,6 +153,24 @@ def senza_pr_aperte(esegui):
     return _esegui
 
 
+def con_la_pr_creata(esegui, url: str):
+    """`esegui` con la ricerca di `apri_pr()` davanti: `gh pr list` non trova
+    niente prima di `gh pr create`, e dopo trova `url` — l'URL di una PR creata
+    viene dal JSON della ricerca (PBI-376, decisione 1). Ogni altro comando va a
+    `esegui` com'era."""
+    creata = False
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        nonlocal creata
+        if cmd[:3] == ["gh", "pr", "list"]:
+            return 0, json.dumps([{"url": url}] if creata else [])
+        if cmd[:3] == ["gh", "pr", "create"]:
+            creata = True
+        return esegui(cmd, cwd, timeout, **k)
+
+    return _esegui
+
+
 class TestIlCriticPuoSospendere:
     """Un rilievo che aspetta una persona non è «non pronto»: è un'altra diagnosi."""
 
@@ -2733,24 +2751,25 @@ class TestLUrlDellaPrSiRiconoscePerForma:
     avviso di aggiornamento, una nota sul remoto, una riga di `gh` che parla di
     sé: bastano a far finire nella colonna `pr` del registro una frase che non è
     un indirizzo. La colonna serve a una cosa sola — aprire la PR — e un warning
-    lì dentro la rende inutile senza dirlo.
+    lì dentro la rende inutile senza dirlo. Da PBI-376 l'uscita di `gh pr
+    create` non si legge più: l'URL viene dal JSON di `gh pr list`.
     """
 
-    def _crea_pr(self, monkeypatch, uscita: str) -> str:
+    URL = "https://github.com/Lara-srl/ada_controller/pull/212"
+
+    def _crea_pr(self, monkeypatch, uscita: str, esegui=senza_pr_aperte) -> str:
         monkeypatch.setattr(runner, "git", lambda *a: "")
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(lambda *a, **k: (0, uscita)))
+        monkeypatch.setattr(runner, "esegui", esegui(lambda *a, **k: (0, uscita)))
         return runner.apri_pr(
             "PBI-212", runner.REPO / "backlog" / "PBI-212-margine-costo-e-ricavo.md",
             "pbi/pbi-212", runner.Esito("PBI-212", "fatto"),
         )
 
     def test_lurl_si_trova_anche_sotto_un_warning(self, monkeypatch):
-        uscita = ("https://github.com/Lara-srl/ada_controller/pull/212\n"
-                  "A new release of gh is available: 2.55.0 → 2.62.0\n")
-        assert self._crea_pr(monkeypatch, uscita) == (
-            "https://github.com/Lara-srl/ada_controller/pull/212"
-        )
+        uscita = self.URL + "\nA new release of gh is available: 2.55.0 → 2.62.0\n"
+        assert self._crea_pr(monkeypatch, uscita,
+                             lambda esegui: con_la_pr_creata(esegui, self.URL)) == self.URL
 
     def test_senza_url_la_colonna_resta_vuota(self, monkeypatch):
         """Meglio vuota che con dentro una frase: una colonna che mente costa più
@@ -2852,7 +2871,9 @@ class TestLaPrSiCercaPrimaDiCrearla:
 
     def test_un_create_senza_url_passa_per_la_stessa_ricerca(self, monkeypatch):
         """Decisione 2, l'altro caso: `gh` risponde, ma nell'uscita non c'è un URL
-        riconoscibile (difetto 12). La PR c'è, e la colonna `pr` la nomina."""
+        riconoscibile (difetto 12). La PR c'è, e la colonna `pr` la nomina: da
+        PBI-376 l'uscita non si legge, e la ricerca dopo il create è la stessa
+        con o senza un URL a schermo."""
         pr, esito, comandi, commentate = self._apri(
             monkeypatch,
             list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
@@ -2863,7 +2884,6 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert pr == esito.pr == self.URL
         assert commentate == [self.URL]
         assert esito.stato == "fatto"
-        assert "PR ritrovata dopo output senza URL" in esito.nota, esito.nota
 
     @pytest.mark.parametrize("creazione", [
         subprocess.TimeoutExpired(["gh", "pr", "create"], 300),
@@ -2890,17 +2910,21 @@ class TestLaPrSiCercaPrimaDiCrearla:
     def test_guardia_una_pr_creata_al_primo_colpo_porta_il_suo_url_e_i_commenti(
             self, monkeypatch):
         """Guardia dichiarata: la ricerca non trova niente, `gh pr create` apre la
-        PR e ne scrive l'URL. È la strada di sempre, e vale anche su `main`: un
-        solo create e nessuna ricerca dopo, l'URL del create nell'esito, i
-        commenti del Critic su quella PR, e nella nota nessuna delle frasi della
-        PR ritrovata. Che la ricerca venga prima del create lo fissano gli altri
-        test di questa classe, non la guardia."""
+        PR, e la ricerca dopo la ritrova. È la strada di sempre: un solo create e
+        dopo solo letture, l'URL nell'esito, i commenti del Critic su quella PR, e
+        nella nota nessuna delle frasi della PR ritrovata. L'ordine si asserisce
+        così (PBI-376, decisione 4) perché è vero su `main`, dove dopo il create
+        non c'è niente, e dopo la decisione 1, dove c'è la ricerca: un secondo
+        create, o una scrittura diversa dopo il create, lo fanno fallire. Che la
+        ricerca venga prima del create lo fissano gli altri test di questa classe,
+        non la guardia."""
         pr, esito, comandi, commentate = self._apri(
-            monkeypatch, list=[(0, "[]")], create=[(0, self.URL + "\n")])
+            monkeypatch, list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
+            create=[(0, self.URL + "\n")])
 
         sottocomandi = [c[2] for c in comandi]
-        assert sottocomandi.count("create") == 1, sottocomandi
-        assert sottocomandi[-1] == "create", sottocomandi
+        i = sottocomandi.index("create")
+        assert set(sottocomandi[i + 1:]) <= {"list"}, sottocomandi
         assert pr == esito.pr == self.URL
         assert commentate == [self.URL]
         assert esito.stato == "fatto"
@@ -2917,6 +2941,25 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert commentate == []
         assert esito.stato == "fatto"
         assert self.URL in esito.nota and self.ALTRA in esito.nota, esito.nota
+
+    def test_un_url_a_forma_di_pr_nellavviso_di_gh_non_diventa_lurl_dellesito(
+            self, monkeypatch):
+        """PBI-376, decisione 1: l'URL di una PR creata viene da `gh pr list
+        --json`. L'uscita di `gh pr create` mescola stdout e stderr, e un avviso
+        che cita una PR di un altro repository ha la stessa forma di quella
+        creata: letto sul testo, finiva nella colonna `pr` del registro."""
+        avviso = ("! warning: see https://github.com/cli/cli/pull/9999 before upgrading\n"
+                  + self.URL + "\n")
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch,
+            list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
+            create=[(0, avviso)],
+        )
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"]
+        assert pr == esito.pr == self.URL, "l'URL è quello della ricerca, non dell'avviso"
+        assert commentate == [self.URL]
+        assert esito.stato == "fatto"
 
 
 class TestIGateSiDichiaranoPrimaDiPartire:
@@ -6821,7 +6864,7 @@ class TestIlRapportoDelCriticArrivaIntero:
                 raise commento_alza
             return (1, "HTTP 502: Bad Gateway") if commento_fallisce else (0, "")
 
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, self.URL))
         if prima_dei_commenti is not None:
             prima_dei_commenti(esito)
         pr = runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
@@ -7176,8 +7219,9 @@ class TestUnaBasePerGiro:
             return git_del_ramo(*args)
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(lambda cmd, cwd, timeout=0, **k:
-                            (0, "https://github.com/x/y/pull/374\n")))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(
+            lambda cmd, cwd, timeout=0, **k: (0, "https://github.com/x/y/pull/374\n"),
+            "https://github.com/x/y/pull/374"))
         esito = runner.Esito("PBI-374", "fatto")
 
         pr = runner.apri_pr("PBI-374", REPO / "backlog" / "PBI-374-x.md", "pbi/pbi-374", esito)
@@ -7732,7 +7776,7 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
         def commenti_che_alzano(u, e):
             raise ValueError("rapporto con un carattere non codificabile")
 
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, url))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
@@ -7766,7 +7810,7 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
                 return commento
             return agente(cmd, cwd, timeout, **k)
 
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, self.URL))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
