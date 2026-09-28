@@ -4895,6 +4895,46 @@ class TestLeRigheCambiateSiLeggonoDalDiff:
         assert runner.righe_cambiate("origin/main", sha) == {}
 
 
+class TestIlPerimetroSonoLeFunzioniToccate:
+    """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
+    toccate dal diff, non le righe (revisione del 26/09 di ADR-0022).
+
+    Un hunk di sole cancellazioni non porta righe: il resto della funzione da cui il
+    branch ha tolto codice restava fuori, e la guardia che il Critic chiede su quel
+    comportamento nasceva verde e non poteva mordere. Il caso è il primo giro di
+    PBI-373 (26/09).
+    """
+
+    SEGNO = ("def segno(x):\n"
+             "    if x > 0:\n"
+             "        return 'positivo'\n"
+             "    print('ramo di riserva')\n"
+             "    return 'negativo'\n")
+
+    def test_una_guardia_sul_resto_della_funzione_da_cui_si_toglie_codice_morde(
+        self, repo_di_prova
+    ):
+        """Il branch cancella la stampa (riga 4): `@@ -4 +3,0 @@`. La funzione
+        `segno` contiene la riga 3, dopo cui si è cancellato, ed entra tutta. La
+        guardia asserisce il ramo che decide, e il `return 'positivo'` cambiato in
+        `pass` la fa fallire per asserzione."""
+        vecchio = repo_di_prova.commit("feat: il segno", {"backend/app/segno.py": self.SEGNO})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo_di_prova.commit("refactor: togli la stampa del ramo di riserva", {
+            "backend/app/segno.py": self.SEGNO.replace("    print('ramo di riserva')\n", ""),
+        })
+        repo_di_prova.commit("test: presidia il ramo positivo del segno", {
+            "backend/tests/test_segno.py":
+                "from app.segno import segno\n\n\n"
+                "def test_il_positivo():\n    assert segno(1) == 'positivo'\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert "backend/app/segno.py:3" in morsi[0]["mutante"]
+        assert morsi[0]["tipo"] == "AssertionError"
+
+
 class TestIlTestNatoVerdePassaSeMorde:
     """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
 
