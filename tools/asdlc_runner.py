@@ -1947,8 +1947,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
 # «Nato verde» è una prova di processo, e ha un falso positivo sistematico: la
 # guardia che il Critic ordina su un comportamento che c'è già nasce verde per
 # forza. La domanda di sostanza — *se guasto il codice che copre, se ne accorge?* —
-# si misura: si mutano le righe di produzione che il branch ha cambiato e si rigira
-# quel test. Un mutante ucciso è la prova che il test guarda quelle righe.
+# si misura: si mutano le funzioni di produzione che il branch ha toccato (PBI-378)
+# e si rigira quel test. Un mutante ucciso è la prova che il test guarda quel codice.
 
 @dataclass(frozen=True)
 class Mutante:
@@ -2003,33 +2003,77 @@ def si_puo_cancellare(testo: str) -> bool:
 RE_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 
-def righe_cambiate(base: str, sha: str) -> dict[str, set[int]]:
-    """Per ogni file di **produzione** che il branch ha cambiato fino a `sha`, le
-    righe nuove o toccate, numerate come nel file a quel commit.
+def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
+    """Per ogni file di **produzione** che il branch ha cambiato fino a `sha`, gli
+    hunk come `(inizio, quante)` nella numerazione del file a quel commit.
 
     `base...sha` e non `base..sha`: il diff parte dal merge-base, così un `main`
     andato avanti nel frattempo non entra nel conto come se fosse del branch.
-    Una riga tolta non c'è più da guastare, e un file di soli `-` non compare.
     """
-    righe: dict[str, set[int]] = {}
+    hunk: dict[str, list[tuple[int, int]]] = {}
     for percorso in git("diff", "--name-only", f"{base}...{sha}").splitlines():
         if not percorso or not e_file_di_produzione(percorso):
             continue
         diff = git("diff", "--unified=0", f"{base}...{sha}", "--", percorso)
-        nuove: set[int] = set()
-        for inizio, quante in RE_HUNK.findall(diff):
-            nuove.update(range(int(inizio), int(inizio) + (int(quante) if quante else 1)))
+        hunk[percorso] = [(int(inizio), int(quante) if quante else 1)
+                          for inizio, quante in RE_HUNK.findall(diff)]
+    return hunk
+
+
+def righe_cambiate(base: str, sha: str) -> dict[str, set[int]]:
+    """Per ogni file di produzione, le righe nuove o toccate. Una riga tolta non
+    c'è più da guastare, e un file di soli `-` non compare: dove si è cancellato
+    lo dice `cancellazioni`."""
+    righe: dict[str, set[int]] = {}
+    for percorso, elenco in hunk_di_produzione(base, sha).items():
+        nuove = {n for inizio, quante in elenco for n in range(inizio, inizio + quante)}
         if nuove:
             righe[percorso] = nuove
     return righe
 
 
+def cancellazioni(base: str, sha: str) -> dict[str, set[int]]:
+    """Per ogni file di produzione, la posizione degli hunk di sole cancellazioni
+    (`+c,0`): la riga `c` del file a quel commit, quella dopo cui si è cancellato.
+    Non è una riga da guastare, ma dice quale funzione il branch ha toccato."""
+    posizioni: dict[str, set[int]] = {}
+    for percorso, elenco in hunk_di_produzione(base, sha).items():
+        dove = {inizio for inizio, quante in elenco if quante == 0}
+        if dove:
+            posizioni[percorso] = dove
+    return posizioni
+
+
+def righe_del_perimetro(percorso: str, sorgente: str, righe: set[int],
+                        posizioni: set[int]) -> set[int]:
+    """Le righe da mutare di un file: tutte quelle delle funzioni toccate, e le
+    righe cambiate che stanno fuori da ogni funzione (PBI-378).
+
+    Una funzione è toccata se contiene una riga cambiata o la posizione di una
+    cancellazione, e vale la più interna — un metodo, una funzione annidata — dai
+    `lineno`/`end_lineno` dell'AST. Un file che non è Python resta per riga.
+    """
+    if not percorso.endswith(".py"):
+        return righe
+    funzioni = [n for n in ast.walk(ast.parse(sorgente))
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    perimetro: set[int] = set()
+    for riga in righe | posizioni:
+        dentro = [f for f in funzioni if f.lineno <= riga <= (f.end_lineno or f.lineno)]
+        if dentro:
+            piu_interna = max(dentro, key=lambda f: f.lineno)
+            perimetro.update(range(piu_interna.lineno, (piu_interna.end_lineno or 0) + 1))
+        elif riga in righe:
+            perimetro.add(riga)
+    return perimetro
+
+
 def mutanti_del_sorgente(sorgente: str, righe: set[int]) -> list[Mutante]:
     """I mutanti delle sole `righe` (1-based) di `sorgente`, in ordine di riga.
 
-    Sulle righe cambiate e non su tutto il file: è il codice che quel giro ha
-    scritto, ed è l'unico di cui i suoi test rispondono. La cancellazione è
-    l'operatore più forte e vale in tutti e due i linguaggi; una riga di sola
+    Sulle righe del perimetro (`righe_del_perimetro`) e non su tutto il file: è il
+    codice che quel giro ha toccato, ed è l'unico di cui i suoi test rispondono.
+    La cancellazione è l'operatore più forte e vale in tutti e due i linguaggi; una riga di sola
     punteggiatura non si cancella, perché romperebbe la sintassi e basta, e un
     guasto di forma non è una prova che il test morda.
     """
@@ -2121,29 +2165,33 @@ def morde(c: ComandoDiProva, chiave: str) -> tuple[str, str]:
 
 def quarta_lettura(albero: Path, base: str, sha: str, comando: ComandoDiProva,
                    chiave: str) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
-    """Il test nato verde, rigirato contro i mutanti delle righe del branch.
+    """Il test nato verde, rigirato contro i mutanti delle funzioni che il branch
+    ha toccato.
 
     Torna la prova del primo mutante che lo fa fallire per asserzione, e tutte le
     prove fatte fino a lì: `{"mutante", "esito", "tipo"}`, una per mutante, perché
     chi legge il rapporto veda anche quelli sopravvissuti e quelli falliti per
-    eccezione (PBI-365). `None` quando nessuno lo uccide: quel test non guarda le
-    righe che il branch ha scritto, e la lettura resta «nato verde».
+    eccezione (PBI-365). `None` quando nessuno lo uccide: quel test non guarda il
+    codice che il branch ha toccato, e la lettura resta «nato verde».
 
     Un mutante alla volta, nello stesso worktree in cui il test è stato visto
     verde: il file si riscrive con la riga guasta, il test gira da solo, e si esce
-    al primo kill perché uno basta — il gate chiede che il test osservi le righe
-    nuove, non che le copra tutte.
+    al primo kill perché uno basta — il gate chiede che il test osservi il codice
+    toccato, non che lo copra tutto.
     """
     test = comando.origine[chiave]
     da_solo, _ = comandi_dei_test(albero, [test])
     prove: list[dict[str, str]] = []
-    for percorso, righe in righe_cambiate(base, sha).items():
+    cambiate, cancellate = righe_cambiate(base, sha), cancellazioni(base, sha)
+    for percorso in sorted(cambiate.keys() | cancellate.keys()):
         if linguaggio_del_file(percorso) != test.linguaggio:
             continue  # un test Python non morde un .ts, e rigirarlo lì è tempo perso
         file = albero / percorso
         sorgente = leggi_sorgente(file)
         if sorgente is None:
             continue
+        righe = righe_del_perimetro(percorso, sorgente, cambiate.get(percorso, set()),
+                                    cancellate.get(percorso, set()))
         try:
             for m in mutanti_del_sorgente(sorgente, righe):
                 guasto = sorgente_del_mutante(percorso, sorgente, m)
@@ -2227,7 +2275,7 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
     """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso.
 
     Un test nato verde ha la quarta lettura prima di finire fra i mancati: se
-    morde un mutante delle righe del branch, va in `morsi` — commit, test, mutante,
+    morde un mutante delle funzioni toccate dal branch, va in `morsi` — commit, test, mutante,
     tipo del fallimento e le prove fatte fino al kill — e non ferma niente.
     """
     mancati: list[dict[str, str]] = []
