@@ -2658,6 +2658,23 @@ def pr_aperte(branch: str) -> list[str] | None:
         return None
 
 
+def adotta_pr(aperte: list[str], come: str, e: Esito) -> str:
+    """La PR che la ricerca ha trovato sul ramo diventa quella del giro: l'URL
+    nell'esito, i commenti del Critic, e `come` nella nota. Con più di una non se
+    ne sceglie nessuna, e la nota le nomina tutte (PBI-381, decisione 4)."""
+    if len(aperte) > 1:
+        e.nota = " · ".join(t for t in (
+            e.nota, f"{len(aperte)} PR aperte sul ramo, nessuna scelta: {', '.join(aperte)}"
+        ) if t)
+        return ""
+    e.nota = " · ".join(t for t in (e.nota, come) if t)
+    # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR esiste già
+    # e l'esito la deve nominare (PBI-377, decisione 5).
+    e.pr = aperte[0]
+    commenta_i_rapporti(e.pr, e)
+    return e.pr
+
+
 def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     """Apre la PR e si ferma lì: il merge è dell'umano (micro-commits §5).
 
@@ -2721,10 +2738,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
             t for t in (e.nota, "PR non aperta: GitHub non ha risposto alla ricerca") if t)
         return ""
     if aperte:
-        e.nota = " · ".join(t for t in (e.nota, "PR già aperta sul ramo") if t)
-        e.pr = aperte[0]
-        commenta_i_rapporti(e.pr, e)
-        return e.pr
+        return adotta_pr(aperte, "PR già aperta sul ramo", e)
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
         f"(`tools/asdlc_runner.py`).\n\n"
@@ -2771,10 +2785,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
     # non si trova, o `gh` tace, la colonna resta vuota — una colonna che mente
     # costa più di una che tace — e la nota lo dice: la riga del tick risolve.
     if ritrovate := pr_aperte(branch):
-        e.nota = " · ".join(t for t in (e.nota, f"PR ritrovata dopo {perche}") if t)
-        e.pr = ritrovate[0]
-        commenta_i_rapporti(e.pr, e)
-        return e.pr
+        return adotta_pr(ritrovate, f"PR ritrovata dopo {perche}", e)
     e.nota = " · ".join(t for t in (e.nota, "PR forse aperta, da verificare") if t)
     return ""
 
