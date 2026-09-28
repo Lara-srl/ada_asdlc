@@ -2129,6 +2129,22 @@ class TestIlBranchLoPubblicaIlRunner:
             "docstring (PBI-377 giro 1, 27/09/2026)"
         )
 
+    def test_il_builder_sa_che_una_guardia_che_nessun_criterio_chiede_e_una_fermata(self):
+        """Il giro 2 di PBI-376 (28/09/2026).
+
+        Il Builder ha visto un comportamento da proteggere che il PBI non nominava
+        (il vitest che scade senza rapporto), gli ha scritto una guardia e l'ha
+        coperta con la deroga allo Scope. La guardia non mordeva, e il gate del
+        rosso ha fermato il giro su un ciclo che nessuna fix annulla. La deroga
+        copre il codice che un criterio richiede, non i test che nessun criterio
+        chiede: il prompt deve dire che lì ci si ferma.
+        """
+        prompt = runner.PROMPT_BUILDER.lower()
+        assert "nessun criterio" in prompt and "deroga" in prompt, (
+            "una guardia che nessun criterio chiede si dice con `fermati`, non si "
+            "committa sotto la deroga allo Scope (PBI-376 giro 2, 28/09/2026)"
+        )
+
 
 class TestSuOriginFinisceCioCheIGateHannoMisurato:
     """Difetto 30 di PBI-102, misurato su PBI-358 la notte del 21→22/09/2026.
