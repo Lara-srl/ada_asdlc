@@ -1956,12 +1956,17 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     tutto il comando darebbero a `B` senza una voce sua l'esito di `A`. Resta il
     solo file che non si carica (`esito_dei_file_di_vitest`, PBI-376, decisione 2).
     """
+    if c.rapporto is not None:
+        # Il percorso del rapporto resta fra una misura e l'altra (in `apri` è
+        # `REPO.parent`): un vitest che esce senza scriverlo lascerebbe leggere
+        # l'esito di un commit misurato prima. Tolto qui, il file che si legge
+        # dopo è di questo comando, o manca (PBI-376, decisione 3).
+        c.rapporto.unlink(missing_ok=True)
     try:
         codice, uscita = esegui(c.argv, c.cartella, timeout=TETTO_DEI_TEST)
     except subprocess.TimeoutExpired as exc:
         # vitest fermato prima della fine il rapporto non lo scrive, e un
         # rapporto che manca è un guasto del gate (PBI-376, decisioni 3 e 5).
-        # Il file al suo posto, se c'è, è di un commit misurato prima.
         if c.linguaggio == "vitest":
             raise GuastoDelGate(
                 f"vitest scaduto dopo {TETTO_DEI_TEST} secondi: `{' '.join(c.argv)}` "
