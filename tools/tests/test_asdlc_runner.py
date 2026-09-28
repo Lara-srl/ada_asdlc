@@ -2871,6 +2871,18 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto"
         assert "PR forse aperta, da verificare" in esito.nota, esito.nota
 
+    def test_piu_pr_aperte_sul_ramo_non_se_ne_sceglie_una(self, monkeypatch):
+        """Decisione 4: non se ne crea un'altra, non se ne sceglie una, e la nota
+        le nomina tutte."""
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch, list=[(0, json.dumps([{"url": self.URL}, {"url": self.ALTRA}]))])
+
+        assert not self._create(comandi)
+        assert pr == esito.pr == ""
+        assert commentate == []
+        assert esito.stato == "fatto"
+        assert self.URL in esito.nota and self.ALTRA in esito.nota, esito.nota
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
