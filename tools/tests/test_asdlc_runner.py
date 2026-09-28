@@ -4959,6 +4959,83 @@ class TestIlPerimetroSonoLeFunzioniToccate:
         assert righe == {13}
 
 
+class TestLaGuardiaNominaLaFunzioneDaMutare:
+    """PBI-378, decisione 3: se il comportamento vive dove il branch non tocca, il
+    commit della guardia lo dice con `Guardia-su: <percorso>::<nome>` nel corpo, e
+    il gate aggiunge quella funzione al perimetro per i test di quel commit.
+
+    Il branch cambia `doppio`, la guardia asserisce `soglia`: senza la riga i
+    mutanti di `doppio` le sopravvivono tutti, e resta «nato verde e non morde».
+    """
+
+    MODULO = ("def soglia(x):\n"
+              "    if x > 10:\n"
+              "        return 'alta'\n"
+              "    return 'bassa'\n"
+              "\n\n"
+              "class Limite:\n"
+              "    def supera(self, x):\n"
+              "        if x > 10:\n"
+              "            return True\n"
+              "        return False\n"
+              "\n\n"
+              "def doppio(x):\n"
+              "    return x * 2\n")
+
+    def _branch_che_cambia_doppio(self, repo):
+        vecchio = repo.commit("feat: soglia, limite e doppio", {"backend/app/m.py": self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo.commit("refactor: il doppio come somma", {
+            "backend/app/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+    def test_la_funzione_nominata_entra_nel_perimetro_e_senza_la_riga_no(self, repo_di_prova):
+        self._branch_che_cambia_doppio(repo_di_prova)
+        nominata = repo_di_prova.commit(
+            "test: presidia la soglia alta\n\nGuardia-su: backend/app/m.py::soglia", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+        metodo = repo_di_prova.commit(
+            "test: presidia il limite superato\n\nGuardia-su: backend/app/m.py::Limite.supera", {
+                "backend/tests/test_limite.py":
+                    "from app.m import Limite\n\n\n"
+                    "def test_il_limite_superato():\n    assert Limite().supera(11) is True\n",
+            })
+        senza = repo_di_prova.commit("test: presidia la soglia alta, senza nominarla", {
+            "backend/tests/test_soglia_senza.py":
+                "from app.m import soglia\n\n\n"
+                "def test_la_soglia_alta_senza_nome():\n    assert soglia(11) == 'alta'\n",
+        })
+        morsi: list[dict] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert [m["commit"] for m in morsi] == [nominata[:7], metodo[:7]]
+        assert "backend/app/m.py:3" in morsi[0]["mutante"]
+        assert "backend/app/m.py:10" in morsi[1]["mutante"]
+        assert [m["commit"] for m in mancati] == [senza[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+
+    def test_la_funzione_nominata_che_non_ce_compare_nel_rapporto(self, repo_di_prova):
+        """ADR-0008: si segnala e non si blocca. La guardia si giudica sul resto del
+        perimetro, e chi legge «non morde» vede che il nome non ha trovato niente."""
+        self._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            "test: presidia la soglia alta\n\nGuardia-su: backend/app/m.py::soglie", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert "nato verde e non morde" in mancato["esito"]
+        assert "backend/app/m.py::soglie" in mancato["esito"]
+        assert "funzione nominata non trovata" in mancato["esito"]
+
+
 class TestIlTestNatoVerdePassaSeMorde:
     """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
 
