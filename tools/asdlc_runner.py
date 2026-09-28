@@ -2739,6 +2739,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         f"Prima del merge, guarda: i criteri di verifica del PBI, il diff fuori scope, "
         f"e se la spec è stata aggiornata dove il comportamento è cambiato."
     )
+    scaduto: subprocess.TimeoutExpired | None = None
     try:
         code, out = esegui(
             ["gh", "pr", "create",
@@ -2746,33 +2747,38 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
              "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
             REPO, timeout=300,
         )
-    except subprocess.TimeoutExpired:
-        # Il client è morto, ma la PR può essere nata su GitHub: la si cerca di
-        # nuovo, una volta sola (PBI-381, decisione 2).
+    except subprocess.TimeoutExpired as exc:
         print("    ⚠️  gh pr create scaduto: cerco la PR sul ramo")
-        if ritrovate := pr_aperte(branch):
-            e.nota = " · ".join(t for t in (e.nota, "PR ritrovata dopo timeout") if t)
-            e.pr = ritrovate[0]
+        scaduto, perche = exc, "timeout"
+    else:
+        if code != 0:
+            print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
+            return ""
+        # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga
+        # finché non ha altro da dire, e un avviso di aggiornamento basta a far
+        # finire nella colonna `pr` del registro una frase che non è un indirizzo
+        # (difetto 12).
+        url = re.search(r"https://\S+/pull/\d+", out)
+        if url is not None:
+            # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR
+            # esiste già e l'esito la deve nominare (PBI-377, decisione 5).
+            e.pr = url.group(0)
             commenta_i_rapporti(e.pr, e)
             return e.pr
-        raise
-    if code != 0:
-        print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
-        return ""
-    # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga finché
-    # non ha altro da dire, e un avviso di aggiornamento basta a far finire nella
-    # colonna `pr` del registro una frase che non è un indirizzo (difetto 12).
-    # Se non c'è un URL la colonna resta vuota: una colonna che mente costa più
-    # di una che tace.
-    url = re.search(r"https://\S+/pull/\d+", out)
-    if url is None:
         print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
-        return ""
-    # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR esiste già
-    # e l'esito la deve nominare (PBI-377, decisione 5).
-    e.pr = url.group(0)
-    commenta_i_rapporti(e.pr, e)
-    return e.pr
+        perche = "output senza URL"
+    # Il client è morto o non ha detto l'URL, ma la PR può essere nata su
+    # GitHub: la si cerca di nuovo, una volta sola (PBI-381, decisione 2). Se
+    # non si trova la colonna resta vuota: una colonna che mente costa più di
+    # una che tace.
+    if ritrovate := pr_aperte(branch):
+        e.nota = " · ".join(t for t in (e.nota, f"PR ritrovata dopo {perche}") if t)
+        e.pr = ritrovate[0]
+        commenta_i_rapporti(e.pr, e)
+        return e.pr
+    if scaduto is not None:
+        raise scaduto
+    return ""
 
 
 class ChiusuraFallita(RuntimeError):
