@@ -7201,6 +7201,28 @@ class TestOgniUscitaHaIlSuoMotivo:
             f"la nota «{esito.nota}» non comincia con il motivo e il testo della tabella"
         )
 
+    @pytest.mark.parametrize("motivo", list(USCITE_DEL_GIRO))
+    def test_la_nota_non_porta_la_diagnosi_di_un_altro_motivo(self, monkeypatch, motivo):
+        """PBI-380, decisione 1 (difetto 54 di `PBI-102`): una nota ha un motivo
+        solo in testa. `apri_pr()` metteva la diagnosi di `head-non-su-origin`
+        davanti a quella di `fatto`, e la nota finiva con «· fatto: giro chiuso»."""
+        _, percorri = USCITE_DEL_GIRO[motivo]
+        git_delle_uscite(monkeypatch)
+        monkeypatch.setattr(runner, "esegui",
+                            agente_finto({"builder": FATTO, "critic": verdetto("pass")}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
+        monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
+        argomenti = {"pbi": "PBI-102", "attivi": set(), "dry": False, "con_pr": False}
+        argomenti |= percorri(monkeypatch)
+
+        esito = runner.esegui_pbi(**argomenti)
+
+        altre = [f"{m}: {t}" for m, (_, t) in runner.USCITE.items() if m != motivo]
+        assert not [d for d in altre if d in esito.nota], (
+            f"la nota «{esito.nota}» di {motivo} porta anche la diagnosi di un altro motivo"
+        )
+
     def test_ogni_motivo_della_tabella_ha_il_suo_caso(self):
         """Decisione 5: il giorno in cui si aggiunge un'uscita alla tabella senza
         il suo caso nel test di sopra, fallisce questo."""
