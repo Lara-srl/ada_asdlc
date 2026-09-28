@@ -5048,6 +5048,76 @@ class TestLaGuardiaNominaLaFunzioneDaMutare:
         assert "funzione nominata non trovata" in mancato["esito"]
 
 
+class TestIlRapportoDiceIlPerimetro:
+    """PBI-378, decisione 6: per ogni guardia il rapporto dice le funzioni mutate e,
+    per ciascuna, se è entrata dal diff o perché nominata. Chi legge «non morde»
+    deve vedere dove il gate ha guardato; chi legge «morde», su cosa."""
+
+    @staticmethod
+    def _voce(perimetro, funzione: str) -> str:
+        [voce] = [p for p in perimetro if funzione in p]
+        return voce
+
+    def test_il_morso_porta_le_funzioni_dal_diff_e_quelle_nominate(self, repo_di_prova):
+        TestLaGuardiaNominaLaFunzioneDaMutare()._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit(
+            "test: presidia la soglia alta\n\nGuardia-su: backend/app/m.py::soglia", {
+                "backend/tests/test_soglia.py":
+                    "from app.m import soglia\n\n\n"
+                    "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+            })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        perimetro = morsi[0]["perimetro"]
+        assert "dal diff" in self._voce(perimetro, "backend/app/m.py::doppio")
+        assert "nominata" in self._voce(perimetro, "backend/app/m.py::soglia")
+        assert len(perimetro) == 2
+
+    def test_la_guardia_che_non_morde_dice_dove_il_gate_ha_guardato(self, repo_di_prova):
+        TestLaGuardiaNominaLaFunzioneDaMutare()._branch_che_cambia_doppio(repo_di_prova)
+        repo_di_prova.commit("test: presidia la soglia alta, senza nominarla", {
+            "backend/tests/test_soglia.py":
+                "from app.m import soglia\n\n\n"
+                "def test_la_soglia_alta():\n    assert soglia(11) == 'alta'\n",
+        })
+
+        [mancato] = runner.gate_del_rosso()
+
+        assert "backend/app/m.py::doppio" in mancato["esito"]
+        assert "dal diff" in mancato["esito"]
+        assert "soglia" not in mancato["esito"]
+
+    MORSO = {"commit": "abc1234", "titolo": "test(ci): presidia la soglia alta",
+             "test": "tests/test_soglia.py::test_la_soglia_alta",
+             "mutante": "backend/app/m.py:3  `return 'alta'` → riga cancellata",
+             "tipo": "AssertionError", "prove": [],
+             "perimetro": ["backend/app/m.py::doppio (dal diff)",
+                           "backend/app/m.py::soglia (nominata)"]}
+
+    def test_il_log_del_giro_e_il_gate_da_solo_scrivono_il_perimetro(
+        self, monkeypatch, capsys
+    ):
+        morso = self.MORSO
+        TestITestCheMordonoFinisconoNelRapporto._mondo(
+            type("Mondo", (), {"MORSO": morso})(), monkeypatch)
+
+        runner.esegui_pbi("PBI-378", attivi=set(), dry=False, con_pr=False)
+        nel_giro = capsys.readouterr().out
+
+        def _gate(base, ref, morsi=None, **k):
+            morsi.append(dict(morso))
+            return []
+
+        monkeypatch.setattr(runner, "gate_del_rosso", _gate)
+        runner.stampa_il_gate_del_rosso("origin/main..pbi/pbi-378")
+        da_solo = capsys.readouterr().out
+
+        for a_schermo in (nel_giro, da_solo):
+            assert "backend/app/m.py::doppio (dal diff)" in a_schermo
+            assert "backend/app/m.py::soglia (nominata)" in a_schermo
+
+
 class TestIlTestNatoVerdePassaSeMorde:
     """PBI-105, la quarta lettura: *se guasto il codice che copre, se ne accorge?*
 
