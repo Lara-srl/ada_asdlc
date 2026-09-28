@@ -4494,6 +4494,18 @@ class TestIlBuilderSaComeSiApreLaProduzione:
         assert "morde" in prompt
         assert "mutant" in prompt
 
+    def test_dice_che_si_mutano_le_funzioni_toccate_e_come_nominarne_una(self):
+        """PBI-378: il perimetro sono le funzioni toccate, non le righe, e una
+        guardia su un comportamento che il branch non cambia nomina la sua
+        funzione con `Guardia-su:`. Vale per il Builder e per il giro di rimedio,
+        che è dove il Critic chiede le guardie."""
+        rimedio = runner.PROMPT_RIMEDIO
+        for prompt in (self._prompt(), rimedio):
+            testo = " ".join(prompt.split())
+            assert "funzioni che il branch ha toccato" in testo
+            assert "Guardia-su: <percorso>::<funzione>" in testo
+            assert "righe che il branch ha cambiato" not in testo
+
     def test_non_promette_piu_un_numero_di_commit_scollegato_dai_criteri(self):
         """«3-5 commit» su un PBI da otto criteri è un invito ad accorpare, ed è
         aritmetica: due o tre coppie non coprono otto comportamenti."""
