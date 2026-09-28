@@ -4124,6 +4124,29 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert str(rapporto) in str(guasto.value)
 
+    def test_un_rapporto_di_vitest_rimasto_da_una_misura_prima_non_vale_per_questa(
+            self, monkeypatch, tmp_path):
+        """PBI-376, decisione 3 — rilievo 1 del Critic, giro 3. `apri` mette il
+        rapporto in `REPO.parent / "vitest-N.json"`, un percorso che resta fra
+        una misura e l'altra. Se vitest esce senza scriverlo — `npm test` che
+        muore prima di avviarlo, una config che non si carica — il file lì è di
+        un commit misurato prima: letto, darebbe al test chiesto il suo esito
+        vecchio, e un `failed` vecchio aprirebbe `IMPL` con un rosso che nessuno
+        ha visto (ADR-0021). È un rapporto che manca."""
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({"testResults": [
+            {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+             "assertionResults": [
+                 {"title": "mostra le commesse del foglio", "status": "failed"}]},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui",
+                            lambda *a, **k: (1, "npm ERR! missing script: test\n"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
     def test_un_vitest_che_scade_senza_rapporto_e_un_guasto_del_gate(
             self, monkeypatch, tmp_path):
         """PBI-376, decisione 5. vitest ucciso dal tetto di `esiti_del_comando()`
