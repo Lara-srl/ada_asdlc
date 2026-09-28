@@ -2818,6 +2818,22 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto", "il lavoro del giro resta fatto"
         assert "PR non aperta: GitHub non ha risposto alla ricerca" in esito.nota, esito.nota
 
+    def test_un_create_che_scade_con_la_pr_nata_la_ritrova(self, monkeypatch):
+        """Decisione 2: il client muore, la PR su GitHub è nata. Il `TimeoutExpired`
+        lo intercetta `apri_pr()`, non il `try` di PBI-377, e la ricerca si rifà
+        una volta."""
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch,
+            list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
+            create=[subprocess.TimeoutExpired(["gh", "pr", "create"], 300)],
+        )
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"]
+        assert pr == esito.pr == self.URL, "l'URL ritrovato va nell'esito"
+        assert commentate == [self.URL], "si prosegue come per una PR creata"
+        assert esito.stato == "fatto"
+        assert "PR ritrovata dopo timeout" in esito.nota, esito.nota
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
