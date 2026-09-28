@@ -2739,7 +2739,6 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         f"Prima del merge, guarda: i criteri di verifica del PBI, il diff fuori scope, "
         f"e se la spec è stata aggiornata dove il comportamento è cambiato."
     )
-    scaduto: subprocess.TimeoutExpired | None = None
     try:
         code, out = esegui(
             ["gh", "pr", "create",
@@ -2747,9 +2746,9 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
              "--body", corpo, "--base", RAMO_PRINCIPALE, "--head", branch],
             REPO, timeout=300,
         )
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired:
         print("    ⚠️  gh pr create scaduto: cerco la PR sul ramo")
-        scaduto, perche = exc, "timeout"
+        perche = "timeout"
     else:
         if code != 0:
             print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
@@ -2769,15 +2768,14 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         perche = "output senza URL"
     # Il client è morto o non ha detto l'URL, ma la PR può essere nata su
     # GitHub: la si cerca di nuovo, una volta sola (PBI-381, decisione 2). Se
-    # non si trova la colonna resta vuota: una colonna che mente costa più di
-    # una che tace.
+    # non si trova, o `gh` tace, la colonna resta vuota — una colonna che mente
+    # costa più di una che tace — e la nota lo dice: la riga del tick risolve.
     if ritrovate := pr_aperte(branch):
         e.nota = " · ".join(t for t in (e.nota, f"PR ritrovata dopo {perche}") if t)
         e.pr = ritrovate[0]
         commenta_i_rapporti(e.pr, e)
         return e.pr
-    if scaduto is not None:
-        raise scaduto
+    e.nota = " · ".join(t for t in (e.nota, "PR forse aperta, da verificare") if t)
     return ""
 
 
