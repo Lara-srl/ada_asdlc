@@ -298,3 +298,19 @@ def test_la_radice_e_il_primo_antenato_col_file_non_l_ultimo(tmp_path):
     scrivi_toml(interno)
 
     assert asdlc_config.radice(interno / ".") == interno
+
+
+def test_senza_asdlc_toml_dalla_cwd_in_su_la_radice_e_un_errore_che_lo_dice(tmp_path):
+    """Un runner lanciato fuori da un progetto non ha niente da fare, e lo deve
+    dire con la cartella da cui è partito — prima del lucchetto e di ogni
+    scrittura, che sono di chi chiama."""
+    vuota = tmp_path / "vuota"
+    vuota.mkdir()
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.radice(vuota)
+
+    assert str(fermata.value) == (
+        f"nessun `asdlc.toml` da `{vuota}` in su: il runner si lancia dalla "
+        "cartella di un progetto ASDLC"
+    )
