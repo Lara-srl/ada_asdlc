@@ -762,9 +762,13 @@ def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
 
 def file_toccati(base: str | None = None) -> set[str]:
     """I file che il branch ha cambiato rispetto alla base, `<base>...HEAD`
-    come per i mutanti: un `main` andato avanti nel frattempo non entra."""
+    come per i mutanti: un `main` andato avanti nel frattempo non entra.
+
+    Di un rename entrano i due lati: un file uscito da un percorso accende il
+    gate di quel percorso, e `--name-only` ne dava solo il nuovo (PBI-387)."""
     base = base if base is not None else BASE
-    return {p for p in git("diff", "--name-only", f"{base}...HEAD").splitlines() if p}
+    voci = voci_del_name_status(git("diff", "--name-status", "-M", f"{base}...HEAD"))
+    return {p for voce in voci for p in (voce.vecchio, voce.percorso) if p}
 
 
 def gate_mancanti(attivi: set[str]) -> list[str]:
