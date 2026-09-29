@@ -50,13 +50,14 @@ import sys
 import tempfile
 import time
 import traceback
+import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import NamedTuple
+from typing import Iterable, NamedTuple
 
 # La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
 # trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
@@ -1732,7 +1733,7 @@ class ComandoDiProva:
     argv: list[str]
     linguaggio: str
     etichette: dict[str, str]
-    rapporto: Path | None = None  # dove vitest scrive il suo json
+    rapporto: Path | None = None  # dove vitest scrive il suo json, pytest il JUnit
     # chiave → il test da cui viene: serve a rigirarlo **da solo**, quando la
     # quarta lettura lo prova contro i mutanti uno alla volta.
     origine: dict[str, TestNuovo] = field(default_factory=dict)
@@ -1772,19 +1773,22 @@ def comandi_dei_test(albero: Path,
             per_vitest.setdefault((cartella, relativo), []).append(t.nome)
             origine[t.nome] = t
 
-    # `-v` e non `-q`: il conteggio finale è una somma e non dice **quale**, mentre
-    # una riga per test dice nome ed esito. `--tb=no` perché il traceback qui non
-    # serve — la coda che finisce nel rapporto è la stessa per tutti. `-rf` scrive
-    # in fondo, per ogni test fallito, l'eccezione che l'ha fatto fallire: è ciò
-    # che separa un'asserzione mancata da un `NameError` del codice mutato. E `-vv`
-    # e non `-v`, perché con `-v` pytest taglia quel messaggio alla larghezza del
-    # terminale, e con un node id lungo lo toglie del tutto.
-    comandi: list[ComandoDiProva] = [
-        ComandoDiProva(cartella, ["pytest", "--tb=no", "-vv", "-rf", *nodi], "python",
-                       {nodo: nodo for nodo in nodi},
-                       origine={nodo: origine[nodo] for nodo in nodi})
-        for cartella, nodi in per_pytest.items()
-    ]
+    # L'esito per test viene dal `--junitxml`, in un file accanto al worktree come
+    # il json di vitest (PBI-390, decisione 1): le righe di `-v` si leggevano con
+    # una regex che un parametro con uno spazio non combaciava. `--tb=no` perché il
+    # traceback qui non serve — la coda che finisce nel rapporto è la stessa per
+    # tutti. `-rf` scrive in fondo, per ogni test fallito, l'eccezione che l'ha
+    # fatto fallire: è ciò che separa un'asserzione mancata da un `NameError` del
+    # codice mutato. E `-vv` e non `-v`, perché con `-v` pytest taglia quel
+    # messaggio alla larghezza del terminale, e con un node id lungo lo toglie del
+    # tutto.
+    comandi: list[ComandoDiProva] = []
+    for numero, (cartella, nodi) in enumerate(per_pytest.items()):
+        rapporto = albero.parent / f"pytest-{numero}.xml"
+        comandi.append(ComandoDiProva(
+            cartella, ["pytest", "--tb=no", "-vv", "-rf", f"--junitxml={rapporto}", *nodi],
+            "python", {nodo: nodo for nodo in nodi}, rapporto,
+            origine={nodo: origine[nodo] for nodo in nodi}))
     # Il json di vitest va in un file e non a schermo: `npm test` ci scrive sopra la
     # sua intestazione, e ritagliare un oggetto json da un output misto è un modo di
     # sbagliare in silenzio. Il file sta accanto al worktree e se ne va con lui.
@@ -1880,11 +1884,6 @@ def tipi_dei_falliti(uscita: str) -> dict[str, str]:
     return {nodo: tipo_del_fallimento(messaggio)
             for nodo, messaggio in RE_RIEPILOGO_PYTEST.findall(uscita)}
 
-ESITI_DI_PYTEST = {"PASSED": "verde", "XPASS": "verde",
-                   "FAILED": "rosso", "ERROR": "rosso",
-                   # `xfail` è un rosso già previsto: osservato non lo si vede, e
-                   # sta con lo `skip` invece che col rosso vero.
-                   "SKIPPED": "saltato", "XFAIL": "saltato"}
 # `pending` e `todo` sono i due modi in cui vitest dice «non l'ho eseguito».
 ESITI_DI_VITEST = {"passed": "verde", "failed": "rosso",
                    "skipped": "saltato", "pending": "saltato", "todo": "saltato"}
@@ -1894,13 +1893,36 @@ def piu_forte(uno: str, altro: str) -> str:
     return max(uno, altro, key=ORDINE_ESITI.index)
 
 
-def esiti_di_pytest(uscita: str) -> dict[str, str]:
-    """Il verdetto **per test**, dalle righe di `pytest -v`, per node id."""
+def esito_del_caso(caso: ET.Element) -> str:
+    """L'esito di un `testcase` del JUnit, dal suo figlio (PBI-390, decisione 3):
+    `<failure>` o `<error>` è rosso, `<skipped>` è saltato, nessuno dei tre è
+    verde. Anche `xfail` scrive `<skipped>`: è un rosso già previsto, osservato
+    non lo si vede, e sta con lo `skip` invece che col rosso vero."""
+    if caso.find("failure") is not None or caso.find("error") is not None:
+        return "rosso"
+    if caso.find("skipped") is not None:
+        return "saltato"
+    return "verde"
+
+
+def esiti_di_pytest(rapporto: Path | None, chiavi: Iterable[str]) -> dict[str, str]:
+    """Il verdetto **per test**, dal `--junitxml` di pytest, per le `chiavi` chieste.
+
+    Un caso si lega alla sua chiave con `caso_junit()`, e il parametro del
+    `name` si toglie: un test parametrico vale il più forte dei suoi casi. Un
+    rapporto che non c'è torna **vuoto**, come per vitest.
+    """
+    try:
+        radice = ET.parse(rapporto).getroot()
+    except (TypeError, OSError, ET.ParseError):
+        return {}
+    per_caso = {caso_junit(chiave): chiave for chiave in chiavi}
     letti: dict[str, str] = {}
-    for nodo, esito in RE_ESITO_PYTEST.findall(uscita):
-        chiave = RE_PARAMETRO.sub("", nodo)
-        letti[chiave] = piu_forte(letti.get(chiave, "nessuno"),
-                                  ESITI_DI_PYTEST.get(esito, "nessuno"))
+    for caso in radice.iter("testcase"):
+        chiave = per_caso.get((caso.get("classname", ""),
+                               caso.get("name", "").partition("[")[0]))
+        if chiave is not None:
+            letti[chiave] = piu_forte(letti.get(chiave, "nessuno"), esito_del_caso(caso))
     return letti
 
 
@@ -1987,7 +2009,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # Per pytest un timeout lo dicono i test: a quel commit non terminano, e
         # il gate non indovina. Lo strumento ha girato — quindi non è un guasto.
         codice, uscita = 0, "i test non terminano a quel commit"
-    letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
+    letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
+             else esiti_di_vitest(c.rapporto))
     complessivo = (leggi_esito(uscita) if c.linguaggio == "python"
                    else esito_dei_file_di_vitest(c.rapporto))
     if complessivo == "nessuno" and codice not in CODICI_DEL_TEST[c.linguaggio]:
