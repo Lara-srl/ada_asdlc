@@ -122,7 +122,7 @@ CRITIC = ["claude", "-p", "--allowedTools",
 
 # Il server dell'esito (`PBI-366`, `ADR-0027`): sta accanto al runner, e si
 # estrae con lui. I ruoli sono i suoi: un altro valore lo ferma all'avvio.
-SERVER_DELL_ESITO = Path(__file__).resolve().parent / "asdlc_esito.py"
+SERVER_DELL_ESITO = Path(__file__).resolve().parent / "esito.py"
 RUOLI = ("builder", "critic")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
