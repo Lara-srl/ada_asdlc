@@ -3905,9 +3905,14 @@ def chiedi_impl() -> int:
 # Il `pre-commit` che il runner installa. Inerte fuori da un giro, come l'hook di
 # Claude Code e per la stessa ragione: sta in `.git/hooks`, che i worktree di
 # questo repository condividono, e non deve farsi sentire da chi non è in un giro.
+# Il runner si cerca in due forme, la nuova prima (PBI-388): `PBI-383` lo sposta
+# in `tools/asdlc/runner.py`, e `python3` su un file che non c'è esce con 2.
 GUARDIA_DEL_COMMIT = """#!/bin/sh
 # Installato da tools/asdlc_runner.py (PBI-104): il commit non nasce fuori fase.
-exec python3 "$(git rev-parse --show-toplevel)/tools/asdlc_runner.py" --guardia-commit
+radice="$(git rev-parse --show-toplevel)"
+for sorgente in tools/asdlc/runner.py tools/asdlc_runner.py; do
+    [ -f "$radice/$sorgente" ] && exec python3 "$radice/$sorgente" --guardia-commit
+done
 """
 
 
