@@ -3938,12 +3938,17 @@ def guardia_del_commit() -> int:
     Guarda lo **stage** e non il modo in cui ci è arrivato, ed è la differenza
     che conta: `Edit`, `Write`, un heredoc da Bash, `sed -i` e una patch applicata
     a mano finiscono tutti nello stesso posto, e qui valgono uguale.
+
+    Un rename in stage si giudica sui due lati: il vecchio è la cancellazione
+    di quel percorso, il nuovo un'aggiunta. `--name-only` dava il solo nuovo, e
+    in `IMPL` un test spostato in `nota.txt` passava come un file qualsiasi.
     """
     fase = fase_corrente(REPO)
     if fase is None:
         return 0
-    ragioni = [r for percorso in git("diff", "--cached", "--name-only").splitlines()
-               if percorso and (r := guardia_di_fase(fase, percorso))]
+    voci = voci_del_name_status(git("diff", "--cached", "--name-status", "-M"))
+    percorsi = [p for voce in voci for p in (voce.vecchio, voce.percorso) if p]
+    ragioni = [r for percorso in percorsi if (r := guardia_di_fase(fase, percorso))]
     if not ragioni:
         return 0
     print(f"Il commit non si fa: il giro è in {fase}.\n")
