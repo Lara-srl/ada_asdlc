@@ -8719,6 +8719,38 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert "tools/asdlc/runner.py" in esito.stderr
         assert "tools/asdlc_runner.py" in esito.stderr
 
+    def test_guardia_fase_tdd_col_runner_in_tools_decide_come_prima(self, repo_di_prova):
+        """PBI-388, quinto criterio: con `tools/asdlc_runner.py` al suo posto,
+        che è l'albero vero, `fase-tdd.sh` blocca la produzione in `TEST_ONLY`
+        con 2 e la lascia scrivere in `IMPL` con 0, come prima di PBI-388."""
+        radice = repo_di_prova.radice
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(radice),
+                "tool_input": {"file_path": str(radice / "backend/app/foglio.py")}}
+        uscite = {}
+        for fase in (runner.FASE_TEST_ONLY, runner.FASE_IMPL):
+            runner.percorso_della_fase(radice).write_text(f"{fase}\n")
+            uscite[fase] = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
+                                          capture_output=True, text=True,
+                                          cwd=radice).returncode
+
+        assert uscite == {runner.FASE_TEST_ONLY: 2, runner.FASE_IMPL: 0}
+
+    def test_guardia_il_pre_commit_col_runner_in_tools_ferma_il_commit(self, repo_di_prova):
+        """PBI-388, quinto criterio: con il runner nella forma di oggi il
+        `pre-commit` installato lo lancia, e un'uscita diversa da 0 ferma il
+        commit come prima di PBI-388."""
+        radice = repo_di_prova.radice
+        segno = self._runner_finto(radice, "tools/asdlc_runner.py")
+        runner.installa_la_guardia_del_commit()
+        (radice / "README.md").write_text("ciao\n", encoding="utf-8")
+        repo_di_prova._git("add", "README.md")
+
+        esito = subprocess.run(["git", "commit", "-q", "-m", "chore: prova"],
+                               capture_output=True, text=True, cwd=radice)
+
+        assert esito.returncode != 0, "il commit doveva essere fermato dalla guardia"
+        assert segno.read_text() == "--guardia-commit"
+
 
 class TestGliHookDelRunnerSiRiscrivono:
     """PBI-388, decisione 3: un hook del runner si riconosce dalla riga di
@@ -8780,3 +8812,13 @@ class TestGliHookDelRunnerSiRiscrivono:
 
         assert runner.installa_la_guardia_del_commit() is False
         assert hook.read_text() == altrui
+
+    def test_guardia_un_hook_del_runner_gia_uguale_non_si_riscrive(self, repo_di_prova):
+        """PBI-388, quinto criterio: la riscrittura è per il testo cambiato. Un
+        hook del runner uguale a quello di oggi resta il file che era."""
+        runner.installa_la_guardia_del_commit()
+        hook = self._hook(repo_di_prova)
+        os.utime(hook, ns=(0, 0))
+
+        assert runner.installa_la_guardia_del_commit() is False
+        assert hook.stat().st_mtime_ns == 0
