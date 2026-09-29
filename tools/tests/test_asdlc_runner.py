@@ -8718,3 +8718,44 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert "guardia del lucchetto: runner non trovato" in esito.stderr
         assert "tools/asdlc/runner.py" in esito.stderr
         assert "tools/asdlc_runner.py" in esito.stderr
+
+
+class TestGliHookDelRunnerSiRiscrivono:
+    """PBI-388, decisione 3: un hook del runner si riconosce dalla riga di
+    commento che segue lo shebang, e se il testo è cambiato si riscrive.
+
+    Prima `installa_un_hook()` non riscriveva mai un hook esistente, e non
+    distingueva il proprio da quello altrui: il `pre-commit` restava quello del
+    primo giro che l'aveva installato, anche dopo che il runner ne cambiava il
+    testo. Il marcatore nuovo non nomina percorsi, perché `PBI-383` li sposta.
+    """
+
+    MARCATORE = "# Installato dal runner ASDLC (PBI-104):"
+    VECCHIO = ("#!/bin/sh\n"
+               "# Installato da tools/asdlc_runner.py (PBI-104): il commit non nasce fuori fase.\n"
+               'exec python3 "$(git rev-parse --show-toplevel)/tools/asdlc_runner.py" '
+               "--guardia-commit\n")
+
+    def _hook(self, repo, nome="pre-commit"):
+        cartella = repo.radice / ".git" / "hooks"
+        cartella.mkdir(parents=True, exist_ok=True)
+        return cartella / nome
+
+    def test_i_testi_nuovi_portano_il_marcatore_senza_percorsi(self):
+        for corpo in (runner.GUARDIA_DEL_COMMIT, runner.RITORNO_IN_TEST_ONLY):
+            assert corpo.splitlines()[1].startswith(self.MARCATORE), corpo
+
+    def test_un_pre_commit_del_runner_con_il_testo_vecchio_si_riscrive(self, repo_di_prova):
+        hook = self._hook(repo_di_prova)
+        hook.write_text(self.VECCHIO, encoding="utf-8")
+
+        assert runner.installa_la_guardia_del_commit() is True
+        assert hook.read_text() == runner.GUARDIA_DEL_COMMIT
+
+    def test_un_hook_col_marcatore_nuovo_e_un_testo_diverso_si_riscrive(self, repo_di_prova):
+        hook = self._hook(repo_di_prova, "post-commit")
+        hook.write_text(f"#!/bin/sh\n{self.MARCATORE} un testo di prima.\nexit 0\n",
+                        encoding="utf-8")
+
+        assert runner.installa_il_ritorno_in_test_only() is True
+        assert hook.read_text() == runner.RITORNO_IN_TEST_ONLY
