@@ -5436,6 +5436,19 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {1}}
         assert self._perimetro(repo_di_prova, sha) == []
 
+    def test_il_rename_si_legge_anche_con_diff_renames_spento(self, repo_di_prova):
+        """`diff.renames` è configurazione della macchina: `-M` sta scritto nel
+        comando, o su un repository che lo spegne il modulo spostato torna un file
+        cancellato più uno aggiunto per intero."""
+        repo_di_prova.configura("diff.renames", "false")
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit("refactor: il modulo in sotto/, e il doppio come somma", {
+            "backend/app/sotto/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {11}}
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
