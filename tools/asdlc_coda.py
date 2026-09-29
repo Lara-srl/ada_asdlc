@@ -190,7 +190,7 @@ RE_RAMO_PBI: re.Pattern[str]
 
 
 def configura(cfg: asdlc_config.Config) -> None:
-    """Le costanti di modulo, dalla configurazione: una volta all'import, e i
+    """Le costanti di modulo, dalla configurazione: una volta da `main()`, e i
     test la richiamano con un `asdlc.toml` di prova. Restano nomi di modulo per
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
@@ -209,12 +209,6 @@ def configura(cfg: asdlc_config.Config) -> None:
     RE_TITOLO_PR = re.compile(rf"^\s*({id_pbi})\s*:")
     RE_RAMO_PR = re.compile(rf"^{ramo}")
     RE_RAMO_PBI = re.compile(rf"refs/heads/{ramo}")
-
-
-try:
-    configura(asdlc_config.carica(REPO))
-except asdlc_config.ErroreDiConfigurazione as guasto:
-    sys.exit(f"asdlc_coda: {guasto}")
 
 
 class Guasto(RuntimeError):
@@ -555,7 +549,21 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Un tick: guarda, decide una cosa, la fa, e finisce."""
+    """Un tick: legge `asdlc.toml`, poi guarda, decide una cosa, la fa, e finisce.
+
+    La configurazione si legge qui e non all'import (PBI-382): un modulo
+    importato non deve leggere niente.
+    """
+    try:
+        configura(asdlc_config.carica(REPO))
+    except asdlc_config.ErroreDiConfigurazione as guasto:
+        sys.exit(f"asdlc_coda: {guasto}")
+    return smista(argv)
+
+
+def smista(argv: list[str] | None = None) -> int:
+    """`main()` a configurazione già letta: i test la chiamano da qui, coi nomi
+    di modulo che hanno sostituito."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=REPO,
                     help="il checkout da cui si legge la coda e si interroga origin")
