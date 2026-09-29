@@ -5410,6 +5410,19 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         assert runner.righe_cambiate("origin/main", sha) == {}
         assert self._perimetro(repo_di_prova, sha) == []
 
+    def test_un_git_mv_con_una_riga_cambiata_mette_nel_perimetro_quella_funzione_sola(
+            self, repo_di_prova):
+        """La riga è numerata nel file nuovo: `return x + x` è la 11 di `sotto/m.py`."""
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit("refactor: il modulo in sotto/, e il doppio come somma", {
+            "backend/app/sotto/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {11}}
+        assert self._perimetro(repo_di_prova, sha) == [
+            "backend/app/sotto/m.py::doppio (dal diff)"]
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
