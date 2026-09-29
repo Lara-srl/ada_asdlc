@@ -4158,6 +4158,46 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert esiti == {chiave: "rosso" for chiave in chiavi}
 
+    @pytest.mark.parametrize("contenuto", [None, "<testsuites><testsuite", ""],
+                             ids=["assente", "troncato", "vuoto"])
+    def test_un_rapporto_di_pytest_che_manca_o_non_si_legge_e_un_guasto_del_gate(
+            self, monkeypatch, tmp_path, contenuto):
+        """PBI-390, decisione 5 e criterio 5. Senza rapporto il gate non ha
+        guardato niente: leggerlo come «nessun test» accusa il Builder di un
+        rosso mancato, mentre a non funzionare è lo strumento. Il messaggio
+        nomina il percorso dove il rapporto era atteso. Il contenuto si scrive
+        mentre pytest gira, perché quello di prima si toglie."""
+        rapporto = tmp_path / "pytest-0.xml"
+        if contenuto is None:
+            monkeypatch.setattr(runner, "esegui",
+                                lambda *a, **k: (1, "1 failed, 1 passed in 0.10s"))
+        else:
+            monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+                rapporto, contenuto, 1, "1 failed, 1 passed in 0.10s"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando(rapporto=rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
+    def test_un_rapporto_di_pytest_rimasto_da_una_misura_prima_non_vale_per_questa(
+            self, monkeypatch, tmp_path):
+        """PBI-390, decisione 1 e criterio 5. Il rapporto sta in
+        `pytest-N.xml` accanto al worktree, un percorso che resta fra una misura
+        e l'altra. Se pytest esce senza scriverlo, il file lì è di un commit
+        misurato prima: letto, darebbe al test chiesto il suo esito vecchio, e
+        un `<failure>` vecchio aprirebbe `IMPL` con un rosso che nessuno ha
+        visto (ADR-0021). È un rapporto che manca."""
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.t", "test_x", '<failure message="assert 1 == 2"/>')), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "1 failed in 0.10s"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando(rapporto=rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
     def _comando_vitest(self, rapporto):
         relativo = "src/pages/FoglioPage.test.tsx"
         nome = "mostra le commesse del foglio"
