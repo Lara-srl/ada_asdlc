@@ -153,6 +153,24 @@ def senza_pr_aperte(esegui):
     return _esegui
 
 
+def con_la_pr_creata(esegui, url: str):
+    """`esegui` con la ricerca di `apri_pr()` davanti: `gh pr list` non trova
+    niente prima di `gh pr create`, e dopo trova `url` — l'URL di una PR creata
+    viene dal JSON della ricerca (PBI-376, decisione 1). Ogni altro comando va a
+    `esegui` com'era."""
+    creata = False
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        nonlocal creata
+        if cmd[:3] == ["gh", "pr", "list"]:
+            return 0, json.dumps([{"url": url}] if creata else [])
+        if cmd[:3] == ["gh", "pr", "create"]:
+            creata = True
+        return esegui(cmd, cwd, timeout, **k)
+
+    return _esegui
+
+
 class TestIlCriticPuoSospendere:
     """Un rilievo che aspetta una persona non è «non pronto»: è un'altra diagnosi."""
 
@@ -2733,24 +2751,25 @@ class TestLUrlDellaPrSiRiconoscePerForma:
     avviso di aggiornamento, una nota sul remoto, una riga di `gh` che parla di
     sé: bastano a far finire nella colonna `pr` del registro una frase che non è
     un indirizzo. La colonna serve a una cosa sola — aprire la PR — e un warning
-    lì dentro la rende inutile senza dirlo.
+    lì dentro la rende inutile senza dirlo. Da PBI-376 l'uscita di `gh pr
+    create` non si legge più: l'URL viene dal JSON di `gh pr list`.
     """
 
-    def _crea_pr(self, monkeypatch, uscita: str) -> str:
+    URL = "https://github.com/Lara-srl/ada_controller/pull/212"
+
+    def _crea_pr(self, monkeypatch, uscita: str, esegui=senza_pr_aperte) -> str:
         monkeypatch.setattr(runner, "git", lambda *a: "")
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(lambda *a, **k: (0, uscita)))
+        monkeypatch.setattr(runner, "esegui", esegui(lambda *a, **k: (0, uscita)))
         return runner.apri_pr(
             "PBI-212", runner.REPO / "backlog" / "PBI-212-margine-costo-e-ricavo.md",
             "pbi/pbi-212", runner.Esito("PBI-212", "fatto"),
         )
 
     def test_lurl_si_trova_anche_sotto_un_warning(self, monkeypatch):
-        uscita = ("https://github.com/Lara-srl/ada_controller/pull/212\n"
-                  "A new release of gh is available: 2.55.0 → 2.62.0\n")
-        assert self._crea_pr(monkeypatch, uscita) == (
-            "https://github.com/Lara-srl/ada_controller/pull/212"
-        )
+        uscita = self.URL + "\nA new release of gh is available: 2.55.0 → 2.62.0\n"
+        assert self._crea_pr(monkeypatch, uscita,
+                             lambda esegui: con_la_pr_creata(esegui, self.URL)) == self.URL
 
     def test_senza_url_la_colonna_resta_vuota(self, monkeypatch):
         """Meglio vuota che con dentro una frase: una colonna che mente costa più
@@ -2852,7 +2871,9 @@ class TestLaPrSiCercaPrimaDiCrearla:
 
     def test_un_create_senza_url_passa_per_la_stessa_ricerca(self, monkeypatch):
         """Decisione 2, l'altro caso: `gh` risponde, ma nell'uscita non c'è un URL
-        riconoscibile (difetto 12). La PR c'è, e la colonna `pr` la nomina."""
+        riconoscibile (difetto 12). La PR c'è, e la colonna `pr` la nomina: da
+        PBI-376 l'uscita non si legge, e la ricerca dopo il create è la stessa
+        con o senza un URL a schermo."""
         pr, esito, comandi, commentate = self._apri(
             monkeypatch,
             list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
@@ -2863,7 +2884,6 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert pr == esito.pr == self.URL
         assert commentate == [self.URL]
         assert esito.stato == "fatto"
-        assert "PR ritrovata dopo output senza URL" in esito.nota, esito.nota
 
     @pytest.mark.parametrize("creazione", [
         subprocess.TimeoutExpired(["gh", "pr", "create"], 300),
@@ -2890,17 +2910,21 @@ class TestLaPrSiCercaPrimaDiCrearla:
     def test_guardia_una_pr_creata_al_primo_colpo_porta_il_suo_url_e_i_commenti(
             self, monkeypatch):
         """Guardia dichiarata: la ricerca non trova niente, `gh pr create` apre la
-        PR e ne scrive l'URL. È la strada di sempre, e vale anche su `main`: un
-        solo create e nessuna ricerca dopo, l'URL del create nell'esito, i
-        commenti del Critic su quella PR, e nella nota nessuna delle frasi della
-        PR ritrovata. Che la ricerca venga prima del create lo fissano gli altri
-        test di questa classe, non la guardia."""
+        PR, e la ricerca dopo la ritrova. È la strada di sempre: un solo create e
+        dopo solo letture, l'URL nell'esito, i commenti del Critic su quella PR, e
+        nella nota nessuna delle frasi della PR ritrovata. L'ordine si asserisce
+        così (PBI-376, decisione 4) perché è vero su `main`, dove dopo il create
+        non c'è niente, e dopo la decisione 1, dove c'è la ricerca: un secondo
+        create, o una scrittura diversa dopo il create, lo fanno fallire. Che la
+        ricerca venga prima del create lo fissano gli altri test di questa classe,
+        non la guardia."""
         pr, esito, comandi, commentate = self._apri(
-            monkeypatch, list=[(0, "[]")], create=[(0, self.URL + "\n")])
+            monkeypatch, list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
+            create=[(0, self.URL + "\n")])
 
         sottocomandi = [c[2] for c in comandi]
-        assert sottocomandi.count("create") == 1, sottocomandi
-        assert sottocomandi[-1] == "create", sottocomandi
+        i = sottocomandi.index("create")
+        assert set(sottocomandi[i + 1:]) <= {"list"}, sottocomandi
         assert pr == esito.pr == self.URL
         assert commentate == [self.URL]
         assert esito.stato == "fatto"
@@ -2918,6 +2942,40 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert esito.stato == "fatto"
         assert self.URL in esito.nota and self.ALTRA in esito.nota, esito.nota
 
+    def test_un_url_a_forma_di_pr_nellavviso_di_gh_non_diventa_lurl_dellesito(
+            self, monkeypatch):
+        """PBI-376, decisione 1: l'URL di una PR creata viene da `gh pr list
+        --json`. L'uscita di `gh pr create` mescola stdout e stderr, e un avviso
+        che cita una PR di un altro repository ha la stessa forma di quella
+        creata: letto sul testo, finiva nella colonna `pr` del registro."""
+        avviso = ("! warning: see https://github.com/cli/cli/pull/9999 before upgrading\n"
+                  + self.URL + "\n")
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch,
+            list=[(0, "[]"), (0, json.dumps([{"url": self.URL}]))],
+            create=[(0, avviso)],
+        )
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"]
+        assert pr == esito.pr == self.URL, "l'URL è quello della ricerca, non dell'avviso"
+        assert commentate == [self.URL]
+        assert esito.stato == "fatto"
+
+
+    def test_un_create_uscito_con_0_senza_pr_ritrovata_non_prende_lurl_dalluscita(
+            self, monkeypatch):
+        """PBI-376, decisione 1: `gh pr create` esce con 0 e scrive un URL, ma la
+        ricerca dopo non trova la PR. L'URL a schermo non si usa — è la stessa
+        lettura sul testo che la decisione toglie — e il giro chiude con la
+        colonna vuota e la PR forse aperta, come dopo un timeout."""
+        pr, esito, comandi, commentate = self._apri(
+            monkeypatch, list=[(0, "[]"), (0, "[]")], create=[(0, self.URL + "\n")])
+
+        assert [c[2] for c in comandi] == ["list", "create", "list"]
+        assert pr == esito.pr == ""
+        assert commentate == []
+        assert esito.stato == "fatto"
+        assert "PR forse aperta, da verificare" in esito.nota, esito.nota
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
@@ -3941,6 +3999,15 @@ class TestUnGateGuastoNonEUnCicloMancato:
             {nome: f"{relativo} -t {nome}"}, rapporto,
         )
 
+    @staticmethod
+    def _vitest_che_scrive(rapporto, dati, codice, schermo):
+        """Un `esegui` che fa vitest: il rapporto lo scrive **mentre gira**, come
+        `--outputFile`, e non lo trova già scritto da prima."""
+        def esegui(*a, **k):
+            rapporto.write_text(json.dumps(dati), encoding="utf-8")
+            return codice, schermo
+        return esegui
+
     def test_un_file_che_non_si_carica_e_un_rosso_anche_in_vitest(
             self, monkeypatch, tmp_path):
         """Il gemello frontend dell'import che non esiste ancora.
@@ -3952,11 +4019,11 @@ class TestUnGateGuastoNonEUnCicloMancato:
         e l'unica cosa scritta è il file `failed` con zero `assertionResults`.
         """
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({"testResults": [
-            {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
-             "assertionResults": []},
-        ]}), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "\n RUN  v3.2.4\n"))
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {"testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+                 "assertionResults": []},
+            ]}, 1, "\n RUN  v3.2.4\n"))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
@@ -3971,16 +4038,166 @@ class TestUnGateGuastoNonEUnCicloMancato:
         `nessuno`, che è quello che il gate segnala come «rosso non isolabile».
         """
         rapporto = tmp_path / "vitest-0.json"
-        rapporto.write_text(json.dumps({"testResults": [
-            {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
-             "assertionResults": []},
-        ]}), encoding="utf-8")
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (0, "\n RUN  v3.2.4\n"))
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {"testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+                 "assertionResults": []},
+            ]}, 0, "\n RUN  v3.2.4\n"))
 
         esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
 
         assert esiti == {"mostra le commesse del foglio": "nessuno"}
 
+
+    @pytest.mark.parametrize("schermo, conti", [
+        ("\n Tests  1 failed (1)\n", {"numFailedTests": 1}),
+        ("\n Tests  1 passed (1)\n", {"numPassedTests": 1}),
+        ("\n Tests  1 skipped (1)\n", {"numPendingTests": 1}),
+        ("\n Tests  1 skipped (1)\n", {"numTodoTests": 1}),
+        ("\n Tests  1 passed (1)\n", {"numFailedTests": 1}),
+        ("\n RUN  v3.2.4\n", {"numFailedTests": 1}),
+        ("\n RUN  v3.2.4\n", {"numPassedTests": 1}),
+    ], ids=["failed", "passed", "pending", "todo", "riepilogo-verde-json-rosso",
+            "senza-riepilogo-json-rosso", "senza-riepilogo-json-verde"])
+    def test_i_totali_del_comando_non_decidono_per_un_test_senza_voce(
+            self, monkeypatch, tmp_path, schermo, conti):
+        """PBI-376, decisione 2. Il comando mette in OR i test chiesti di un file
+        (`-t "A|B"`), e i totali — quelli a schermo e `numFailedTests`,
+        `numPassedTests`, `numPendingTests`, `numTodoTests` del rapporto — sono
+        di tutto il comando. Se decidessero per un test che nel rapporto non ha
+        una voce sua, quel test erediterebbe l'esito dei vicini: un falso rosso
+        osservato (ADR-0021), un falso nato verde, o un «rosso non osservabile»
+        al posto di «non isolabile» (`ESITI_MANCATI`). Resta `nessuno`."""
+        rapporto = tmp_path / "vitest-0.json"
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {**conti, "testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+                 "assertionResults": []},
+            ]}, 1, schermo))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": "nessuno"}
+
+    @pytest.mark.parametrize("schermo, voce, conti, atteso", [
+        ("\n RUN  v3.2.4\n", "passed", {}, "verde"),
+        ("\n RUN  v3.2.4\n", "failed", {}, "rosso"),
+        ("\n Tests  1 failed (1)\n", "passed", {"numFailedTests": 1}, "verde"),
+        ("\n Tests  1 passed (1)\n", "failed", {"numPassedTests": 1}, "rosso"),
+        ("\n Tests  1 passed (1)\n", "skipped", {"numPassedTests": 1}, "saltato"),
+    ], ids=["senza-riepilogo-verde", "senza-riepilogo-rosso", "riepilogo-rosso-voce-verde",
+            "riepilogo-verde-voce-rossa", "riepilogo-verde-voce-saltata"])
+    def test_guardia_un_test_con_la_sua_voce_nel_rapporto_prende_quella_voce(
+            self, monkeypatch, tmp_path, schermo, voce, conti, atteso):
+        """Guardia dichiarata di PBI-376, decisione 2: l'esito di un test di
+        vitest viene dalla sua voce in `assertionResults`, anche quando lo
+        schermo non ha la riga di riepilogo o ne ha una che dice altro, e anche
+        quando i totali del rapporto dicono altro."""
+        rapporto = tmp_path / "vitest-0.json"
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(
+            rapporto, {**conti, "testResults": [
+                {"name": "src/pages/FoglioPage.test.tsx", "status": "passed",
+                 "assertionResults": [
+                     {"title": "mostra le commesse del foglio", "status": voce}]},
+            ]}, 1, schermo))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": atteso}
+
+    @pytest.mark.parametrize("contenuto", [None, "{\"testResults\": [", ""],
+                             ids=["assente", "troncato", "vuoto"])
+    def test_un_rapporto_di_vitest_che_manca_o_non_si_legge_e_un_guasto_del_gate(
+            self, monkeypatch, tmp_path, contenuto):
+        """PBI-376, decisione 3 — il difetto 25 di `PBI-102`. Senza rapporto il
+        gate non ha guardato niente: leggerlo come «nessun test» accusa il
+        Builder di un rosso mancato, mentre a non funzionare è lo strumento. Il
+        messaggio nomina il percorso dove il rapporto era atteso."""
+        rapporto = tmp_path / "vitest-0.json"
+        if contenuto is not None:
+            rapporto.write_text(contenuto, encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui",
+                            lambda *a, **k: (1, "\n Tests  1 failed (1)\n"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
+    def test_un_rapporto_di_vitest_rimasto_da_una_misura_prima_non_vale_per_questa(
+            self, monkeypatch, tmp_path):
+        """PBI-376, decisione 3 — rilievo 1 del Critic, giro 3. `apri` mette il
+        rapporto in `REPO.parent / "vitest-N.json"`, un percorso che resta fra
+        una misura e l'altra. Se vitest esce senza scriverlo — `npm test` che
+        muore prima di avviarlo, una config che non si carica — il file lì è di
+        un commit misurato prima: letto, darebbe al test chiesto il suo esito
+        vecchio, e un `failed` vecchio aprirebbe `IMPL` con un rosso che nessuno
+        ha visto (ADR-0021). È un rapporto che manca."""
+        rapporto = tmp_path / "vitest-0.json"
+        rapporto.write_text(json.dumps({"testResults": [
+            {"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+             "assertionResults": [
+                 {"title": "mostra le commesse del foglio", "status": "failed"}]},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui",
+                            lambda *a, **k: (1, "npm ERR! missing script: test\n"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
+    def test_un_vitest_che_scade_senza_rapporto_e_un_guasto_del_gate(
+            self, monkeypatch, tmp_path):
+        """PBI-376, decisione 5. vitest ucciso dal tetto di `esiti_del_comando()`
+        il rapporto non lo scrive: è un rapporto assente, e come nella decisione
+        3 ferma il gate invece di diventare `nessuno`. Il messaggio dice la
+        causa, così chi legge il guasto non cerca un rapporto che vitest non ha
+        mai avuto il tempo di scrivere."""
+        def scade(argv, cartella, timeout=0, **k):
+            raise subprocess.TimeoutExpired(argv, timeout)
+
+        monkeypatch.setattr(runner, "esegui", scade)
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando_vitest(tmp_path / "vitest-0.json"))
+
+        assert "vitest scaduto dopo 1800 secondi" in str(guasto.value)
+
+    @pytest.mark.parametrize("schermo, atteso", [
+        ("1 failed, 2 passed in 0.10s", "rosso"),
+        ("ERROR tests/t.py\n1 error in 0.02s", "rosso"),
+        ("3 passed in 0.10s", "verde"),
+        ("2 skipped in 0.01s", "saltato"),
+        ("no tests ran in 0.01s", "nessuno"),
+    ], ids=["failed", "error", "passed", "skipped", "niente"])
+    def test_guardia_i_conteggi_di_pytest_si_leggono_ancora_dallo_schermo(
+            self, monkeypatch, schermo, atteso):
+        """Guardia dichiarata di PBI-376: pytest resta fuori scope, e i suoi
+        conteggi si leggono dalla riga di riepilogo come prima. Lo schermo non
+        ha righe per test, quindi decide l'esito del comando intero."""
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+
+        esiti, _ = runner.esiti_del_comando(self._comando())
+
+        assert esiti == {"tests/t.py::test_x": atteso}
+
+    def test_guardia_un_file_di_vitest_che_non_si_carica_resta_rosso_coi_totali_a_zero(
+            self, monkeypatch, tmp_path):
+        """Guardia dichiarata di PBI-376: il file che fallisce prima dei test ha
+        tutti i totali del rapporto a zero e nessun `assertionResults`, e resta
+        rosso anche ora che lo schermo non si legge più."""
+        rapporto = tmp_path / "vitest-0.json"
+        monkeypatch.setattr(runner, "esegui", self._vitest_che_scrive(rapporto, {
+            "numFailedTests": 0, "numPassedTests": 0, "numPendingTests": 0,
+            "numTodoTests": 0, "numFailedTestSuites": 1,
+            "testResults": [{"name": "src/pages/FoglioPage.test.tsx", "status": "failed",
+                             "assertionResults": []}],
+        }, 1, "\n RUN  v3.2.4\n"))
+
+        esiti, _ = runner.esiti_del_comando(self._comando_vitest(rapporto))
+
+        assert esiti == {"mostra le commesse del foglio": "rosso"}
 
 class TestIlGateDelRossoStaNelGiro:
     """Dove sta il gate, e cosa succede quando ferma.
@@ -6821,7 +7038,7 @@ class TestIlRapportoDelCriticArrivaIntero:
                 raise commento_alza
             return (1, "HTTP 502: Bad Gateway") if commento_fallisce else (0, "")
 
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, self.URL))
         if prima_dei_commenti is not None:
             prima_dei_commenti(esito)
         pr = runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
@@ -7176,8 +7393,9 @@ class TestUnaBasePerGiro:
             return git_del_ramo(*args)
 
         monkeypatch.setattr(runner, "git", _git)
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(lambda cmd, cwd, timeout=0, **k:
-                            (0, "https://github.com/x/y/pull/374\n")))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(
+            lambda cmd, cwd, timeout=0, **k: (0, "https://github.com/x/y/pull/374\n"),
+            "https://github.com/x/y/pull/374"))
         esito = runner.Esito("PBI-374", "fatto")
 
         pr = runner.apri_pr("PBI-374", REPO / "backlog" / "PBI-374-x.md", "pbi/pbi-374", esito)
@@ -7732,7 +7950,7 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
         def commenti_che_alzano(u, e):
             raise ValueError("rapporto con un carattere non codificabile")
 
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, url))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
@@ -7766,7 +7984,7 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
                 return commento
             return agente(cmd, cwd, timeout, **k)
 
-        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
+        monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, self.URL))
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         monkeypatch.setattr(runner, "gate_del_rosso", lambda **k: [])
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)

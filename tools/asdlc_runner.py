@@ -1787,8 +1787,10 @@ def comandi_dei_test(albero: Path,
 
 
 def leggi_esito(uscita: str) -> str:
-    """`rosso` | `verde` | `saltato` | `nessuno`, dai conteggi che pytest e vitest
-    scrivono tutti e due come «N passed», «N failed», «N skipped».
+    """`rosso` | `verde` | `saltato` | `nessuno`, dai conteggi che pytest scrive
+    come «N passed», «N failed», «N skipped». Solo pytest: per vitest lo schermo
+    non si legge, e i totali del comando non decidono per un test (PBI-376,
+    decisione 2).
 
     Un **errore** conta come rosso: il caso più comune di test-first in Python è un
     `from app.x import y` che a quel commit non esiste ancora, e leggerlo come «non
@@ -1893,7 +1895,8 @@ def esiti_di_vitest(rapporto: Path | None) -> dict[str, str]:
     """Il verdetto per test, dal `--reporter=json` di vitest, per titolo.
 
     Un rapporto che non c'è torna **vuoto** e non «tutto verde»: chi non ha letto
-    niente non ha visto niente, e allora vale l'esito del comando intero.
+    niente non ha visto niente, e allora vale l'esito del comando intero — che
+    per un rapporto che manca è `GuastoDelGate` (`esito_dei_file_di_vitest`).
     """
     try:
         dati = json.loads(rapporto.read_text(encoding="utf-8"))
@@ -1922,15 +1925,24 @@ def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
     test è il filtro `-t` che non ha matchato niente, e leggerlo come verde darebbe
     per girato un test che non è mai partito — il gate passerebbe in silenzio proprio
     dove non ha guardato.
+
+    Un rapporto che manca o non si legge è `GuastoDelGate`, col percorso atteso:
+    il gate non ha guardato niente, e «nessuno» accuserebbe il Builder di un
+    rosso mancato (PBI-376, decisione 3; difetto 25).
     """
     try:
         dati = json.loads(rapporto.read_text(encoding="utf-8"))
-    except (AttributeError, OSError, ValueError):
-        return "nessuno"
+    except (AttributeError, OSError, ValueError) as exc:
+        raise GuastoDelGate(f"rapporto di vitest assente o illeggibile: {rapporto} "
+                            f"({type(exc).__name__}: {str(exc)[:200]})") from exc
     for file in dati.get("testResults", []):
         if file.get("status") == "failed" and not file.get("assertionResults"):
             return "rosso"
     return "nessuno"
+
+
+# Il tetto di un comando di prova, in secondi.
+TETTO_DEI_TEST = 1800
 
 
 def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
@@ -1939,19 +1951,32 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     Un errore di **raccolta** — il `from app.x import y` che a quel commit non
     esiste ancora, cioè il rosso più comune del test-first — non stampa nessuna riga
     per test: lì vale l'esito del comando intero, che è la sola cosa che si sa. In
-    vitest quell'esito non è nell'output ma nel json (`esito_dei_file_di_vitest`),
-    perché il `--reporter=json` porta via da schermo anche i conteggi.
+    vitest quell'esito viene dal json e non dallo schermo, e non sono i totali:
+    il comando mette in OR i test chiesti di un file (`-t "A|B"`), e i totali di
+    tutto il comando darebbero a `B` senza una voce sua l'esito di `A`. Resta il
+    solo file che non si carica (`esito_dei_file_di_vitest`, PBI-376, decisione 2).
     """
+    if c.rapporto is not None:
+        # Il percorso del rapporto resta fra una misura e l'altra (in `apri` è
+        # `REPO.parent`): un vitest che esce senza scriverlo lascerebbe leggere
+        # l'esito di un commit misurato prima. Tolto qui, il file che si legge
+        # dopo è di questo comando, o manca (PBI-376, decisione 3).
+        c.rapporto.unlink(missing_ok=True)
     try:
-        codice, uscita = esegui(c.argv, c.cartella, timeout=1800)
-    except subprocess.TimeoutExpired:
-        # Un timeout lo dicono i test: a quel commit non terminano, e il gate non
-        # indovina. Lo strumento ha girato — quindi non è un guasto.
+        codice, uscita = esegui(c.argv, c.cartella, timeout=TETTO_DEI_TEST)
+    except subprocess.TimeoutExpired as exc:
+        # vitest fermato prima della fine il rapporto non lo scrive, e un
+        # rapporto che manca è un guasto del gate (PBI-376, decisioni 3 e 5).
+        if c.linguaggio == "vitest":
+            raise GuastoDelGate(
+                f"vitest scaduto dopo {TETTO_DEI_TEST} secondi: `{' '.join(c.argv)}` "
+                f"in {c.cartella}, rapporto non scritto in {c.rapporto}") from exc
+        # Per pytest un timeout lo dicono i test: a quel commit non terminano, e
+        # il gate non indovina. Lo strumento ha girato — quindi non è un guasto.
         codice, uscita = 0, "i test non terminano a quel commit"
     letti = esiti_di_pytest(uscita) if c.linguaggio == "python" else esiti_di_vitest(c.rapporto)
-    complessivo = leggi_esito(uscita)
-    if c.linguaggio == "vitest" and complessivo == "nessuno":
-        complessivo = esito_dei_file_di_vitest(c.rapporto)
+    complessivo = (leggi_esito(uscita) if c.linguaggio == "python"
+                   else esito_dei_file_di_vitest(c.rapporto))
     if complessivo == "nessuno" and codice not in CODICI_DEL_TEST[c.linguaggio]:
         raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
                             f"{uscita.strip()[-1000:]}")
@@ -2768,30 +2793,23 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         )
     except subprocess.TimeoutExpired:
         print("    ⚠️  gh pr create scaduto: cerco la PR sul ramo")
-        perche = "timeout"
+        come = "PR ritrovata dopo timeout"
     else:
         if code != 0:
             print(f"    ⚠️  PR non aperta: {out.strip()[:200]}")
             return ""
-        # Per **forma**, non per posizione: `gh` scrive l'URL sull'ultima riga
-        # finché non ha altro da dire, e un avviso di aggiornamento basta a far
-        # finire nella colonna `pr` del registro una frase che non è un indirizzo
-        # (difetto 12).
-        url = re.search(r"https://\S+/pull/\d+", out)
-        if url is not None:
-            # Nell'esito prima dei commenti: se da lì sale un'eccezione, la PR
-            # esiste già e l'esito la deve nominare (PBI-377, decisione 5).
-            e.pr = url.group(0)
-            commenta_i_rapporti(e.pr, e)
-            return e.pr
-        print(f"    ⚠️  PR aperta ma senza URL riconoscibile: {out.strip()[:200]}")
-        perche = "output senza URL"
-    # Il client è morto o non ha detto l'URL, ma la PR può essere nata su
-    # GitHub: la si cerca di nuovo, una volta sola (PBI-381, decisione 2). Se
-    # non si trova, o `gh` tace, la colonna resta vuota — una colonna che mente
-    # costa più di una che tace — e la nota lo dice: la riga del tick risolve.
+        come = ""
+    # L'URL della PR creata lo dice il JSON di `gh pr list`: `gh pr create` non
+    # ha `--json`, e nella sua uscita stdout e stderr sono mescolati — un avviso
+    # che cita un'altra PR ha la stessa forma (PBI-376, decisione 1). Se il
+    # client è morto la PR può essere nata lo stesso su GitHub: la ricerca è una
+    # sola in tutti e due i casi (PBI-381, decisione 2), e l'uscita del create
+    # non si legge nemmeno quando la ricerca non trova niente.
     if ritrovate := pr_aperte(branch):
-        return adotta_pr(ritrovate, f"PR ritrovata dopo {perche}", e)
+        return adotta_pr(ritrovate, come, e)
+    # Se non si trova, o `gh` tace, la colonna resta vuota — una colonna che
+    # mente costa più di una che tace — e la nota lo dice: la riga del tick
+    # risolve.
     e.nota = " · ".join(t for t in (e.nota, "PR forse aperta, da verificare") if t)
     return ""
 
