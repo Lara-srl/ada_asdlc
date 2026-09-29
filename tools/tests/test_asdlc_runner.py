@@ -5477,6 +5477,20 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         assert runner.hunk_di_produzione("origin/main", sha) == {
             "backend/app/triplo.py": [(1, 3)]}
 
+    def test_un_file_modificato_sul_posto_da_gli_stessi_hunk_di_prima(self, repo_di_prova):
+        """Guardia, verde su `main`: senza rename la voce ha un lato solo, e gli
+        hunk sono quelli di sempre — una cancellazione `+6,0` dopo la riga 6 e
+        una riga cambiata, la 10 del file a `sha`."""
+        self._base_col_modulo(repo_di_prova)
+        sha = repo_di_prova.commit("refactor: la soglia senza ramo basso, il doppio come somma", {
+            "backend/app/m.py": self.MODULO.replace("    return 'bassa'\n", "")
+                                           .replace("return x * 2", "return x + x"),
+            "docs/m.md": "# il modulo\n",
+        })
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/m.py": [(6, 0), (10, 1)]}
+
     def test_nessun_git_diff_o_show_con_pathspec_fuori_da_diff_del_file(self):
         """Decisione 1: la regola «un rename si legge sui due lati, con `-M`
         scritto» sta in un posto solo. Il difetto 31 era stato chiuso dentro due
