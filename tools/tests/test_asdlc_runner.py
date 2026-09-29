@@ -8633,3 +8633,192 @@ class TestUnPushCheScadeENonPubblicato:
         assert esito.nota.endswith(runner.NON_PUBBLICATO), esito.nota
         assert "timeout" not in esito.nota, esito.nota
         assert "dopo la chiusura" not in esito.nota
+
+
+# Un runner finto: scrive gli argomenti con cui è stato lanciato accanto a sé, ed
+# esce con 1. Il segno dice quale delle due forme la guardia ha lanciato, l'uscita
+# che il suo verdetto arriva intatto a chi l'ha chiamata.
+RUNNER_FINTO = ("import sys\nfrom pathlib import Path\n\n"
+                "Path(__file__).with_name('lanciato').write_text(' '.join(sys.argv[1:]))\n"
+                "sys.exit(1)\n")
+
+
+class TestLeGuardieTrovanoIlRunnerSpostato:
+    """PBI-388: le due guardie del lucchetto lanciano il runner per percorso, e
+    `PBI-383` quel percorso lo sposta in `tools/asdlc/runner.py`.
+
+    `python3` su un file che non c'è esce con 2, che per Claude Code è il blocco:
+    dopo lo spostamento `fase-tdd.sh` fermerebbe ogni scrittura della sessione, e
+    il `pre-commit` — che sta in `.git/hooks`, condiviso da tutti i worktree —
+    ogni commit di ogni checkout. Le guardie cercano la forma nuova, poi la vecchia.
+    """
+
+    SCRIPT = REPO / ".claude" / "hooks" / "fase-tdd.sh"
+
+    @staticmethod
+    def _albero_con_lo_script(radice: Path) -> Path:
+        script = radice / ".claude" / "hooks" / "fase-tdd.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text(TestLeGuardieTrovanoIlRunnerSpostato.SCRIPT.read_text())
+        script.chmod(0o755)
+        return script
+
+    @staticmethod
+    def _runner_finto(radice: Path, percorso: str) -> Path:
+        runner_finto = radice / percorso
+        runner_finto.parent.mkdir(parents=True, exist_ok=True)
+        runner_finto.write_text(RUNNER_FINTO, encoding="utf-8")
+        return runner_finto.with_name("lanciato")
+
+    def test_fase_tdd_lancia_il_runner_in_tools_asdlc(self, tmp_path):
+        script = self._albero_con_lo_script(tmp_path)
+        segno = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path)
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-fase"
+        assert esito.returncode == 1
+
+    def test_il_pre_commit_lancia_il_runner_in_tools_asdlc(self, repo_di_prova):
+        radice = repo_di_prova.radice
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+        segno = self._runner_finto(radice, "tools/asdlc/runner.py")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-commit"
+        assert esito.returncode == 1
+
+    def test_fase_tdd_senza_runner_lo_dice_ed_esce_con_1(self, tmp_path):
+        """PBI-388, decisione 2: una guardia che non trova il suo codice non ferma
+        il repository. Per Claude Code solo il 2 blocca."""
+        script = self._albero_con_lo_script(tmp_path)
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path)
+
+        assert esito.returncode == 1
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert "tools/asdlc/runner.py" in esito.stderr
+        assert "tools/asdlc_runner.py" in esito.stderr
+
+    def test_il_pre_commit_senza_runner_lo_dice_e_lascia_passare(self, repo_di_prova):
+        """PBI-388, decisione 2 e `ADR-0008`: si segnala e si lascia passare."""
+        radice = repo_di_prova.radice
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert esito.returncode == 0
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert "tools/asdlc/runner.py" in esito.stderr
+        assert "tools/asdlc_runner.py" in esito.stderr
+
+    def test_guardia_fase_tdd_col_runner_in_tools_decide_come_prima(self, repo_di_prova):
+        """PBI-388, quinto criterio: con `tools/asdlc_runner.py` al suo posto,
+        che è l'albero vero, `fase-tdd.sh` blocca la produzione in `TEST_ONLY`
+        con 2 e la lascia scrivere in `IMPL` con 0, come prima di PBI-388."""
+        radice = repo_di_prova.radice
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(radice),
+                "tool_input": {"file_path": str(radice / "backend/app/foglio.py")}}
+        uscite = {}
+        for fase in (runner.FASE_TEST_ONLY, runner.FASE_IMPL):
+            runner.percorso_della_fase(radice).write_text(f"{fase}\n")
+            uscite[fase] = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
+                                          capture_output=True, text=True,
+                                          cwd=radice).returncode
+
+        assert uscite == {runner.FASE_TEST_ONLY: 2, runner.FASE_IMPL: 0}
+
+    def test_guardia_il_pre_commit_col_runner_in_tools_ferma_il_commit(self, repo_di_prova):
+        """PBI-388, quinto criterio: con il runner nella forma di oggi il
+        `pre-commit` installato lo lancia, e un'uscita diversa da 0 ferma il
+        commit come prima di PBI-388."""
+        radice = repo_di_prova.radice
+        segno = self._runner_finto(radice, "tools/asdlc_runner.py")
+        runner.installa_la_guardia_del_commit()
+        (radice / "README.md").write_text("ciao\n", encoding="utf-8")
+        repo_di_prova._git("add", "README.md")
+
+        esito = subprocess.run(["git", "commit", "-q", "-m", "chore: prova"],
+                               capture_output=True, text=True, cwd=radice)
+
+        assert esito.returncode != 0, "il commit doveva essere fermato dalla guardia"
+        assert segno.read_text() == "--guardia-commit"
+
+
+class TestGliHookDelRunnerSiRiscrivono:
+    """PBI-388, decisione 3: un hook del runner si riconosce dalla riga di
+    commento che segue lo shebang, e se il testo è cambiato si riscrive.
+
+    Prima `installa_un_hook()` non riscriveva mai un hook esistente, e non
+    distingueva il proprio da quello altrui: il `pre-commit` restava quello del
+    primo giro che l'aveva installato, anche dopo che il runner ne cambiava il
+    testo. Il marcatore nuovo non nomina percorsi, perché `PBI-383` li sposta.
+    """
+
+    MARCATORE = "# Installato dal runner ASDLC (PBI-104):"
+    VECCHIO = ("#!/bin/sh\n"
+               "# Installato da tools/asdlc_runner.py (PBI-104): il commit non nasce fuori fase.\n"
+               'exec python3 "$(git rev-parse --show-toplevel)/tools/asdlc_runner.py" '
+               "--guardia-commit\n")
+
+    def _hook(self, repo, nome="pre-commit"):
+        cartella = repo.radice / ".git" / "hooks"
+        cartella.mkdir(parents=True, exist_ok=True)
+        return cartella / nome
+
+    def test_i_testi_nuovi_portano_il_marcatore_senza_percorsi(self):
+        for corpo in (runner.GUARDIA_DEL_COMMIT, runner.RITORNO_IN_TEST_ONLY):
+            assert corpo.splitlines()[1].startswith(self.MARCATORE), corpo
+
+    def test_un_pre_commit_del_runner_con_il_testo_vecchio_si_riscrive(self, repo_di_prova):
+        hook = self._hook(repo_di_prova)
+        hook.write_text(self.VECCHIO, encoding="utf-8")
+
+        assert runner.installa_la_guardia_del_commit() is True
+        assert hook.read_text() == runner.GUARDIA_DEL_COMMIT
+
+    def test_un_hook_col_marcatore_nuovo_e_un_testo_diverso_si_riscrive(self, repo_di_prova):
+        hook = self._hook(repo_di_prova, "post-commit")
+        hook.write_text(f"#!/bin/sh\n{self.MARCATORE} un testo di prima.\nexit 0\n",
+                        encoding="utf-8")
+
+        assert runner.installa_il_ritorno_in_test_only() is True
+        assert hook.read_text() == runner.RITORNO_IN_TEST_ONLY
+
+    def test_guardia_un_hook_altrui_non_si_riscrive(self, repo_di_prova):
+        """PBI-388, quarto criterio: un hook senza il marcatore sotto lo shebang
+        non è del runner, e resta com'è anche se il testo è diverso."""
+        altrui = "#!/bin/sh\n# il formattatore di qualcun altro\nexec npx lint-staged\n"
+        hook = self._hook(repo_di_prova)
+        hook.write_text(altrui, encoding="utf-8")
+
+        assert runner.installa_la_guardia_del_commit() is False
+        assert hook.read_text() == altrui
+
+    def test_guardia_il_marcatore_lontano_dallo_shebang_non_fa_un_hook_del_runner(
+            self, repo_di_prova):
+        """PBI-388, quarto criterio: il marcatore conta solo sulla riga che segue
+        lo shebang. Un hook altrui che lo porta più in basso resta com'è."""
+        altrui = f"#!/bin/sh\n# di qualcun altro\n{self.MARCATORE} copiato\nexit 0\n"
+        hook = self._hook(repo_di_prova)
+        hook.write_text(altrui, encoding="utf-8")
+
+        assert runner.installa_la_guardia_del_commit() is False
+        assert hook.read_text() == altrui
+
+    def test_guardia_un_hook_del_runner_gia_uguale_non_si_riscrive(self, repo_di_prova):
+        """PBI-388, quinto criterio: la riscrittura è per il testo cambiato. Un
+        hook del runner uguale a quello di oggi resta il file che era."""
+        runner.installa_la_guardia_del_commit()
+        hook = self._hook(repo_di_prova)
+        os.utime(hook, ns=(0, 0))
+
+        assert runner.installa_la_guardia_del_commit() is False
+        assert hook.stat().st_mtime_ns == 0

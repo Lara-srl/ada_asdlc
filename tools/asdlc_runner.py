@@ -3905,14 +3905,23 @@ def chiedi_impl() -> int:
 # Il `pre-commit` che il runner installa. Inerte fuori da un giro, come l'hook di
 # Claude Code e per la stessa ragione: sta in `.git/hooks`, che i worktree di
 # questo repository condividono, e non deve farsi sentire da chi non è in un giro.
+# Il runner si cerca in due forme, la nuova prima (PBI-388): `PBI-383` lo sposta
+# in `tools/asdlc/runner.py`, e `python3` su un file che non c'è esce con 2. Se
+# non c'è nessuna delle due il commit passa, con un avviso (ADR-0008).
 GUARDIA_DEL_COMMIT = """#!/bin/sh
-# Installato da tools/asdlc_runner.py (PBI-104): il commit non nasce fuori fase.
-exec python3 "$(git rev-parse --show-toplevel)/tools/asdlc_runner.py" --guardia-commit
+# Installato dal runner ASDLC (PBI-104): il commit non nasce fuori fase.
+radice="$(git rev-parse --show-toplevel)"
+for sorgente in tools/asdlc/runner.py tools/asdlc_runner.py; do
+    [ -f "$radice/$sorgente" ] && exec python3 "$radice/$sorgente" --guardia-commit
+done
+echo "guardia del lucchetto: runner non trovato in tools/asdlc/runner.py né in tools/asdlc_runner.py" >&2
+exit 0
 """
 
 
 def installa_la_guardia_del_commit() -> bool:
-    """Mette il `pre-commit` al suo posto. `False` se ce n'era già uno.
+    """Mette il `pre-commit` al suo posto. `False` se ce n'era già uno altrui, o
+    il nostro con lo stesso testo.
 
     Un `pre-commit` di qualcun altro non si calpesta: potrebbe essere un
     formattatore, o la cura di qualcosa che non sappiamo. Chi lo trova occupato
@@ -3940,15 +3949,33 @@ def cartella_degli_hook() -> Path | None:
     return cartella if cartella.is_absolute() else REPO / cartella
 
 
+# La riga che segue lo shebang di un hook del runner, nella forma di oggi e in
+# quella di prima di PBI-388, che nominava un percorso che `PBI-383` sposta.
+MARCATORI_DEGLI_HOOK = ("# Installato dal runner ASDLC (PBI-104):",
+                        "# Installato da tools/asdlc_runner.py (PBI-104):")
+
+
+def e_un_hook_del_runner(testo: str) -> bool:
+    """Se l'hook l'ha scritto il runner: lo shebang, e sotto uno dei marcatori."""
+    righe = testo.splitlines()
+    return len(righe) > 1 and righe[0].startswith("#!") \
+        and righe[1].startswith(MARCATORI_DEGLI_HOOK)
+
+
 def installa_un_hook(nome: str, corpo: str) -> bool:
-    """Scrive un hook di git in `.git/hooks`, e `False` se ce n'era già uno."""
+    """Scrive un hook di git in `.git/hooks`, e `False` se ce n'era già uno
+    altrui, o il nostro con lo stesso testo. Il nostro con un testo diverso si
+    riscrive (PBI-388): è l'unico modo in cui un cambio del testo arriva agli
+    alberi in cui l'hook c'è già."""
     cartella = cartella_degli_hook()
     if cartella is None:
         return False
     cartella.mkdir(parents=True, exist_ok=True)
     hook = cartella / nome
     if hook.exists():
-        return False
+        testo = hook.read_text(encoding="utf-8", errors="replace")
+        if testo == corpo or not e_un_hook_del_runner(testo):
+            return False
     hook.write_text(corpo, encoding="utf-8")
     hook.chmod(0o755)
     return True
@@ -3959,7 +3986,7 @@ def installa_un_hook(nome: str, corpo: str) -> bool:
 # dopo il primo permesso, il comportamento successivo tornerebbe a nascere senza
 # rosso. Chi vede ogni commit è git, quindi è git a riportare la fase indietro.
 RITORNO_IN_TEST_ONLY = f"""#!/bin/sh
-# Installato da tools/asdlc_runner.py (PBI-104): un commit chiude il ciclo.
+# Installato dal runner ASDLC (PBI-104): un commit chiude il ciclo.
 fase="$(git rev-parse --git-path {FILE_DELLA_FASE})"
 [ -f "$fase" ] && printf '{FASE_TEST_ONLY}\\n' > "$fase"
 exit 0
