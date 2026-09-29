@@ -309,7 +309,7 @@ Esegui il PBI con queste regole non negoziabili:
   2. **committalo**, da solo: `test(scope): … (RED)`. Un commit di soli test, senza una
      riga di produzione dentro — il rosso non può essere esistito in mezzo a un commit
      misto, e il gate lo ferma dal solo diff;
-  3. `python3 tools/asdlc_runner.py --chiedi-impl` — rigira quei test e apre la fase
+  3. `python3 tools/asdlc/runner.py --chiedi-impl` — rigira quei test e apre la fase
      `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e non è
      questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
   4. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
@@ -1370,13 +1370,13 @@ def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
         return None
     if Path(percorso).name == FILE_DELLA_FASE:
         return (f"{percorso}: la fase non la decidi tu. Il passaggio a {FASE_IMPL} lo "
-                f"apre `asdlc_runner.py --chiedi-impl`, e solo se i test nuovi "
+                f"apre `tools/asdlc/runner.py --chiedi-impl`, e solo se i test nuovi "
                 f"falliscono davvero.")
     if fase == FASE_TEST_ONLY:
         if e_file_di_produzione(percorso):
             return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
                     f"qui si scrivono solo i test. Scrivi il test del comportamento che "
-                    f"ti serve, poi `asdlc_runner.py --chiedi-impl`: se è rosso, la "
+                    f"ti serve, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
                     f"produzione si apre. Se il test passa già, quel comportamento c'è "
                     f"di suo e non è questo il commit in cui nasce.")
         return None
@@ -2854,7 +2854,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         return adotta_pr(aperte, "PR già aperta sul ramo", e)
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
-        f"(`tools/asdlc_runner.py`).\n\n"
+        f"(`tools/asdlc/runner.py`).\n\n"
         + (f"Gate deterministici verdi · **Review Gate saltato** (`--senza-critic`): "
            f"di questo lavoro non esiste una lettura avversariale, e la revisione è "
            f"tutta qui.\n"
@@ -4209,7 +4209,7 @@ def smista() -> int:
             albero.enter_context(lucchetto())
         except AlberoOccupato as exc:
             print(f"Non parto: {exc}.\n"
-                  "Il lucchetto è di un runner vivo — `ps aux | grep asdlc_runner` dice "
+                  "Il lucchetto è di un runner vivo — `ps aux | grep asdlc/runner` dice "
                   "quale.\nPer un secondo giro in parallelo serve un altro worktree, non "
                   "un altro processo.")
             return 2
@@ -4273,7 +4273,7 @@ def smista() -> int:
         # (`ADR-0020`). Il giro lascia il suo rapporto; le righe entrano in `main`
         # dopo il merge, con `--registra`.
         rapporto = chiudi_rapporto(run, esiti)
-        print(f"\nRegistro: `python3 tools/asdlc_runner.py --registra {LOG_DIR}` "
+        print(f"\nRegistro: `python3 tools/asdlc/runner.py --registra {LOG_DIR}` "
               f"su main, dopo il merge. Rapporto del giro: {rapporto}")
         totale = sum(e.durata_s for e in esiti)
         print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"

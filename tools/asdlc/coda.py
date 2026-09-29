@@ -302,7 +302,7 @@ def pbi_mergiati(repo: Path) -> set[str]:
             f"gh ha reso {len(elenco)} PR mergiate, cioè tutta la finestra di "
             f"{LIMITE_PR} che gli è stata chiesta: l'elenco può essere tagliato, e un "
             "PBI già in main che non ci compaia si rilancerebbe. Alza LIMITE_PR in "
-            "tools/asdlc_coda.py."
+            "tools/asdlc/coda.py."
         )
     return {
         nome
@@ -508,7 +508,7 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    codice, uscita = esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
+    codice, uscita = esegui(["python3", "tools/asdlc/runner.py", pbi], worktree)
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
