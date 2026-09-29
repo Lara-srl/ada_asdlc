@@ -1827,6 +1827,73 @@ class TestIlLancioSiFermaPrimaDiScrivere:
         assert "lucchetto" in capsys.readouterr().out.lower()
 
 
+class TestIlRunnerSiNominaDalPacchetto:
+    """PBI-383: i testi che dicono come lanciare il runner lo nominano come
+    `tools/asdlc/runner.py`. Chi li legge — il Builder, chi apre la PR, chi
+    registra i giri — copia il comando, e `tools/asdlc_runner.py` non c'è più."""
+
+    COMANDO = "tools/asdlc/runner.py --chiedi-impl"
+
+    def test_il_prompt_del_builder(self):
+        prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
+        assert f"python3 {self.COMANDO}" in prompt
+
+    def test_la_guardia_di_fase_sulla_produzione(self):
+        ragione = runner.guardia_di_fase("TEST_ONLY", "frontend/src/pages/FoglioPage.tsx")
+        assert self.COMANDO in ragione
+
+    def test_la_guardia_di_fase_sul_file_della_fase(self):
+        ragione = runner.guardia_di_fase("TEST_ONLY", runner.FILE_DELLA_FASE)
+        assert self.COMANDO in ragione
+
+    def test_il_corpo_della_pr(self, monkeypatch, git_finto):
+        catturato: dict[str, list[str]] = {}
+
+        def finto_esegui(cmd, cwd, timeout=7200):
+            catturato.setdefault("cmd", cmd)
+            return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
+
+        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(finto_esegui))
+        pbi_path = REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
+        esito = runner.Esito("PBI-102", "fatto", critic_saltato=True)
+
+        runner.apri_pr("PBI-102", pbi_path, "pbi/pbi-102", esito)
+
+        cmd = catturato["cmd"]
+        assert "`tools/asdlc/runner.py`" in cmd[cmd.index("--body") + 1]
+
+    def test_la_riga_del_registro_a_fine_giro(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda pbi, *a, **k: runner.Esito(pbi, "saltato")
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["asdlc_runner", "PBI-212", "--dry-run", "--in-primo-piano"]
+        )
+
+        runner.smista()
+
+        assert "`python3 tools/asdlc/runner.py --registra " in capsys.readouterr().out
+
+    def test_il_lucchetto_occupato_dice_come_cercare_il_runner(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI deve partire con l'albero occupato"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        with runner.lucchetto():
+            assert runner.smista() == 2
+
+        assert "`ps aux | grep asdlc/runner`" in capsys.readouterr().out
+
+
 class TestSiPuoSaltareIlCritic:
     """Il Review Gate si può togliere, ma non di nascosto.
 
