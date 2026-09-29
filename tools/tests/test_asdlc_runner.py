@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -3939,6 +3940,36 @@ class TestLEsitoSiLeggePerTest:
         """Vuoto e non «tutto verde»: chi non ha letto niente non ha visto niente, e
         l'esito del comando intero resta l'unica cosa che si sa."""
         assert runner.esiti_di_vitest(tmp_path / "mai-scritto.json") == {}
+
+
+class TestIlCasoJUnitSiLegaAllaChiave:
+    """PBI-390, decisione 2: il gate chiede i test per node id, e pytest ne
+    scrive l'esito nel rapporto JUnit sotto un altro nome — il percorso a punti
+    e senza `.py` nel `classname`, con le classi dietro, e la funzione col suo
+    parametro nel `name`. Il legame si fa con la stessa trasformazione, e si
+    confronta con l'XML che pytest scrive davvero, non con uno scritto a mano."""
+
+    def test_la_chiave_e_il_caso_si_legano_come_li_scrive_pytest(self, tmp_path):
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_legame.py").write_text(
+            "import pytest\n\n\n"
+            "def test_di_modulo():\n    pass\n\n\n"
+            "class TestUnaClasse:\n"
+            "    def test_di_classe(self):\n        pass\n\n"
+            "    @pytest.mark.parametrize('p', ['a b', 'c'])\n"
+            "    def test_parametrico(self, p):\n        pass\n",
+            encoding="utf-8")
+        rapporto = tmp_path / "pytest.xml"
+        subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                        f"--junitxml={rapporto}", "tests/test_legame.py"],
+                       cwd=tmp_path, capture_output=True, check=True)
+        scritti = {(caso.get("classname"), caso.get("name").partition("[")[0])
+                   for caso in ET.parse(rapporto).getroot().iter("testcase")}
+        chiavi = ["tests/test_legame.py::test_di_modulo",
+                  "tests/test_legame.py::TestUnaClasse::test_di_classe",
+                  "tests/test_legame.py::TestUnaClasse::test_parametrico"]
+
+        assert {runner.caso_junit(chiave) for chiave in chiavi} == scritti
 
 
 class TestUnGateGuastoNonEUnCicloMancato:
