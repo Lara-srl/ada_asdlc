@@ -2046,12 +2046,13 @@ def diff_del_file(voce: VoceDiCommit, *dove: str) -> str:
 
     Un rename si chiede nominando **tutti e due** i lati: con il solo percorso
     nuovo git non applica il rename detection, e il file risulta aggiunto per
-    intero (difetto 61 di PBI-102).
+    intero (difetto 61 di PBI-102). `-M` è scritto e non lasciato a
+    `diff.renames`, come in `file_del_commit`.
     """
     lati = [voce.percorso]
     if voce.vecchio:
         lati.insert(0, voce.vecchio)
-    return git(*dove, "--unified=0", "--", *lati)
+    return git(*dove, "--unified=0", "-M", "--", *lati)
 
 
 def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
@@ -2066,7 +2067,7 @@ def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
     funzione entra nel perimetro.
     """
     hunk: dict[str, list[tuple[int, int]]] = {}
-    for voce in voci_del_name_status(git("diff", "--name-status", f"{base}...{sha}")):
+    for voce in voci_del_name_status(git("diff", "--name-status", "-M", f"{base}...{sha}")):
         if not e_file_di_produzione(voce.percorso):
             continue
         diff = diff_del_file(voce, "diff", f"{base}...{sha}")
