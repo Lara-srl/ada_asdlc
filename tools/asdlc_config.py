@@ -141,7 +141,7 @@ class Config:
 
 def radice(cwd: Path) -> Path:
     """La radice del progetto: il primo antenato di `cwd`, compresa, che contiene
-    `asdlc.toml`.
+    `asdlc.toml`. Se non c'è, è un errore che nomina la cwd.
 
     Il progetto lo dice la cartella di lavoro e non il sorgente del runner:
     installato, il sorgente sta in site-packages (`ADR-0026`, PBI-382). Non
@@ -151,6 +151,10 @@ def radice(cwd: Path) -> Path:
     for cartella in (cwd, *cwd.parents):
         if (cartella / NOME_FILE).is_file():
             return cartella
+    raise ErroreDiConfigurazione(
+        f"nessun `{NOME_FILE}` da `{cwd}` in su: il runner si lancia dalla "
+        "cartella di un progetto ASDLC"
+    )
 
 
 def carica(repo: Path) -> Config:
