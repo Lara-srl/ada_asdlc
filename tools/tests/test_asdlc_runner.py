@@ -4235,8 +4235,8 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         `FoglioPage.test.tsx` senza `FoglioPage.tsx` è il RED classico del
         test-first nel frontend, ed è il caso che in Python `leggi_esito` conta come
-        rosso leggendo `1 error`. Col `--reporter=json` quel conteggio a schermo non
-        c'è mai: il file non si carica, quindi non esiste nessun risultato per-test,
+        rosso leggendo l'errore di raccolta nel JUnit. Col `--reporter=json` non
+        c'è un caso così: il file non si carica, quindi non esiste nessun risultato per-test,
         e l'unica cosa scritta è il file `failed` con zero `assertionResults`.
         """
         rapporto = tmp_path / "vitest-0.json"
