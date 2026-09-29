@@ -23,10 +23,10 @@ Ogni esecuzione scrive i **tempi** in `runs/tempi.csv` (una riga per PBI, in app
 Un PBI = una sessione = un contesto pulito. È il motivo per cui il PBI è un puntatore
 alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 
-    python3 tools/asdlc_runner.py PBI-201
-    python3 tools/asdlc_runner.py PBI-313 --senza-critic   # due gate su tre, e lo dichiara
-    python3 tools/asdlc_runner.py PBI-201 PBI-203 --dry-run
-    python3 tools/asdlc_runner.py --riepilogo --tariffa 90
+    python3 tools/asdlc/runner.py PBI-201
+    python3 tools/asdlc/runner.py PBI-313 --senza-critic   # due gate su tre, e lo dichiara
+    python3 tools/asdlc/runner.py PBI-201 PBI-203 --dry-run
+    python3 tools/asdlc/runner.py --riepilogo --tariffa 90
 
 ⚠️ Da usare in un clone o in un worktree dedicato, mai sull'albero che stai guardando:
    l'agente gira in modalità non interattiva e scrive senza chiedere conferma.
@@ -64,14 +64,14 @@ from typing import Iterable, NamedTuple
 # codice sta in site-packages (`ADR-0026`, decisione 3).
 REPO: Path
 
-# `tools/` non è un pacchetto e non deve diventarlo: il runner si lancia per
-# percorso, e sotto i test si carica con `importlib` da `backend/tests/`. Il
-# lettore della configurazione sta accanto a questo file, e si importa da lì:
-# qui conta dove sta il codice, non dove sta il progetto.
-SORGENTE = Path(__file__).resolve().parent
+# Il runner è un modulo del pacchetto `asdlc`, in `tools/asdlc/` (PBI-383), e si
+# lancia ancora per percorso finché non ci sono i comandi (PBI-384): `tools/` va
+# sul `sys.path`, o `asdlc.config` non si trova. Qui conta dove sta il codice,
+# non dove sta il progetto.
+SORGENTE = Path(__file__).resolve().parent.parent
 if str(SORGENTE) not in sys.path:
     sys.path.insert(0, str(SORGENTE))
-import asdlc_config  # noqa: E402
+from asdlc import config as asdlc_config  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
 # sono relativi a `REPO`, e la ragione di ogni valore sta accanto a dove si legge.
