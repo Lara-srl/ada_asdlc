@@ -58,13 +58,18 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import NamedTuple
 
-REPO = Path(__file__).resolve().parent.parent
+# La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
+# trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
+# codice sta in site-packages (`ADR-0026`, decisione 3).
+REPO: Path
 
 # `tools/` non è un pacchetto e non deve diventarlo: il runner si lancia per
 # percorso, e sotto i test si carica con `importlib` da `backend/tests/`. Il
-# lettore della configurazione sta accanto a questo file, e si importa da lì.
-if str(REPO / "tools") not in sys.path:
-    sys.path.insert(0, str(REPO / "tools"))
+# lettore della configurazione sta accanto a questo file, e si importa da lì:
+# qui conta dove sta il codice, non dove sta il progetto.
+SORGENTE = Path(__file__).resolve().parent
+if str(SORGENTE) not in sys.path:
+    sys.path.insert(0, str(SORGENTE))
 import asdlc_config  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
@@ -4017,7 +4022,10 @@ def main() -> int:
     try:
         # Fuori da un progetto ci si ferma qui, prima del lucchetto e di ogni
         # scrittura: il runner non ha niente da fare, e lo dice.
-        asdlc_config.radice(Path.cwd())
+        radice = asdlc_config.radice(Path.cwd())
+        # `configura()` compone i percorsi da `REPO`: la radice va messa prima.
+        global REPO
+        REPO = radice
         configura(asdlc_config.carica(REPO))
     except asdlc_config.ErroreDiConfigurazione as guasto:
         sys.exit(f"asdlc_runner: {guasto}")
