@@ -5463,6 +5463,20 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
 
         assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {11}}
 
+    def test_un_file_di_produzione_nuovo_entra_per_intero(self, repo_di_prova):
+        """Guardia, verde su `main`: senza un lato vecchio il file nuovo è un unico
+        hunk dalla riga 1. Il test e il documento dello stesso commit non sono
+        produzione e non entrano."""
+        self._base_col_modulo(repo_di_prova)
+        sha = repo_di_prova.commit("feat: il triplo", {
+            "backend/app/triplo.py": "def triplo(x):\n    y = x * 3\n    return y\n",
+            "backend/tests/test_triplo.py": "def test_x():\n    assert True\n",
+            "docs/triplo.md": "# il triplo\n",
+        })
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/triplo.py": [(1, 3)]}
+
     def test_nessun_git_diff_o_show_con_pathspec_fuori_da_diff_del_file(self):
         """Decisione 1: la regola «un rename si legge sui due lati, con `-M`
         scritto» sta in un posto solo. Il difetto 31 era stato chiuso dentro due
