@@ -10,6 +10,8 @@ altri test: la cwd e l'import sono proprio ciò che si prova, e cambiarli nel
 processo di pytest li cambierebbe a tutta la suite.
 """
 
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -141,3 +143,70 @@ def test_il_tick_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp
 
     assert fatto.returncode == 2, fatto.stderr
     assert f"--repo e --worktree sono lo stesso albero ({progetto})" in fatto.stdout
+
+
+# --- Guardie: con il codice dentro il progetto decidono come prima (PBI-382) --
+
+
+def un_progetto_come_ada(tmp_path: Path) -> Path:
+    """La forma di aDa oggi: il codice in `<progetto>/tools`, l'hook in
+    `.claude/hooks/`, l'`asdlc.toml` versionato alla radice, e un giro in
+    `TEST_ONLY`. Prima di PBI-382 il progetto lo diceva `__file__`, ora la cwd:
+    qui coincidono, e le guardie devono decidere uguale."""
+    progetto = tmp_path / "progetto"
+    tools = progetto / "tools"
+    tools.mkdir(parents=True)
+    for nome in MODULI:
+        shutil.copy(REPO / "tools" / nome, tools / nome)
+    shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    hooks = progetto / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(REPO / ".claude" / "hooks" / "fase-tdd.sh", hooks / "fase-tdd.sh")
+    subprocess.run(["git", "init", "-q"], cwd=progetto, check=True)
+    fase = subprocess.run(["git", "rev-parse", "--git-path", "asdlc-fase"], cwd=progetto,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    (progetto / fase).write_text("TEST_ONLY\n", encoding="utf-8")
+    return progetto
+
+
+def test_guardia_la_guardia_di_fase_dall_hook_lanciato_altrove_decide_come_prima(tmp_path):
+    """L'hook `PreToolUse` lanciato da una cwd fuori dal progetto: in
+    `TEST_ONLY` ferma la produzione con `2` e lascia passare il test con `0`."""
+    progetto = un_progetto_come_ada(tmp_path)
+    altrove = tmp_path / "altrove"
+    altrove.mkdir()
+    hook = progetto / ".claude" / "hooks" / "fase-tdd.sh"
+
+    def chiedi(file_path: str):
+        dato = {"hook_event_name": "PreToolUse", "tool_name": "Edit", "cwd": str(progetto),
+                "tool_input": {"file_path": str(progetto / file_path)}}
+        return subprocess.run([str(hook)], input=json.dumps(dato), cwd=altrove,
+                              capture_output=True, text=True, timeout=60,
+                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+
+    produzione = chiedi("backend/app/foglio.py")
+    test = chiedi("backend/tests/test_foglio.py")
+
+    assert produzione.returncode == 2, produzione.stderr
+    assert "TEST_ONLY" in produzione.stderr
+    assert test.returncode == 0, test.stderr
+    assert test.stderr == ""
+
+
+def test_guardia_la_guardia_del_commit_dalla_radice_decide_come_prima(tmp_path):
+    """Il `pre-commit` parte dalla radice dell'albero: in `TEST_ONLY` rifiuta lo
+    stage con la produzione, nominandola, e accetta quello di soli test."""
+    progetto = un_progetto_come_ada(tmp_path)
+
+    def in_stage(percorso: str):
+        (progetto / percorso).parent.mkdir(parents=True, exist_ok=True)
+        (progetto / percorso).write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", percorso], cwd=progetto, check=True)
+        return lancia(progetto / "tools", "asdlc_runner.py", ["--guardia-commit"], progetto)
+
+    solo_test = in_stage("backend/tests/test_foglio.py")
+    con_produzione = in_stage("backend/app/foglio.py")
+
+    assert solo_test.returncode == 0, solo_test.stdout + solo_test.stderr
+    assert con_produzione.returncode == 1, con_produzione.stderr
+    assert "backend/app/foglio.py" in con_produzione.stdout
