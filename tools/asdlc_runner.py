@@ -762,9 +762,13 @@ def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
 
 def file_toccati(base: str | None = None) -> set[str]:
     """I file che il branch ha cambiato rispetto alla base, `<base>...HEAD`
-    come per i mutanti: un `main` andato avanti nel frattempo non entra."""
+    come per i mutanti: un `main` andato avanti nel frattempo non entra.
+
+    Di un rename entrano i due lati: un file uscito da un percorso accende il
+    gate di quel percorso, e `--name-only` ne dava solo il nuovo (PBI-387)."""
     base = base if base is not None else BASE
-    return {p for p in git("diff", "--name-only", f"{base}...HEAD").splitlines() if p}
+    voci = voci_del_name_status(git("diff", "--name-status", "-M", f"{base}...HEAD"))
+    return {p for voce in voci for p in (voce.vecchio, voce.percorso) if p}
 
 
 def gate_mancanti(attivi: set[str]) -> list[str]:
@@ -1515,8 +1519,8 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
         if linguaggio is None:
             continue
         aggiunti, tolti = nomi_dei_test(
-            git("show", "--format=", "--unified=0", "-M", sha, "--",
-                *lati_del_diff(voce)), linguaggio
+            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)),
+            linguaggio,
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -1550,7 +1554,7 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
-            diff = git("diff", "HEAD", "-M", "--unified=0", "--", *lati_del_diff(voce))
+            diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
         aggiunti, tolti = nomi_dei_test(diff, linguaggio)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -2040,20 +2044,42 @@ def si_puo_cancellare(testo: str) -> bool:
 RE_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 
+def diff_del_file(voce: VoceDiCommit, *dove: str, lati: list[str] | None = None) -> str:
+    """Il diff `--unified=0` di una voce, su `dove` — `("diff", "base...sha")`,
+    `("show", "--format=", sha)`, `("diff", "HEAD")`. È l'unico posto del runner
+    che chiede a git il diff di un file (PBI-387).
+
+    Un rename si chiede nominando **tutti e due** i lati: con il solo percorso
+    nuovo git non applica il rename detection, e il file risulta aggiunto per
+    intero (difetti 31 e 61 di PBI-102). `-M` è scritto e non lasciato a
+    `diff.renames`, come in `file_del_commit`. `lati` sostituisce i due lati
+    quando la regola è un'altra: per i test la dà `lati_del_diff`.
+    """
+    if lati is None:
+        lati = [voce.percorso]
+        if voce.vecchio:
+            lati.insert(0, voce.vecchio)
+    return git(*dove, "--unified=0", "-M", "--", *lati)
+
+
 def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
     """Per ogni file di **produzione** che il branch ha cambiato fino a `sha`, gli
     hunk come `(inizio, quante)` nella numerazione del file a quel commit.
 
     `base...sha` e non `base..sha`: il diff parte dal merge-base, così un `main`
     andato avanti nel frattempo non entra nel conto come se fosse del branch.
+
+    La chiave è il percorso a `sha`, anche per un file spostato: è lì che le
+    righe sono numerate. Un rename senza cambi non porta hunk, e nessuna sua
+    funzione entra nel perimetro.
     """
     hunk: dict[str, list[tuple[int, int]]] = {}
-    for percorso in git("diff", "--name-only", f"{base}...{sha}").splitlines():
-        if not percorso or not e_file_di_produzione(percorso):
+    for voce in voci_del_name_status(git("diff", "--name-status", "-M", f"{base}...{sha}")):
+        if not e_file_di_produzione(voce.percorso):
             continue
-        diff = git("diff", "--unified=0", f"{base}...{sha}", "--", percorso)
-        hunk[percorso] = [(int(inizio), int(quante) if quante else 1)
-                          for inizio, quante in RE_HUNK.findall(diff)]
+        diff = diff_del_file(voce, "diff", f"{base}...{sha}")
+        hunk[voce.percorso] = [(int(inizio), int(quante) if quante else 1)
+                               for inizio, quante in RE_HUNK.findall(diff)]
     return hunk
 
 
@@ -3919,12 +3945,17 @@ def guardia_del_commit() -> int:
     Guarda lo **stage** e non il modo in cui ci è arrivato, ed è la differenza
     che conta: `Edit`, `Write`, un heredoc da Bash, `sed -i` e una patch applicata
     a mano finiscono tutti nello stesso posto, e qui valgono uguale.
+
+    Un rename in stage si giudica sui due lati: il vecchio è la cancellazione
+    di quel percorso, il nuovo un'aggiunta. `--name-only` dava il solo nuovo, e
+    in `IMPL` un test spostato in `nota.txt` passava come un file qualsiasi.
     """
     fase = fase_corrente(REPO)
     if fase is None:
         return 0
-    ragioni = [r for percorso in git("diff", "--cached", "--name-only").splitlines()
-               if percorso and (r := guardia_di_fase(fase, percorso))]
+    voci = voci_del_name_status(git("diff", "--cached", "--name-status", "-M"))
+    percorsi = [p for voce in voci for p in (voce.vecchio, voce.percorso) if p]
+    ragioni = [r for percorso in percorsi if (r := guardia_di_fase(fase, percorso))]
     if not ragioni:
         return 0
     print(f"Il commit non si fa: il giro è in {fase}.\n")

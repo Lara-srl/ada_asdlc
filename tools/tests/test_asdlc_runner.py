@@ -4795,6 +4795,20 @@ class TestIlCommitNonNasceFuoriFase:
         runner.installa_la_guardia_del_commit()
         assert "di qualcun altro" in hook.read_text()
 
+    def test_in_impl_ferma_il_git_mv_di_un_test_verso_un_file_che_non_e_un_test(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-387, decisione 4: `--name-only` dà di un rename il solo percorso
+        nuovo, e `nota.txt` non è un test. Il lato vecchio è la cancellazione di
+        `backend/tests/test_foglio.py`, e in `IMPL` i test sono in sola lettura."""
+        repo_di_prova.commit("test: il foglio (RED)",
+                             {"backend/tests/test_foglio.py": TRE_TEST})
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_IMPL}\n")
+        repo_di_prova.sposta("backend/tests/test_foglio.py", "nota.txt")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.smista() == 1
+        assert "backend/tests/test_foglio.py" in capsys.readouterr().out
+
 
 class TestOgniCommitRiportaAllaFaseDelTest:
     """Il ciclo si chiude da sé, o il lucchetto vale una volta sola.
@@ -5359,6 +5373,159 @@ class TestLeRigheCambiateSiLeggonoDalDiff:
         })
 
         assert runner.righe_cambiate("origin/main", sha) == {}
+
+
+class TestUnModuloSpostatoSiLeggeComeSpostato:
+    """PBI-387, difetto 61 di PBI-102: il diff di un file di produzione traslocato
+    si chiedeva nominando il solo percorso nuovo, git non applicava il rename
+    detection, e il file risultava aggiunto per intero — ogni sua funzione nel
+    perimetro dei mutanti. `PBI-383` sposta il runner in `tools/asdlc/` con
+    `git mv`, e il suo perimetro deve restare zero.
+
+    Qui git non si finge: il rename lo rileva git, come in `TestUnTestTraslocatoNonNasce`.
+    """
+
+    MODULO = ("import os\n"
+              "\n\n"
+              "def soglia(x):\n"
+              "    if x > 10:\n"
+              "        return 'alta'\n"
+              "    return 'bassa'\n"
+              "\n\n"
+              "def doppio(x):\n"
+              "    return x * 2\n"
+              "\n\n"
+              "def cartella():\n"
+              "    return os.getcwd()\n")
+
+    def _base_col_modulo(self, repo):
+        vecchio = repo.commit("feat: il modulo", {"backend/app/m.py": self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+
+    def _perimetro(self, repo, sha):
+        """Le voci `<percorso>::<funzione> (dal diff)` del perimetro a `sha`, come le
+        compone il gate del rosso."""
+        cambiate = runner.righe_cambiate("origin/main", sha)
+        cancellate = runner.cancellazioni("origin/main", sha)
+        voci: list[str] = []
+        for percorso in sorted(cambiate.keys() | cancellate.keys()):
+            sorgente = repo._git("show", f"{sha}:{percorso}")
+            voci += runner.righe_del_perimetro(percorso, sorgente,
+                                               cambiate.get(percorso, set()),
+                                               cancellate.get(percorso, set()))[1]
+        return voci
+
+    def test_un_git_mv_senza_cambi_non_mette_nel_perimetro_nessuna_funzione(
+            self, repo_di_prova):
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il modulo in sotto/")
+
+        assert runner.righe_cambiate("origin/main", sha) == {}
+        assert self._perimetro(repo_di_prova, sha) == []
+
+    def test_un_git_mv_con_una_riga_cambiata_mette_nel_perimetro_quella_funzione_sola(
+            self, repo_di_prova):
+        """La riga è numerata nel file nuovo: `return x + x` è la 11 di `sotto/m.py`."""
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit("refactor: il modulo in sotto/, e il doppio come somma", {
+            "backend/app/sotto/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {11}}
+        assert self._perimetro(repo_di_prova, sha) == [
+            "backend/app/sotto/m.py::doppio (dal diff)"]
+
+    def test_un_git_mv_con_la_sola_riga_di_import_cambiata_lascia_il_perimetro_vuoto(
+            self, repo_di_prova):
+        """La forma di `PBI-383`: il modulo si sposta e cambia un import, una riga a
+        livello di modulo che nessuna funzione contiene."""
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit("refactor: il modulo in sotto/, con os.path", {
+            "backend/app/sotto/m.py": self.MODULO.replace("import os\n", "import os.path\n"),
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {1}}
+        assert self._perimetro(repo_di_prova, sha) == []
+
+    def test_il_rename_si_legge_anche_con_diff_renames_spento(self, repo_di_prova):
+        """`diff.renames` è configurazione della macchina: `-M` sta scritto nel
+        comando, o su un repository che lo spegne il modulo spostato torna un file
+        cancellato più uno aggiunto per intero."""
+        repo_di_prova.configura("diff.renames", "false")
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit("refactor: il modulo in sotto/, e il doppio come somma", {
+            "backend/app/sotto/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {11}}
+
+    def test_un_file_di_produzione_nuovo_entra_per_intero(self, repo_di_prova):
+        """Guardia, verde su `main`: senza un lato vecchio il file nuovo è un unico
+        hunk dalla riga 1. Il test e il documento dello stesso commit non sono
+        produzione e non entrano."""
+        self._base_col_modulo(repo_di_prova)
+        sha = repo_di_prova.commit("feat: il triplo", {
+            "backend/app/triplo.py": "def triplo(x):\n    y = x * 3\n    return y\n",
+            "backend/tests/test_triplo.py": "def test_x():\n    assert True\n",
+            "docs/triplo.md": "# il triplo\n",
+        })
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/triplo.py": [(1, 3)]}
+
+    def test_un_file_modificato_sul_posto_da_gli_stessi_hunk_di_prima(self, repo_di_prova):
+        """Guardia, verde su `main`: senza rename la voce ha un lato solo, e gli
+        hunk sono quelli di sempre — una cancellazione `+6,0` dopo la riga 6 e
+        una riga cambiata, la 10 del file a `sha`."""
+        self._base_col_modulo(repo_di_prova)
+        sha = repo_di_prova.commit("refactor: la soglia senza ramo basso, il doppio come somma", {
+            "backend/app/m.py": self.MODULO.replace("    return 'bassa'\n", "")
+                                           .replace("return x * 2", "return x + x"),
+            "docs/m.md": "# il modulo\n",
+        })
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/m.py": [(6, 0), (10, 1)]}
+
+    def test_il_modulo_e_il_suo_test_spostati_insieme_non_fanno_nascere_niente(
+            self, repo_di_prova):
+        """Guardia, verde su `main`: la forma intera di `PBI-383`, il modulo e il
+        suo test traslocati nello stesso commit. Le nascite restano zero come le
+        ha fissate `PBI-361`, ora che il diff dei test passa per `diff_del_file`."""
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.commit("test: i tre casi (RED)", {"backend/tests/test_m.py": TRE_TEST})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        repo_di_prova.sposta("backend/app/m.py", "tools/asdlc/m.py")
+        repo_di_prova.sposta("backend/tests/test_m.py", "tools/tests/test_m.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il modulo e il suo test in tools/")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_nessun_git_diff_o_show_con_pathspec_fuori_da_diff_del_file(self):
+        """Decisione 1: la regola «un rename si legge sui due lati, con `-M`
+        scritto» sta in un posto solo. Il difetto 31 era stato chiuso dentro due
+        chiamate, e la terza — il difetto 61 — non l'aveva avuta."""
+        import ast
+
+        albero = ast.parse((REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8"))
+        fuori: list[str] = []
+        for funzione in ast.walk(albero):
+            if (not isinstance(funzione, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    or funzione.name == "diff_del_file"):
+                continue
+            for nodo in ast.walk(funzione):
+                if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name)
+                        and nodo.func.id == "git" and nodo.args):
+                    continue
+                costanti = [a.value for a in nodo.args if isinstance(a, ast.Constant)]
+                if costanti[:1] in (["diff"], ["show"]) and "--" in costanti:
+                    fuori.append(f"{funzione.name}:{nodo.lineno}")
+
+        assert fuori == []
 
 
 class TestIlPerimetroSonoLeFunzioniToccate:
@@ -6602,8 +6769,8 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
             runner, "esegui", lambda cmd, cwd, timeout=0: girati.append(cmd[-1]) or (0, ""))
 
         def _git(*args):
-            assert args == ("diff", "--name-only", "origin/main...HEAD"), args
-            return "\n".join(toccati)
+            assert args == ("diff", "--name-status", "-M", "origin/main...HEAD"), args
+            return "\n".join(f"M\t{t}" for t in toccati)
 
         monkeypatch.setattr(runner, "git", _git)
         runner.gira_gate(set())
@@ -6625,6 +6792,22 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
 
     def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
         assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], [], []]
+
+    def test_un_file_spostato_fuori_dal_percorso_accende_il_gate(self, repo_di_prova):
+        """PBI-387, decisione 5: `--name-only` dà di un rename il solo percorso
+        nuovo, e un file uscito da `backend/app/` non accendeva il gate di
+        `backend/app/`. `file_toccati()` restituisce i due lati."""
+        vecchio = repo_di_prova.commit("feat: il modulo", {
+            "backend/app/m.py": TestUnModuloSpostatoSiLeggeComeSpostato.MODULO})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo_di_prova.sposta("backend/app/m.py", "altrove/m.py")
+        repo_di_prova.commit_dello_stage("refactor: il modulo fuori da backend/app")
+        gate = runner.Gate("app", ("pytest",), ".", ("backend/app/",))
+
+        toccati = runner.file_toccati("origin/main")
+
+        assert toccati == {"backend/app/m.py", "altrove/m.py"}
+        assert runner.acceso(gate, set(), toccati)
 
 
 class TestITestNonScrivonoNellaCartellaVeraDeiGiri:
