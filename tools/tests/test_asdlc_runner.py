@@ -5423,6 +5423,19 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         assert self._perimetro(repo_di_prova, sha) == [
             "backend/app/sotto/m.py::doppio (dal diff)"]
 
+    def test_un_git_mv_con_la_sola_riga_di_import_cambiata_lascia_il_perimetro_vuoto(
+            self, repo_di_prova):
+        """La forma di `PBI-383`: il modulo si sposta e cambia un import, una riga a
+        livello di modulo che nessuna funzione contiene."""
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit("refactor: il modulo in sotto/, con os.path", {
+            "backend/app/sotto/m.py": self.MODULO.replace("import os\n", "import os.path\n"),
+        })
+
+        assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {1}}
+        assert self._perimetro(repo_di_prova, sha) == []
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
