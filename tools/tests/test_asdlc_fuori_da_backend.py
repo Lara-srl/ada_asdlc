@@ -33,6 +33,10 @@ _spec = importlib.util.spec_from_file_location(
 runner = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = runner
 _spec.loader.exec_module(runner)
+# L'import non legge `asdlc.toml` (PBI-382): la configurazione è quella del
+# repository di questo file.
+runner.REPO = REPO
+runner.configura(runner.asdlc_config.carica(REPO))
 
 
 def test_gira_gate_esegue_cinque_comandi_e_il_quinto_e_la_suite_asdlc(monkeypatch):

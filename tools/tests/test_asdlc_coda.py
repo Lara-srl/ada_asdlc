@@ -32,6 +32,11 @@ _spec = importlib.util.spec_from_file_location("asdlc_coda", REPO / "tools" / "a
 coda = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = coda
 _spec.loader.exec_module(coda)
+# L'import non legge `asdlc.toml` (PBI-382): lo fa `main()` dalla cwd. Qui la
+# configurazione è quella del repository di questo file, e i test chiamano
+# `smista()`, cioè `main()` senza quel passo.
+coda.REPO = REPO
+coda.configura(coda.asdlc_config.carica(REPO))
 
 
 def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
@@ -731,7 +736,7 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(coda, "esegui", si_stacca)
     monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 0
     assert ["python3", "tools/asdlc_runner.py", "PBI-337"] in visti
@@ -754,7 +759,7 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     visti, esegui = mondo_registrato()
     monkeypatch.setattr(coda, "esegui", esegui)
 
-    uscita = coda.main(
+    uscita = coda.smista(
         ["--repo", str(repo), "--worktree", str(albero), "--dry-run"]
     )
 
@@ -818,7 +823,7 @@ def test_la_riga_di_attesa_dice_cosa_ce_sul_ramo(
     albero.mkdir()
     monkeypatch.setattr(coda, "esegui", mondo_con_pr_aperte(aperte))
 
-    assert coda.main(["--repo", str(repo), "--worktree", str(albero), "--dry-run"]) == 0
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero), "--dry-run"]) == 0
 
     assert capsys.readouterr().out.strip() == (
         f"attende: PBI-338 ha un ramo su origin e non è in main {coda_della_riga}")
@@ -852,8 +857,8 @@ def test_ogni_tick_lascia_una_riga_nel_log(tmp_path, monkeypatch):
     monkeypatch.setattr(coda, "esegui", esegui)
     argomenti = ["--repo", str(repo), "--worktree", str(albero), "--dry-run"]
 
-    coda.main(argomenti)
-    coda.main(argomenti)
+    coda.smista(argomenti)
+    coda.smista(argomenti)
 
     righe = (repo / "runs" / "coda.log").read_text(encoding="utf-8").splitlines()
     assert len(righe) == 2
@@ -879,7 +884,7 @@ def test_lavviso_delle_domande_esce_accanto_al_lancio(tmp_path, monkeypatch, cap
     _, esegui = mondo_registrato()
     monkeypatch.setattr(coda, "esegui", esegui)
 
-    coda.main(["--repo", str(repo), "--worktree", str(albero), "--dry-run"])
+    coda.smista(["--repo", str(repo), "--worktree", str(albero), "--dry-run"])
 
     stampato = capsys.readouterr().out
     assert "PBI-340" in stampato
@@ -908,7 +913,7 @@ def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
 
     monkeypatch.setattr(coda, "esegui", fetch_rotto)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
     log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
@@ -944,7 +949,7 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
 
     monkeypatch.setattr(coda, "esegui", python_che_non_ce)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
     log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
@@ -982,7 +987,7 @@ def test_un_runner_fermatosi_dopo_il_distacco_non_conta_come_lanciato(
     monkeypatch.setattr(coda, "esegui", esegui)
     monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
     log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
@@ -1000,7 +1005,7 @@ def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, caps
     repo = scrivi_coda(tmp_path, "- PBI-337\n")
     monkeypatch.setattr(coda, "esegui", nessun_comando)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(repo)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(repo)])
 
     assert uscita == 2
     assert "--worktree" in capsys.readouterr().out
