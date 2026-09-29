@@ -1519,8 +1519,8 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
         if linguaggio is None:
             continue
         aggiunti, tolti = nomi_dei_test(
-            git("show", "--format=", "--unified=0", "-M", sha, "--",
-                *lati_del_diff(voce)), linguaggio
+            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)),
+            linguaggio,
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -1554,7 +1554,7 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
-            diff = git("diff", "HEAD", "-M", "--unified=0", "--", *lati_del_diff(voce))
+            diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
         aggiunti, tolti = nomi_dei_test(diff, linguaggio)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     return nuovi
@@ -2044,18 +2044,21 @@ def si_puo_cancellare(testo: str) -> bool:
 RE_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 
-def diff_del_file(voce: VoceDiCommit, *dove: str) -> str:
+def diff_del_file(voce: VoceDiCommit, *dove: str, lati: list[str] | None = None) -> str:
     """Il diff `--unified=0` di una voce, su `dove` — `("diff", "base...sha")`,
-    `("show", "--format=", sha)`.
+    `("show", "--format=", sha)`, `("diff", "HEAD")`. È l'unico posto del runner
+    che chiede a git il diff di un file (PBI-387).
 
     Un rename si chiede nominando **tutti e due** i lati: con il solo percorso
     nuovo git non applica il rename detection, e il file risulta aggiunto per
-    intero (difetto 61 di PBI-102). `-M` è scritto e non lasciato a
-    `diff.renames`, come in `file_del_commit`.
+    intero (difetti 31 e 61 di PBI-102). `-M` è scritto e non lasciato a
+    `diff.renames`, come in `file_del_commit`. `lati` sostituisce i due lati
+    quando la regola è un'altra: per i test la dà `lati_del_diff`.
     """
-    lati = [voce.percorso]
-    if voce.vecchio:
-        lati.insert(0, voce.vecchio)
+    if lati is None:
+        lati = [voce.percorso]
+        if voce.vecchio:
+            lati.insert(0, voce.vecchio)
     return git(*dove, "--unified=0", "-M", "--", *lati)
 
 
