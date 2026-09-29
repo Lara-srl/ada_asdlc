@@ -1803,28 +1803,25 @@ def comandi_dei_test(albero: Path,
     return comandi, orfani
 
 
-def leggi_esito(uscita: str) -> str:
-    """`rosso` | `verde` | `saltato` | `nessuno`, dai conteggi che pytest scrive
-    come «N passed», «N failed», «N skipped». Solo pytest: per vitest lo schermo
-    non si legge, e i totali del comando non decidono per un test (PBI-376,
-    decisione 2).
+def leggi_esito(rapporto: Path | None) -> str:
+    """L'esito di pytest per le chiavi che nel `--junitxml` non hanno un caso loro:
+    `rosso` quando pytest non ha raccolto un modulo, `nessuno` in ogni altro caso.
 
-    Un **errore** conta come rosso: il caso più comune di test-first in Python è un
-    `from app.x import y` che a quel commit non esiste ancora, e leggerlo come «non
-    ha girato» fermerebbe proprio il ciclo fatto bene.
+    L'errore di raccolta è il caso col `classname` vuoto e un `<error>` (PBI-390,
+    decisione 5): il caso più comune di test-first in Python è un `from app.x
+    import y` che a quel commit non esiste ancora, e leggerlo come «non ha
+    girato» fermerebbe proprio il ciclo fatto bene. I totali del comando non
+    decidono per un test, come per vitest (PBI-376, decisione 2).
 
-    Non si guarda l'exit code: `pytest` torna 0 anche con tutto saltato, e `vitest`
-    torna 1 sia per un test rosso sia per un file che non ha trovato.
+    Non si guarda l'exit code: `pytest` torna 0 anche con tutto saltato.
     """
-    conti = Counter()
-    for numero, voce in re.findall(r"(\d+) (passed|failed|skipped|error)", uscita):
-        conti[voce] += int(numero)
-    if conti["failed"] or conti["error"]:
-        return "rosso"
-    if conti["passed"]:
-        return "verde"
-    if conti["skipped"]:
-        return "saltato"
+    try:
+        radice = ET.parse(rapporto).getroot()
+    except (TypeError, OSError, ET.ParseError):
+        return "nessuno"
+    for caso in radice.iter("testcase"):
+        if not caso.get("classname") and caso.find("error") is not None:
+            return "rosso"
     return "nessuno"
 
 
@@ -1952,7 +1949,8 @@ def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
     È il gemello frontend dell'errore di raccolta: un `import FoglioPage from
     './FoglioPage'` che a quel commit non esiste ancora fa fallire il file **prima**
     dei test, e allora non c'è nessun `assertionResult` da leggere. In Python quel
-    caso è un rosso perché `pytest` scrive `1 error` e `leggi_esito` lo conta; col
+    caso è un rosso perché il JUnit di pytest ha il caso dell'errore di raccolta e
+    `leggi_esito` lo legge; col
     `--reporter=json` di vitest i conteggi non sono a schermo, e senza questa lettura
     lo stesso identico ciclo TDD risulta `nessuno` e ferma il gate.
 
@@ -1984,12 +1982,13 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     """Gira il comando e torna l'esito di **ogni** test che gli era stato chiesto.
 
     Un errore di **raccolta** — il `from app.x import y` che a quel commit non
-    esiste ancora, cioè il rosso più comune del test-first — non stampa nessuna riga
-    per test: lì vale l'esito del comando intero, che è la sola cosa che si sa. In
-    vitest quell'esito viene dal json e non dallo schermo, e non sono i totali:
-    il comando mette in OR i test chiesti di un file (`-t "A|B"`), e i totali di
-    tutto il comando darebbero a `B` senza una voce sua l'esito di `A`. Resta il
-    solo file che non si carica (`esito_dei_file_di_vitest`, PBI-376, decisione 2).
+    esiste ancora, cioè il rosso più comune del test-first — non scrive un caso
+    per test: lì vale l'esito del comando intero, che è la sola cosa che si sa.
+    Quell'esito viene dal rapporto e non dallo schermo, e non sono i totali:
+    i totali di tutto il comando darebbero a `B` senza una voce sua l'esito di
+    `A`. Resta il solo modulo che pytest non raccoglie (`leggi_esito`, PBI-390,
+    decisione 5) e il solo file che vitest non carica (`esito_dei_file_di_vitest`,
+    PBI-376, decisione 2).
     """
     if c.rapporto is not None:
         # Il percorso del rapporto resta fra una misura e l'altra (in `apri` è
@@ -2011,7 +2010,7 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         codice, uscita = 0, "i test non terminano a quel commit"
     letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
              else esiti_di_vitest(c.rapporto))
-    complessivo = (leggi_esito(uscita) if c.linguaggio == "python"
+    complessivo = (leggi_esito(c.rapporto) if c.linguaggio == "python"
                    else esito_dei_file_di_vitest(c.rapporto))
     if complessivo == "nessuno" and codice not in CODICI_DEL_TEST[c.linguaggio]:
         raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
