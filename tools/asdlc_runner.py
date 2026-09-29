@@ -1773,15 +1773,14 @@ def comandi_dei_test(albero: Path,
             per_vitest.setdefault((cartella, relativo), []).append(t.nome)
             origine[t.nome] = t
 
-    # L'esito per test viene dal `--junitxml`, in un file accanto al worktree come
-    # il json di vitest (PBI-390, decisione 1): le righe di `-v` si leggevano con
-    # una regex che un parametro con uno spazio non combaciava. `--tb=no` perché il
-    # traceback qui non serve — la coda che finisce nel rapporto è la stessa per
-    # tutti. `-rf` scrive in fondo, per ogni test fallito, l'eccezione che l'ha
-    # fatto fallire: è ciò che separa un'asserzione mancata da un `NameError` del
-    # codice mutato. E `-vv` e non `-v`, perché con `-v` pytest taglia quel
-    # messaggio alla larghezza del terminale, e con un node id lungo lo toglie del
-    # tutto.
+    # L'esito per test e il tipo di ogni fallimento vengono dal `--junitxml`, in un
+    # file accanto al worktree come il json di vitest (PBI-390, decisione 1): le
+    # righe di `-vv` e il riepilogo di `-rf` si leggevano con regex che un
+    # parametro con uno spazio non combaciava. `-vv` e `-rf` restano per chi legge
+    # la coda nel rapporto del giro, e non si leggono più: `-rf` scrive in fondo,
+    # per ogni test fallito, l'eccezione che l'ha fatto fallire, e `-vv` non taglia
+    # quel messaggio alla larghezza del terminale. `--tb=no` perché il traceback qui
+    # non serve — la coda che finisce nel rapporto è la stessa per tutti.
     comandi: list[ComandoDiProva] = []
     for numero, (cartella, nodi) in enumerate(per_pytest.items()):
         rapporto = albero.parent / f"pytest-{numero}.xml"
@@ -1872,14 +1871,6 @@ CODICI_DEL_TEST = {"python": {0, 1, 2, 5}, "vitest": {0, 1}}
 # in cui mordeva ce l'ha avuto, ed è tutto ciò che il gate chiede.
 ORDINE_ESITI = ("nessuno", "saltato", "verde", "rosso")
 
-# `pytest -v` scrive una riga per test: `file::Classe::test PASSED  [ 33%]`.
-RE_ESITO_PYTEST = re.compile(
-    r"^(\S+::\S+) (PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.MULTILINE)
-# `file::test[caso]` → `file::test`: l'id che il gate ha chiesto è quello della
-# funzione, e un test parametrizzato ne stampa uno per caso.
-RE_PARAMETRO = re.compile(r"\[.*\]$")
-# `pytest -rf` riepiloga ogni fallito come `FAILED file::test - messaggio`.
-RE_RIEPILOGO_PYTEST = re.compile(r"^FAILED (\S+::\S+) - (.*)$", re.MULTILINE)
 # Un'asserzione del test: l'`assert` che pytest riscrive, e il `Failed` di
 # `pytest.fail` e di `pytest.raises` che non vede l'eccezione attesa.
 TIPI_DI_ASSERZIONE = {"AssertionError", "Failed"}
@@ -2282,11 +2273,11 @@ def falliti_per_asserzione(c: ComandoDiProva) -> set[str]:
     vale come rosso di tutto il comando, perché il `from app.x import y` che non
     esiste ancora è il rosso più comune del test-first. Qui vale il contrario. Un
     mutante che rompe la sintassi fa fallire *tutto* — l'errore di raccolta di
-    pytest, il file che vitest non carica — e nessuna riga per test lo dice: non è
+    pytest, il file che vitest non carica — e nessun caso per test lo dice: non è
     il test che ha morso, è il file che non c'è più. Contare quelli farebbe
     passare ogni guardia, perché cancellare una riga a caso rompe la sintassi una
-    volta su tre. E l'`ERROR` per test — la fixture che esplode — sta dalla stessa
-    parte: il test non è arrivato all'asserzione.
+    volta su tre. E l'`<error>` per test — la fixture che esplode — sta dalla
+    stessa parte: il test non è arrivato all'asserzione.
 
     Né ci arriva il `FAILED` per un'eccezione del codice — un `NameError` perché la
     riga cancellata definiva un nome: è un guasto di esistenza, e lo uccide anche
