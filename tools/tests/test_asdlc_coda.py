@@ -1202,3 +1202,21 @@ def test_guardia_il_dry_run_lanciato_dal_checkout_decide_come_col_repo_esplicito
     assert decisa_dalla_cwd == decisa_col_repo
     assert decisa_dalla_cwd.strip()
     assert set(cartelle) == {REPO}
+
+
+def test_guardia_il_dry_run_dal_checkout_scrive_il_log_nel_temporaneo(tmp_path, monkeypatch, capsys):
+    """Decisione 6 di PBI-382: il tick chiamato sul checkout vero lascia il
+    `runs/coda.log` vero com'era, e la sua riga sta nella cartella temporanea
+    di `log_dir_temporanea` — la classe del difetto 38 è un test che sporca il
+    registro vero."""
+    _, albero = tick_dal_checkout(tmp_path, monkeypatch)
+    vero = REPO / "runs" / "coda.log"
+    prima = vero.read_bytes() if vero.is_file() else None
+
+    coda.main(["--worktree", str(albero), "--dry-run"])
+    decisa = capsys.readouterr().out.strip()
+
+    assert (vero.read_bytes() if vero.is_file() else None) == prima
+    assert not coda.LOG.is_relative_to(REPO), coda.LOG
+    righe = coda.LOG.read_text(encoding="utf-8").splitlines()
+    assert [r.split("  ", 1)[1] for r in righe] == [decisa]
