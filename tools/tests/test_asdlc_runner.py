@@ -6277,7 +6277,7 @@ class TestIlMorsoEUnFallimentoPerAsserzione:
         rapporto.write_text(json.dumps({"testResults": [
             {"status": "failed", "assertionResults": []}]}))
 
-        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == set()
+        assert runner.falliti_per_asserzione(self._comando(rapporto)) == set()
 
     def test_lasserzione_fallita_e_un_morso(self, tmp_path):
         rapporto = tmp_path / "vitest.json"
@@ -6285,18 +6285,21 @@ class TestIlMorsoEUnFallimentoPerAsserzione:
             {"title": "morde", "status": "failed"},
             {"title": "non morde", "status": "passed"}]}]}))
 
-        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == {"morde"}
+        assert runner.falliti_per_asserzione(self._comando(rapporto)) == {"morde"}
 
-    def test_in_pytest_conta_il_failed_e_non_lerror(self):
+    def test_in_pytest_conta_il_failed_e_non_lerror(self, tmp_path):
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.test_x", "test_a", '<failure message="assert 1 == 2"/>'),
+            ("tests.test_x", "test_b", '<error message="failed on setup with ..."/>'),
+            ("tests.test_x", "test_c", ""),
+        ), encoding="utf-8")
+        chiavi = ["tests/test_x.py::test_a", "tests/test_x.py::test_b",
+                  "tests/test_x.py::test_c"]
         comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python",
-                                        {"tests/test_x.py::test_a": "tests/test_x.py::test_a"})
-        uscita = ("tests/test_x.py::test_a FAILED\n"
-                  "tests/test_x.py::test_b ERROR\n"
-                  "tests/test_x.py::test_c PASSED\n"
-                  "=== short test summary info ===\n"
-                  "FAILED tests/test_x.py::test_a - assert 1 == 2\n")
+                                        {chiave: chiave for chiave in chiavi}, rapporto)
 
-        assert runner.falliti_per_asserzione(comando, uscita) == {"tests/test_x.py::test_a"}
+        assert runner.falliti_per_asserzione(comando) == {"tests/test_x.py::test_a"}
 
 
 class TestUnEccezioneDelCodiceMutatoNonEUnMorso:
@@ -6346,6 +6349,55 @@ class TestUnEccezioneDelCodiceMutatoNonEUnMorso:
         assert "backend/app/fermata.py:4" in morsi[0]["mutante"], (
             f"ucciso da un'eccezione e non da un'asserzione: {morsi[0]['mutante']}"
         )
+
+
+class TestIlMorsoSiLeggeDalJUnit:
+    """PBI-390: il tipo del fallimento viene dal `message` del `<failure>` nel
+    rapporto JUnit, dentro il caso del suo test, e non dal riepilogo di `-rf`.
+
+    La regex su quel riepilogo cercava l'id con `\\S+::\\S+`: il caso di un test
+    parametrico con uno spazio nell'id non combaciava, e un mutante che lo
+    faceva fallire per asserzione restava «sopravvissuto». È quello che ha
+    fermato il giro 1 di `PBI-388` (`878f1be`).
+    """
+
+    def test_un_mutante_che_fa_fallire_un_caso_con_uno_spazio_nellid_e_ucciso(
+        self, repo_di_prova
+    ):
+        """Criterio 2. Cancellato il `return`, la funzione torna `None` e i due
+        casi della guardia falliscono per asserzione."""
+        repo_di_prova.commit("feat: la fermata", {
+            "backend/app/fermata.py":
+                "def fermata(riga):\n    return riga.startswith('STOP:')\n",
+        })
+        repo_di_prova.commit("test: la guardia della fermata", {
+            "backend/tests/test_fermata.py":
+                "import pytest\n\nfrom app.fermata import fermata\n\n\n"
+                "@pytest.mark.parametrize('riga', ['STOP: una fermata', 'STOP: due'])\n"
+                "def test_la_guardia(riga):\n    assert fermata(riga) is True\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [p["esito"] for p in morsi[0]["prove"]][-1] == "ucciso per asserzione"
+        assert morsi[0]["tipo"] == "AssertionError"
+
+    def test_un_rapporto_di_pytest_che_manca_sotto_il_mutante_e_un_guasto_del_gate(
+        self, monkeypatch, tmp_path
+    ):
+        """Decisione 5 dentro `morde()`: rigirato contro un mutante, un pytest
+        che non scrive il rapporto non ha detto niente sul test. Leggerlo dallo
+        schermo darebbe un morso che il gate non ha visto."""
+        rapporto = tmp_path / "pytest-0.xml"
+        comando = runner.ComandoDiProva(tmp_path, ["pytest"], "python",
+                                        {"tests/t.py::test_x": "tests/t.py::test_x"}, rapporto)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (
+            1, "FAILED tests/t.py::test_x - AssertionError: no\n"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.morde(comando, "tests/t.py::test_x")
+
+        assert str(rapporto) in str(guasto.value)
 
 
 class TestLaRigaCheDecideSiCancellaConPass:
@@ -6518,22 +6570,27 @@ class TestIlGateCorrettoNonRegredisce:
     funzione giri.
     """
 
-    RIEPILOGO = ("tests/test_x.py::test_assert FAILED\n"
-                 "tests/test_x.py::test_messaggio FAILED\n"
-                 "tests/test_x.py::test_raises FAILED\n"
-                 "tests/test_x.py::test_nome FAILED\n"
-                 "=== short test summary info ===\n"
-                 "FAILED tests/test_x.py::test_assert - assert 1 == 2\n"
-                 "FAILED tests/test_x.py::test_messaggio - AssertionError: il totale: 3\n"
-                 "FAILED tests/test_x.py::test_raises - Failed: DID NOT RAISE ValueError\n"
-                 "FAILED tests/test_x.py::test_nome - NameError: name 'righe' is not defined\n")
+    RIEPILOGO = junit_finto(
+        ("tests.test_x", "test_assert", '<failure message="assert 1 == 2"/>'),
+        ("tests.test_x", "test_messaggio",
+         '<failure message="AssertionError: il totale: 3"/>'),
+        ("tests.test_x", "test_raises",
+         '<failure message="Failed: DID NOT RAISE ValueError"/>'),
+        ("tests.test_x", "test_nome",
+         '<failure message="NameError: name \'righe\' is not defined"/>'),
+    )
 
-    def test_un_fallimento_per_asserzione_resta_un_kill(self):
+    def test_un_fallimento_per_asserzione_resta_un_kill(self, tmp_path):
         """L'`assert` riscritto da pytest, l'`AssertionError` col suo messaggio e il
         `Failed` di `pytest.raises` sono asserzioni del test; il `NameError` no."""
-        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python", {})
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(self.RIEPILOGO, encoding="utf-8")
+        chiavi = [f"tests/test_x.py::{nome}"
+                  for nome in ("test_assert", "test_messaggio", "test_raises", "test_nome")]
+        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python",
+                                        {chiave: chiave for chiave in chiavi}, rapporto)
 
-        assert runner.falliti_per_asserzione(comando, self.RIEPILOGO) == {
+        assert runner.falliti_per_asserzione(comando) == {
             "tests/test_x.py::test_assert",
             "tests/test_x.py::test_messaggio",
             "tests/test_x.py::test_raises",
