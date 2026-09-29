@@ -8633,3 +8633,62 @@ class TestUnPushCheScadeENonPubblicato:
         assert esito.nota.endswith(runner.NON_PUBBLICATO), esito.nota
         assert "timeout" not in esito.nota, esito.nota
         assert "dopo la chiusura" not in esito.nota
+
+
+# Un runner finto: scrive gli argomenti con cui è stato lanciato accanto a sé, ed
+# esce con 1. Il segno dice quale delle due forme la guardia ha lanciato, l'uscita
+# che il suo verdetto arriva intatto a chi l'ha chiamata.
+RUNNER_FINTO = ("import sys\nfrom pathlib import Path\n\n"
+                "Path(__file__).with_name('lanciato').write_text(' '.join(sys.argv[1:]))\n"
+                "sys.exit(1)\n")
+
+
+class TestLeGuardieTrovanoIlRunnerSpostato:
+    """PBI-388: le due guardie del lucchetto lanciano il runner per percorso, e
+    `PBI-383` quel percorso lo sposta in `tools/asdlc/runner.py`.
+
+    `python3` su un file che non c'è esce con 2, che per Claude Code è il blocco:
+    dopo lo spostamento `fase-tdd.sh` fermerebbe ogni scrittura della sessione, e
+    il `pre-commit` — che sta in `.git/hooks`, condiviso da tutti i worktree —
+    ogni commit di ogni checkout. Le guardie cercano la forma nuova, poi la vecchia.
+    """
+
+    SCRIPT = REPO / ".claude" / "hooks" / "fase-tdd.sh"
+
+    @staticmethod
+    def _albero_con_lo_script(radice: Path) -> Path:
+        script = radice / ".claude" / "hooks" / "fase-tdd.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text(TestLeGuardieTrovanoIlRunnerSpostato.SCRIPT.read_text())
+        script.chmod(0o755)
+        return script
+
+    @staticmethod
+    def _runner_finto(radice: Path, percorso: str) -> Path:
+        runner_finto = radice / percorso
+        runner_finto.parent.mkdir(parents=True, exist_ok=True)
+        runner_finto.write_text(RUNNER_FINTO, encoding="utf-8")
+        return runner_finto.with_name("lanciato")
+
+    def test_fase_tdd_lancia_il_runner_in_tools_asdlc(self, tmp_path):
+        script = self._albero_con_lo_script(tmp_path)
+        segno = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path)
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-fase"
+        assert esito.returncode == 1
+
+    def test_il_pre_commit_lancia_il_runner_in_tools_asdlc(self, repo_di_prova):
+        radice = repo_di_prova.radice
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+        segno = self._runner_finto(radice, "tools/asdlc/runner.py")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-commit"
+        assert esito.returncode == 1
