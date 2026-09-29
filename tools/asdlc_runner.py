@@ -1648,6 +1648,19 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
     return trovati[0] if len(trovati) == 1 else None
 
 
+def caso_junit(chiave: str) -> tuple[str, str]:
+    """`(classname, name)` con cui pytest scrive nel `--junitxml` il test di node
+    id `chiave`, senza parametro nel `name` (PBI-390, decisione 2).
+
+    È la trasformazione di pytest scritta qui, e non importata da
+    `_pytest.junitxml`, che è privato: il percorso con i `/` diventati punti e
+    senza `.py`, e le classi unite da punti dietro, fanno il `classname`.
+    """
+    percorso, *classi, nome = chiave.split("::")
+    modulo = re.sub(r"\.py$", "", percorso.replace("/", "."))
+    return ".".join([modulo, *classi]), nome
+
+
 def dove_gira(percorso: str) -> tuple[str, str]:
     """La cartella da cui si lancia il test, e il suo percorso da lì.
 
