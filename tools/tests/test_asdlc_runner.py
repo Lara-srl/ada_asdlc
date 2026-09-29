@@ -30,6 +30,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
+from xml.sax.saxutils import quoteattr
 from datetime import datetime
 from pathlib import Path
 
@@ -3342,6 +3343,16 @@ def sorgente_che_lascia_un_segno(marcatore: Path, corpo: str) -> str:
     )
 
 
+def junit_finto(*casi: tuple[str, str, str]) -> str:
+    """Un rapporto `--junitxml` nella forma che scrive pytest 9 (PBI-390): un
+    `testcase` per `(classname, name, figlio)`, con `figlio` il tag del suo esito
+    — `<failure …/>`, `<error …/>`, `<skipped …/>` — o vuoto per un test verde."""
+    righe = "".join(f"<testcase classname={quoteattr(classe)} name={quoteattr(nome)} "
+                    f'time="0.001">{figlio}</testcase>' for classe, nome, figlio in casi)
+    return ('<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">'
+            f'<testsuite name="pytest">{righe}</testsuite></testsuites>')
+
+
 TRE_TEST = ("def test_uno():\n    assert True\n\n\n"
             "def test_due():\n    assert True\n\n\n"
             "def test_tre():\n    assert True\n")
@@ -3894,28 +3905,61 @@ class TestLEsitoSiLeggePerTest:
     coprire gli undici nati verdi accanto.
     """
 
-    def test_pytest_lo_dice_riga_per_riga(self):
-        uscita = (
-            "tests/test_conti.py::test_la_somma_fa_due PASSED                  [ 33%]\n"
-            "tests/test_conti.py::TestIlGolden::test_coincide SKIPPED (il foglio) [ 66%]\n"
-            "tests/test_conti.py::test_la_differenza_fa_zero FAILED            [100%]\n"
-            "\n1 failed, 1 passed, 1 skipped in 0.12s\n"
-        )
+    def test_pytest_lo_dice_caso_per_caso_nel_suo_junit(self, tmp_path):
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.test_conti", "test_la_somma_fa_due", ""),
+            ("tests.test_conti.TestIlGolden", "test_coincide",
+             '<skipped type="pytest.skip" message="il foglio"/>'),
+            ("tests.test_conti", "test_la_differenza_fa_zero",
+             '<failure message="assert 0 == 1"/>'),
+        ), encoding="utf-8")
+        chiavi = ["tests/test_conti.py::test_la_somma_fa_due",
+                  "tests/test_conti.py::TestIlGolden::test_coincide",
+                  "tests/test_conti.py::test_la_differenza_fa_zero"]
 
-        assert runner.esiti_di_pytest(uscita) == {
+        assert runner.esiti_di_pytest(rapporto, chiavi) == {
             "tests/test_conti.py::test_la_somma_fa_due": "verde",
             "tests/test_conti.py::TestIlGolden::test_coincide": "saltato",
             "tests/test_conti.py::test_la_differenza_fa_zero": "rosso",
         }
 
-    def test_un_test_parametrizzato_torna_sotto_il_nome_della_funzione(self):
-        """`pytest -v` stampa una riga per caso — `test_x[1]`, `test_x[2]` — mentre
+    def test_un_test_parametrizzato_torna_sotto_il_nome_della_funzione(self, tmp_path):
+        """pytest scrive un caso per parametro — `test_x[1]`, `test_x[2]` — mentre
         l'id che il gate ha chiesto è quello della funzione. Un caso rosso basta:
         quel test un momento in cui mordeva ce l'ha avuto."""
-        uscita = ("tests/t.py::test_lo_scarto[1] PASSED   [ 50%]\n"
-                  "tests/t.py::test_lo_scarto[2] FAILED   [100%]\n")
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.t", "test_lo_scarto[1]", ""),
+            ("tests.t", "test_lo_scarto[2]", '<failure message="assert 1 == 2"/>'),
+        ), encoding="utf-8")
 
-        assert runner.esiti_di_pytest(uscita) == {"tests/t.py::test_lo_scarto": "rosso"}
+        assert runner.esiti_di_pytest(rapporto, ["tests/t.py::test_lo_scarto"]) == {
+            "tests/t.py::test_lo_scarto": "rosso"}
+
+    def test_un_test_nato_verde_con_uno_spazio_nellid_resta_verde_accanto_a_un_rosso(
+            self, tmp_path):
+        """PBI-390, criterio 1 — il difetto 65 di `PBI-102`. Il parametro con
+        uno spazio non combaciava con la regex sulle righe di `-vv`, e il test
+        prendeva l'esito dei totali del comando: `1 failed` del vicino rosso lo
+        faceva rosso, e un nato verde passava per un rosso osservato. Qui gira
+        un pytest vero, nello stesso comando dei due test."""
+        albero = tmp_path / "albero"
+        (albero / "backend" / "tests").mkdir(parents=True)
+        (albero / "backend" / "tests" / "test_spazi.py").write_text(
+            "import pytest\n\n\n"
+            "@pytest.mark.parametrize('voce', ['una riga', 'due righe'])\n"
+            "def test_nato_verde(voce):\n    assert voce\n\n\n"
+            "def test_rosso():\n    assert 1 == 2\n",
+            encoding="utf-8")
+        nuovi = [runner.TestNuovo("backend/tests/test_spazi.py", nome, "python")
+                 for nome in ("test_nato_verde", "test_rosso")]
+        [comando], _ = runner.comandi_dei_test(albero, nuovi)
+
+        esiti, _ = runner.esiti_del_comando(comando)
+
+        assert esiti == {"tests/test_spazi.py::test_nato_verde": "verde",
+                         "tests/test_spazi.py::test_rosso": "rosso"}
 
     def test_vitest_lo_dice_nel_suo_json(self, tmp_path):
         """`--reporter=json`: l'unica forma in cui vitest dà l'esito per test senza
