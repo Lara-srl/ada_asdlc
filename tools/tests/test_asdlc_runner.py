@@ -8759,3 +8759,24 @@ class TestGliHookDelRunnerSiRiscrivono:
 
         assert runner.installa_il_ritorno_in_test_only() is True
         assert hook.read_text() == runner.RITORNO_IN_TEST_ONLY
+
+    def test_guardia_un_hook_altrui_non_si_riscrive(self, repo_di_prova):
+        """PBI-388, quarto criterio: un hook senza il marcatore sotto lo shebang
+        non è del runner, e resta com'è anche se il testo è diverso."""
+        altrui = "#!/bin/sh\n# il formattatore di qualcun altro\nexec npx lint-staged\n"
+        hook = self._hook(repo_di_prova)
+        hook.write_text(altrui, encoding="utf-8")
+
+        assert runner.installa_la_guardia_del_commit() is False
+        assert hook.read_text() == altrui
+
+    def test_guardia_il_marcatore_lontano_dallo_shebang_non_fa_un_hook_del_runner(
+            self, repo_di_prova):
+        """PBI-388, quarto criterio: il marcatore conta solo sulla riga che segue
+        lo shebang. Un hook altrui che lo porta più in basso resta com'è."""
+        altrui = f"#!/bin/sh\n# di qualcun altro\n{self.MARCATORE} copiato\nexit 0\n"
+        hook = self._hook(repo_di_prova)
+        hook.write_text(altrui, encoding="utf-8")
+
+        assert runner.installa_la_guardia_del_commit() is False
+        assert hook.read_text() == altrui
