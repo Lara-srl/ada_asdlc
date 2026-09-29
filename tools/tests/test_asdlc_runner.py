@@ -28,7 +28,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
+from xml.sax.saxutils import quoteattr
 from datetime import datetime
 from pathlib import Path
 
@@ -3341,6 +3343,16 @@ def sorgente_che_lascia_un_segno(marcatore: Path, corpo: str) -> str:
     )
 
 
+def junit_finto(*casi: tuple[str, str, str]) -> str:
+    """Un rapporto `--junitxml` nella forma che scrive pytest 9 (PBI-390): un
+    `testcase` per `(classname, name, figlio)`, con `figlio` il tag del suo esito
+    — `<failure …/>`, `<error …/>`, `<skipped …/>` — o vuoto per un test verde."""
+    righe = "".join(f"<testcase classname={quoteattr(classe)} name={quoteattr(nome)} "
+                    f'time="0.001">{figlio}</testcase>' for classe, nome, figlio in casi)
+    return ('<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests">'
+            f'<testsuite name="pytest">{righe}</testsuite></testsuites>')
+
+
 TRE_TEST = ("def test_uno():\n    assert True\n\n\n"
             "def test_due():\n    assert True\n\n\n"
             "def test_tre():\n    assert True\n")
@@ -3893,28 +3905,61 @@ class TestLEsitoSiLeggePerTest:
     coprire gli undici nati verdi accanto.
     """
 
-    def test_pytest_lo_dice_riga_per_riga(self):
-        uscita = (
-            "tests/test_conti.py::test_la_somma_fa_due PASSED                  [ 33%]\n"
-            "tests/test_conti.py::TestIlGolden::test_coincide SKIPPED (il foglio) [ 66%]\n"
-            "tests/test_conti.py::test_la_differenza_fa_zero FAILED            [100%]\n"
-            "\n1 failed, 1 passed, 1 skipped in 0.12s\n"
-        )
+    def test_pytest_lo_dice_caso_per_caso_nel_suo_junit(self, tmp_path):
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.test_conti", "test_la_somma_fa_due", ""),
+            ("tests.test_conti.TestIlGolden", "test_coincide",
+             '<skipped type="pytest.skip" message="il foglio"/>'),
+            ("tests.test_conti", "test_la_differenza_fa_zero",
+             '<failure message="assert 0 == 1"/>'),
+        ), encoding="utf-8")
+        chiavi = ["tests/test_conti.py::test_la_somma_fa_due",
+                  "tests/test_conti.py::TestIlGolden::test_coincide",
+                  "tests/test_conti.py::test_la_differenza_fa_zero"]
 
-        assert runner.esiti_di_pytest(uscita) == {
+        assert runner.esiti_di_pytest(rapporto, chiavi) == {
             "tests/test_conti.py::test_la_somma_fa_due": "verde",
             "tests/test_conti.py::TestIlGolden::test_coincide": "saltato",
             "tests/test_conti.py::test_la_differenza_fa_zero": "rosso",
         }
 
-    def test_un_test_parametrizzato_torna_sotto_il_nome_della_funzione(self):
-        """`pytest -v` stampa una riga per caso — `test_x[1]`, `test_x[2]` — mentre
+    def test_un_test_parametrizzato_torna_sotto_il_nome_della_funzione(self, tmp_path):
+        """pytest scrive un caso per parametro — `test_x[1]`, `test_x[2]` — mentre
         l'id che il gate ha chiesto è quello della funzione. Un caso rosso basta:
         quel test un momento in cui mordeva ce l'ha avuto."""
-        uscita = ("tests/t.py::test_lo_scarto[1] PASSED   [ 50%]\n"
-                  "tests/t.py::test_lo_scarto[2] FAILED   [100%]\n")
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.t", "test_lo_scarto[1]", ""),
+            ("tests.t", "test_lo_scarto[2]", '<failure message="assert 1 == 2"/>'),
+        ), encoding="utf-8")
 
-        assert runner.esiti_di_pytest(uscita) == {"tests/t.py::test_lo_scarto": "rosso"}
+        assert runner.esiti_di_pytest(rapporto, ["tests/t.py::test_lo_scarto"]) == {
+            "tests/t.py::test_lo_scarto": "rosso"}
+
+    def test_un_test_nato_verde_con_uno_spazio_nellid_resta_verde_accanto_a_un_rosso(
+            self, tmp_path):
+        """PBI-390, criterio 1 — il difetto 65 di `PBI-102`. Il parametro con
+        uno spazio non combaciava con la regex sulle righe di `-vv`, e il test
+        prendeva l'esito dei totali del comando: `1 failed` del vicino rosso lo
+        faceva rosso, e un nato verde passava per un rosso osservato. Qui gira
+        un pytest vero, nello stesso comando dei due test."""
+        albero = tmp_path / "albero"
+        (albero / "backend" / "tests").mkdir(parents=True)
+        (albero / "backend" / "tests" / "test_spazi.py").write_text(
+            "import pytest\n\n\n"
+            "@pytest.mark.parametrize('voce', ['una riga', 'due righe'])\n"
+            "def test_nato_verde(voce):\n    assert voce\n\n\n"
+            "def test_rosso():\n    assert 1 == 2\n",
+            encoding="utf-8")
+        nuovi = [runner.TestNuovo("backend/tests/test_spazi.py", nome, "python")
+                 for nome in ("test_nato_verde", "test_rosso")]
+        [comando], _ = runner.comandi_dei_test(albero, nuovi)
+
+        esiti, _ = runner.esiti_del_comando(comando)
+
+        assert esiti == {"tests/test_spazi.py::test_nato_verde": "verde",
+                         "tests/test_spazi.py::test_rosso": "rosso"}
 
     def test_vitest_lo_dice_nel_suo_json(self, tmp_path):
         """`--reporter=json`: l'unica forma in cui vitest dà l'esito per test senza
@@ -3941,6 +3986,102 @@ class TestLEsitoSiLeggePerTest:
         assert runner.esiti_di_vitest(tmp_path / "mai-scritto.json") == {}
 
 
+class TestIlCasoJUnitSiLegaAllaChiave:
+    """PBI-390, decisione 2: il gate chiede i test per node id, e pytest ne
+    scrive l'esito nel rapporto JUnit sotto un altro nome — il percorso a punti
+    e senza `.py` nel `classname`, con le classi dietro, e la funzione col suo
+    parametro nel `name`. Il legame si fa con la stessa trasformazione, e si
+    confronta con l'XML che pytest scrive davvero, non con uno scritto a mano."""
+
+    def test_la_chiave_e_il_caso_si_legano_come_li_scrive_pytest(self, tmp_path):
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_legame.py").write_text(
+            "import pytest\n\n\n"
+            "def test_di_modulo():\n    pass\n\n\n"
+            "class TestUnaClasse:\n"
+            "    def test_di_classe(self):\n        pass\n\n"
+            "    @pytest.mark.parametrize('p', ['a b', 'c'])\n"
+            "    def test_parametrico(self, p):\n        pass\n",
+            encoding="utf-8")
+        rapporto = tmp_path / "pytest.xml"
+        subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                        f"--junitxml={rapporto}", "tests/test_legame.py"],
+                       cwd=tmp_path, capture_output=True, check=True)
+        scritti = {(caso.get("classname"), caso.get("name").partition("[")[0])
+                   for caso in ET.parse(rapporto).getroot().iter("testcase")}
+        chiavi = ["tests/test_legame.py::test_di_modulo",
+                  "tests/test_legame.py::TestUnaClasse::test_di_classe",
+                  "tests/test_legame.py::TestUnaClasse::test_parametrico"]
+
+        assert {runner.caso_junit(chiave) for chiave in chiavi} == scritti
+
+
+class TestLoSchermoDiPytestNonDecide:
+    """PBI-390, criterio 7: nel runner non resta una regex sull'uscita a schermo
+    di pytest che decida un esito o un tipo. Le due che c'erano cercavano l'id
+    con `\\S+::\\S+`, e un parametro con uno spazio le faceva mancare in
+    silenzio. `-vv` e `-rf` restano nel comando per chi legge la coda, ma a
+    decidere è il rapporto JUnit."""
+
+    def test_nel_runner_non_ci_sono_le_regex_sullo_schermo_di_pytest(self):
+        sorgente = (REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8")
+
+        assert "RE_ESITO_PYTEST" not in sorgente
+        assert "RE_RIEPILOGO_PYTEST" not in sorgente
+
+
+class TestLeLettureDiPytestCheNonCambiano:
+    """PBI-390, criterio 8: le guardie dichiarate. Il rapporto JUnit prende il
+    posto dello schermo, e ciò che il gate leggeva bene dallo schermo lo deve
+    leggere uguale: un test rosso resta rosso, un `xfail` resta saltato, e il
+    pytest che scade decide come prima, senza rapporto e senza `GuastoDelGate`.
+    I primi due girano con un pytest vero."""
+
+    @staticmethod
+    def _esiti(tmp_path, sorgente, nome):
+        albero = tmp_path / "albero"
+        (albero / "backend" / "tests").mkdir(parents=True)
+        (albero / "backend" / "tests" / "test_guardia.py").write_text(sorgente,
+                                                                      encoding="utf-8")
+        [comando], _ = runner.comandi_dei_test(
+            albero, [runner.TestNuovo("backend/tests/test_guardia.py", nome, "python")])
+        esiti, _ = runner.esiti_del_comando(comando)
+        return esiti
+
+    def test_guardia_un_test_rosso_resta_rosso(self, tmp_path):
+        esiti = self._esiti(tmp_path, "def test_rosso():\n    assert 1 == 2\n", "test_rosso")
+
+        assert esiti == {"tests/test_guardia.py::test_rosso": "rosso"}
+
+    def test_guardia_un_xfail_resta_saltato(self, tmp_path):
+        esiti = self._esiti(tmp_path,
+                            "import pytest\n\n\n"
+                            "@pytest.mark.xfail\n"
+                            "def test_previsto():\n    assert 1 == 2\n", "test_previsto")
+
+        assert esiti == {"tests/test_guardia.py::test_previsto": "saltato"}
+
+    def test_guardia_il_pytest_che_scade_non_e_un_guasto_del_gate(self, monkeypatch, tmp_path):
+        """§Fuori scope di PBI-390, come di PBI-376: un pytest fermato dal tetto
+        non scrive il rapporto, e l'esito resta «i test non terminano a quel
+        commit». Lo strumento ha girato, quindi non è un guasto del gate."""
+        def scade(argv, cartella, timeout=0, **k):
+            raise subprocess.TimeoutExpired(argv, timeout)
+
+        monkeypatch.setattr(runner, "esegui", scade)
+        comando = runner.ComandoDiProva(
+            tmp_path, ["pytest", "tests/t.py::test_x"], "python",
+            {"tests/t.py::test_x": "tests/t.py::test_x"}, tmp_path / "pytest-0.xml")
+
+        try:
+            esiti, uscita = runner.esiti_del_comando(comando)
+        except runner.GuastoDelGate as guasto:
+            pytest.fail(f"il pytest che scade è diventato un guasto del gate: {guasto}")
+
+        assert esiti == {"tests/t.py::test_x": "nessuno"}
+        assert uscita == "i test non terminano a quel commit"
+
+
 class TestUnGateGuastoNonEUnCicloMancato:
     """`127` non è «nato verde».
 
@@ -3951,11 +4092,20 @@ class TestUnGateGuastoNonEUnCicloMancato:
     già costato una diagnosi sbagliata (difetto 11).
     """
 
-    def _comando(self, linguaggio="python"):
+    def _comando(self, linguaggio="python", rapporto=None):
         return runner.ComandoDiProva(
             Path("/tmp"), ["pytest", "--tb=no", "-v", "tests/t.py::test_x"],
-            linguaggio, {"tests/t.py::test_x": "tests/t.py::test_x"},
+            linguaggio, {"tests/t.py::test_x": "tests/t.py::test_x"}, rapporto,
         )
+
+    @staticmethod
+    def _pytest_che_scrive(rapporto, xml, codice, schermo=""):
+        """Un `esegui` che fa pytest: il `--junitxml` lo scrive **mentre gira**, e
+        non lo trova già scritto da prima (PBI-390, decisione 6)."""
+        def esegui(*a, **k):
+            rapporto.write_text(xml, encoding="utf-8")
+            return codice, schermo
+        return esegui
 
     def test_un_comando_che_non_parte_alza_invece_di_accusare(self, monkeypatch):
         monkeypatch.setattr(
@@ -3968,34 +4118,99 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert "pytest" in str(guasto.value)
 
-    def test_una_riga_di_comando_sbagliata_e_del_gate_non_del_builder(self, monkeypatch):
+    def test_una_riga_di_comando_sbagliata_e_del_gate_non_del_builder(
+            self, monkeypatch, tmp_path):
         """`4` è l'uso sbagliato di pytest: se l'id l'ha scritto il gate, l'errore è
-        del gate."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (4, "ERROR: not found"))
+        del gate. Il rapporto pytest lo scrive lo stesso, vuoto."""
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(), 4, "ERROR: not found"))
 
         with pytest.raises(runner.GuastoDelGate):
-            runner.esiti_del_comando(self._comando())
+            runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
-    def test_nessun_test_raccolto_resta_una_lettura_sui_test(self, monkeypatch):
+    def test_nessun_test_raccolto_resta_una_lettura_sui_test(self, monkeypatch, tmp_path):
         """`5` lo dice pytest **sui test**: lì il gate non indovina e lo scrive, che
         è un'altra cosa dal non aver potuto guardare."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (5, "no tests ran in 0.01s"))
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(), 5, "no tests ran in 0.01s"))
 
-        esiti, _ = runner.esiti_del_comando(self._comando())
+        esiti, _ = runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
         assert esiti == {"tests/t.py::test_x": "nessuno"}
 
-    def test_un_errore_di_raccolta_resta_un_rosso(self, monkeypatch):
-        """L'import che a quel commit non esiste ancora è il rosso più comune del
-        test-first: `2` è un codice di pytest, e il conteggio c'è."""
-        monkeypatch.setattr(
-            runner, "esegui",
-            lambda *a, **k: (2, "ERROR tests/t.py\n1 error in 0.02s"),
-        )
+    ERRORE_DI_RACCOLTA = ("", "tests.t", '<error message="collection failure"/>')
 
-        esiti, _ = runner.esiti_del_comando(self._comando())
+    def test_un_errore_di_raccolta_resta_un_rosso(self, monkeypatch, tmp_path):
+        """L'import che a quel commit non esiste ancora è il rosso più comune del
+        test-first: `2` è un codice di pytest, e nel JUnit c'è il caso senza
+        `classname` con il suo `<error>`."""
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(self.ERRORE_DI_RACCOLTA), 2))
+
+        esiti, _ = runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
         assert esiti == {"tests/t.py::test_x": "rosso"}
+
+    def test_l_errore_di_raccolta_nel_junit_e_rosso_per_ogni_chiave_del_comando(
+            self, monkeypatch, tmp_path):
+        """PBI-390, decisione 5 e criterio 6. L'errore di raccolta non ha un caso
+        per test: il JUnit scrive un caso solo, col `classname` vuoto e il modulo
+        nel `name`, e vale `rosso` per ogni chiave del comando che non ha un caso
+        suo, come valeva `1 error` a schermo. Lo schermo qui non dice niente: a
+        decidere è il rapporto."""
+        rapporto = tmp_path / "pytest-0.xml"
+        chiavi = ["tests/t.py::test_x", "tests/t.py::TestY::test_y"]
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(self.ERRORE_DI_RACCOLTA), 2))
+
+        esiti, _ = runner.esiti_del_comando(runner.ComandoDiProva(
+            Path("/tmp"), ["pytest", *chiavi], "python",
+            {chiave: chiave for chiave in chiavi}, rapporto))
+
+        assert esiti == {chiave: "rosso" for chiave in chiavi}
+
+    @pytest.mark.parametrize("contenuto", [None, "<testsuites><testsuite", ""],
+                             ids=["assente", "troncato", "vuoto"])
+    def test_un_rapporto_di_pytest_che_manca_o_non_si_legge_e_un_guasto_del_gate(
+            self, monkeypatch, tmp_path, contenuto):
+        """PBI-390, decisione 5 e criterio 5. Senza rapporto il gate non ha
+        guardato niente: leggerlo come «nessun test» accusa il Builder di un
+        rosso mancato, mentre a non funzionare è lo strumento. Il messaggio
+        nomina il percorso dove il rapporto era atteso. Il contenuto si scrive
+        mentre pytest gira, perché quello di prima si toglie."""
+        rapporto = tmp_path / "pytest-0.xml"
+        if contenuto is None:
+            monkeypatch.setattr(runner, "esegui",
+                                lambda *a, **k: (1, "1 failed, 1 passed in 0.10s"))
+        else:
+            monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+                rapporto, contenuto, 1, "1 failed, 1 passed in 0.10s"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando(rapporto=rapporto))
+
+        assert str(rapporto) in str(guasto.value)
+
+    def test_un_rapporto_di_pytest_rimasto_da_una_misura_prima_non_vale_per_questa(
+            self, monkeypatch, tmp_path):
+        """PBI-390, decisione 1 e criterio 5. Il rapporto sta in
+        `pytest-N.xml` accanto al worktree, un percorso che resta fra una misura
+        e l'altra. Se pytest esce senza scriverlo, il file lì è di un commit
+        misurato prima: letto, darebbe al test chiesto il suo esito vecchio, e
+        un `<failure>` vecchio aprirebbe `IMPL` con un rosso che nessuno ha
+        visto (ADR-0021). È un rapporto che manca."""
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.t", "test_x", '<failure message="assert 1 == 2"/>')), encoding="utf-8")
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, "1 failed in 0.10s"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.esiti_del_comando(self._comando(rapporto=rapporto))
+
+        assert str(rapporto) in str(guasto.value)
 
     def _comando_vitest(self, rapporto):
         relativo = "src/pages/FoglioPage.test.tsx"
@@ -4020,8 +4235,8 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         `FoglioPage.test.tsx` senza `FoglioPage.tsx` è il RED classico del
         test-first nel frontend, ed è il caso che in Python `leggi_esito` conta come
-        rosso leggendo `1 error`. Col `--reporter=json` quel conteggio a schermo non
-        c'è mai: il file non si carica, quindi non esiste nessun risultato per-test,
+        rosso leggendo l'errore di raccolta nel JUnit. Col `--reporter=json` non
+        c'è un caso così: il file non si carica, quindi non esiste nessun risultato per-test,
         e l'unica cosa scritta è il file `failed` con zero `assertionResults`.
         """
         rapporto = tmp_path / "vitest-0.json"
@@ -4170,21 +4385,27 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert "vitest scaduto dopo 1800 secondi" in str(guasto.value)
 
-    @pytest.mark.parametrize("schermo, atteso", [
-        ("1 failed, 2 passed in 0.10s", "rosso"),
-        ("ERROR tests/t.py\n1 error in 0.02s", "rosso"),
-        ("3 passed in 0.10s", "verde"),
-        ("2 skipped in 0.01s", "saltato"),
-        ("no tests ran in 0.01s", "nessuno"),
+    @pytest.mark.parametrize("casi, atteso", [
+        ([("tests.t", "test_x", '<failure message="assert 1 == 2"/>'),
+          ("tests.t", "test_y", ""), ("tests.t", "test_z", "")], "rosso"),
+        ([("", "tests.t", '<error message="collection failure"/>')], "rosso"),
+        ([("tests.t", "test_x", ""), ("tests.t", "test_y", ""),
+          ("tests.t", "test_z", "")], "verde"),
+        ([("tests.t", "test_x", '<skipped type="pytest.skip" message="dopo"/>'),
+          ("tests.t", "test_y", '<skipped type="pytest.skip" message="dopo"/>')],
+         "saltato"),
+        ([], "nessuno"),
     ], ids=["failed", "error", "passed", "skipped", "niente"])
-    def test_guardia_i_conteggi_di_pytest_si_leggono_ancora_dallo_schermo(
-            self, monkeypatch, schermo, atteso):
-        """Guardia dichiarata di PBI-376: pytest resta fuori scope, e i suoi
-        conteggi si leggono dalla riga di riepilogo come prima. Lo schermo non
-        ha righe per test, quindi decide l'esito del comando intero."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+    def test_guardia_gli_esiti_di_pytest_si_leggono_dal_rapporto_junit(
+            self, monkeypatch, tmp_path, casi, atteso):
+        """Guardia dichiarata di PBI-376, passata al JUnit da PBI-390 (decisione
+        6): gli stessi cinque esiti che prima si leggevano dalla riga di
+        riepilogo, ora scritti nel rapporto, danno a `test_x` lo stesso esito."""
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui",
+                            self._pytest_che_scrive(rapporto, junit_finto(*casi), 1))
 
-        esiti, _ = runner.esiti_del_comando(self._comando())
+        esiti, _ = runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
         assert esiti == {"tests/t.py::test_x": atteso}
 
@@ -6070,7 +6291,7 @@ class TestIlMorsoEUnFallimentoPerAsserzione:
         rapporto.write_text(json.dumps({"testResults": [
             {"status": "failed", "assertionResults": []}]}))
 
-        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == set()
+        assert runner.falliti_per_asserzione(self._comando(rapporto)) == set()
 
     def test_lasserzione_fallita_e_un_morso(self, tmp_path):
         rapporto = tmp_path / "vitest.json"
@@ -6078,18 +6299,21 @@ class TestIlMorsoEUnFallimentoPerAsserzione:
             {"title": "morde", "status": "failed"},
             {"title": "non morde", "status": "passed"}]}]}))
 
-        assert runner.falliti_per_asserzione(self._comando(rapporto), "") == {"morde"}
+        assert runner.falliti_per_asserzione(self._comando(rapporto)) == {"morde"}
 
-    def test_in_pytest_conta_il_failed_e_non_lerror(self):
+    def test_in_pytest_conta_il_failed_e_non_lerror(self, tmp_path):
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(junit_finto(
+            ("tests.test_x", "test_a", '<failure message="assert 1 == 2"/>'),
+            ("tests.test_x", "test_b", '<error message="failed on setup with ..."/>'),
+            ("tests.test_x", "test_c", ""),
+        ), encoding="utf-8")
+        chiavi = ["tests/test_x.py::test_a", "tests/test_x.py::test_b",
+                  "tests/test_x.py::test_c"]
         comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python",
-                                        {"tests/test_x.py::test_a": "tests/test_x.py::test_a"})
-        uscita = ("tests/test_x.py::test_a FAILED\n"
-                  "tests/test_x.py::test_b ERROR\n"
-                  "tests/test_x.py::test_c PASSED\n"
-                  "=== short test summary info ===\n"
-                  "FAILED tests/test_x.py::test_a - assert 1 == 2\n")
+                                        {chiave: chiave for chiave in chiavi}, rapporto)
 
-        assert runner.falliti_per_asserzione(comando, uscita) == {"tests/test_x.py::test_a"}
+        assert runner.falliti_per_asserzione(comando) == {"tests/test_x.py::test_a"}
 
 
 class TestUnEccezioneDelCodiceMutatoNonEUnMorso:
@@ -6139,6 +6363,84 @@ class TestUnEccezioneDelCodiceMutatoNonEUnMorso:
         assert "backend/app/fermata.py:4" in morsi[0]["mutante"], (
             f"ucciso da un'eccezione e non da un'asserzione: {morsi[0]['mutante']}"
         )
+
+
+class TestIlMorsoSiLeggeDalJUnit:
+    """PBI-390: il tipo del fallimento viene dal `message` del `<failure>` nel
+    rapporto JUnit, dentro il caso del suo test, e non dal riepilogo di `-rf`.
+
+    La regex su quel riepilogo cercava l'id con `\\S+::\\S+`: il caso di un test
+    parametrico con uno spazio nell'id non combaciava, e un mutante che lo
+    faceva fallire per asserzione restava «sopravvissuto». È quello che ha
+    fermato il giro 1 di `PBI-388` (`878f1be`).
+    """
+
+    def test_un_mutante_che_fa_fallire_un_caso_con_uno_spazio_nellid_e_ucciso(
+        self, repo_di_prova
+    ):
+        """Criterio 2. Cancellato il `return`, la funzione torna `None` e i due
+        casi della guardia falliscono per asserzione."""
+        repo_di_prova.commit("feat: la fermata", {
+            "backend/app/fermata.py":
+                "def fermata(riga):\n    return riga.startswith('STOP:')\n",
+        })
+        repo_di_prova.commit("test: la guardia della fermata", {
+            "backend/tests/test_fermata.py":
+                "import pytest\n\nfrom app.fermata import fermata\n\n\n"
+                "@pytest.mark.parametrize('riga', ['STOP: una fermata', 'STOP: due'])\n"
+                "def test_la_guardia(riga):\n    assert fermata(riga) is True\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        assert [p["esito"] for p in morsi[0]["prove"]][-1] == "ucciso per asserzione"
+        assert morsi[0]["tipo"] == "AssertionError"
+
+    def test_guardia_un_nameerror_del_codice_mutato_resta_fallito_per_eccezione(
+        self, repo_di_prova
+    ):
+        """Criterio 3 e decisione 4, sulla forma della #254 (PBI-365) con uno
+        spazio nell'id. Cancellata la riga 2, `righe` non esiste e i casi
+        muoiono di `NameError`: è un fallimento per eccezione, col suo tipo,
+        e non un morso. Il morso arriva dalla riga 4, per asserzione."""
+        repo_di_prova.commit("feat: la fermata", {
+            "backend/app/fermata.py":
+                "def ultima_fermata(uscita):\n"
+                "    righe = uscita.strip().splitlines()\n"
+                "    fermate = [r for r in righe if r.startswith('STOP:')]\n"
+                "    return fermate[-1] if len(fermate) > 0 else None\n",
+        })
+        repo_di_prova.commit("test: la guardia della fermata", {
+            "backend/tests/test_fermata.py":
+                "import pytest\n\nfrom app.fermata import ultima_fermata\n\n\n"
+                "@pytest.mark.parametrize('prima', ['una riga', 'due righe'])\n"
+                "def test_la_guardia(prima):\n"
+                "    assert ultima_fermata(prima + '\\nSTOP: x') == 'STOP: x'\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        prove = morsi[0]["prove"]
+        assert (prove[0]["esito"], prove[0]["tipo"]) == ("fallito per eccezione", "NameError")
+        assert "backend/app/fermata.py:2" in prove[0]["mutante"]
+        assert "backend/app/fermata.py:4" in morsi[0]["mutante"]
+
+    def test_un_rapporto_di_pytest_che_manca_sotto_il_mutante_e_un_guasto_del_gate(
+        self, monkeypatch, tmp_path
+    ):
+        """Decisione 5 dentro `morde()`: rigirato contro un mutante, un pytest
+        che non scrive il rapporto non ha detto niente sul test. Leggerlo dallo
+        schermo darebbe un morso che il gate non ha visto."""
+        rapporto = tmp_path / "pytest-0.xml"
+        comando = runner.ComandoDiProva(tmp_path, ["pytest"], "python",
+                                        {"tests/t.py::test_x": "tests/t.py::test_x"}, rapporto)
+        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (
+            1, "FAILED tests/t.py::test_x - AssertionError: no\n"))
+
+        with pytest.raises(runner.GuastoDelGate) as guasto:
+            runner.morde(comando, "tests/t.py::test_x")
+
+        assert str(rapporto) in str(guasto.value)
 
 
 class TestLaRigaCheDecideSiCancellaConPass:
@@ -6311,22 +6613,27 @@ class TestIlGateCorrettoNonRegredisce:
     funzione giri.
     """
 
-    RIEPILOGO = ("tests/test_x.py::test_assert FAILED\n"
-                 "tests/test_x.py::test_messaggio FAILED\n"
-                 "tests/test_x.py::test_raises FAILED\n"
-                 "tests/test_x.py::test_nome FAILED\n"
-                 "=== short test summary info ===\n"
-                 "FAILED tests/test_x.py::test_assert - assert 1 == 2\n"
-                 "FAILED tests/test_x.py::test_messaggio - AssertionError: il totale: 3\n"
-                 "FAILED tests/test_x.py::test_raises - Failed: DID NOT RAISE ValueError\n"
-                 "FAILED tests/test_x.py::test_nome - NameError: name 'righe' is not defined\n")
+    RIEPILOGO = junit_finto(
+        ("tests.test_x", "test_assert", '<failure message="assert 1 == 2"/>'),
+        ("tests.test_x", "test_messaggio",
+         '<failure message="AssertionError: il totale: 3"/>'),
+        ("tests.test_x", "test_raises",
+         '<failure message="Failed: DID NOT RAISE ValueError"/>'),
+        ("tests.test_x", "test_nome",
+         '<failure message="NameError: name \'righe\' is not defined"/>'),
+    )
 
-    def test_un_fallimento_per_asserzione_resta_un_kill(self):
+    def test_un_fallimento_per_asserzione_resta_un_kill(self, tmp_path):
         """L'`assert` riscritto da pytest, l'`AssertionError` col suo messaggio e il
         `Failed` di `pytest.raises` sono asserzioni del test; il `NameError` no."""
-        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python", {})
+        rapporto = tmp_path / "pytest-0.xml"
+        rapporto.write_text(self.RIEPILOGO, encoding="utf-8")
+        chiavi = [f"tests/test_x.py::{nome}"
+                  for nome in ("test_assert", "test_messaggio", "test_raises", "test_nome")]
+        comando = runner.ComandoDiProva(Path("/nessuna"), ["pytest"], "python",
+                                        {chiave: chiave for chiave in chiavi}, rapporto)
 
-        assert runner.falliti_per_asserzione(comando, self.RIEPILOGO) == {
+        assert runner.falliti_per_asserzione(comando) == {
             "tests/test_x.py::test_assert",
             "tests/test_x.py::test_messaggio",
             "tests/test_x.py::test_raises",
