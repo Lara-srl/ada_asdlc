@@ -4016,6 +4016,20 @@ class TestIlCasoJUnitSiLegaAllaChiave:
         assert {runner.caso_junit(chiave) for chiave in chiavi} == scritti
 
 
+class TestLoSchermoDiPytestNonDecide:
+    """PBI-390, criterio 7: nel runner non resta una regex sull'uscita a schermo
+    di pytest che decida un esito o un tipo. Le due che c'erano cercavano l'id
+    con `\\S+::\\S+`, e un parametro con uno spazio le faceva mancare in
+    silenzio. `-vv` e `-rf` restano nel comando per chi legge la coda, ma a
+    decidere è il rapporto JUnit."""
+
+    def test_nel_runner_non_ci_sono_le_regex_sullo_schermo_di_pytest(self):
+        sorgente = (REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8")
+
+        assert "RE_ESITO_PYTEST" not in sorgente
+        assert "RE_RIEPILOGO_PYTEST" not in sorgente
+
+
 class TestLeLettureDiPytestCheNonCambiano:
     """PBI-390, criterio 8: le guardie dichiarate. Il rapporto JUnit prende il
     posto dello schermo, e ciò che il gate leggeva bene dallo schermo lo deve
