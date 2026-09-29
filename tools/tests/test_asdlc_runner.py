@@ -1764,6 +1764,17 @@ class TestUnAgenteNelWorktreeFermaIlLancio:
         self._finto(proc, 42, albero / "frontend", b"claude\x00")
         assert [p for p, _ in runner.agenti_estranei(albero, proc=proc)] == [42]
 
+    def test_trova_il_runner_lanciato_come_tools_asdlc_runner(self, tmp_path):
+        """PBI-383, criterio 6: dopo il `git mv` il runner si lancia come
+        `tools/asdlc/runner.py`, e nella sua riga di comando `asdlc_runner`
+        non c'è più."""
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, 4242, albero,
+                    b"/usr/bin/python3\x00tools/asdlc/runner.py\x00PBI-383\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == [
+            (4242, "/usr/bin/python3 tools/asdlc/runner.py PBI-383")]
+
     def test_ignora_chi_lavora_altrove(self, tmp_path):
         proc, albero = tmp_path / "proc", tmp_path / "albero"
         albero.mkdir()
