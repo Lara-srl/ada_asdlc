@@ -1814,11 +1814,16 @@ def leggi_esito(rapporto: Path | None) -> str:
     decidono per un test, come per vitest (PBI-376, decisione 2).
 
     Non si guarda l'exit code: `pytest` torna 0 anche con tutto saltato.
+
+    Un rapporto che manca o non si legge è `GuastoDelGate`, col percorso atteso:
+    il gate non ha guardato niente, e «nessuno» accuserebbe il Builder di un
+    rosso mancato (PBI-390, decisione 5).
     """
     try:
         radice = ET.parse(rapporto).getroot()
-    except (TypeError, OSError, ET.ParseError):
-        return "nessuno"
+    except (TypeError, OSError, ET.ParseError) as exc:
+        raise GuastoDelGate(f"rapporto di pytest assente o illeggibile: {rapporto} "
+                            f"({type(exc).__name__}: {str(exc)[:200]})") from exc
     for caso in radice.iter("testcase"):
         if not caso.get("classname") and caso.find("error") is not None:
             return "rosso"
@@ -1907,7 +1912,8 @@ def esiti_di_pytest(rapporto: Path | None, chiavi: Iterable[str]) -> dict[str, s
 
     Un caso si lega alla sua chiave con `caso_junit()`, e il parametro del
     `name` si toglie: un test parametrico vale il più forte dei suoi casi. Un
-    rapporto che non c'è torna **vuoto**, come per vitest.
+    rapporto che non c'è torna **vuoto**, come per vitest: il `GuastoDelGate` lo
+    alza `leggi_esito`.
     """
     try:
         radice = ET.parse(rapporto).getroot()
@@ -1992,9 +1998,10 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     """
     if c.rapporto is not None:
         # Il percorso del rapporto resta fra una misura e l'altra (in `apri` è
-        # `REPO.parent`): un vitest che esce senza scriverlo lascerebbe leggere
-        # l'esito di un commit misurato prima. Tolto qui, il file che si legge
-        # dopo è di questo comando, o manca (PBI-376, decisione 3).
+        # `REPO.parent`): un vitest o un pytest che esce senza scriverlo
+        # lascerebbe leggere l'esito di un commit misurato prima. Tolto qui, il
+        # file che si legge dopo è di questo comando, o manca (PBI-376,
+        # decisione 3; PBI-390, decisione 1).
         c.rapporto.unlink(missing_ok=True)
     try:
         codice, uscita = esegui(c.argv, c.cartella, timeout=TETTO_DEI_TEST)
@@ -2006,8 +2013,10 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
                 f"vitest scaduto dopo {TETTO_DEI_TEST} secondi: `{' '.join(c.argv)}` "
                 f"in {c.cartella}, rapporto non scritto in {c.rapporto}") from exc
         # Per pytest un timeout lo dicono i test: a quel commit non terminano, e
-        # il gate non indovina. Lo strumento ha girato — quindi non è un guasto.
-        codice, uscita = 0, "i test non terminano a quel commit"
+        # il gate non indovina. Lo strumento ha girato — quindi non è un guasto,
+        # e il rapporto che pytest non ha scritto non si cerca (PBI-390, §Fuori
+        # scope).
+        return {chiave: "nessuno" for chiave in c.etichette}, "i test non terminano a quel commit"
     letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
              else esiti_di_vitest(c.rapporto))
     complessivo = (leggi_esito(c.rapporto) if c.linguaggio == "python"
