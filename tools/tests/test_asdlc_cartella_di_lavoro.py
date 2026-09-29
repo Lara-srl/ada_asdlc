@@ -117,14 +117,18 @@ comando = ["pytest", "-q"]
 
 def test_il_runner_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp_path):
     """Il codice sta in `codice/`, che un `asdlc.toml` non ce l'ha: i tempi che
-    il riepilogo cerca sono quelli di `progetto/giri/ore.csv`."""
+    il riepilogo cerca sono quelli di `progetto/giri/ore.csv`.
+
+    Il codice d'uscita non si guarda: senza `ore.csv` il riepilogo esce 1 da
+    prima di PBI-382, che non lo cambia (decisione 5). La prova è il percorso
+    nel messaggio."""
     tools = copia_il_codice(tmp_path)
     progetto = un_progetto(tmp_path)
 
     fatto = lancia(tools, "asdlc_runner.py", ["--riepilogo"], progetto / "src" / "moduli")
 
-    assert fatto.returncode == 0, fatto.stderr
-    assert "Nessun tempo registrato: giri/ore.csv non esiste ancora." in fatto.stdout
+    assert "Nessun tempo registrato: giri/ore.csv non esiste ancora." in fatto.stdout, (
+        fatto.stderr)
 
 
 def test_il_tick_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp_path):
