@@ -6705,8 +6705,8 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
             runner, "esegui", lambda cmd, cwd, timeout=0: girati.append(cmd[-1]) or (0, ""))
 
         def _git(*args):
-            assert args == ("diff", "--name-only", "origin/main...HEAD"), args
-            return "\n".join(toccati)
+            assert args == ("diff", "--name-status", "-M", "origin/main...HEAD"), args
+            return "\n".join(f"M\t{t}" for t in toccati)
 
         monkeypatch.setattr(runner, "git", _git)
         runner.gira_gate(set())
@@ -6728,6 +6728,22 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
 
     def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
         assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], [], []]
+
+    def test_un_file_spostato_fuori_dal_percorso_accende_il_gate(self, repo_di_prova):
+        """PBI-387, decisione 5: `--name-only` dà di un rename il solo percorso
+        nuovo, e un file uscito da `backend/app/` non accendeva il gate di
+        `backend/app/`. `file_toccati()` restituisce i due lati."""
+        vecchio = repo_di_prova.commit("feat: il modulo", {
+            "backend/app/m.py": TestUnModuloSpostatoSiLeggeComeSpostato.MODULO})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo_di_prova.sposta("backend/app/m.py", "altrove/m.py")
+        repo_di_prova.commit_dello_stage("refactor: il modulo fuori da backend/app")
+        gate = runner.Gate("app", ("pytest",), ".", ("backend/app/",))
+
+        toccati = runner.file_toccati("origin/main")
+
+        assert toccati == {"backend/app/m.py", "altrove/m.py"}
+        assert runner.acceso(gate, set(), toccati)
 
 
 class TestITestNonScrivonoNellaCartellaVeraDeiGiri:
