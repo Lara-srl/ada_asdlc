@@ -4016,6 +4016,58 @@ class TestIlCasoJUnitSiLegaAllaChiave:
         assert {runner.caso_junit(chiave) for chiave in chiavi} == scritti
 
 
+class TestLeLettureDiPytestCheNonCambiano:
+    """PBI-390, criterio 8: le guardie dichiarate. Il rapporto JUnit prende il
+    posto dello schermo, e ciò che il gate leggeva bene dallo schermo lo deve
+    leggere uguale: un test rosso resta rosso, un `xfail` resta saltato, e il
+    pytest che scade decide come prima, senza rapporto e senza `GuastoDelGate`.
+    I primi due girano con un pytest vero."""
+
+    @staticmethod
+    def _esiti(tmp_path, sorgente, nome):
+        albero = tmp_path / "albero"
+        (albero / "backend" / "tests").mkdir(parents=True)
+        (albero / "backend" / "tests" / "test_guardia.py").write_text(sorgente,
+                                                                      encoding="utf-8")
+        [comando], _ = runner.comandi_dei_test(
+            albero, [runner.TestNuovo("backend/tests/test_guardia.py", nome, "python")])
+        esiti, _ = runner.esiti_del_comando(comando)
+        return esiti
+
+    def test_guardia_un_test_rosso_resta_rosso(self, tmp_path):
+        esiti = self._esiti(tmp_path, "def test_rosso():\n    assert 1 == 2\n", "test_rosso")
+
+        assert esiti == {"tests/test_guardia.py::test_rosso": "rosso"}
+
+    def test_guardia_un_xfail_resta_saltato(self, tmp_path):
+        esiti = self._esiti(tmp_path,
+                            "import pytest\n\n\n"
+                            "@pytest.mark.xfail\n"
+                            "def test_previsto():\n    assert 1 == 2\n", "test_previsto")
+
+        assert esiti == {"tests/test_guardia.py::test_previsto": "saltato"}
+
+    def test_guardia_il_pytest_che_scade_non_e_un_guasto_del_gate(self, monkeypatch, tmp_path):
+        """§Fuori scope di PBI-390, come di PBI-376: un pytest fermato dal tetto
+        non scrive il rapporto, e l'esito resta «i test non terminano a quel
+        commit». Lo strumento ha girato, quindi non è un guasto del gate."""
+        def scade(argv, cartella, timeout=0, **k):
+            raise subprocess.TimeoutExpired(argv, timeout)
+
+        monkeypatch.setattr(runner, "esegui", scade)
+        comando = runner.ComandoDiProva(
+            tmp_path, ["pytest", "tests/t.py::test_x"], "python",
+            {"tests/t.py::test_x": "tests/t.py::test_x"}, tmp_path / "pytest-0.xml")
+
+        try:
+            esiti, uscita = runner.esiti_del_comando(comando)
+        except runner.GuastoDelGate as guasto:
+            pytest.fail(f"il pytest che scade è diventato un guasto del gate: {guasto}")
+
+        assert esiti == {"tests/t.py::test_x": "nessuno"}
+        assert uscita == "i test non terminano a quel commit"
+
+
 class TestUnGateGuastoNonEUnCicloMancato:
     """`127` non è «nato verde».
 
