@@ -269,3 +269,32 @@ def test_il_lettore_usa_solo_la_libreria_standard():
     }
     fuori = importati - sys.stdlib_module_names
     assert not fuori, f"import fuori dalla libreria standard: {sorted(fuori)}"
+
+
+# --- La radice del progetto è la cartella di lavoro (PBI-382) ---------------
+
+
+def test_la_radice_si_trova_salendo_da_una_sottocartella(tmp_path):
+    """Il runner installato non sta nel progetto: il progetto lo dice la cwd, e
+    il primo antenato che contiene `asdlc.toml` è la radice."""
+    scrivi_toml(tmp_path)
+    sotto = tmp_path / "frontend" / "src"
+    sotto.mkdir(parents=True)
+
+    assert asdlc_config.radice(sotto) == tmp_path
+
+
+def test_la_radice_lanciata_dalla_radice_e_la_cartella_stessa(tmp_path):
+    scrivi_toml(tmp_path)
+
+    assert asdlc_config.radice(tmp_path) == tmp_path
+
+
+def test_la_radice_e_il_primo_antenato_col_file_non_l_ultimo(tmp_path):
+    """Un progetto dentro un altro: vince quello più vicino alla cwd."""
+    scrivi_toml(tmp_path)
+    interno = tmp_path / "vendor" / "altro"
+    interno.mkdir(parents=True)
+    scrivi_toml(interno)
+
+    assert asdlc_config.radice(interno / ".") == interno
