@@ -28,13 +28,14 @@ def log_dir_temporanea(tmp_path_factory, monkeypatch):
     perché riapplicare un `asdlc.toml` li ricalcola da `REPO`, cioè di nuovo
     sotto `runs/`.
     """
+    # Una cartella sua e non `tmp_path`: i test che guardano cosa c'è in
+    # `tmp_path` non devono trovarci una `runs/` che non hanno creato.
+    finta = tmp_path_factory.mktemp("runs")
+    sposta_il_log_del_tick(finta, monkeypatch)
     runner = sys.modules.get("asdlc_runner")
     if runner is None:
         return
     vera = runner.LOG_DIR
-    # Una cartella sua e non `tmp_path`: i test che guardano cosa c'è in
-    # `tmp_path` non devono trovarci una `runs/` che non hanno creato.
-    finta = tmp_path_factory.mktemp("runs")
 
     def sposta() -> None:
         for nome, valore in list(vars(runner).items()):
@@ -49,4 +50,31 @@ def log_dir_temporanea(tmp_path_factory, monkeypatch):
         sposta()
 
     monkeypatch.setattr(runner, "configura", configura_e_sposta)
+    sposta()
+
+
+def sposta_il_log_del_tick(finta: Path, monkeypatch) -> None:
+    """Il `LOG` del tick nella stessa cartella temporanea (PBI-382, decisione 6).
+
+    Il tick lo scrive in `repo / LOG`, con `LOG` relativo: un test che lo chiama
+    in-process sul checkout vero scriverebbe nel `runs/coda.log` vero, che è la
+    classe del difetto 38. Un `LOG` assoluto vince sul `repo` davanti, qualunque
+    sia. E si rifà dopo ogni `configura()`, perché `main()` la chiama e rimette il
+    `LOG` relativo di `asdlc.toml`.
+    """
+    coda = sys.modules.get("asdlc_coda")
+    if coda is None:
+        return
+
+    def sposta() -> None:
+        monkeypatch.setattr(coda, "LOG", finta / "coda.log")
+
+    configura = coda.configura
+
+    @functools.wraps(configura)
+    def configura_e_sposta(cfg):
+        configura(cfg)
+        sposta()
+
+    monkeypatch.setattr(coda, "configura", configura_e_sposta)
     sposta()
