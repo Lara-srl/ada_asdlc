@@ -6382,6 +6382,35 @@ class TestIlMorsoSiLeggeDalJUnit:
         assert [p["esito"] for p in morsi[0]["prove"]][-1] == "ucciso per asserzione"
         assert morsi[0]["tipo"] == "AssertionError"
 
+    def test_guardia_un_nameerror_del_codice_mutato_resta_fallito_per_eccezione(
+        self, repo_di_prova
+    ):
+        """Criterio 3 e decisione 4, sulla forma della #254 (PBI-365) con uno
+        spazio nell'id. Cancellata la riga 2, `righe` non esiste e i casi
+        muoiono di `NameError`: è un fallimento per eccezione, col suo tipo,
+        e non un morso. Il morso arriva dalla riga 4, per asserzione."""
+        repo_di_prova.commit("feat: la fermata", {
+            "backend/app/fermata.py":
+                "def ultima_fermata(uscita):\n"
+                "    righe = uscita.strip().splitlines()\n"
+                "    fermate = [r for r in righe if r.startswith('STOP:')]\n"
+                "    return fermate[-1] if len(fermate) > 0 else None\n",
+        })
+        repo_di_prova.commit("test: la guardia della fermata", {
+            "backend/tests/test_fermata.py":
+                "import pytest\n\nfrom app.fermata import ultima_fermata\n\n\n"
+                "@pytest.mark.parametrize('prima', ['una riga', 'due righe'])\n"
+                "def test_la_guardia(prima):\n"
+                "    assert ultima_fermata(prima + '\\nSTOP: x') == 'STOP: x'\n",
+        })
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+        prove = morsi[0]["prove"]
+        assert (prove[0]["esito"], prove[0]["tipo"]) == ("fallito per eccezione", "NameError")
+        assert "backend/app/fermata.py:2" in prove[0]["mutante"]
+        assert "backend/app/fermata.py:4" in morsi[0]["mutante"]
+
     def test_un_rapporto_di_pytest_che_manca_sotto_il_mutante_e_un_guasto_del_gate(
         self, monkeypatch, tmp_path
     ):
