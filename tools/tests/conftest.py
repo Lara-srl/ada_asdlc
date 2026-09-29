@@ -11,6 +11,12 @@ from pathlib import Path
 
 import pytest
 
+# `tools/` sul `sys.path`, una volta per tutta la suite: il runner è il pacchetto
+# `asdlc` (PBI-383), e i test lo caricano per nome.
+TOOLS = Path(__file__).resolve().parents[1]
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
 
 @pytest.fixture(autouse=True)
 def log_dir_temporanea(tmp_path_factory, monkeypatch):
