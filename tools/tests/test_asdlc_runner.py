@@ -4795,6 +4795,20 @@ class TestIlCommitNonNasceFuoriFase:
         runner.installa_la_guardia_del_commit()
         assert "di qualcun altro" in hook.read_text()
 
+    def test_in_impl_ferma_il_git_mv_di_un_test_verso_un_file_che_non_e_un_test(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-387, decisione 4: `--name-only` dà di un rename il solo percorso
+        nuovo, e `nota.txt` non è un test. Il lato vecchio è la cancellazione di
+        `backend/tests/test_foglio.py`, e in `IMPL` i test sono in sola lettura."""
+        repo_di_prova.commit("test: il foglio (RED)",
+                             {"backend/tests/test_foglio.py": TRE_TEST})
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_IMPL}\n")
+        repo_di_prova.sposta("backend/tests/test_foglio.py", "nota.txt")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
+
+        assert runner.smista() == 1
+        assert "backend/tests/test_foglio.py" in capsys.readouterr().out
+
 
 class TestOgniCommitRiportaAllaFaseDelTest:
     """Il ciclo si chiude da sé, o il lucchetto vale una volta sola.
