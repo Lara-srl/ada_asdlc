@@ -2040,20 +2040,38 @@ def si_puo_cancellare(testo: str) -> bool:
 RE_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 
+def diff_del_file(voce: VoceDiCommit, *dove: str) -> str:
+    """Il diff `--unified=0` di una voce, su `dove` — `("diff", "base...sha")`,
+    `("show", "--format=", sha)`.
+
+    Un rename si chiede nominando **tutti e due** i lati: con il solo percorso
+    nuovo git non applica il rename detection, e il file risulta aggiunto per
+    intero (difetto 61 di PBI-102).
+    """
+    lati = [voce.percorso]
+    if voce.vecchio:
+        lati.insert(0, voce.vecchio)
+    return git(*dove, "--unified=0", "--", *lati)
+
+
 def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
     """Per ogni file di **produzione** che il branch ha cambiato fino a `sha`, gli
     hunk come `(inizio, quante)` nella numerazione del file a quel commit.
 
     `base...sha` e non `base..sha`: il diff parte dal merge-base, così un `main`
     andato avanti nel frattempo non entra nel conto come se fosse del branch.
+
+    La chiave è il percorso a `sha`, anche per un file spostato: è lì che le
+    righe sono numerate. Un rename senza cambi non porta hunk, e nessuna sua
+    funzione entra nel perimetro.
     """
     hunk: dict[str, list[tuple[int, int]]] = {}
-    for percorso in git("diff", "--name-only", f"{base}...{sha}").splitlines():
-        if not percorso or not e_file_di_produzione(percorso):
+    for voce in voci_del_name_status(git("diff", "--name-status", f"{base}...{sha}")):
+        if not e_file_di_produzione(voce.percorso):
             continue
-        diff = git("diff", "--unified=0", f"{base}...{sha}", "--", percorso)
-        hunk[percorso] = [(int(inizio), int(quante) if quante else 1)
-                          for inizio, quante in RE_HUNK.findall(diff)]
+        diff = diff_del_file(voce, "diff", f"{base}...{sha}")
+        hunk[voce.percorso] = [(int(inizio), int(quante) if quante else 1)
+                               for inizio, quante in RE_HUNK.findall(diff)]
     return hunk
 
 
