@@ -5,8 +5,8 @@ scritte nel sorgente, e le stesse due forme dell'id di un PBI in cinque punti
 diversi: PBI-353 ne ha corrette tre insieme, e la coda è rimasta ferma sette ore
 perché la quarta diceva un'altra cosa. Qui si legge un file solo.
 
-`tools/` non è un pacchetto e non deve diventarlo per un test: si carica il modulo
-dal suo percorso, come `test_asdlc_runner.py` e `test_asdlc_coda.py`.
+Il modulo si carica per nome, `asdlc.config`, come `test_asdlc_runner.py` e
+`test_asdlc_coda.py`: `conftest.py` mette `tools/` sul `sys.path` (PBI-383).
 """
 
 import ast
@@ -17,12 +17,9 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-SORGENTE = REPO / "tools" / "asdlc_config.py"
+SORGENTE = REPO / "tools" / "asdlc" / "config.py"
 
-_spec = importlib.util.spec_from_file_location("asdlc_config", SORGENTE)
-asdlc_config = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = asdlc_config
-_spec.loader.exec_module(asdlc_config)
+asdlc_config = importlib.import_module("asdlc.config")
 
 
 @pytest.fixture(autouse=True)

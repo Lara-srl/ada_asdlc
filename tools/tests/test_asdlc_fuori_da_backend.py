@@ -13,8 +13,8 @@ Due cose che il trasloco deve rendere vere, e che nessun altro test guarda:
   con `sqlite3.dbapi2.connect` contato: è la porta da cui passa quella fixture —
   SQLAlchemy apre SQLite da `dbapi2`, non da `sqlite3.connect`.
 
-`tools/` non è un pacchetto e non deve diventarlo per un test: si carica il modulo
-dal suo percorso, come gli altri tre file di questa cartella.
+Il runner si carica dal suo percorso in `tools/asdlc/` con un nome suo, e non
+per nome come negli altri file di questa cartella: vedi sotto.
 """
 
 import importlib.util
@@ -26,9 +26,9 @@ REPO = Path(__file__).resolve().parents[2]
 QUI = Path(__file__).resolve()
 
 # Un nome suo in `sys.modules`: `test_asdlc_runner.py` registra il runner come
-# `asdlc_runner` e lo riconfigura nei suoi test, e questo modulo non glielo tocca.
+# `asdlc.runner` e lo riconfigura nei suoi test, e questo modulo non glielo tocca.
 _spec = importlib.util.spec_from_file_location(
-    "asdlc_runner_del_gate", REPO / "tools" / "asdlc_runner.py"
+    "asdlc_runner_del_gate", REPO / "tools" / "asdlc" / "runner.py"
 )
 runner = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = runner

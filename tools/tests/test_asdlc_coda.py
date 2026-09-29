@@ -12,8 +12,8 @@ Tre gruppi, dal centro verso fuori:
   partire e da quelli che non devono. Nessun test avvia un giro: un test che
   lancia il runner non è un test, è una notte.
 
-`tools/` non è un pacchetto installato e non deve diventarlo per un test: si
-carica il modulo dal suo percorso, come fa `test_importa_storico.py`.
+Il modulo si carica per nome, `asdlc.coda`: `conftest.py` mette `tools/` sul
+`sys.path` (PBI-383).
 """
 
 import fcntl
@@ -28,10 +28,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
-_spec = importlib.util.spec_from_file_location("asdlc_coda", REPO / "tools" / "asdlc_coda.py")
-coda = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = coda
-_spec.loader.exec_module(coda)
+coda = importlib.import_module("asdlc.coda")
 # L'import non legge `asdlc.toml` (PBI-382): lo fa `main()` dalla cwd. Qui la
 # configurazione è quella del repository di questo file, e i test chiamano
 # `smista()`, cioè `main()` senza quel passo.

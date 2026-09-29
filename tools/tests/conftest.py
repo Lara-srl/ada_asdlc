@@ -1,7 +1,7 @@
 """Le fixture comuni ai test di `tools/`.
 
-Il runner si carica con `importlib` da `test_asdlc_runner.py` e si registra in
-`sys.modules` come `asdlc_runner`: qui lo si cerca lì, al momento del test, senza
+Il runner si carica per nome da `test_asdlc_runner.py`, e sta in `sys.modules`
+come `asdlc.runner`: qui lo si cerca lì, al momento del test, senza
 caricarne una seconda copia.
 """
 
@@ -32,7 +32,7 @@ def log_dir_temporanea(tmp_path_factory, monkeypatch):
     # `tmp_path` non devono trovarci una `runs/` che non hanno creato.
     finta = tmp_path_factory.mktemp("runs")
     sposta_il_log_del_tick(finta, monkeypatch)
-    runner = sys.modules.get("asdlc_runner")
+    runner = sys.modules.get("asdlc.runner")
     if runner is None:
         return
     vera = runner.LOG_DIR
@@ -62,7 +62,7 @@ def sposta_il_log_del_tick(finta: Path, monkeypatch) -> None:
     sia. E si rifà dopo ogni `configura()`, perché `main()` la chiama e rimette il
     `LOG` relativo di `asdlc.toml`.
     """
-    coda = sys.modules.get("asdlc_coda")
+    coda = sys.modules.get("asdlc.coda")
     if coda is None:
         return
 

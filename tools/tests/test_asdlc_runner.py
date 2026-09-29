@@ -38,12 +38,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
-_spec = importlib.util.spec_from_file_location(
-    "asdlc_runner", REPO / "tools" / "asdlc_runner.py"
-)
-runner = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = runner
-_spec.loader.exec_module(runner)
+# `conftest.py` mette `tools/` sul `sys.path`: il runner è `asdlc.runner` (PBI-383).
+runner = importlib.import_module("asdlc.runner")
 # L'import non legge `asdlc.toml` (PBI-382): la radice e la configurazione le
 # prende `main()` dalla cwd. Qui il repository è quello di questo file, come per
 # trovare il codice, e i test chiamano `smista()`, cioè `main()` senza quel
@@ -4024,7 +4020,7 @@ class TestLoSchermoDiPytestNonDecide:
     decidere è il rapporto JUnit."""
 
     def test_nel_runner_non_ci_sono_le_regex_sullo_schermo_di_pytest(self):
-        sorgente = (REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8")
+        sorgente = (REPO / "tools" / "asdlc" / "runner.py").read_text(encoding="utf-8")
 
         assert "RE_ESITO_PYTEST" not in sorgente
         assert "RE_RIEPILOGO_PYTEST" not in sorgente
@@ -5732,7 +5728,7 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         chiamate, e la terza — il difetto 61 — non l'aveva avuta."""
         import ast
 
-        albero = ast.parse((REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8"))
+        albero = ast.parse((REPO / "tools" / "asdlc" / "runner.py").read_text(encoding="utf-8"))
         fuori: list[str] = []
         for funzione in ast.walk(albero):
             if (not isinstance(funzione, (ast.FunctionDef, ast.AsyncFunctionDef))
