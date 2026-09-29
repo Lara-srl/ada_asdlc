@@ -5491,6 +5491,20 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         assert runner.hunk_di_produzione("origin/main", sha) == {
             "backend/app/m.py": [(6, 0), (10, 1)]}
 
+    def test_il_modulo_e_il_suo_test_spostati_insieme_non_fanno_nascere_niente(
+            self, repo_di_prova):
+        """Guardia, verde su `main`: la forma intera di `PBI-383`, il modulo e il
+        suo test traslocati nello stesso commit. Le nascite restano zero come le
+        ha fissate `PBI-361`, ora che il diff dei test passa per `diff_del_file`."""
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.commit("test: i tre casi (RED)", {"backend/tests/test_m.py": TRE_TEST})
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
+        repo_di_prova.sposta("backend/app/m.py", "tools/asdlc/m.py")
+        repo_di_prova.sposta("backend/tests/test_m.py", "tools/tests/test_m.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il modulo e il suo test in tools/")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
     def test_nessun_git_diff_o_show_con_pathspec_fuori_da_diff_del_file(self):
         """Decisione 1: la regola «un rename si legge sui due lati, con `-M`
         scritto» sta in un posto solo. Il difetto 31 era stato chiuso dentro due
