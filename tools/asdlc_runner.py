@@ -4015,6 +4015,9 @@ def main() -> int:
     esegue questo file a ogni commit.
     """
     try:
+        # Fuori da un progetto ci si ferma qui, prima del lucchetto e di ogni
+        # scrittura: il runner non ha niente da fare, e lo dice.
+        asdlc_config.radice(Path.cwd())
         configura(asdlc_config.carica(REPO))
     except asdlc_config.ErroreDiConfigurazione as guasto:
         sys.exit(f"asdlc_runner: {guasto}")
