@@ -5398,6 +5398,25 @@ class TestIComandiPortanoIlServerDellEsito:
         fine = next((i for i, a in enumerate(dopo) if a.startswith("-")), len(dopo))
         return dopo[:fine]
 
+    def test_la_config_lancia_il_server_da_tools_asdlc_esito(
+        self, monkeypatch, git_finto, tmp_path
+    ):
+        """PBI-383, criterio 5: il server sta nel pacchetto, e la config lo
+        lancia da lì. Un percorso che non esiste la CLI lo scopre solo a giro
+        avviato, come «senza esito»."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == "builder")
+        config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
+        server = config["mcpServers"]["asdlc"]
+        assert server["args"] == [str(REPO / "tools" / "asdlc" / "esito.py")]
+        assert Path(server["args"][0]).is_file()
+
     @pytest.mark.parametrize("ruolo", ["builder", "critic"])
     def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
         self, monkeypatch, git_finto, tmp_path, ruolo
@@ -5416,7 +5435,7 @@ class TestIComandiPortanoIlServerDellEsito:
         )
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        assert any(a.endswith("asdlc_esito.py") for a in [server["command"], *server["args"]])
+        assert any(a.endswith("asdlc/esito.py") for a in [server["command"], *server["args"]])
         ambiente = server["env"]
         assert ambiente["ASDLC_RUOLO"] == ruolo
         assert Path(ambiente["ASDLC_ESITO"]).parent == tmp_path, (
