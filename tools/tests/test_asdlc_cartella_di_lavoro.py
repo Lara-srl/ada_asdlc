@@ -71,3 +71,69 @@ def test_runner_e_tick_senza_asdlc_toml_dalla_cwd_in_su_escono_col_motivo(tmp_pa
         assert (f"nessun `asdlc.toml` da `{vuota}` in su: il runner si lancia dalla "
                 "cartella di un progetto ASDLC") in fatto.stderr, (modulo, fatto.stderr)
         assert tutti_i_file(tmp_path) - prima == set(), modulo
+
+
+def un_progetto(tmp_path: Path) -> Path:
+    """Un progetto ASDLC con valori che non sono quelli di aDa, e la cartella
+    del runner che è la radice stessa: il tick lo rifiuta nominando `--repo`."""
+    progetto = tmp_path / "progetto"
+    (progetto / "src" / "moduli").mkdir(parents=True)
+    (progetto / "asdlc.toml").write_text(f"""\
+[git]
+base = "origin/master"
+prefisso_ramo = "us/us-"
+
+[backlog]
+cartella = "storie"
+coda = "storie/CODA.md"
+id = "US-{{n}}"
+file = "US-{{n}}-{{slug}}.md"
+
+[registro]
+cartella = "giri"
+tempi = "ore.csv"
+
+[ambiente]
+venv = ".venv"
+prestiti = []
+
+[worktree]
+percorso = "{progetto}"
+
+[soglie]
+tentativi = 2
+igiene = 5
+revisioni = 7
+
+[gate_del_rosso]
+attivo = true
+
+[[gate]]
+nome = "pytest"
+comando = ["pytest", "-q"]
+""", encoding="utf-8")
+    return progetto
+
+
+def test_il_runner_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp_path):
+    """Il codice sta in `codice/`, che un `asdlc.toml` non ce l'ha: i tempi che
+    il riepilogo cerca sono quelli di `progetto/giri/ore.csv`."""
+    tools = copia_il_codice(tmp_path)
+    progetto = un_progetto(tmp_path)
+
+    fatto = lancia(tools, "asdlc_runner.py", ["--riepilogo"], progetto / "src" / "moduli")
+
+    assert fatto.returncode == 0, fatto.stderr
+    assert "Nessun tempo registrato: giri/ore.csv non esiste ancora." in fatto.stdout
+
+
+def test_il_tick_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp_path):
+    """Il checkout del tick è la radice trovata dalla cwd: qui coincide con il
+    worktree del TOML, e il tick si rifiuta nominandola."""
+    tools = copia_il_codice(tmp_path)
+    progetto = un_progetto(tmp_path)
+
+    fatto = lancia(tools, "asdlc_coda.py", ["--dry-run"], progetto / "src" / "moduli")
+
+    assert fatto.returncode == 2, fatto.stderr
+    assert f"--repo e --worktree sono lo stesso albero ({progetto})" in fatto.stdout
