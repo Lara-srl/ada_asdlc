@@ -5463,6 +5463,28 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
 
         assert runner.righe_cambiate("origin/main", sha) == {"backend/app/sotto/m.py": {11}}
 
+    def test_nessun_git_diff_o_show_con_pathspec_fuori_da_diff_del_file(self):
+        """Decisione 1: la regola «un rename si legge sui due lati, con `-M`
+        scritto» sta in un posto solo. Il difetto 31 era stato chiuso dentro due
+        chiamate, e la terza — il difetto 61 — non l'aveva avuta."""
+        import ast
+
+        albero = ast.parse((REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8"))
+        fuori: list[str] = []
+        for funzione in ast.walk(albero):
+            if (not isinstance(funzione, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    or funzione.name == "diff_del_file"):
+                continue
+            for nodo in ast.walk(funzione):
+                if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name)
+                        and nodo.func.id == "git" and nodo.args):
+                    continue
+                costanti = [a.value for a in nodo.args if isinstance(a, ast.Constant)]
+                if costanti[:1] in (["diff"], ["show"]) and "--" in costanti:
+                    fuori.append(f"{funzione.name}:{nodo.lineno}")
+
+        assert fuori == []
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
