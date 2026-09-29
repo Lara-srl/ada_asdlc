@@ -5361,6 +5361,56 @@ class TestLeRigheCambiateSiLeggonoDalDiff:
         assert runner.righe_cambiate("origin/main", sha) == {}
 
 
+class TestUnModuloSpostatoSiLeggeComeSpostato:
+    """PBI-387, difetto 61 di PBI-102: il diff di un file di produzione traslocato
+    si chiedeva nominando il solo percorso nuovo, git non applicava il rename
+    detection, e il file risultava aggiunto per intero — ogni sua funzione nel
+    perimetro dei mutanti. `PBI-383` sposta il runner in `tools/asdlc/` con
+    `git mv`, e il suo perimetro deve restare zero.
+
+    Qui git non si finge: il rename lo rileva git, come in `TestUnTestTraslocatoNonNasce`.
+    """
+
+    MODULO = ("import os\n"
+              "\n\n"
+              "def soglia(x):\n"
+              "    if x > 10:\n"
+              "        return 'alta'\n"
+              "    return 'bassa'\n"
+              "\n\n"
+              "def doppio(x):\n"
+              "    return x * 2\n"
+              "\n\n"
+              "def cartella():\n"
+              "    return os.getcwd()\n")
+
+    def _base_col_modulo(self, repo):
+        vecchio = repo.commit("feat: il modulo", {"backend/app/m.py": self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+
+    def _perimetro(self, repo, sha):
+        """Le voci `<percorso>::<funzione> (dal diff)` del perimetro a `sha`, come le
+        compone il gate del rosso."""
+        cambiate = runner.righe_cambiate("origin/main", sha)
+        cancellate = runner.cancellazioni("origin/main", sha)
+        voci: list[str] = []
+        for percorso in sorted(cambiate.keys() | cancellate.keys()):
+            sorgente = repo._git("show", f"{sha}:{percorso}")
+            voci += runner.righe_del_perimetro(percorso, sorgente,
+                                               cambiate.get(percorso, set()),
+                                               cancellate.get(percorso, set()))[1]
+        return voci
+
+    def test_un_git_mv_senza_cambi_non_mette_nel_perimetro_nessuna_funzione(
+            self, repo_di_prova):
+        self._base_col_modulo(repo_di_prova)
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/sotto/m.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il modulo in sotto/")
+
+        assert runner.righe_cambiate("origin/main", sha) == {}
+        assert self._perimetro(repo_di_prova, sha) == []
+
+
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
     toccate dal diff, non le righe (revisione del 26/09 di ADR-0022).
