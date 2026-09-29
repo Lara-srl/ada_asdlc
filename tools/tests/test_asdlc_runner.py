@@ -8692,3 +8692,29 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert segno.is_file(), esito.stderr
         assert segno.read_text() == "--guardia-commit"
         assert esito.returncode == 1
+
+    def test_fase_tdd_senza_runner_lo_dice_ed_esce_con_1(self, tmp_path):
+        """PBI-388, decisione 2: una guardia che non trova il suo codice non ferma
+        il repository. Per Claude Code solo il 2 blocca."""
+        script = self._albero_con_lo_script(tmp_path)
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path)
+
+        assert esito.returncode == 1
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert "tools/asdlc/runner.py" in esito.stderr
+        assert "tools/asdlc_runner.py" in esito.stderr
+
+    def test_il_pre_commit_senza_runner_lo_dice_e_lascia_passare(self, repo_di_prova):
+        """PBI-388, decisione 2 e `ADR-0008`: si segnala e si lascia passare."""
+        radice = repo_di_prova.radice
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert esito.returncode == 0
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert "tools/asdlc/runner.py" in esito.stderr
+        assert "tools/asdlc_runner.py" in esito.stderr
