@@ -269,3 +269,48 @@ def test_il_lettore_usa_solo_la_libreria_standard():
     }
     fuori = importati - sys.stdlib_module_names
     assert not fuori, f"import fuori dalla libreria standard: {sorted(fuori)}"
+
+
+# --- La radice del progetto è la cartella di lavoro (PBI-382) ---------------
+
+
+def test_la_radice_si_trova_salendo_da_una_sottocartella(tmp_path):
+    """Il runner installato non sta nel progetto: il progetto lo dice la cwd, e
+    il primo antenato che contiene `asdlc.toml` è la radice."""
+    scrivi_toml(tmp_path)
+    sotto = tmp_path / "frontend" / "src"
+    sotto.mkdir(parents=True)
+
+    assert asdlc_config.radice(sotto) == tmp_path
+
+
+def test_la_radice_lanciata_dalla_radice_e_la_cartella_stessa(tmp_path):
+    scrivi_toml(tmp_path)
+
+    assert asdlc_config.radice(tmp_path) == tmp_path
+
+
+def test_la_radice_e_il_primo_antenato_col_file_non_l_ultimo(tmp_path):
+    """Un progetto dentro un altro: vince quello più vicino alla cwd."""
+    scrivi_toml(tmp_path)
+    interno = tmp_path / "vendor" / "altro"
+    interno.mkdir(parents=True)
+    scrivi_toml(interno)
+
+    assert asdlc_config.radice(interno / ".") == interno
+
+
+def test_senza_asdlc_toml_dalla_cwd_in_su_la_radice_e_un_errore_che_lo_dice(tmp_path):
+    """Un runner lanciato fuori da un progetto non ha niente da fare, e lo deve
+    dire con la cartella da cui è partito — prima del lucchetto e di ogni
+    scrittura, che sono di chi chiama."""
+    vuota = tmp_path / "vuota"
+    vuota.mkdir()
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.radice(vuota)
+
+    assert str(fermata.value) == (
+        f"nessun `asdlc.toml` da `{vuota}` in su: il runner si lancia dalla "
+        "cartella di un progetto ASDLC"
+    )

@@ -42,6 +42,12 @@ _spec = importlib.util.spec_from_file_location(
 runner = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = runner
 _spec.loader.exec_module(runner)
+# L'import non legge `asdlc.toml` (PBI-382): la radice e la configurazione le
+# prende `main()` dalla cwd. Qui il repository è quello di questo file, come per
+# trovare il codice, e i test chiamano `smista()`, cioè `main()` senza quel
+# passo: ricaricare la configurazione rimetterebbe i nomi che sostituiscono.
+runner.REPO = REPO
+runner.configura(runner.asdlc_config.carica(REPO))
 
 
 # --- Niente infrastruttura sotto uno strumento da riga di comando ------------
@@ -406,7 +412,7 @@ class TestUnSenzaEsitoFermaLaCoda:
         monkeypatch.setattr(sys, "argv",
                             ["asdlc_runner", "PBI-212", "PBI-213", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         assert eseguiti == ["PBI-212"], (
             "un senza esito del limite d'uso colpirebbe anche il PBI dopo"
@@ -1801,14 +1807,14 @@ class TestIlLancioSiFermaPrimaDiScrivere:
     def test_un_agente_estraneo_ferma_tutto(self, monkeypatch, capsys):
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [(797078, "claude -p")])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
-        assert runner.main() == 2
+        assert runner.smista() == 2
         assert "797078" in capsys.readouterr().out
 
     def test_un_altro_runner_ferma_tutto(self, monkeypatch, capsys):
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
         with runner.lucchetto():
-            assert runner.main() == 2
+            assert runner.smista() == 2
         assert "lucchetto" in capsys.readouterr().out.lower()
 
 
@@ -1955,7 +1961,7 @@ class TestIlRunnerSiStaccaDaSolo:
         )
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212"])
 
-        runner.main()
+        runner.smista()
 
         assert ordine[:2] == ["stacca", "lucchetto"]
 
@@ -1972,7 +1978,7 @@ class TestIlRunnerSiStaccaDaSolo:
         )
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
 
     def test_il_log_del_giro_sta_accanto_al_suo_rapporto(self, tmp_path, monkeypatch):
         """Log e rapporto JSON portano lo stesso nome: sono lo stesso giro visto da
@@ -2441,7 +2447,7 @@ class TestUnGiroLasciaTracciaAppenaComincia:
         monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         assert visto["rapporto"], "il rapporto del giro va aperto prima del primo PBI"
 
@@ -2456,7 +2462,7 @@ class TestUnGiroLasciaTracciaAppenaComincia:
         )
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         rapporto = json.loads(next(tmp_path.glob("*.json")).read_text())
         assert [e["pbi"] for e in rapporto["esiti"]] == ["PBI-212"]
@@ -2494,7 +2500,7 @@ class TestUnPbiFinitoELoResta:
         self._mondo(monkeypatch, tmp_path, esegui_pbi_finto,
                     ["PBI-212", "PBI-214", "--continua-sui-rossi"])
 
-        runner.main()
+        runner.smista()
 
         rapporto = json.loads(next(tmp_path.glob("*.json")).read_text())
         esiti = {e["pbi"]: e for e in rapporto["esiti"]}
@@ -2517,7 +2523,7 @@ class TestUnPbiFinitoELoResta:
 
         self._mondo(monkeypatch, tmp_path, esegui_pbi_finto, ["PBI-212", "PBI-214"])
 
-        runner.main()
+        runner.smista()
 
         assert partiti == ["PBI-212"], (
             "`rosso` interrompe: costruire sul PBI dopo una base rotta costa di più"
@@ -2534,7 +2540,7 @@ class TestUnPbiFinitoELoResta:
 
         self._mondo(monkeypatch, tmp_path, esegui_pbi_finto, ["PBI-212", "PBI-214"])
 
-        runner.main()
+        runner.smista()
 
         assert visto["esiti"] == ["PBI-212"], (
             "l'esito del primo PBI deve essere già su disco mentre parte il secondo: "
@@ -2579,7 +2585,7 @@ class TestIlRegistroEsceDaiBranch:
         )
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         assert not (tmp_path / "tempi.csv").exists(), (
             "il registro scritto sul branch è il conflitto del difetto 19"
@@ -2693,7 +2699,7 @@ class TestIlGateE2ENonEDelRunner:
             sys, "argv", ["asdlc_runner", "PBI-212", "--e2e", "--in-primo-piano"]
         )
 
-        assert runner.main() == 2
+        assert runner.smista() == 2
         uscita = capsys.readouterr().out
         assert "CI" in uscita or "ci.yml" in uscita, (
             "chi ha battuto --e2e vuole gli E2E: va detto dove girano davvero"
@@ -3012,7 +3018,7 @@ class TestIGateSiDichiaranoPrimaDiPartire:
         )
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
-        assert runner.main() == 2
+        assert runner.smista() == 2
         assert "pytest" in capsys.readouterr().out
 
     def test_un_dry_run_non_pretende_i_gate(self, tmp_path, monkeypatch):
@@ -3029,7 +3035,7 @@ class TestIGateSiDichiaranoPrimaDiPartire:
             sys, "argv", ["asdlc_runner", "PBI-212", "--dry-run", "--in-primo-piano"]
         )
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
 
     def test_le_dipendenze_di_test_sono_dichiarate(self):
         """La conoscenza che stava nella testa di chi allestì il primo venv."""
@@ -4360,7 +4366,7 @@ class TestIlGateDelRossoSiLanciaDaSolo:
         )
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso", "pbi/pbi-330"])
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert "f35abd1" in capsys.readouterr().out
 
     def test_accetta_anche_un_intervallo(self, monkeypatch):
@@ -4376,7 +4382,7 @@ class TestIlGateDelRossoSiLanciaDaSolo:
             sys, "argv", ["asdlc_runner", "--gate-rosso", "d2c084c..pbi/pbi-330"]
         )
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
         assert visto == {"base": "d2c084c", "ref": "pbi/pbi-330"}
 
     def test_un_guasto_non_si_confonde_con_un_ciclo_mancato(self, monkeypatch, capsys):
@@ -4388,14 +4394,14 @@ class TestIlGateDelRossoSiLanciaDaSolo:
         monkeypatch.setattr(runner, "gate_del_rosso", _guasto)
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso", "pbi/pbi-330"])
 
-        assert runner.main() == 2
+        assert runner.smista() == 2
         assert "pytest" in capsys.readouterr().out
 
     def test_torna_0_quando_il_rosso_ce_stato(self, monkeypatch):
         monkeypatch.setattr(runner, "gate_del_rosso", lambda ref, **k: [])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--gate-rosso"])
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
 
 
 class TestLaFaseDecideCosaSiPuoScrivere:
@@ -4550,7 +4556,7 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
         self._stdin(monkeypatch, cwd=str(tmp_path),
                     tool_input={"file_path": str(tmp_path / "frontend/src/App.tsx")})
 
-        assert runner.main() == 2
+        assert runner.smista() == 2
         assert "TEST_ONLY" in capsys.readouterr().err
 
     def test_lascia_passare_il_test_e_non_dice_niente(self, monkeypatch, repo_di_prova, capsys):
@@ -4559,7 +4565,7 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
         self._stdin(monkeypatch, cwd=str(tmp_path),
                     tool_input={"file_path": str(tmp_path / "frontend/src/App.test.tsx")})
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
         assert capsys.readouterr().err == ""
 
     def test_uno_strumento_senza_percorso_non_lo_riguarda(self, monkeypatch, repo_di_prova):
@@ -4569,7 +4575,7 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
         self._stdin(monkeypatch, cwd=str(tmp_path), tool_name="Bash",
                     tool_input={"command": "npm test"})
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
 
     def test_un_json_rotto_non_blocca_la_sessione(self, monkeypatch, capsys):
         """Si sbaglia dalla parte del passaggio, ed è l'unico posto dove si fa.
@@ -4582,7 +4588,7 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
         monkeypatch.setattr(sys, "stdin", io.StringIO("{non è json"))
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-fase"])
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
         assert "guardia" in capsys.readouterr().err
 
 
@@ -4665,13 +4671,13 @@ class TestIlPermessoDiImplementareSiChiede:
     def test_apre_la_fase_quando_il_test_nuovo_e_rosso(self, repo_di_prova, monkeypatch):
         self._in_test_only(repo_di_prova, monkeypatch)
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
         assert self._fase(repo_di_prova) == runner.FASE_IMPL
 
     def test_non_apre_su_un_test_nato_verde(self, repo_di_prova, monkeypatch, capsys):
         self._in_test_only(repo_di_prova, monkeypatch, esito="verde")
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
         assert runner.ESITI_MANCATI["verde"] in capsys.readouterr().out
 
@@ -4683,14 +4689,14 @@ class TestIlPermessoDiImplementareSiChiede:
         """
         self._in_test_only(repo_di_prova, monkeypatch, esito="nessuno")
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert runner.ESITI_MANCATI["nessuno"] in capsys.readouterr().out
 
     def test_senza_test_nuovi_non_apre(self, repo_di_prova, monkeypatch, capsys):
         runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
         assert "nessun test nuovo" in capsys.readouterr().out
 
@@ -4701,7 +4707,7 @@ class TestIlPermessoDiImplementareSiChiede:
         runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_IMPL}\n")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert runner.FASE_TEST_ONLY in capsys.readouterr().out
 
 
@@ -4760,7 +4766,7 @@ class TestIlCommitNonNasceFuoriFase:
         self._stage(repo_di_prova, "backend/app/foglio.py")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert "backend/app/foglio.py" in capsys.readouterr().out
 
     def test_lascia_passare_il_commit_di_soli_test(self, repo_di_prova, monkeypatch):
@@ -4768,13 +4774,13 @@ class TestIlCommitNonNasceFuoriFase:
         self._stage(repo_di_prova, "backend/tests/test_foglio.py", "def test_x():\n    pass\n")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
 
     def test_fuori_da_un_giro_non_guarda_niente(self, repo_di_prova, monkeypatch):
         self._stage(repo_di_prova, "backend/app/foglio.py")
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--guardia-commit"])
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
 
     def test_il_pre_commit_si_installa_e_non_calpesta_quello_che_ce(self, repo_di_prova):
         """Installarlo è del runner, non di chi lancia: un lucchetto che dipende da
@@ -5032,7 +5038,7 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
         repo_di_prova.commit("test(analisi): il clic apre la pratica (RED)", {self.TEST: self.ROSSO})
         self._chiedi(repo_di_prova, monkeypatch)
 
-        assert runner.main() == 0
+        assert runner.smista() == 0
         assert self._fase(repo_di_prova) == runner.FASE_IMPL
 
     def test_non_apre_se_lultimo_commit_porta_anche_produzione(self, repo_di_prova, monkeypatch, capsys):
@@ -5041,7 +5047,7 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
             self.TEST: self.ROSSO, "backend/app/foglio.py": "def calcola():\n    pass\n"})
         self._chiedi(repo_di_prova, monkeypatch)
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
 
     def test_non_guarda_un_commit_che_e_gia_su_origin_main(self, repo_di_prova, monkeypatch, capsys):
@@ -5051,7 +5057,7 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
         repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
         self._chiedi(repo_di_prova, monkeypatch)
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
 
     def test_conta_dalla_base_del_giro_anche_se_origin_main_ha_ricevuto_il_ramo(
@@ -5066,7 +5072,7 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
         repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD")
         self._chiedi(repo_di_prova, monkeypatch)
 
-        assert runner.main() == 0, capsys.readouterr().out
+        assert runner.smista() == 0, capsys.readouterr().out
         assert self._fase(repo_di_prova) == runner.FASE_IMPL
 
     def test_guardia_il_primo_chiedi_impl_con_head_sulla_base_del_giro_e_un_rifiuto(
@@ -5080,7 +5086,7 @@ class TestIlPermessoSiChiedeAncheDopoIlCommitRed:
         runner.apri_la_fase(base)
         self._chiedi(repo_di_prova, monkeypatch)
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
         assert "nessun test nuovo" in capsys.readouterr().out
         assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
 
@@ -6301,7 +6307,7 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
 def toml_versionato(config):
     """Il solo `asdlc.toml` del repository, **senza** `asdlc.local.toml`.
 
-    All'import il modulo applica anche il file locale, che sulla macchina di chi
+    Il caricamento in cima a questo file applica anche il file locale, che sulla macchina di chi
     lo scrive cambia `[ambiente]` e `[worktree]` di proposito: un test che
     guardasse lì il «valore di ieri» sarebbe rosso su codice giusto, e verde
     solo dove il file non c'è — in CI, e nel worktree del runner."""
@@ -7004,7 +7010,7 @@ class TestIlRapportoDelCriticArrivaIntero:
         monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         giri = [f.stem for f in runner.LOG_DIR.glob("*.json")]
         assert len(giri) == 1
@@ -7833,7 +7839,7 @@ class TestLeGuardieDelMotivo:
         monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         # Il rapporto è `<run>.json`; accanto ci sono gli esiti e le config MCP
         # delle invocazioni.
@@ -7862,7 +7868,7 @@ class TestLeGuardieDelMotivo:
         monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         [rapporto] = [f for f in tmp_path.glob("*.json")
                       if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
@@ -7885,7 +7891,7 @@ class TestLeGuardieDelMotivo:
         monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-102", "--in-primo-piano"])
 
-        assert runner.main() == 1
+        assert runner.smista() == 1
 
         [rapporto] = [f for f in tmp_path.glob("*.json")
                       if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]
@@ -8034,7 +8040,7 @@ class TestDopoLaChiusuraUnEccezioneSiAggiungeAllEsito:
         monkeypatch.setattr(sys, "argv",
                             ["asdlc_runner", "PBI-102", "PBI-377", "--in-primo-piano"])
 
-        runner.main()
+        runner.smista()
 
         [rapporto] = [f for f in tmp_path.glob("*.json")
                       if re.fullmatch(r"\d{8}-\d{6}\.json", f.name)]

@@ -139,6 +139,24 @@ class Config:
     gate: tuple[Gate, ...]
 
 
+def radice(cwd: Path) -> Path:
+    """La radice del progetto: il primo antenato di `cwd`, compresa, che contiene
+    `asdlc.toml`. Se non c'è, è un errore che nomina la cwd.
+
+    Il progetto lo dice la cartella di lavoro e non il sorgente del runner:
+    installato, il sorgente sta in site-packages (`ADR-0026`, PBI-382). Non
+    `git rev-parse --show-toplevel`: in un repository senza `asdlc.toml` il
+    runner non ha niente da fare.
+    """
+    for cartella in (cwd, *cwd.parents):
+        if (cartella / NOME_FILE).is_file():
+            return cartella
+    raise ErroreDiConfigurazione(
+        f"nessun `{NOME_FILE}` da `{cwd}` in su: il runner si lancia dalla "
+        "cartella di un progetto ASDLC"
+    )
+
+
 def carica(repo: Path) -> Config:
     """La configurazione letta da `repo / asdlc.toml`, con sopra le sovrascritture
     di `asdlc.local.toml` se c'è."""

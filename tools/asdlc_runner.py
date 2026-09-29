@@ -58,13 +58,18 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import NamedTuple
 
-REPO = Path(__file__).resolve().parent.parent
+# La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
+# trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
+# codice sta in site-packages (`ADR-0026`, decisione 3).
+REPO: Path
 
 # `tools/` non è un pacchetto e non deve diventarlo: il runner si lancia per
 # percorso, e sotto i test si carica con `importlib` da `backend/tests/`. Il
-# lettore della configurazione sta accanto a questo file, e si importa da lì.
-if str(REPO / "tools") not in sys.path:
-    sys.path.insert(0, str(REPO / "tools"))
+# lettore della configurazione sta accanto a questo file, e si importa da lì:
+# qui conta dove sta il codice, non dove sta il progetto.
+SORGENTE = Path(__file__).resolve().parent
+if str(SORGENTE) not in sys.path:
+    sys.path.insert(0, str(SORGENTE))
 import asdlc_config  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
@@ -212,8 +217,8 @@ GATE: list[Gate] = []
 
 
 def configura(cfg: asdlc_config.Config) -> None:
-    """Le costanti di modulo, dalla configurazione. Si chiama una volta,
-    all'import, e i test la richiamano con un `asdlc.toml` di prova.
+    """Le costanti di modulo, dalla configurazione. Si chiama una volta, da
+    `main()`, e i test la richiamano con un `asdlc.toml` di prova.
 
     Restano **nomi di modulo** e non attributi di un oggetto: 36 punti dei test
     fanno `monkeypatch.setattr(runner, …)` su queste costanti, e spostarle
@@ -579,15 +584,6 @@ l'esito il runner lo legge solo da quella chiamata, non dal testo della risposta
 
 PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
 PROMPT_RIMEDIO: str  # idem, da `MODELLO_RIMEDIO`
-
-# `asdlc.toml` è obbligatorio, e un file che manca o non si legge ferma qui con
-# un messaggio e non con un traceback: lo legge chi ha appena perso l'uso di
-# `git commit`, perché il `pre-commit` esegue questo file a ogni commit. Sta
-# dopo i modelli dei prompt perché li riempie.
-try:
-    configura(asdlc_config.carica(REPO))
-except asdlc_config.ErroreDiConfigurazione as guasto:
-    sys.exit(f"asdlc_runner: {guasto}")
 
 
 @dataclass
@@ -4015,6 +4011,30 @@ def costruisci_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Il punto d'ingresso: legge `asdlc.toml` e poi fa ciò che chiedono i flag.
+
+    La configurazione si legge qui e non all'import (PBI-382): un modulo
+    importato non deve leggere niente. `asdlc.toml` è obbligatorio, e un file
+    che manca o non si legge ferma con un messaggio e non con un traceback: lo
+    legge chi ha appena perso l'uso di `git commit`, perché il `pre-commit`
+    esegue questo file a ogni commit.
+    """
+    try:
+        # Fuori da un progetto ci si ferma qui, prima del lucchetto e di ogni
+        # scrittura: il runner non ha niente da fare, e lo dice.
+        radice = asdlc_config.radice(Path.cwd())
+        # `configura()` compone i percorsi da `REPO`: la radice va messa prima.
+        global REPO
+        REPO = radice
+        configura(asdlc_config.carica(REPO))
+    except asdlc_config.ErroreDiConfigurazione as guasto:
+        sys.exit(f"asdlc_runner: {guasto}")
+    return smista()
+
+
+def smista() -> int:
+    """`main()` a configurazione già letta: i test la chiamano da qui, coi nomi
+    di modulo che hanno sostituito."""
     ap = costruisci_parser()
     a = ap.parse_args()
 

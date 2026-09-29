@@ -32,6 +32,11 @@ _spec = importlib.util.spec_from_file_location("asdlc_coda", REPO / "tools" / "a
 coda = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = coda
 _spec.loader.exec_module(coda)
+# L'import non legge `asdlc.toml` (PBI-382): lo fa `main()` dalla cwd. Qui la
+# configurazione è quella del repository di questo file, e i test chiamano
+# `smista()`, cioè `main()` senza quel passo.
+coda.REPO = REPO
+coda.configura(coda.asdlc_config.carica(REPO))
 
 
 def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
@@ -731,7 +736,7 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(coda, "esegui", si_stacca)
     monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 0
     assert ["python3", "tools/asdlc_runner.py", "PBI-337"] in visti
@@ -754,7 +759,7 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     visti, esegui = mondo_registrato()
     monkeypatch.setattr(coda, "esegui", esegui)
 
-    uscita = coda.main(
+    uscita = coda.smista(
         ["--repo", str(repo), "--worktree", str(albero), "--dry-run"]
     )
 
@@ -818,7 +823,7 @@ def test_la_riga_di_attesa_dice_cosa_ce_sul_ramo(
     albero.mkdir()
     monkeypatch.setattr(coda, "esegui", mondo_con_pr_aperte(aperte))
 
-    assert coda.main(["--repo", str(repo), "--worktree", str(albero), "--dry-run"]) == 0
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero), "--dry-run"]) == 0
 
     assert capsys.readouterr().out.strip() == (
         f"attende: PBI-338 ha un ramo su origin e non è in main {coda_della_riga}")
@@ -852,10 +857,10 @@ def test_ogni_tick_lascia_una_riga_nel_log(tmp_path, monkeypatch):
     monkeypatch.setattr(coda, "esegui", esegui)
     argomenti = ["--repo", str(repo), "--worktree", str(albero), "--dry-run"]
 
-    coda.main(argomenti)
-    coda.main(argomenti)
+    coda.smista(argomenti)
+    coda.smista(argomenti)
 
-    righe = (repo / "runs" / "coda.log").read_text(encoding="utf-8").splitlines()
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert len(righe) == 2
     oggi = datetime.date.today().isoformat()
     assert all(riga.startswith(oggi) and "PBI-337" in riga for riga in righe), righe
@@ -879,12 +884,12 @@ def test_lavviso_delle_domande_esce_accanto_al_lancio(tmp_path, monkeypatch, cap
     _, esegui = mondo_registrato()
     monkeypatch.setattr(coda, "esegui", esegui)
 
-    coda.main(["--repo", str(repo), "--worktree", str(albero), "--dry-run"])
+    coda.smista(["--repo", str(repo), "--worktree", str(albero), "--dry-run"])
 
     stampato = capsys.readouterr().out
     assert "PBI-340" in stampato
     assert "Da decidere, se le dodici colonne non ci stanno" in stampato
-    assert "Da decidere" in (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    assert "Da decidere" in (repo / coda.LOG).read_text(encoding="utf-8")
 
 
 def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
@@ -908,10 +913,10 @@ def test_un_lancio_che_non_parte_lo_scrive_nel_log(tmp_path, monkeypatch):
 
     monkeypatch.setattr(coda, "esegui", fetch_rotto)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
-    log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    log = (repo / coda.LOG).read_text(encoding="utf-8")
     assert "fetch" in log
 
 
@@ -944,10 +949,10 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
 
     monkeypatch.setattr(coda, "esegui", python_che_non_ce)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
-    log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    log = (repo / coda.LOG).read_text(encoding="utf-8")
     assert "non lanciato" in log, log
     assert "uscita 127" in log, log
     assert "python3" in log, log
@@ -982,10 +987,10 @@ def test_un_runner_fermatosi_dopo_il_distacco_non_conta_come_lanciato(
     monkeypatch.setattr(coda, "esegui", esegui)
     monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(albero)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 1
-    log = (repo / "runs" / "coda.log").read_text(encoding="utf-8")
+    log = (repo / coda.LOG).read_text(encoding="utf-8")
     assert "non lanciato" in log, log
     assert "PBI-337" in log, log
 
@@ -1000,7 +1005,7 @@ def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, caps
     repo = scrivi_coda(tmp_path, "- PBI-337\n")
     monkeypatch.setattr(coda, "esegui", nessun_comando)
 
-    uscita = coda.main(["--repo", str(repo), "--worktree", str(repo)])
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(repo)])
 
     assert uscita == 2
     assert "--worktree" in capsys.readouterr().out
@@ -1038,11 +1043,14 @@ def configura(tmp_path):
     TOML di prova al tick e alla fine rimette la configurazione di macchina."""
     config = coda.asdlc_config
     di_prima = coda.CFG
-    coda.configura(config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE))
+    # La `configura()` vera e non quella che `log_dir_temporanea` avvolge per
+    # spostare il `LOG` (PBI-382): qui si prova ciò che deriva da `asdlc.toml`.
+    configura = getattr(coda.configura, "__wrapped__", coda.configura)
+    configura(config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE))
 
     def _applica(testo: str):
         (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
-        coda.configura(config.carica(tmp_path))
+        configura(config.carica(tmp_path))
 
     yield _applica
     coda.configura(di_prima)
@@ -1145,3 +1153,70 @@ def test_il_preflight_si_stacca_sul_ramo_del_toml(configura, tmp_path, monkeypat
     ]
     for aperto in tenuti:
         aperto.close()
+
+
+# --- La radice del tick è la cartella di lavoro (PBI-382) --------------------
+
+
+def tick_dal_checkout(tmp_path, monkeypatch):
+    """`main()` lanciato con la cwd nel checkout vero, come fa il cron da
+    `ada_controller`, con un mondo finto al posto di `gh` e `git ls-remote`.
+
+    `main()` rilegge `asdlc.toml` e rimette i nomi di modulo: si registrano
+    prima, perché `monkeypatch` li restituisca ai test dopo. Il worktree è una
+    cartella vuota: quello di `asdlc.toml` è quest'albero stesso, quando la
+    suite gira nel worktree del runner, e il tick si rifiuterebbe. Torna le
+    cartelle da cui il tick ha interrogato il mondo, e il `--worktree`."""
+    for nome in ("REPO", "CFG", "WORKTREE_DEL_RUNNER", "LOG", "LUCCHETTO", "BACKLOG",
+                 "CODA", "BASE", "REMOTO", "PREFISSO_RAMO", "RE_PBI", "RE_TITOLO_PR",
+                 "RE_RAMO_PR", "RE_RAMO_PBI"):
+        monkeypatch.setattr(coda, nome, getattr(coda, nome))
+    cartelle = []
+    _, rispondi = mondo_registrato()
+
+    def esegui(cmd, cwd):
+        cartelle.append(Path(cwd))
+        return rispondi(cmd, cwd)
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.chdir(REPO)
+    return cartelle, albero
+
+
+def test_guardia_il_dry_run_lanciato_dal_checkout_decide_come_col_repo_esplicito(
+    tmp_path, monkeypatch, capsys
+):
+    """Il checkout è la radice trovata dalla cwd, non più la cartella del codice:
+    in aDa coincidono, e la decisione stampata è la stessa che dà `--repo`
+    esplicito sullo stesso checkout. Le domande al mondo partono da lì."""
+    cartelle, albero = tick_dal_checkout(tmp_path, monkeypatch)
+
+    dalla_cwd = coda.main(["--worktree", str(albero), "--dry-run"])
+    decisa_dalla_cwd = capsys.readouterr().out
+    col_repo = coda.main(["--repo", str(REPO), "--worktree", str(albero), "--dry-run"])
+    decisa_col_repo = capsys.readouterr().out
+
+    assert dalla_cwd == col_repo == 0
+    assert decisa_dalla_cwd == decisa_col_repo
+    assert decisa_dalla_cwd.strip()
+    assert set(cartelle) == {REPO}
+
+
+def test_guardia_il_dry_run_dal_checkout_scrive_il_log_nel_temporaneo(tmp_path, monkeypatch, capsys):
+    """Decisione 6 di PBI-382: il tick chiamato sul checkout vero lascia il
+    `runs/coda.log` vero com'era, e la sua riga sta nella cartella temporanea
+    di `log_dir_temporanea` — la classe del difetto 38 è un test che sporca il
+    registro vero."""
+    _, albero = tick_dal_checkout(tmp_path, monkeypatch)
+    vero = REPO / "runs" / "coda.log"
+    prima = vero.read_bytes() if vero.is_file() else None
+
+    coda.main(["--worktree", str(albero), "--dry-run"])
+    decisa = capsys.readouterr().out.strip()
+
+    assert (vero.read_bytes() if vero.is_file() else None) == prima
+    assert not coda.LOG.is_relative_to(REPO), coda.LOG
+    righe = coda.LOG.read_text(encoding="utf-8").splitlines()
+    assert [r.split("  ", 1)[1] for r in righe] == [decisa]

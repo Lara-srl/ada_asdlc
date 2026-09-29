@@ -28,15 +28,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-# Il checkout da cui si legge la coda e si interroga `origin`: la radice di questo
-# file, e l'unico percorso che non sta in `asdlc.toml` — un percorso assoluto in
-# un file versionato è il difetto che la configurazione toglie.
-REPO = Path(__file__).resolve().parent.parent
+# Il checkout da cui si legge la coda e si interroga `origin`: il primo antenato
+# della cwd che contiene `asdlc.toml`, trovato da `main()` (PBI-382). Non la
+# cartella di questo file: installato, il codice sta in site-packages. È l'unico
+# percorso che non sta in `asdlc.toml` — un percorso assoluto in un file
+# versionato è il difetto che la configurazione toglie.
+REPO: Path
 
 # `tools/` non è un pacchetto: il lettore della configurazione sta accanto a
-# questo file e si importa da lì, come fa il runner.
-if str(REPO / "tools") not in sys.path:
-    sys.path.insert(0, str(REPO / "tools"))
+# questo file e si importa da lì, come fa il runner. Qui conta dove sta il
+# codice, non dove sta il progetto.
+SORGENTE = Path(__file__).resolve().parent
+if str(SORGENTE) not in sys.path:
+    sys.path.insert(0, str(SORGENTE))
 import asdlc_config  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
@@ -190,7 +194,7 @@ RE_RAMO_PBI: re.Pattern[str]
 
 
 def configura(cfg: asdlc_config.Config) -> None:
-    """Le costanti di modulo, dalla configurazione: una volta all'import, e i
+    """Le costanti di modulo, dalla configurazione: una volta da `main()`, e i
     test la richiamano con un `asdlc.toml` di prova. Restano nomi di modulo per
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
@@ -209,12 +213,6 @@ def configura(cfg: asdlc_config.Config) -> None:
     RE_TITOLO_PR = re.compile(rf"^\s*({id_pbi})\s*:")
     RE_RAMO_PR = re.compile(rf"^{ramo}")
     RE_RAMO_PBI = re.compile(rf"refs/heads/{ramo}")
-
-
-try:
-    configura(asdlc_config.carica(REPO))
-except asdlc_config.ErroreDiConfigurazione as guasto:
-    sys.exit(f"asdlc_coda: {guasto}")
 
 
 class Guasto(RuntimeError):
@@ -555,7 +553,26 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Un tick: guarda, decide una cosa, la fa, e finisce."""
+    """Un tick: legge `asdlc.toml`, poi guarda, decide una cosa, la fa, e finisce.
+
+    La configurazione si legge qui e non all'import (PBI-382): un modulo
+    importato non deve leggere niente.
+    """
+    try:
+        # Fuori da un progetto ci si ferma qui, prima del lucchetto e di ogni
+        # scrittura: il runner non ha niente da fare, e lo dice.
+        radice = asdlc_config.radice(Path.cwd())
+        configura(asdlc_config.carica(radice))
+    except asdlc_config.ErroreDiConfigurazione as guasto:
+        sys.exit(f"asdlc_coda: {guasto}")
+    global REPO
+    REPO = radice
+    return smista(argv)
+
+
+def smista(argv: list[str] | None = None) -> int:
+    """`main()` a configurazione già letta: i test la chiamano da qui, coi nomi
+    di modulo che hanno sostituito."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", type=Path, default=REPO,
                     help="il checkout da cui si legge la coda e si interroga origin")
