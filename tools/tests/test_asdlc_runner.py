@@ -4078,11 +4078,20 @@ class TestUnGateGuastoNonEUnCicloMancato:
     già costato una diagnosi sbagliata (difetto 11).
     """
 
-    def _comando(self, linguaggio="python"):
+    def _comando(self, linguaggio="python", rapporto=None):
         return runner.ComandoDiProva(
             Path("/tmp"), ["pytest", "--tb=no", "-v", "tests/t.py::test_x"],
-            linguaggio, {"tests/t.py::test_x": "tests/t.py::test_x"},
+            linguaggio, {"tests/t.py::test_x": "tests/t.py::test_x"}, rapporto,
         )
+
+    @staticmethod
+    def _pytest_che_scrive(rapporto, xml, codice, schermo=""):
+        """Un `esegui` che fa pytest: il `--junitxml` lo scrive **mentre gira**, e
+        non lo trova già scritto da prima (PBI-390, decisione 6)."""
+        def esegui(*a, **k):
+            rapporto.write_text(xml, encoding="utf-8")
+            return codice, schermo
+        return esegui
 
     def test_un_comando_che_non_parte_alza_invece_di_accusare(self, monkeypatch):
         monkeypatch.setattr(
@@ -4095,34 +4104,59 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert "pytest" in str(guasto.value)
 
-    def test_una_riga_di_comando_sbagliata_e_del_gate_non_del_builder(self, monkeypatch):
+    def test_una_riga_di_comando_sbagliata_e_del_gate_non_del_builder(
+            self, monkeypatch, tmp_path):
         """`4` è l'uso sbagliato di pytest: se l'id l'ha scritto il gate, l'errore è
-        del gate."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (4, "ERROR: not found"))
+        del gate. Il rapporto pytest lo scrive lo stesso, vuoto."""
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(), 4, "ERROR: not found"))
 
         with pytest.raises(runner.GuastoDelGate):
-            runner.esiti_del_comando(self._comando())
+            runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
-    def test_nessun_test_raccolto_resta_una_lettura_sui_test(self, monkeypatch):
+    def test_nessun_test_raccolto_resta_una_lettura_sui_test(self, monkeypatch, tmp_path):
         """`5` lo dice pytest **sui test**: lì il gate non indovina e lo scrive, che
         è un'altra cosa dal non aver potuto guardare."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (5, "no tests ran in 0.01s"))
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(), 5, "no tests ran in 0.01s"))
 
-        esiti, _ = runner.esiti_del_comando(self._comando())
+        esiti, _ = runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
         assert esiti == {"tests/t.py::test_x": "nessuno"}
 
-    def test_un_errore_di_raccolta_resta_un_rosso(self, monkeypatch):
-        """L'import che a quel commit non esiste ancora è il rosso più comune del
-        test-first: `2` è un codice di pytest, e il conteggio c'è."""
-        monkeypatch.setattr(
-            runner, "esegui",
-            lambda *a, **k: (2, "ERROR tests/t.py\n1 error in 0.02s"),
-        )
+    ERRORE_DI_RACCOLTA = ("", "tests.t", '<error message="collection failure"/>')
 
-        esiti, _ = runner.esiti_del_comando(self._comando())
+    def test_un_errore_di_raccolta_resta_un_rosso(self, monkeypatch, tmp_path):
+        """L'import che a quel commit non esiste ancora è il rosso più comune del
+        test-first: `2` è un codice di pytest, e nel JUnit c'è il caso senza
+        `classname` con il suo `<error>`."""
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(self.ERRORE_DI_RACCOLTA), 2))
+
+        esiti, _ = runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
         assert esiti == {"tests/t.py::test_x": "rosso"}
+
+    def test_l_errore_di_raccolta_nel_junit_e_rosso_per_ogni_chiave_del_comando(
+            self, monkeypatch, tmp_path):
+        """PBI-390, decisione 5 e criterio 6. L'errore di raccolta non ha un caso
+        per test: il JUnit scrive un caso solo, col `classname` vuoto e il modulo
+        nel `name`, e vale `rosso` per ogni chiave del comando che non ha un caso
+        suo, come valeva `1 error` a schermo. Lo schermo qui non dice niente: a
+        decidere è il rapporto."""
+        rapporto = tmp_path / "pytest-0.xml"
+        chiavi = ["tests/t.py::test_x", "tests/t.py::TestY::test_y"]
+        monkeypatch.setattr(runner, "esegui", self._pytest_che_scrive(
+            rapporto, junit_finto(self.ERRORE_DI_RACCOLTA), 2))
+
+        esiti, _ = runner.esiti_del_comando(runner.ComandoDiProva(
+            Path("/tmp"), ["pytest", *chiavi], "python",
+            {chiave: chiave for chiave in chiavi}, rapporto))
+
+        assert esiti == {chiave: "rosso" for chiave in chiavi}
 
     def _comando_vitest(self, rapporto):
         relativo = "src/pages/FoglioPage.test.tsx"
@@ -4297,21 +4331,27 @@ class TestUnGateGuastoNonEUnCicloMancato:
 
         assert "vitest scaduto dopo 1800 secondi" in str(guasto.value)
 
-    @pytest.mark.parametrize("schermo, atteso", [
-        ("1 failed, 2 passed in 0.10s", "rosso"),
-        ("ERROR tests/t.py\n1 error in 0.02s", "rosso"),
-        ("3 passed in 0.10s", "verde"),
-        ("2 skipped in 0.01s", "saltato"),
-        ("no tests ran in 0.01s", "nessuno"),
+    @pytest.mark.parametrize("casi, atteso", [
+        ([("tests.t", "test_x", '<failure message="assert 1 == 2"/>'),
+          ("tests.t", "test_y", ""), ("tests.t", "test_z", "")], "rosso"),
+        ([("", "tests.t", '<error message="collection failure"/>')], "rosso"),
+        ([("tests.t", "test_x", ""), ("tests.t", "test_y", ""),
+          ("tests.t", "test_z", "")], "verde"),
+        ([("tests.t", "test_x", '<skipped type="pytest.skip" message="dopo"/>'),
+          ("tests.t", "test_y", '<skipped type="pytest.skip" message="dopo"/>')],
+         "saltato"),
+        ([], "nessuno"),
     ], ids=["failed", "error", "passed", "skipped", "niente"])
-    def test_guardia_i_conteggi_di_pytest_si_leggono_ancora_dallo_schermo(
-            self, monkeypatch, schermo, atteso):
-        """Guardia dichiarata di PBI-376: pytest resta fuori scope, e i suoi
-        conteggi si leggono dalla riga di riepilogo come prima. Lo schermo non
-        ha righe per test, quindi decide l'esito del comando intero."""
-        monkeypatch.setattr(runner, "esegui", lambda *a, **k: (1, schermo))
+    def test_guardia_gli_esiti_di_pytest_si_leggono_dal_rapporto_junit(
+            self, monkeypatch, tmp_path, casi, atteso):
+        """Guardia dichiarata di PBI-376, passata al JUnit da PBI-390 (decisione
+        6): gli stessi cinque esiti che prima si leggevano dalla riga di
+        riepilogo, ora scritti nel rapporto, danno a `test_x` lo stesso esito."""
+        rapporto = tmp_path / "pytest-0.xml"
+        monkeypatch.setattr(runner, "esegui",
+                            self._pytest_che_scrive(rapporto, junit_finto(*casi), 1))
 
-        esiti, _ = runner.esiti_del_comando(self._comando())
+        esiti, _ = runner.esiti_del_comando(self._comando(rapporto=rapporto))
 
         assert esiti == {"tests/t.py::test_x": atteso}
 
