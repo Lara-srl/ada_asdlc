@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +44,9 @@ SORGENTE = Path(__file__).resolve().parent.parent
 if str(SORGENTE) not in sys.path:
     sys.path.insert(0, str(SORGENTE))
 from asdlc import config as asdlc_config  # noqa: E402
+# La ricerca degli eseguibili e delle versioni è la stessa del runner: il tick la
+# fa prima di lanciare, sullo stesso `asdlc.toml` (PBI-384).
+from asdlc import runner as asdlc_runner  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
 # file che legge il runner, quindi il tick e il runner non possono più dire due
@@ -485,6 +489,31 @@ def runner_installato() -> Path:
     return PACCHETTO / "bin" / "asdlc-runner"
 
 
+def mancanze_dell_ambiente(worktree: Path) -> list[str]:
+    """Ciò che manca perché il runner possa partire in `worktree`, una riga per
+    mancanza; vuota se non manca niente (PBI-384, decisione 7).
+
+    Il runner installato, `<pacchetto>/bin/asdlc-runner`, e l'ambiente che il
+    runner stesso verificherebbe all'avvio: gli `[ambiente].eseguibili` nel venv
+    del worktree o sul `PATH`, alla versione di `[ambiente].minimi`. Il runner li
+    guarda anche lui, ma dopo il distacco, e lì la ragione finisce in un log che
+    il tick non legge.
+    """
+    mancanze: list[str] = []
+    if PACCHETTO is None:
+        mancanze.append("ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
+                        "il venv in cui è installato il runner")
+    else:
+        comando = runner_installato()
+        if not (comando.is_file() and os.access(comando, os.X_OK)):
+            mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile — "
+                            "`pip install ./tools` nel venv del pacchetto")
+    ambiente = CFG.ambiente
+    mancanze += asdlc_runner.eseguibili_mancanti(ambiente.eseguibili, ambiente.venv, worktree)
+    mancanze += asdlc_runner.versioni_sotto_il_minimo(ambiente.minimi, ambiente.venv, worktree)
+    return mancanze
+
+
 def lancia(pbi: str, worktree: Path) -> None:
     """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
 
@@ -620,6 +649,15 @@ def smista(argv: list[str] | None = None) -> int:
     # **cambia** lo stato — il pre-flight, che sposta il worktree su un altro
     # ramo, e il runner.
     if isinstance(decisione, Lancia) and not a.dry_run:
+        # L'ambiente prima del pre-flight: senza il runner o senza ciò che i gate
+        # lanciano, il giro si fermerebbe dopo aver spostato il worktree. Tutte le
+        # mancanze in una riga, perché il log ne ha una per tick.
+        if mancanze := mancanze_dell_ambiente(a.worktree):
+            prefisso = "ambiente mancante: "
+            riga = prefisso + "; ".join(m.removeprefix(prefisso) for m in mancanze)
+            print(riga)
+            scrivi_nel_log(a.repo, riga)
+            return 1
         try:
             lancia(decisione.pbi, a.worktree)
         except Guasto as guasto:
