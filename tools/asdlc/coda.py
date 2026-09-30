@@ -61,6 +61,9 @@ CODA: Path                     # `[backlog].coda`, relativo al checkout
 BASE: str                      # `[git].base`
 REMOTO: str                    # `origin`, da `BASE`
 PREFISSO_RAMO: str             # `[git].prefisso_ramo`
+# Il venv in cui è installato il runner, assoluto: il tick lancia
+# `<pacchetto>/bin/asdlc-runner`, mai la copia di lavoro dell'albero (PBI-384).
+PACCHETTO: Path | None         # `[ambiente].pacchetto`
 
 
 @dataclass(frozen=True)
@@ -199,7 +202,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     test la richiamano con un `asdlc.toml` di prova. Restano nomi di modulo per
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
-    global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI
+    global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI, PACCHETTO
     CFG = cfg
     WORKTREE_DEL_RUNNER = cfg.worktree.percorso
     LOG = Path(cfg.registro.cartella) / "coda.log"
@@ -208,6 +211,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     CODA = Path(cfg.backlog.coda)
     BASE, REMOTO = cfg.git.base, cfg.git.remoto
     PREFISSO_RAMO = cfg.git.prefisso_ramo
+    PACCHETTO = cfg.ambiente.pacchetto
     id_pbi = asdlc_config.regex_del_modello(cfg.backlog.id).pattern
     ramo = re.escape(PREFISSO_RAMO) + r"(\d+)"
     RE_PBI = re.compile(rf"^-\s+({id_pbi})\s*$")
@@ -471,6 +475,16 @@ def preflight() -> list[list[str]]:
 ATTESA_DEL_DISTACCO = 15.0
 
 
+def runner_installato() -> Path:
+    """`<pacchetto>/bin/asdlc-runner`, per percorso assoluto: il cron ha il `PATH`
+    minimo, e il runner che lavora è quello installato, non il sorgente
+    dell'albero che il giro sta per cambiare (`ADR-0026`, decisione 3)."""
+    if PACCHETTO is None:
+        raise Guasto("asdlc.toml non dichiara `[ambiente].pacchetto`: non so quale "
+                     "runner lanciare")
+    return PACCHETTO / "bin" / "asdlc-runner"
+
+
 def lancia(pbi: str, worktree: Path) -> None:
     """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
 
@@ -488,8 +502,8 @@ def lancia(pbi: str, worktree: Path) -> None:
     di ieri e il ramo nascerebbe su una base vecchia.
 
     Il codice d'uscita del runner copre ciò che succede **prima** del distacco, e
-    solo quello: `--e2e`, un argomento che argparse rifiuta, `python3` che su
-    questa macchina non c'è. Dopo non copre più niente, perché `stacca()` esce
+    solo quello: `--e2e`, un argomento che argparse rifiuta, un `asdlc-runner`
+    che nel venv del pacchetto non c'è. Dopo non copre più niente, perché `stacca()` esce
     dal padre con `os._exit(0)` prima del lucchetto, di `agenti_estranei()` e del
     controllo d'igiene — e l'ordine è deliberato, il `flock` vive nell'open file
     description e un padre che lo prendesse e poi forkasse se lo porterebbe via.
@@ -508,7 +522,7 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    codice, uscita = esegui(["python3", "tools/asdlc/runner.py", pbi], worktree)
+    codice, uscita = esegui([str(runner_installato()), pbi], worktree)
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
