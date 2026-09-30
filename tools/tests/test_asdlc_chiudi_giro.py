@@ -199,3 +199,22 @@ def test_la_pausa_ce_prima_che_il_ramo_si_cancelli(home_finta, tmp_path, monkeyp
     assert len(cancellazione) == 1
     assert cancellazione[0] is not None, "la pausa deve esserci prima della cancellazione"
     assert cancellazione[0].strip().endswith("asdlc-chiudi-giro PBI-377"), cancellazione
+
+
+def test_il_nome_del_tag_porta_il_giro_dal_ramo_e_la_data_dal_rapporto(
+    home_finta, tmp_path, monkeypatch
+):
+    """Decisione 4. `pbi/pbi-376-giro2` è il secondo giro (`nome_libero()`), e il
+    rapporto è del 29/09 anche se lo si chiude un altro giorno: il tag dice quale
+    giro è stato fermato e quando, non quando qualcuno lo ha chiuso."""
+    repo, albero = un_giro_fermato(tmp_path, run="20260929-231500-000002", pbi="PBI-376")
+    visti, esegui = un_origin(home_finta, rami=(("pbi/pbi-376-giro2", TESTA),))
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    assert chiudi_giro().smista(
+        ["PBI-376", "--repo", str(repo), "--worktree", str(albero)]) == 0
+
+    tag = [cmd for cmd, _, _ in visti if cmd[:2] == ["git", "tag"]]
+    assert tag == [["git", "tag", "giro-fermato/pbi-376-giro2-20260929", TESTA]]
+    cancellato = [cmd for cmd, _, _ in visti if "--delete" in cmd]
+    assert cancellato == [["git", "push", "origin", "--delete", "pbi/pbi-376-giro2"]]
