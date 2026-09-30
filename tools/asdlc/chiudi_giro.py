@@ -113,7 +113,12 @@ def smista(argv: list[str] | None = None) -> int:
     if coda.giro_in_corso(a.worktree):
         return rifiuta(f"il lucchetto {a.worktree / coda.LUCCHETTO} è tenuto: in "
                        f"{a.worktree} c'è un runner al lavoro, e il giro non è fermo.")
-    run, esito = ultimo_rapporto(a.worktree, a.pbi, a.run)
+    trovato = ultimo_rapporto(a.worktree, a.pbi, a.run)
+    if trovato is None:
+        dove = a.worktree / coda.CFG.registro.cartella
+        return rifiuta(f"in {dove} non c'è un rapporto " +
+                       (f"{a.run}.json " if a.run else "") + f"con un esito di {a.pbi}.")
+    run, esito = trovato
     testa = esito.get("testa", "")
     if not testa:
         return rifiuta(f"il rapporto {run} di {a.pbi} non ha `testa`, e il tag non saprebbe "
