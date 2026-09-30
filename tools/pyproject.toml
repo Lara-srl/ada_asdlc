@@ -22,6 +22,7 @@ dependencies = []
 asdlc-runner = "asdlc.runner:main"
 asdlc-coda = "asdlc.coda:main"
 asdlc-esito = "asdlc.esito:main"
+asdlc-chiudi-giro = "asdlc.chiudi_giro:main"
 
 # Il solo pacchetto `asdlc`: in `tools/` stanno anche gli script di aDa, che non
 # sono del runner e non si installano.

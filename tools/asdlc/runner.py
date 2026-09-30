@@ -696,6 +696,10 @@ class Esito:
     # Lo sha da cui discende il giro: il commit su cui si è letto il PBI, da cui è
     # nato il branch e contro cui si contano i commit (PBI-374, decisione 1).
     base: str = ""
+    # Lo sha del ramo pubblicato su `origin`, letto con `ls-remote` dopo il push:
+    # è la testa su cui `asdlc-chiudi-giro` mette il tag (PBI-385, decisione 1).
+    # Vuoto se il giro non ha pubblicato, o se `origin` non ha risposto.
+    testa: str = ""
 
 
 def apri_rapporto(run: str, pbi: list[str]) -> Path:
@@ -3322,6 +3326,17 @@ NON_PUBBLICATO = "branch non pubblicato: i commit restano nel worktree"
 PUSH_SCADUTO = "push in timeout, stato di origin da verificare"
 
 
+def testa_su_origin(branch: str) -> str:
+    """Lo sha di `refs/heads/<branch>` su `origin`, chiesto al remoto con
+    `ls-remote`; `""` se non c'è o se il remoto non risponde. Non alza: la
+    chiama `pubblica()`, che non alza mai (PBI-385, decisione 1)."""
+    try:
+        fuori = git("ls-remote", REMOTO, f"refs/heads/{branch}").split()
+    except (RuntimeError, subprocess.TimeoutExpired):
+        return ""
+    return fuori[0] if fuori else ""
+
+
 def pubblica(branch: str, e: Esito | None = None) -> bool:
     """Manda il branch su `origin`. Non alza mai: pubblicare è l'ultimo gesto.
 
@@ -3354,14 +3369,17 @@ def pubblica(branch: str, e: Esito | None = None) -> bool:
     La divergenza si scrive anche nella nota di `e`, non solo a schermo (PBI-374,
     decisione 5): dopo la verifica prima dei gate può capitare solo se il ref si
     è mosso dopo l'ultimo gate, e deve lasciare traccia nel registro.
+
+    Dopo un push riuscito `e.testa` prende lo sha che `origin` ha davvero sul
+    ramo (`testa_su_origin()`): è la testa che `asdlc-chiudi-giro` legge dal
+    rapporto (PBI-385, decisione 1).
     """
     try:
         diversi = ramo_diverso_da_head(branch)
         if diversi is None:
             git("push", "--force-with-lease", "-u", REMOTO, branch)
-            return True
-        etichetta, head = diversi
-        git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
+        else:
+            git("push", "--force-with-lease", "-u", REMOTO, f"HEAD:refs/heads/{branch}")
     except (RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f"    ⚠️  branch non pubblicato: {str(exc)[:200]}")
         print(f"       i commit restano in locale su {branch}: `git push` a mano quando "
@@ -3372,6 +3390,11 @@ def pubblica(branch: str, e: Esito | None = None) -> bool:
         if isinstance(exc, subprocess.TimeoutExpired) and e is not None:
             e.nota = " · ".join(t for t in (e.nota, PUSH_SCADUTO) if t)
         return False
+    if e is not None:
+        e.testa = testa_su_origin(branch)
+    if diversi is None:
+        return True
+    etichetta, head = diversi
     nota = f"pubblicato HEAD {head} al posto del ramo {branch}, che era {etichetta}"
     try:
         git("branch", "-f", branch, "HEAD")
