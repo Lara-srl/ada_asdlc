@@ -20,6 +20,7 @@ import fcntl
 import importlib.util
 import datetime
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,22 @@ coda.configura(coda.asdlc_config.carica(REPO))
 # `[ambiente].pacchetto`, risolto dalla radice comune (PBI-384).
 RUNNER_INSTALLATO = (coda.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin"
                      / "asdlc-runner")
+
+# La verifica dell'ambiente prima del lancio (PBI-384) guarda il mondo: il venv del
+# runner, il `PATH`, le versioni. Nei test si sostituisce, come `esegui`: su
+# questa macchina e in CI il runner installato non c'è, e ogni lancio si
+# fermerebbe lì. Il test della verifica la rimette con `ambiente_vero`.
+MANCANZE_VERE = getattr(coda, "mancanze_dell_ambiente", None)
+
+
+@pytest.fixture(autouse=True)
+def ambiente_presente(monkeypatch):
+    monkeypatch.setattr(coda, "mancanze_dell_ambiente", lambda worktree: [], raising=False)
+
+
+@pytest.fixture
+def ambiente_vero(monkeypatch):
+    monkeypatch.setattr(coda, "mancanze_dell_ambiente", MANCANZE_VERE, raising=False)
 
 
 def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
@@ -1274,3 +1291,39 @@ def test_guardia_il_dry_run_dal_checkout_scrive_il_log_nel_temporaneo(tmp_path, 
     assert not coda.LOG.is_relative_to(REPO), coda.LOG
     righe = coda.LOG.read_text(encoding="utf-8").splitlines()
     assert [r.split("  ", 1)[1] for r in righe] == [decisa]
+
+
+# --- Il tick verifica l'ambiente prima di lanciare (PBI-384) -----------------
+
+
+def test_il_tick_con_l_ambiente_mancante_scrive_la_riga_e_non_lancia(
+    configura, ambiente_vero, tmp_path, monkeypatch
+):
+    """Decisione 7: senza `<pacchetto>/bin/asdlc-runner`, o con un eseguibile
+    dichiarato che manca, il tick scrive una riga `ambiente mancante: …` e non
+    lancia — né il runner né il pre-flight, che sposta il worktree su un altro
+    ramo. Il `PATH` del cron è minimo, e il runner si fermerebbe lo stesso dopo il
+    distacco, dove la ragione finisce in un log che il tick non legge."""
+    configura(toml_di_prova().replace(
+        'pacchetto = ".venv-asdlc"', 'pacchetto = ".venv-asdlc"\neseguibili = ["git", "pytest"]'))
+    monkeypatch.setattr(shutil, "which",
+                        lambda c, *a, **k: None if c == "pytest" else f"/usr/bin/{c}")
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    mancante = [r for r in righe if "  ambiente mancante: " in r]
+    assert len(mancante) == 1, righe
+    runner_del_pacchetto = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+    assert str(runner_del_pacchetto) in mancante[0]
+    assert "`pytest`" in mancante[0], "tutte le mancanze, nella stessa riga"
+    assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti), "il runner non parte"
+    assert not any(c in cmd for cmd in visti for c in ("fetch", "switch", "checkout")), (
+        "e nemmeno il pre-flight")
