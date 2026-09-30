@@ -99,6 +99,12 @@ def smista(argv: list[str] | None = None) -> int:
                     help="l'albero del runner, dove sta il rapporto del giro")
     a = ap.parse_args(argv)
 
+    # Prima di tutto, anche delle domande a `origin`: con un runner al lavoro
+    # il giro non è fermo, e il suo ramo non si tocca. Lo stesso controllo del
+    # tick, il `flock` sul lucchetto (PBI-373).
+    if coda.giro_in_corso(a.worktree):
+        return rifiuta(f"il lucchetto {a.worktree / coda.LUCCHETTO} è tenuto: in "
+                       f"{a.worktree} c'è un runner al lavoro, e il giro non è fermo.")
     run, esito = ultimo_rapporto(a.worktree, a.pbi)
     testa = esito.get("testa", "")
     if not testa:
