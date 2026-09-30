@@ -2693,13 +2693,55 @@ def voce_mancata(sha: str, titolo: str, test: list[str], esito: str, coda: str) 
             "test": ", ".join(test[:TEST_IN_ELENCO]) + (f" e altri {resto}" if resto > 0 else "")}
 
 
+class Punta:
+    """La punta del ramo, dove si riprova la guardia che non morde al suo commit
+    (PBI-393, revisione del 01/10 di `ADR-0022`).
+
+    Il worktree si estrae alla prima guardia che ne ha bisogno e vale per tutte
+    quelle della stessa chiamata di `gate_del_rosso()`; se nessuna ne ha bisogno
+    non si estrae. Lo smonta la `pila` del gate, comunque vada.
+    """
+
+    def __init__(self, ref: str, pila: ExitStack):
+        self.ref = ref
+        self.sha = ""
+        self._pila = pila
+        self._albero: Path | None = None
+
+    def albero(self) -> Path:
+        if self._albero is None:
+            self.sha = git("rev-parse", self.ref)
+            self._albero = self._pila.enter_context(worktree_usa_e_getta(self.sha))
+        return self._albero
+
+
+def morso_alla_punta(punta: Punta, base: str, test: TestNuovo
+                     ) -> tuple[dict[str, str] | None, list[dict[str, str]], list[str]]:
+    """La quarta lettura della guardia sull'albero della punta, con il perimetro di
+    `base...punta`: `(ucciso, prove, perimetro)` come `quarta_lettura()`.
+
+    Il test si cerca con lo stesso file e lo stesso nome (decisione 4)."""
+    albero = punta.albero()
+    comandi, _ = comandi_dei_test(albero, [test])
+    if not comandi:
+        return None, [], []
+    [comando] = comandi
+    [chiave] = comando.etichette
+    perimetro: list[str] = []
+    ucciso, prove = quarta_lettura(albero, base, punta.sha, comando, chiave, None, perimetro)
+    return ucciso, prove, perimetro
+
+
 def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
-                      morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+                      morsi: list[dict[str, str]] | None = None,
+                      punta: Punta | None = None) -> list[dict[str, str]]:
     """Estrae il commit e ci gira dentro i suoi test nuovi. Attende il rosso.
 
     Un test nato verde ha la quarta lettura prima di finire fra i mancati: se
     morde un mutante delle funzioni toccate dal branch, va in `morsi` — commit, test, mutante,
-    tipo del fallimento e le prove fatte fino al kill — e non ferma niente.
+    tipo del fallimento e le prove fatte fino al kill — e non ferma niente. Se lì
+    non morde, e c'è la `punta`, si riprova sull'albero della punta: il morso di lì
+    va in `morsi` con `"dove": "punta"` (PBI-393).
     """
     mancati: list[dict[str, str]] = []
     morsi = morsi if morsi is not None else []
@@ -2728,8 +2770,18 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                         morsi.append({"commit": sha[:7], "titolo": titolo,
                                       "test": etichetta, "mutante": ucciso["mutante"],
                                       "tipo": ucciso["tipo"], "prove": prove,
-                                      "perimetro": perimetro})
+                                      "perimetro": perimetro, "dove": "commit"})
                         continue
+                    if punta is not None:
+                        ucciso, alla_punta, suo = morso_alla_punta(
+                            punta, base, comando.origine[chiave])
+                        if ucciso is not None:
+                            morsi.append({"commit": sha[:7], "titolo": titolo,
+                                          "test": etichetta, "mutante": ucciso["mutante"],
+                                          "tipo": ucciso["tipo"], "prove": alla_punta,
+                                          "perimetro": suo, "dove": "punta",
+                                          "punta": punta.sha[:7]})
+                            continue
                     lettura = lettura_del_verde(prove, perimetro)
                 per_lettura[lettura].append(etichetta)
             for lettura, elenco in per_lettura.items():
@@ -2741,7 +2793,9 @@ def descrizione_del_morso(m: dict, rientro: str) -> str:
     """La riga «nato verde, ma morde» con il mutante **e** il tipo, e sotto le
     prove fatte fino al kill, una per riga: `mutante: esito (tipo)`."""
     tipo = f" ({m['tipo']})" if m.get("tipo") else ""
-    righe = [f"{rientro}→ nato verde, ma morde: {m['mutante']}{tipo}"]
+    righe = [f"{rientro}→ nato verde, non morde al suo commit, morde alla punta "
+             f"`{m['punta']}`: {m['mutante']}{tipo}" if m.get("dove") == "punta" else
+             f"{rientro}→ nato verde, ma morde: {m['mutante']}{tipo}"]
     if m.get("perimetro"):
         righe.append(f"{rientro}  perimetro: {', '.join(m['perimetro'])}")
     for p in m.get("prove", []):
@@ -2799,19 +2853,21 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     base = base if base is not None else BASE
     visti = visti if visti is not None else set()
     mancati: list[dict[str, str]] = []
-    for sha in commit_da_esaminare(base, ref, visti):
-        visti.add(sha)
-        file = file_del_commit(sha)
-        nuovi = test_nuovi_del_commit(sha, file)
-        if not nuovi:
-            continue  # un refactor non porta test nuovi, e la regola morde su quelli
-        titolo = git("show", "--no-patch", "--format=%s", sha)
-        produzione = [v.percorso for v in file if e_file_di_produzione(v.percorso)]
-        if produzione:
-            mancati.append(voce_mancata(sha, titolo, etichette_al_commit(sha, nuovi),
-                                        MISTO, ", ".join(produzione[:10])))
-            continue
-        mancati += esamina_il_commit(sha, titolo, nuovi, base, morsi)
+    with ExitStack() as pila:
+        punta = Punta(ref, pila)
+        for sha in commit_da_esaminare(base, ref, visti):
+            visti.add(sha)
+            file = file_del_commit(sha)
+            nuovi = test_nuovi_del_commit(sha, file)
+            if not nuovi:
+                continue  # un refactor non porta test nuovi, e la regola morde su quelli
+            titolo = git("show", "--no-patch", "--format=%s", sha)
+            produzione = [v.percorso for v in file if e_file_di_produzione(v.percorso)]
+            if produzione:
+                mancati.append(voce_mancata(sha, titolo, etichette_al_commit(sha, nuovi),
+                                            MISTO, ", ".join(produzione[:10])))
+                continue
+            mancati += esamina_il_commit(sha, titolo, nuovi, base, morsi, punta)
     return mancati
 
 
