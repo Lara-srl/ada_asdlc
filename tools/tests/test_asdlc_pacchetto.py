@@ -43,8 +43,9 @@ def un_progetto_col_pacchetto(tmp_path: Path) -> Path:
     progetto = tmp_path / "progetto"
     pacchetto = progetto / "tools" / "asdlc"
     pacchetto.mkdir(parents=True)
-    for sorgente in (REPO / "tools" / "asdlc").glob("*.py"):
-        shutil.copy(sorgente, pacchetto / sorgente.name)
+    # Tutto il pacchetto e non i soli `.py`: i prompt sono file suoi (PBI-386).
+    shutil.copytree(REPO / "tools" / "asdlc", pacchetto, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
     # Il percorso di macchina nel file locale, che è il suo posto (PBI-384).
     (progetto / "asdlc.local.toml").write_text(
@@ -90,16 +91,11 @@ def test_il_tick_lanciato_dalla_radice_come_tools_asdlc_coda_fa_il_dry_run(tmp_p
 COMANDI = ("asdlc-runner", "asdlc-coda", "asdlc-esito")
 
 
-def test_pip_install_di_tools_in_un_venv_pulito_mette_i_tre_comandi_e_il_runner_risponde(
-    tmp_path,
-):
-    """`pip install ./tools` è l'installazione del runner (`ADR-0026`, decisione 3):
-    non editabile, in un venv suo. I tre punti d'ingresso finiscono nel `bin/`, e
-    `asdlc-runner --help` risponde anche da una cartella che non è un progetto.
+def installa_in_un_venv_pulito(tmp_path: Path) -> Path:
+    """`pip install` di una **copia** di `tools/` in un venv nuovo, e il venv.
 
-    Si installa una **copia** di `tools/`: la build scrive `build/` e
-    `asdlc.egg-info/` accanto al sorgente, e nel repository vero sporcherebbe
-    l'albero del giro."""
+    Una copia: la build scrive `build/` e `asdlc.egg-info/` accanto al sorgente,
+    e nel repository vero sporcherebbe l'albero del giro."""
     sorgente = tmp_path / "sorgente"
     shutil.copytree(REPO / "tools" / "asdlc", sorgente / "asdlc",
                     ignore=shutil.ignore_patterns("__pycache__"))
@@ -114,6 +110,17 @@ def test_pip_install_di_tools_in_un_venv_pulito_mette_i_tre_comandi_e_il_runner_
          str(sorgente)], capture_output=True, text=True, timeout=600)
 
     assert installato.returncode == 0, installato.stdout + installato.stderr
+    return venv
+
+
+def test_pip_install_di_tools_in_un_venv_pulito_mette_i_tre_comandi_e_il_runner_risponde(
+    tmp_path,
+):
+    """`pip install ./tools` è l'installazione del runner (`ADR-0026`, decisione 3):
+    non editabile, in un venv suo. I tre punti d'ingresso finiscono nel `bin/`, e
+    `asdlc-runner --help` risponde anche da una cartella che non è un progetto."""
+    venv = installa_in_un_venv_pulito(tmp_path)
+
     for comando in COMANDI:
         assert (venv / "bin" / comando).is_file(), comando
     fuori = tmp_path / "fuori"
@@ -122,3 +129,37 @@ def test_pip_install_di_tools_in_un_venv_pulito_mette_i_tre_comandi_e_il_runner_
                            capture_output=True, text=True, timeout=60)
     assert aiuto.returncode == 0, aiuto.stdout + aiuto.stderr
     assert "--chiedi-impl" in aiuto.stdout
+
+
+# --- I prompt come dati del pacchetto (PBI-386) ------------------------------
+
+
+# Il ruolo e il nome del modulo che ne porta il testo, prima di `configura()`.
+PROMPT_DEI_RUOLI = (("builder", "MODELLO_BUILDER"), ("igiene", "PROMPT_IGIENE"),
+                    ("riprova", "PROMPT_RIPROVA"), ("critic", "MODELLO_CRITIC"),
+                    ("rimedio", "MODELLO_RIMEDIO"))
+
+LEGGI_I_PROMPT = f"""
+from importlib.resources import files
+from asdlc import runner
+cartella = files("asdlc") / "prompt"
+for ruolo, nome in {PROMPT_DEI_RUOLI!r}:
+    assert getattr(runner, nome) == (cartella / f"{{ruolo}}.md").read_text(encoding="utf-8"), ruolo
+print(runner.__file__)
+"""
+
+
+def test_il_runner_installato_legge_i_prompt_dal_pacchetto_senza_il_sorgente_accanto(tmp_path):
+    """I cinque prompt sono file di `asdlc/prompt/` e viaggiano col pacchetto: il
+    runner installato li legge da lì, lanciato da una cartella in cui il
+    sorgente non c'è (`ADR-0026`, decisione 2)."""
+    venv = installa_in_un_venv_pulito(tmp_path)
+    fuori = tmp_path / "fuori"
+    fuori.mkdir()
+
+    letto = subprocess.run([str(venv / "bin" / "python"), "-c", LEGGI_I_PROMPT], cwd=fuori,
+                           capture_output=True, text=True, timeout=60)
+
+    assert letto.returncode == 0, letto.stdout + letto.stderr
+    assert letto.stdout.strip().startswith(str(venv)), (
+        "il runner che ha letto i prompt è quello installato, non il sorgente")
