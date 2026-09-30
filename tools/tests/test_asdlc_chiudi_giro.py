@@ -292,3 +292,21 @@ def test_senza_un_solo_ramo_sulla_testa_del_rapporto_il_comando_rifiuta(
     assert not (home_finta / "asdlc-tick.pausa").exists()
     detto = capsys.readouterr().out
     assert all(n in detto for n in nominati), detto
+
+
+def test_un_tag_con_lo_stesso_nome_gia_su_origin_fa_rifiutare(
+    home_finta, tmp_path, monkeypatch, capsys
+):
+    """Decisione 4: un tag con quel nome già su `origin` è un rifiuto. Vuol dire
+    che quel giro è già stato chiuso una volta, o che un altro giro dello stesso
+    giorno ne ha preso il nome: spostarlo è il `push -f` di PBI-363."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta, tag_presenti=(TAG,))
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita != 0
+    assert i_passi(visti) == []
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    assert TAG in capsys.readouterr().out
