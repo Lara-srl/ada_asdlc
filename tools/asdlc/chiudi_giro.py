@@ -131,18 +131,32 @@ def smista(argv: list[str] | None = None) -> int:
                        "o un altro giro ne ha preso il nome. Spostarlo è un `push -f`, e "
                        "non lo faccio io.")
 
-    pausa = coda.file_di_pausa()
-    pausa.write_text(f"{datetime.now():%Y-%m-%d %H:%M} asdlc-chiudi-giro {a.pbi}\n",
-                     encoding="utf-8")
-    for comando in (
+    passi = [
         ["git", "tag", tag, testa],
         ["git", "push", coda.REMOTO, f"refs/tags/{tag}"],
         ["git", "push", coda.REMOTO, "--delete", ramo],
         ["git", "fetch", coda.REMOTO],
         ["git", "merge", "--ff-only", coda.BASE],
-    ):
-        esegui(comando, a.repo)
-    pausa.unlink()
+    ]
+    pausa = coda.file_di_pausa()
+    pausa.write_text(f"{datetime.now():%Y-%m-%d %H:%M} asdlc-chiudi-giro {a.pbi}\n",
+                     encoding="utf-8")
+    # La pausa si toglie comunque, anche se un passo fallisce o alza: lasciata
+    # indietro terrebbe il tick spento senza che nessuno lo sappia.
+    try:
+        for n, comando in enumerate(passi):
+            codice, uscita = esegui(comando, a.repo)
+            if codice != 0:
+                # Ci si ferma al primo passo fallito: senza il tag su `origin`,
+                # cancellare il ramo perderebbe il giro.
+                print(f"Passo fallito: `{' '.join(comando)}` (uscita {codice}): "
+                      f"{uscita.strip()[:200]}")
+                print(f"Restano da fare a mano, in {a.repo}:")
+                for resto in passi[n:]:
+                    print(f"  {' '.join(resto)}")
+                return 1
+    finally:
+        pausa.unlink(missing_ok=True)
     return 0
 
 
