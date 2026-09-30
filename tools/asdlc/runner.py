@@ -1783,11 +1783,17 @@ def comandi_dei_test(albero: Path,
     # per ogni test fallito, l'eccezione che l'ha fatto fallire, e `-vv` non taglia
     # quel messaggio alla larghezza del terminale. `--tb=no` perché il traceback qui
     # non serve — la coda che finisce nel rapporto è la stessa per tutti.
+    # `--rootdir` è la cartella di lancio perché `caso_junit()` ricava il caso dal
+    # node id relativo a quella: lasciato a pytest, il rootdir lo decide il primo
+    # file di configurazione che trova — un `tools/pyproject.toml` anche senza
+    # `[tool.pytest.ini_options]` — e nessun caso combacia più con la sua chiave
+    # (PBI-391, difetto 67 di PBI-102).
     comandi: list[ComandoDiProva] = []
     for numero, (cartella, nodi) in enumerate(per_pytest.items()):
         rapporto = albero.parent / f"pytest-{numero}.xml"
         comandi.append(ComandoDiProva(
-            cartella, ["pytest", "--tb=no", "-vv", "-rf", f"--junitxml={rapporto}", *nodi],
+            cartella, ["pytest", "--tb=no", "-vv", "-rf", f"--rootdir={cartella.resolve()}",
+                       f"--junitxml={rapporto}", *nodi],
             "python", {nodo: nodo for nodo in nodi}, rapporto,
             origine={nodo: origine[nodo] for nodo in nodi}))
     # Il json di vitest va in un file e non a schermo: `npm test` ci scrive sopra la
