@@ -2782,7 +2782,10 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                                           "perimetro": suo, "dove": "punta",
                                           "punta": punta.sha[:7]})
                             continue
-                    lettura = lettura_del_verde(prove, perimetro)
+                        lettura = lettura_dei_due_alberi(prove, perimetro, punta.sha,
+                                                         alla_punta, suo)
+                    else:
+                        lettura = lettura_del_verde(prove, perimetro)
                 per_lettura[lettura].append(etichetta)
             for lettura, elenco in per_lettura.items():
                 mancati.append(voce_mancata(sha, titolo, elenco, lettura, coda))
@@ -2818,18 +2821,35 @@ def lettura_del_verde(prove: list[dict[str, str]], perimetro: list[str] | None =
     legge «non morde» deve vedere dove il gate ha guardato (PBI-378).
     """
     if not prove:
-        lettura = f"{ESITI_MANCATI['verde']} — e nessun mutante da provare nel perimetro"
+        return f"{ESITI_MANCATI['verde']} — e {misura_dei_mutanti(prove, perimetro)}"
+    return (f"nato verde e non morde: a quel commit il test passa, e "
+            f"{misura_dei_mutanti(prove, perimetro)}")
+
+
+def misura_dei_mutanti(prove: list[dict[str, str]], perimetro: list[str] | None) -> str:
+    """I mutanti provati in un albero, quelli falliti per eccezione col tipo, e il
+    perimetro: la parte di `lettura_del_verde()` che si ripete per ogni albero."""
+    if not prove:
+        misura = "nessun mutante da provare nel perimetro"
     else:
         quanti = "1 mutante provato" if len(prove) == 1 else f"{len(prove)} mutanti provati"
-        lettura = (f"nato verde e non morde: a quel commit il test passa, e {quanti} nelle "
-                   f"funzioni che il branch ha toccato non lo fanno fallire")
+        misura = f"{quanti} nelle funzioni che il branch ha toccato non lo fanno fallire"
         tipi = [p["tipo"] for p in prove if p["esito"] == PER_ECCEZIONE]
         if tipi:
-            lettura += (f" per asserzione; {len(tipi)} {PER_ECCEZIONE} "
-                        f"({', '.join(sorted(set(tipi)))}), che non è un morso")
+            misura += (f" per asserzione; {len(tipi)} {PER_ECCEZIONE} "
+                       f"({', '.join(sorted(set(tipi)))}), che non è un morso")
     if perimetro:
-        lettura += f"; perimetro: {', '.join(perimetro)}"
-    return lettura
+        misura += f"; perimetro: {', '.join(perimetro)}"
+    return misura
+
+
+def lettura_dei_due_alberi(prove: list[dict[str, str]], perimetro: list[str], punta: str,
+                           alla_punta: list[dict[str, str]], suo: list[str]) -> str:
+    """La lettura della guardia che non morde né al suo commit né alla punta: una
+    sola, che nomina tutti e due gli alberi (PBI-393, decisione 5)."""
+    return (f"nato verde e non morde, né al suo commit né alla punta `{punta[:7]}`: "
+            f"al suo commit: {misura_dei_mutanti(prove, perimetro)}; "
+            f"alla punta: {misura_dei_mutanti(alla_punta, suo)}")
 
 
 def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
