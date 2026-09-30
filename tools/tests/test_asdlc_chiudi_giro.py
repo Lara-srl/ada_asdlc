@@ -379,3 +379,30 @@ def test_il_dry_run_stampa_i_sei_passi_coi_valori_veri_e_non_esegue_niente(
                    "git push origin --delete pbi/pbi-377",
                    "git merge --ff-only origin/main"):
         assert atteso in detto, (atteso, detto)
+
+
+def test_il_rapporto_e_l_ultimo_che_nomina_il_pbi_o_quello_scelto_con_run(
+    home_finta, tmp_path, monkeypatch
+):
+    """Decisione 2. Il rapporto è l'ultimo `runs/<run>.json` dell'albero che
+    nomina il PBI: uno più recente di un altro PBI non conta. Con `--run <id>` si
+    sceglie quello, e il tag porta la sua testa e la sua data."""
+    repo, albero = un_giro_fermato(tmp_path, run="20260926-090000-000001", testa=ALTRA)
+    runs = albero / "runs"
+    (runs / f"{RUN}.json").write_text(json.dumps({"run": RUN, "esiti": [
+        {"pbi": "PBI-377", "stato": "fermato", "testa": TESTA}]}), encoding="utf-8")
+    (runs / "20260928-080000-000001.json").write_text(json.dumps({
+        "run": "20260928-080000-000001", "esiti": [
+            {"pbi": "PBI-378", "stato": "fermato", "testa": "f" * 40}]}), encoding="utf-8")
+    argomenti = ["PBI-377", "--repo", str(repo), "--worktree", str(albero)]
+
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+    assert chiudi_giro().smista(argomenti) == 0
+    assert ["git", "tag", TAG, TESTA] in [cmd for cmd, _, _ in visti]
+
+    visti, esegui = un_origin(home_finta, rami=(("pbi/pbi-377", ALTRA),))
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+    assert chiudi_giro().smista([*argomenti, "--run", "20260926-090000-000001"]) == 0
+    assert (["git", "tag", "giro-fermato/pbi-377-giro1-20260926", ALTRA]
+            in [cmd for cmd, _, _ in visti])
