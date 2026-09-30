@@ -137,6 +137,18 @@ class GateDelRosso:
     attivo: bool
 
 
+# I ruoli che hanno un prompt: ognuno è `asdlc/prompt/<ruolo>.md` nel pacchetto, e
+# può avere un file di aggiunte `<ruolo>.md` nella cartella di `[prompt].aggiunte`.
+RUOLI_DEI_PROMPT = ("builder", "igiene", "riprova", "critic", "rimedio")
+
+
+@dataclass(frozen=True)
+class Prompt:
+    # La cartella delle aggiunte del progetto, assoluta dopo `carica()`: relativa
+    # alla radice del progetto nel TOML. `None` se il progetto non ne dichiara.
+    aggiunte: Path | None = None
+
+
 @dataclass(frozen=True)
 class Config:
     git: Git
@@ -147,6 +159,7 @@ class Config:
     soglie: Soglie
     gate_del_rosso: GateDelRosso
     gate: tuple[Gate, ...]
+    prompt: Prompt = Prompt()
 
 
 def radice(cwd: Path) -> Path:
@@ -179,8 +192,10 @@ def carica(repo: Path) -> Config:
     cfg = interpreta(dati, NOME_FILE)
     comune = radice_comune(repo)
     pacchetto = cfg.ambiente.pacchetto
+    aggiunte = cfg.prompt.aggiunte
     return replace(
         cfg,
+        prompt=Prompt(aggiunte=None if aggiunte is None else (repo / aggiunte).resolve()),
         ambiente=replace(cfg.ambiente,
                          pacchetto=None if pacchetto is None else risolvi(comune, pacchetto)),
         worktree=Worktree(percorso=risolvi(comune, cfg.worktree.percorso)),
@@ -271,6 +286,8 @@ def interpreta(dati: dict, file: str) -> Config:
     worktree = sezione.dentro("worktree")
     soglie = sezione.dentro("soglie")
     gate_del_rosso = sezione.dentro("gate_del_rosso")
+    # Facoltativa: un progetto che non estende i prompt non la scrive.
+    prompt = sezione.dentro("prompt", default={})
     return Config(
         git=Git(base=git.testo("base"), prefisso_ramo=git.testo("prefisso_ramo")),
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
@@ -287,6 +304,7 @@ def interpreta(dati: dict, file: str) -> Config:
                       minuti_critic=soglie.positivo("minuti_critic", default=25)),
         gate_del_rosso=GateDelRosso(attivo=gate_del_rosso.booleano("attivo")),
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
+        prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
     )
 
 
@@ -328,8 +346,8 @@ class _Sezione:
                 f"non {valore!r}")
         return valore
 
-    def dentro(self, chiave: str) -> _Sezione:
-        return _Sezione(self._valore(chiave, dict, "una sezione"), self.file, chiave)
+    def dentro(self, chiave: str, default=_MANCA) -> _Sezione:
+        return _Sezione(self._valore(chiave, dict, "una sezione", default), self.file, chiave)
 
     def elenco_di_sezioni(self, chiave: str) -> list[_Sezione]:
         elenco = self._valore(chiave, list, "un elenco di sezioni `[[…]]`")

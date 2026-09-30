@@ -241,7 +241,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     global MINIMI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO, GUARDIA_DEL_COMMIT
-    global PROMPT_BUILDER
+    global PROMPT_BUILDER, PROMPT_IGIENE, PROMPT_RIPROVA, MODELLO_CRITIC, MODELLO_RIMEDIO
     global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
     GATE = list(cfg.gate)
@@ -253,13 +253,23 @@ def configura(cfg: asdlc_config.Config) -> None:
     # branch, il conteggio dei commit, il gate del rosso e il diff che il Critic
     # legge. Il nome resta per ciò che sta fuori dal giro, come `--gate-rosso`.
     BASE, REMOTO, RAMO_PRINCIPALE = cfg.git.base, cfg.git.remoto, cfg.git.ramo
+    # Ogni prompt è quello del pacchetto con in coda le aggiunte del progetto per
+    # il suo ruolo, se ci sono (PBI-386): si ricompone da capo a ogni chiamata,
+    # così una seconda `configura()` non accoda due volte.
+    aggiunte = aggiunte_del_progetto(cfg.prompt.aggiunte)
+    PROMPT_IGIENE = prompt_del_pacchetto("igiene") + aggiunte["igiene"]
+    PROMPT_RIPROVA = prompt_del_pacchetto("riprova") + aggiunte["riprova"]
+    MODELLO_CRITIC = prompt_del_pacchetto("critic") + aggiunte["critic"]
+    MODELLO_RIMEDIO = prompt_del_pacchetto("rimedio") + aggiunte["rimedio"]
     # I prompt che nominano il ramo lo prendono da qui, e non da una riga scritta a
     # mano: un prompt che dice all'agente un ramo diverso da quello su cui il gate
     # misura è una bugia che costa un giro. `{pbi_path}` e `{rapporto}` restano a
-    # chi chiama, che li riempie a ogni giro.
-    PROMPT_CRITIC = MODELLO_CRITIC.format(base=BASE, pbi_path="{pbi_path}")
-    PROMPT_RIMEDIO = MODELLO_RIMEDIO.format(base=BASE, pbi_path="{pbi_path}",
-                                            rapporto="{rapporto}")
+    # chi chiama, che li riempie a ogni giro. L'aggiunta si accoda **dopo** il
+    # primo `.format()`: è scappata per uno solo, quello di chi chiama.
+    PROMPT_CRITIC = prompt_del_pacchetto("critic").format(
+        base=BASE, pbi_path="{pbi_path}") + aggiunte["critic"]
+    PROMPT_RIMEDIO = prompt_del_pacchetto("rimedio").format(
+        base=BASE, pbi_path="{pbi_path}", rapporto="{rapporto}") + aggiunte["rimedio"]
 
     # Il registro dei giri: i rapporti, i log, i prompt, il lucchetto, e il CSV
     # dei tempi su cui si fattura. Relativo a `REPO`, come ogni percorso del TOML.
@@ -292,7 +302,8 @@ def configura(cfg: asdlc_config.Config) -> None:
     # assoluto, non al sorgente dell'albero che sta cambiando.
     PROMPT_BUILDER = MODELLO_BUILDER.format(
         pbi_path="{pbi_path}",
-        runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "asdlc-runner")
+        runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "asdlc-runner"
+    ) + aggiunte["builder"]
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -330,6 +341,30 @@ def prompt_del_pacchetto(ruolo: str) -> str:
     return (resources.files("asdlc") / "prompt" / f"{ruolo}.md").read_text(encoding="utf-8")
 
 
+# Il titolo sotto cui le aggiunte del progetto seguono il prompt del pacchetto.
+TITOLO_DELLE_AGGIUNTE = "## Aggiunte del progetto"
+
+
+def aggiunte_del_progetto(cartella: Path | None) -> dict[str, str]:
+    """Per ogni ruolo, ciò che si accoda al suo prompt: il titolo e il file
+    `<ruolo>.md` della cartella delle aggiunte, o niente se il file non c'è.
+
+    Un progetto **estende** i prompt del pacchetto e non li sostituisce
+    (`ADR-0026`, decisione 2). Il file è testo e non un modello: le graffe si
+    raddoppiano, e il `.format()` di chi chiama le rende come sono scritte."""
+    aggiunte = dict.fromkeys(asdlc_config.RUOLI_DEI_PROMPT, "")
+    if cartella is None:
+        return aggiunte
+    for ruolo in aggiunte:
+        file = cartella / f"{ruolo}.md"
+        if file.is_file():
+            testo = file.read_text(encoding="utf-8").replace("{", "{{").replace("}", "}}")
+            aggiunte[ruolo] = f"\n{TITOLO_DELLE_AGGIUNTE}\n\n{testo}"
+    return aggiunte
+
+
+# Il testo del pacchetto, all'import. `configura()` riscrive l'igiene, la riprova
+# e i due modelli con in coda le aggiunte del progetto.
 MODELLO_BUILDER = prompt_del_pacchetto("builder")
 PROMPT_IGIENE = prompt_del_pacchetto("igiene")
 PROMPT_RIPROVA = prompt_del_pacchetto("riprova")
@@ -339,7 +374,7 @@ PROMPT_RIPROVA = prompt_del_pacchetto("riprova")
 MODELLO_CRITIC = prompt_del_pacchetto("critic")
 MODELLO_RIMEDIO = prompt_del_pacchetto("rimedio")
 
-PROMPT_BUILDER: str  # `MODELLO_BUILDER` col runner installato dentro, da `configura()`
+PROMPT_BUILDER: str  # `MODELLO_BUILDER` col runner installato dentro e le aggiunte, da `configura()`
 PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
 PROMPT_RIMEDIO: str  # idem, da `MODELLO_RIMEDIO`
 
