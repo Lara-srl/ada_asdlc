@@ -1376,3 +1376,24 @@ def test_il_tick_in_pausa_esce_con_zero_senza_decidere_e_lo_scrive_nel_log(
     assert chiamati == []
     righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert len(righe) == 1 and righe[0].endswith(f"  in pausa: {riga}"), righe
+
+
+def test_un_file_di_pausa_che_non_si_legge_e_pausa_lo_stesso(
+    home_finta, tmp_path, monkeypatch
+):
+    """Decisione 5: un file che c'è ma non si legge è pausa lo stesso. Chi l'ha
+    creato voleva il tick fermo, e un errore di lettura non è una ragione per
+    lanciare. Qui al posto del file c'è una cartella, che `read_text` rifiuta."""
+    (home_finta / "asdlc-tick.pausa").mkdir()
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert chiamati == []
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert len(righe) == 1 and "  in pausa: " in righe[0], righe
+    assert "non si legge" in righe[0], righe
