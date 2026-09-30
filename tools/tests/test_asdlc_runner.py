@@ -5070,7 +5070,8 @@ class TestLHookERegistratoEFerma:
                 "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
 
         esito = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
-                               capture_output=True, text=True, cwd=tmp_path)
+                               capture_output=True, text=True, cwd=tmp_path,
+                               env=fuori_da_un_giro())
 
         assert esito.returncode == 2, esito.stderr
         assert "TEST_ONLY" in esito.stderr
@@ -8921,6 +8922,13 @@ class TestUnPushCheScadeENonPubblicato:
 # Un runner finto: scrive gli argomenti con cui è stato lanciato accanto a sé, ed
 # esce con 1. Il segno dice quale delle due forme la guardia ha lanciato, l'uscita
 # che il suo verdetto arriva intatto a chi l'ha chiamata.
+def fuori_da_un_giro() -> dict[str, str]:
+    """L'ambiente di una sessione di una persona, per `fase-tdd.sh`: senza
+    `ASDLC_GIRO`, che la sessione del Builder che gira questi test ha (PBI-384),
+    e con cui lo script esce subito."""
+    return {k: v for k, v in os.environ.items() if k != "ASDLC_GIRO"}
+
+
 RUNNER_FINTO = ("import sys\nfrom pathlib import Path\n\n"
                 "Path(__file__).with_name('lanciato').write_text(' '.join(sys.argv[1:]))\n"
                 "sys.exit(1)\n")
@@ -8958,11 +8966,25 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         segno = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
 
         esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
-                               cwd=tmp_path)
+                               cwd=tmp_path, env=fuori_da_un_giro())
 
         assert segno.is_file(), esito.stderr
         assert segno.read_text() == "--guardia-fase"
         assert esito.returncode == 1
+
+    def test_fase_tdd_dentro_un_giro_esce_con_0_senza_lanciare_niente(self, tmp_path):
+        """PBI-384, decisione 4: con `ASDLC_GIRO=1` la guardia del giro è l'hook
+        che il runner genera, e lancia il runner installato. `fase-tdd.sh` resta
+        per le sessioni delle persone, e dentro un giro esce subito: mai la copia
+        di lavoro che il Builder sta cambiando."""
+        script = self._albero_con_lo_script(tmp_path)
+        segno = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path, env={**os.environ, "ASDLC_GIRO": "1"})
+
+        assert esito.returncode == 0, esito.stderr
+        assert not segno.exists(), "il runner dell'albero non si lancia"
 
     def test_fase_tdd_senza_runner_lo_dice_ed_esce_con_1(self, tmp_path):
         """PBI-388, decisione 2: una guardia che non trova il suo codice non ferma
@@ -8970,7 +8992,7 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         script = self._albero_con_lo_script(tmp_path)
 
         esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
-                               cwd=tmp_path)
+                               cwd=tmp_path, env=fuori_da_un_giro())
 
         assert esito.returncode == 1
         assert "guardia del lucchetto: runner non trovato" in esito.stderr
@@ -8988,8 +9010,8 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         for fase in (runner.FASE_TEST_ONLY, runner.FASE_IMPL):
             runner.percorso_della_fase(radice).write_text(f"{fase}\n")
             uscite[fase] = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
-                                          capture_output=True, text=True,
-                                          cwd=radice).returncode
+                                          capture_output=True, text=True, cwd=radice,
+                                          env=fuori_da_un_giro()).returncode
 
         assert uscite == {runner.FASE_TEST_ONLY: 2, runner.FASE_IMPL: 0}
 
