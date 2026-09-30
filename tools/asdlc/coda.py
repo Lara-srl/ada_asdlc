@@ -625,6 +625,18 @@ def pausa() -> str | None:
         return f"{file} c'è ma non si legge — {illeggibile}"
 
 
+def fermo_in_pausa(repo: Path) -> bool:
+    """Il tick è in pausa? Se sì lo dice a schermo e in `coda.log`, con la riga
+    del file: chi legge il log deve vedere perché non è successo niente.
+    `smista()` lo chiede due volte, prima di `decidi()` e prima di `lancia()`."""
+    if (motivo := pausa()) is None:
+        return False
+    riga = f"in pausa: {motivo}"
+    print(riga)
+    scrivi_nel_log(repo, riga)
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     """Un tick: legge `asdlc.toml`, poi guarda, decide una cosa, la fa, e finisce.
 
@@ -665,10 +677,7 @@ def smista(argv: list[str] | None = None) -> int:
 
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
-    if (motivo := pausa()) is not None:
-        riga = f"in pausa: {motivo}"
-        print(riga)
-        scrivi_nel_log(a.repo, riga)
+    if fermo_in_pausa(a.repo):
         return 0
 
     decisione = decidi(a.repo, a.worktree)
@@ -695,6 +704,10 @@ def smista(argv: list[str] | None = None) -> int:
             print(riga)
             scrivi_nel_log(a.repo, riga)
             return 1
+        # La seconda lettura, subito prima del lancio: la pausa può essere nata
+        # mentre questo tick decideva, e chi l'ha creata sta chiudendo un giro.
+        if fermo_in_pausa(a.repo):
+            return 0
         try:
             lancia(decisione.pbi, a.worktree)
         except Guasto as guasto:
