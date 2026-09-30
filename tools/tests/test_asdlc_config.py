@@ -61,7 +61,7 @@ venv = ".venv"
 prestiti = ["dati"]
 
 [worktree]
-percorso = "~/prova-run"
+percorso = "../prova-run"
 
 [soglie]
 tentativi = 2
@@ -100,7 +100,8 @@ def test_carica_un_toml_e_torna_i_campi_tipizzati(tmp_path):
     assert (cfg.registro.cartella, cfg.registro.tempi) == ("giri", "ore.csv")
     assert cfg.ambiente.venv == ".venv"
     assert cfg.ambiente.prestiti == ("dati",)
-    assert cfg.worktree.percorso == Path.home() / "prova-run", "la tilde si espande"
+    assert cfg.worktree.percorso == tmp_path.resolve().parent / "prova-run", (
+        "relativo alla radice comune, che fuori da git è la radice del progetto")
     assert (cfg.soglie.tentativi, cfg.soglie.igiene, cfg.soglie.revisioni) == (2, 5, 7)
     assert cfg.gate_del_rosso.attivo is True
     assert [(g.nome, list(g.comando), g.cwd, list(g.solo_se_tocca)) for g in cfg.gate] == [
@@ -220,15 +221,17 @@ def test_asdlc_local_toml_sovrascrive_ambiente_e_worktree_chiave_per_chiave(tmp_
     dovrebbe ricopiarsi la sezione intera per cambiare una riga."""
     scrivi_toml(tmp_path)
     senza = asdlc_config.carica(tmp_path)
-    scrivi_toml(tmp_path, '[ambiente]\nvenv = "/opt/venv"\n\n[worktree]\npercorso = "/tmp/altro-run"\n',
-                nome="asdlc.local.toml")
+    scrivi_toml(tmp_path, '[ambiente]\nvenv = "/opt/venv"\npacchetto = "/opt/venv-asdlc"\n\n'
+                '[worktree]\npercorso = "/tmp/altro-run"\n', nome="asdlc.local.toml")
     con = asdlc_config.carica(tmp_path)
 
     assert senza.ambiente.venv == ".venv"
-    assert senza.worktree.percorso == Path.home() / "prova-run"
+    assert senza.worktree.percorso == tmp_path.resolve().parent / "prova-run"
     assert con.ambiente.venv == "/opt/venv"
     assert con.ambiente.prestiti == ("dati",), "ciò che il locale non dice resta"
     assert con.worktree.percorso == Path("/tmp/altro-run")
+    assert con.ambiente.pacchetto == Path("/opt/venv-asdlc"), (
+        "nel file locale un percorso assoluto vale (PBI-384, decisione 2)")
     assert con.git.base == "origin/master", "le altre sezioni non le tocca"
 
 
@@ -331,7 +334,7 @@ def test_pacchetto_e_worktree_si_risolvono_dalla_radice_comune_anche_da_un_workt
     principale.mkdir()
     scrivi_toml(principale, TOML_DI_PROVA.replace(
         'venv = ".venv"\n', 'venv = ".venv"\npacchetto = ".venv-asdlc"\n'
-    ).replace('percorso = "~/prova-run"', 'percorso = "../prova-run"'))
+    ))
     git_in(principale, "init", "-q")
     git_in(principale, "add", "-A")
     git_in(principale, "commit", "-q", "-m", "progetto")
@@ -346,3 +349,28 @@ def test_pacchetto_e_worktree_si_risolvono_dalla_radice_comune_anche_da_un_workt
     albero = tmp_path.resolve() / "prova-run"
     assert dal_principale.worktree.percorso == albero
     assert dal_worktree.worktree.percorso == albero
+
+
+@pytest.mark.parametrize("sezione,chiave,valore", [
+    ("worktree", "percorso", "~/prova-run"),
+    ("worktree", "percorso", "/tmp/prova-run"),
+    ("ambiente", "pacchetto", "~/.venv-asdlc"),
+    ("ambiente", "pacchetto", "/opt/venv-asdlc"),
+])
+def test_un_percorso_di_macchina_in_asdlc_toml_e_un_errore_che_nomina_la_chiave(
+    tmp_path, sezione, chiave, valore
+):
+    """`asdlc.toml` è versionato e deve valere su ogni PC: un percorso assoluto o
+    con `~` funziona solo su quello di chi l'ha scritto. Il suo posto è
+    `asdlc.local.toml` (PBI-384, decisione 2)."""
+    if chiave == "pacchetto":
+        testo = TOML_DI_PROVA.replace('venv = ".venv"\n', f'venv = ".venv"\npacchetto = "{valore}"\n')
+    else:
+        testo = TOML_DI_PROVA.replace('percorso = "../prova-run"', f'percorso = "{valore}"')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert f"[{sezione}].{chiave}" in str(fermata.value)
+    assert valore in str(fermata.value)
+    assert "asdlc.local.toml" in str(fermata.value), "dice dove va un percorso di macchina"

@@ -1051,7 +1051,7 @@ def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, caps
 def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
                   cartella="backlog", coda_md="backlog/CODA.md",
                   id="PBI-{n}", file="PBI-{n}-{slug}.md",
-                  registro="runs", tempi="tempi.csv", worktree="~/ada-run") -> str:
+                  registro="runs", tempi="tempi.csv", worktree="../ada-run") -> str:
     """Un `asdlc.toml` coi valori di oggi: ogni test nomina solo ciò che cambia."""
     return (
         f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
@@ -1150,16 +1150,16 @@ def test_la_coda_e_l_avviso_delle_domande_si_leggono_dalla_cartella_del_toml(
     assert coda.avviso_domande(repo, "US-7") == "## ❓ Aperta"
 
 
-def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura):
+def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura, tmp_path):
     # Letto senza `carica()`, il percorso resta com'è scritto: a risolverlo dalla
     # radice comune è `carica()`, che sa dove sta il repository (PBI-384).
     assert coda.WORKTREE_DEL_RUNNER == Path("../ada-run")
     assert coda.LOG == Path("runs") / "coda.log"
     assert coda.LUCCHETTO == Path("runs") / ".runner.lock"
 
-    configura(toml_di_prova(registro="giri", worktree="/tmp/altro-run"))
+    configura(toml_di_prova(registro="giri", worktree="../altro-run"))
 
-    assert coda.WORKTREE_DEL_RUNNER == Path("/tmp/altro-run")
+    assert coda.WORKTREE_DEL_RUNNER == tmp_path.resolve().parent / "altro-run"
     assert coda.LOG == Path("giri") / "coda.log"
     assert coda.LUCCHETTO == Path("giri") / ".runner.lock"
 

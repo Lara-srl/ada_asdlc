@@ -6896,7 +6896,7 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
         f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda}"\nid = "{id}"\nfile = "{file}"\n\n'
         f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
         f'[ambiente]\nvenv = "{venv}"\nprestiti = {elenco(prestiti)}\n\n'
-        f'[worktree]\npercorso = "~/ada-run"\n\n'
+        f'[worktree]\npercorso = "../ada-run"\n\n'
         f'[soglie]\ntentativi = {tentativi}\nigiene = {igiene}\nrevisioni = {revisioni}\n\n'
         f'[gate_del_rosso]\nattivo = {"true" if gate_del_rosso else "false"}\n'
     )

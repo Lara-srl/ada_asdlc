@@ -104,7 +104,7 @@ venv = ".venv"
 prestiti = []
 
 [worktree]
-percorso = "{progetto}"
+percorso = "."
 
 [soglie]
 tentativi = 2
