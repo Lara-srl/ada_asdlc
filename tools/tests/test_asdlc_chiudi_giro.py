@@ -310,3 +310,26 @@ def test_un_tag_con_lo_stesso_nome_gia_su_origin_fa_rifiutare(
     assert i_passi(visti) == []
     assert not (home_finta / "asdlc-tick.pausa").exists()
     assert TAG in capsys.readouterr().out
+
+
+def test_un_passo_che_fallisce_toglie_la_pausa_e_dice_cosa_resta(
+    home_finta, tmp_path, monkeypatch, capsys
+):
+    """Decisione 6. Il push del tag è rifiutato: il comando si ferma lì — senza
+    il tag su `origin`, cancellare il ramo perderebbe il giro — toglie la pausa
+    lo stesso, esce diverso da 0, nomina il passo fallito e scrive i comandi che
+    restano da fare a mano. Una pausa lasciata indietro da un guasto terrebbe il
+    tick spento senza che nessuno lo sappia."""
+    repo, albero = un_giro_fermato(tmp_path)
+    push_del_tag = ["git", "push", "origin", f"refs/tags/{TAG}"]
+    visti, esegui = un_origin(home_finta, fallisce=push_del_tag)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita not in (0, None)
+    assert not (home_finta / "asdlc-tick.pausa").exists(), "la pausa si toglie anche qui"
+    assert not [cmd for cmd, _, _ in visti if "--delete" in cmd], "il ramo non si cancella"
+    detto = capsys.readouterr().out
+    assert " ".join(push_del_tag) in detto, detto
+    assert "git push origin --delete pbi/pbi-377" in detto, detto
