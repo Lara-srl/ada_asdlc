@@ -6558,6 +6558,32 @@ class TestIlMorsoSiGiudicaAncheAllaPunta:
         assert [m["dove"] for m in morsi] == ["punta", "punta"]
         assert runner.USA_E_GETTA["montati"] - prima == 3
 
+    def test_la_guardia_che_non_morde_da_nessuna_parte_ferma_e_nomina_i_due_alberi(
+        self, repo_di_prova
+    ):
+        """Decisione 5: una lettura sola, e per ciascuno dei due alberi i mutanti
+        provati e il perimetro. Il ramo dopo la guardia tocca ancora `doppio`, e il
+        prompt resta un dato: alla punta non c'è niente che il golden guardi."""
+        self._base_e_doppio(repo_di_prova)
+        golden = repo_di_prova.commit("test: fissa il prompt",
+                                      {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.commit("refactor: il doppio come prodotto a sinistra", {
+            "backend/app/m.py": self.MODULO.replace("return x * 2", "return 2 * x"),
+        })
+        punta = repo_di_prova._git("rev-parse", "HEAD")
+        morsi: list[dict] = []
+
+        [mancato] = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert mancato["commit"] == golden[:7]
+        esito = mancato["esito"]
+        assert esito.startswith(
+            f"nato verde e non morde, né al suo commit né alla punta `{punta[:7]}`")
+        assert re.search(r"al suo commit: \d+ mutant[ei] provat[io]", esito)
+        assert re.search(r"alla punta: \d+ mutant[ei] provat[io]", esito)
+        assert esito.count("perimetro: backend/app/m.py::doppio (dal diff)") == 2
+
 
 class TestIlPerimetroPerFunzioneNonCambiaIlResto:
     """PBI-378, criterio 5: le guardie. Descrivono comportamenti che `main` ha già
