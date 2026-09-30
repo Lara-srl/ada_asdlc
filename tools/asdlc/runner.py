@@ -778,6 +778,7 @@ def mancanze_dell_ambiente() -> list[str]:
     `sys.executable` così com'è, senza risolverlo: in un venv è un collegamento
     all'interprete di sistema, e risolto uscirebbe dal venv.
 
+    Poi gli hook: devono trovare il runner installato (`gli_hook_trovano_il_runner`).
     Poi l'ambiente dei gate: il venv di `[ambiente].venv` deve esistere, e gli
     `[ambiente].eseguibili` si devono trovare lì o sul `PATH`, con la versione
     principale che `[ambiente].minimi` chiede.
@@ -786,13 +787,56 @@ def mancanze_dell_ambiente() -> list[str]:
     if PACCHETTO is None:
         mancanze.append("ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
                         "il venv in cui è installato il runner")
-    elif not Path(sys.executable).is_relative_to(PACCHETTO):
-        mancanze.append(f"ambiente mancante: il runner gira da `{sys.executable}`, "
-                        f"`asdlc.toml` dichiara `{PACCHETTO}`")
+    else:
+        if not Path(sys.executable).is_relative_to(PACCHETTO):
+            mancanze.append(f"ambiente mancante: il runner gira da `{sys.executable}`, "
+                            f"`asdlc.toml` dichiara `{PACCHETTO}`")
+        mancanze += gli_hook_trovano_il_runner()
     if not (REPO / VENV).is_dir():
         mancanze.append(f"ambiente mancante: il venv `{VENV}` non c'è")
     mancanze += eseguibili_mancanti(ESEGUIBILI, VENV, REPO)
     mancanze += versioni_sotto_il_minimo(MINIMI, VENV, REPO)
+    return mancanze
+
+
+def gli_hook_trovano_il_runner() -> list[str]:
+    """Le mancanze per cui le due guardie di un giro non lancerebbero il runner
+    installato, `<pacchetto>/bin/asdlc-runner` (PBI-384, decisione 6).
+
+    Gli hook che lasciano passare vanno bene per le persone, non per i giri: un
+    Builder senza guardia di fase, o un commit senza guardia, è un giro che non
+    parte. Il comando deve esistere ed essere eseguibile: la guardia di fase della
+    sessione lo lancia, e `impostazioni_della_sessione()` la genera da questo
+    stesso percorso, quindi il controllo sul comando vale anche per lei.
+
+    Il `pre-commit` si guarda e non si scrive: lo installa `apri_la_fase()`, dopo
+    il lucchetto, col testo di `GUARDIA_DEL_COMMIT`, che lancia quel percorso.
+    Uno assente o del runner lo lancerà — il nostro con un testo diverso si
+    riscrive (PBI-388). Uno altrui PBI-388 non lo tocca, ed è una mancanza: se
+    lancia un `asdlc-runner` o `--guardia-commit`, è la guardia di un altro
+    runner.
+    """
+    mancanze: list[str] = []
+    comando = comando_del_pacchetto("asdlc-runner")
+    if not (comando.is_file() and os.access(comando, os.X_OK)):
+        mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile, e gli "
+                        "hook del giro non trovano il runner — `pip install ./tools` nel venv "
+                        "del pacchetto")
+    cartella = cartella_degli_hook()
+    hook = cartella / "pre-commit" if cartella is not None else None
+    if hook is None or not hook.is_file():
+        return mancanze
+    testo = hook.read_text(encoding="utf-8", errors="replace")
+    if e_un_hook_del_runner(testo):
+        return mancanze
+    if "asdlc-runner" in testo or "--guardia-commit" in testo:
+        mancanze.append(f"ambiente mancante: il `pre-commit` in `{cartella}` non lancia "
+                        f"`{comando}`, e il giro non parte con la guardia del commit di un "
+                        "altro runner — PBI-388 non riscrive un hook altrui")
+    else:
+        mancanze.append(f"ambiente mancante: il `pre-commit` in `{cartella}` non è del runner, "
+                        "e il giro non parte senza la guardia del commit — PBI-388 non "
+                        "riscrive un hook altrui")
     return mancanze
 
 
