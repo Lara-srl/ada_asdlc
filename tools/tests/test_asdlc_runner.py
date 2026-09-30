@@ -3236,6 +3236,24 @@ class TestLeGuardieDellAmbienteDichiarato:
         assert shutil.which("pytest") == str(pytest_del_venv)
         assert runner.mancanze_dell_ambiente() == []
 
+    def test_guardia_un_asdlc_toml_senza_eseguibili_non_verifica_niente_e_non_fallisce(
+        self, progetto_col_runner, monkeypatch
+    ):
+        """Le chiavi `eseguibili` e `minimi` sono facoltative: un progetto che non
+        le scrive non ha niente da verificare, e con un `which` che non trova
+        niente la verifica non rende nessuna mancanza (decisione 7)."""
+        (progetto_col_runner / "asdlc.toml").write_text(toml_di_prova(venv=".venv"),
+                                                         encoding="utf-8")
+        (progetto_col_runner / ".venv").mkdir()
+        cfg = runner.asdlc_config.carica(progetto_col_runner)
+        monkeypatch.setattr(runner, "VENV", cfg.ambiente.venv)
+        monkeypatch.setattr(runner, "ESEGUIBILI", cfg.ambiente.eseguibili)
+        monkeypatch.setattr(runner, "MINIMI", cfg.ambiente.minimi)
+        monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: None)
+
+        assert (cfg.ambiente.eseguibili, cfg.ambiente.minimi) == ((), {})
+        assert runner.mancanze_dell_ambiente() == []
+
 
 class TestGliHookTrovanoIlRunnerPrimaDiPartire:
     """PBI-384, decisione 6: gli hook che lasciano passare vanno bene per le
