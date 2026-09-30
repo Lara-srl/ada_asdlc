@@ -35,6 +35,11 @@ coda = importlib.import_module("asdlc.coda")
 coda.REPO = REPO
 coda.configura(coda.asdlc_config.carica(REPO))
 
+# Il runner che il tick lancia: il comando installato nel venv di
+# `[ambiente].pacchetto`, risolto dalla radice comune (PBI-384).
+RUNNER_INSTALLATO = (coda.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin"
+                     / "asdlc-runner")
+
 
 def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
     """La testa sarebbe da lanciare, e non si lancia lo stesso.
@@ -657,7 +662,7 @@ def runner_che_prende_lalbero(albero, esegui):
 
     def si_stacca(cmd, cwd):
         esito = esegui(cmd, cwd)
-        if "asdlc/runner.py" in " ".join(cmd):
+        if cmd[0].endswith("/bin/asdlc-runner") or "asdlc/runner.py" in " ".join(cmd):
             (albero / "runs").mkdir(exist_ok=True)
             aperto = (albero / "runs" / ".runner.lock").open("w")
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -688,29 +693,47 @@ def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch)
         ["git", "checkout", "--", "runs/tempi.csv"],
         ["git", "fetch", "origin"],
         ["git", "switch", "--detach", "origin/main"],
-        ["python3", "tools/asdlc/runner.py", "PBI-337"],
+        [str(RUNNER_INSTALLATO), "PBI-337"],
     ]
     assert {cwd for _, cwd in visti} == {albero}
     for aperto in tenuti:
         aperto.close()
 
 
-def test_il_tick_lancia_il_runner_da_tools_asdlc_runner(tmp_path, monkeypatch):
-    """PBI-383: il runner sta nel pacchetto, e il tick lo lancia da lì. Col
-    percorso di prima `python3` esce 2 su un file che non c'è, e la coda si
-    ferma."""
+def test_il_tick_lancia_asdlc_runner_dal_venv_del_pacchetto_anche_col_path_minimo(
+    configura, tmp_path, monkeypatch
+):
+    """PBI-384, criterio 5: il tick lancia `<pacchetto>/bin/asdlc-runner` per
+    percorso assoluto. Il cron ha il `PATH` minimo, `/usr/bin:/bin`: un nome nudo
+    non si troverebbe, e `python3 tools/asdlc/runner.py` lancerebbe la copia di
+    lavoro dell'albero invece del runner installato (`ADR-0026`, decisione 3).
+
+    Il runner è uno script vero nel `bin/` del venv dichiarato, e parte con il
+    `PATH` del cron; il pre-flight di `git` è finto, e il giro vivo dopo il
+    distacco si dà per visto."""
+    configura(toml_di_prova())
+    installato = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+    installato.parent.mkdir(parents=True)
+    installato.write_text('#!/bin/sh\necho "$@" > "$(dirname "$0")/lanciato"\n',
+                          encoding="utf-8")
+    installato.chmod(0o755)
     albero = tmp_path / "albero"
     albero.mkdir()
-    visti, esegui = registratore()
-    si_stacca, tenuti = runner_che_prende_lalbero(albero, esegui)
-    monkeypatch.setattr(coda, "esegui", si_stacca)
+    vero = coda.esegui
+    monkeypatch.setattr(coda, "esegui",
+                        lambda cmd, cwd: (0, "") if cmd[0] == "git" else vero(cmd, cwd))
     monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+    monkeypatch.setattr(coda, "giro_in_corso", lambda worktree: True)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
-    coda.lancia("PBI-383", albero)
+    try:
+        coda.lancia("PBI-384", albero)
+        fermata = ""
+    except coda.Guasto as guasto:
+        fermata = str(guasto)
 
-    assert [cmd for cmd, _ in visti][-1] == ["python3", "tools/asdlc/runner.py", "PBI-383"]
-    for aperto in tenuti:
-        aperto.close()
+    assert fermata == ""
+    assert (installato.parent / "lanciato").read_text(encoding="utf-8") == "PBI-384\n"
 
 
 def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
@@ -768,7 +791,7 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 0
-    assert ["python3", "tools/asdlc/runner.py", "PBI-337"] in visti
+    assert [str(RUNNER_INSTALLATO), "PBI-337"] in visti
     assert "PBI-337" in capsys.readouterr().out
     for aperto in tenuti:
         aperto.close()
