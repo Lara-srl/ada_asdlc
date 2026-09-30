@@ -71,3 +71,25 @@ def test_il_rapporto_di_un_giro_che_pubblica_porta_la_testa_che_sta_su_origin(
     su_origin = sh(noi, "ls-remote", "origin", "refs/heads/pbi/pbi-385").split()[0]
     scritto = json.loads(rapporto.read_text(encoding="utf-8"))["esiti"][0]
     assert scritto.get("testa") == su_origin
+
+
+def test_guardia_un_rapporto_senza_testa_si_registra_ancora(tmp_path, monkeypatch):
+    """Guardia dichiarata di PBI-385: i rapporti dei giri di prima non hanno
+    `testa`, e `--registra` li deve piegare in `runs/tempi.csv` come prima. Il
+    campo nuovo è del comando che chiude il giro, non del registro."""
+    cartella = tmp_path / "runs"
+    cartella.mkdir()
+    (cartella / "20260927-100000-000001.json").write_text(json.dumps({
+        "run": "20260927-100000-000001", "stato": "finito",
+        "esiti": [{"pbi": "PBI-377", "stato": "fermato", "commit": 4,
+                   "nota": "fermati: la domanda", "iniziato": "2026-09-27T10:00:00",
+                   "finito": "2026-09-27T10:40:00", "durata_s": 2400.0,
+                   "tempi": {"builder": 2000.0, "gate": 400.0}}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+
+    assert runner.registra(cartella) == 0
+
+    righe = list(runner.csv.DictReader((tmp_path / "tempi.csv").open(encoding="utf-8")))
+    assert [(r["run"], r["pbi"], r["stato"], r["commit"]) for r in righe] == [
+        ("20260927-100000-000001", "PBI-377", "fermato", "4")]
