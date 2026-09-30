@@ -41,6 +41,8 @@ def test_senza_pytest_sul_path_dei_sottoprocessi_la_suite_si_ferma_all_avvio_con
 
     uscita = fatto.stdout + fatto.stderr
     assert fatto.returncode != 0, uscita
-    assert uscita.count("ambiente mancante") == 1, uscita
+    # `pytest.exit` scrive il suo messaggio una volta per flusso, su stdout e su
+    # stderr: un messaggio solo è uno per flusso, non uno per test.
+    assert fatto.stdout.count("ambiente mancante") == 1, uscita
     assert "ambiente mancante: `pytest` (cercato in `backend/.venv/bin` e sul `PATH`)" in uscita
     assert "passed" not in uscita, "la raccolta non comincia"
