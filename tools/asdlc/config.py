@@ -140,6 +140,9 @@ class GateDelRosso:
 # I ruoli che hanno un prompt: ognuno è `asdlc/prompt/<ruolo>.md` nel pacchetto, e
 # può avere un file di aggiunte `<ruolo>.md` nella cartella di `[prompt].aggiunte`.
 RUOLI_DEI_PROMPT = ("builder", "igiene", "riprova", "critic", "rimedio")
+# Il solo file della cartella delle aggiunte che non è un ruolo: dice a chi la
+# apre cosa ci va, e non arriva a nessun prompt.
+LEGGIMI_DELLE_AGGIUNTE = "README.md"
 
 
 @dataclass(frozen=True)
@@ -229,13 +232,14 @@ def controlla_le_aggiunte(cartella: Path) -> None:
 
     Una cartella dichiarata e assente, o un file con un nome che non è un ruolo,
     si fermano nominandoli: un refuso non diventa un'aggiunta persa in silenzio
-    (PBI-386, decisione 3)."""
+    (PBI-386, decisione 3). Il `README.md` è ammesso: è la documentazione della
+    cartella."""
     if not cartella.is_dir():
         raise ErroreDiConfigurazione(
             f"{NOME_FILE}: `[prompt].aggiunte` è {cartella}, che non è una cartella")
     ruoli = {f"{ruolo}.md" for ruolo in RUOLI_DEI_PROMPT}
     for file in sorted(cartella.iterdir()):
-        if file.name not in ruoli:
+        if file.name not in ruoli and file.name != LEGGIMI_DELLE_AGGIUNTE:
             raise ErroreDiConfigurazione(
                 f"{NOME_FILE}: `{file.name}` in {cartella} non è un ruolo — le aggiunte "
                 f"sono file `<ruolo>.md`, con ruolo fra {', '.join(RUOLI_DEI_PROMPT)}")
