@@ -1,0 +1,9 @@
+Ci sono modifiche non committate:
+
+{sporco}
+
+Committale con micro-commit coerenti. **`git add` esplicito**, o `git add -A`: i file nuovi
+non sono tracciati, e `git commit -am` li lascia fuori senza dire niente — è così che una
+pagina intera è rimasta a un `git add` dal non esistere. Finché l'albero è sporco il lavoro
+non è giudicabile e i gate non partono. Poi chiama `fatto`, oppure `fermati` con la
+domanda, come prima.

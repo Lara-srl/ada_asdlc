@@ -28,3 +28,8 @@ asdlc-chiudi-giro = "asdlc.chiudi_giro:main"
 # sono del runner e non si installano.
 [tool.setuptools]
 packages = ["asdlc"]
+
+# I prompt dei cinque ruoli sono dati del pacchetto (PBI-386): senza questa riga
+# la build li lascia fuori, e il runner installato non li trova.
+[tool.setuptools.package-data]
+asdlc = ["prompt/*.md"]
