@@ -132,3 +132,26 @@ def test_senza_aggiunte_il_prompt_generato_e_identico_al_golden(configura, ruolo
     configura()
 
     assert generati()[ruolo] == golden(ruolo)
+
+
+# --- Le aggiunte del progetto ------------------------------------------------
+
+
+# Con le graffe dentro: un'aggiunta è testo, non un modello, e un `{x}` scritto
+# da chi estende il prompt arriva all'agente così com'è.
+AGGIUNTA = 'Qui i test si lanciano con `make prova`, e la risposta è `{"esito": "ok"}` o `{x}`.\n'
+
+
+@pytest.mark.parametrize("ruolo", RUOLI)
+def test_un_file_di_aggiunte_finisce_in_fondo_al_prompt_del_suo_ruolo_e_in_nessun_altro(
+    configura, ruolo,
+):
+    configura('\n[prompt]\naggiunte = "asdlc-aggiunte"\n',
+              {f"asdlc-aggiunte/{ruolo}.md": AGGIUNTA})
+
+    prompt = generati()
+
+    assert prompt[ruolo] == golden(ruolo) + "\n## Aggiunte del progetto\n\n" + AGGIUNTA
+    for altro in RUOLI:
+        if altro != ruolo:
+            assert prompt[altro] == golden(altro), f"l'aggiunta di {ruolo} è finita in {altro}"
