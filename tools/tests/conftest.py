@@ -17,6 +17,33 @@ TOOLS = Path(__file__).resolve().parents[1]
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+# Ciò che i test di questa cartella lanciano per nome in un sottoprocesso: il gate
+# del rosso gira `pytest` in un worktree di `git`. `gh`, `npm` e `node` i test li
+# sostituiscono con dei finti, e non si chiedono: la CI non li deve avere.
+USATI_DAI_TEST = ("git", "pytest")
+
+
+def pytest_sessionstart(session):
+    """L'ambiente dei test, prima della raccolta (PBI-384, decisione 8).
+
+    Senza `pytest` sul `PATH` dei sottoprocessi ogni test del gate del rosso
+    moriva da sé con un'uscita 127: 19 `GuastoDelGate` nel difetto 60 di
+    PBI-102, e la causa andava dedotta. Qui si cerca `git` e `pytest` come li
+    cerca il runner — nel venv di `[ambiente].venv`, poi sul `PATH` — e la
+    sessione si ferma con le mancanze, una riga ciascuna. Un `asdlc.toml` che non
+    si legge non ferma niente qui: lo diranno i test che lo leggono.
+    """
+    from asdlc import config as asdlc_config
+    from asdlc import runner as asdlc_runner
+
+    repo = TOOLS.parent
+    try:
+        venv = asdlc_config.carica(repo).ambiente.venv
+    except asdlc_config.ErroreDiConfigurazione:
+        return
+    if mancanze := asdlc_runner.eseguibili_mancanti(USATI_DAI_TEST, venv, repo):
+        pytest.exit("\n".join(mancanze))
+
 
 @pytest.fixture(autouse=True)
 def log_dir_temporanea(tmp_path_factory, monkeypatch):
@@ -39,9 +66,11 @@ def log_dir_temporanea(tmp_path_factory, monkeypatch):
     finta = tmp_path_factory.mktemp("runs")
     sposta_il_log_del_tick(finta, monkeypatch)
     runner = sys.modules.get("asdlc.runner")
-    if runner is None:
+    # Importato da `pytest_sessionstart` ma non configurato: nessun file di test
+    # lo usa, e non ha una `LOG_DIR` da spostare.
+    vera = getattr(runner, "LOG_DIR", None)
+    if vera is None:
         return
-    vera = runner.LOG_DIR
 
     def sposta() -> None:
         for nome, valore in list(vars(runner).items()):
