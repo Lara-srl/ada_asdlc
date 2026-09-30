@@ -5512,12 +5512,14 @@ class TestIComandiPortanoIlServerDellEsito:
         fine = next((i for i, a in enumerate(dopo) if a.startswith("-")), len(dopo))
         return dopo[:fine]
 
-    def test_la_config_lancia_il_server_da_tools_asdlc_esito(
+    def test_la_config_lancia_asdlc_esito_dal_venv_del_pacchetto_per_percorso_assoluto(
         self, monkeypatch, git_finto, tmp_path
     ):
-        """PBI-383, criterio 5: il server sta nel pacchetto, e la config lo
-        lancia da lì. Un percorso che non esiste la CLI lo scopre solo a giro
-        avviato, come «senza esito»."""
+        """PBI-384, criterio 2: il server dell'esito è il comando installato,
+        `<pacchetto>/bin/asdlc-esito`, col percorso assoluto risolto dalla radice
+        comune. Mai il file dell'albero su cui il Builder lavora (`ADR-0026`,
+        decisione 3), e mai il nome nudo, che col `PATH` minimo di cron non si
+        trova."""
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
@@ -5528,8 +5530,9 @@ class TestIComandiPortanoIlServerDellEsito:
         cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == "builder")
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        assert server["args"] == [str(REPO / "tools" / "asdlc" / "esito.py")]
-        assert Path(server["args"][0]).is_file()
+        pacchetto = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc"
+        assert server["command"] == str(pacchetto / "bin" / "asdlc-esito")
+        assert server["args"] == []
 
     @pytest.mark.parametrize("ruolo", ["builder", "critic"])
     def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
@@ -5549,7 +5552,7 @@ class TestIComandiPortanoIlServerDellEsito:
         )
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        assert any(a.endswith("asdlc/esito.py") for a in [server["command"], *server["args"]])
+        assert server["command"].endswith("/bin/asdlc-esito")
         ambiente = server["env"]
         assert ambiente["ASDLC_RUOLO"] == ruolo
         assert Path(ambiente["ASDLC_ESITO"]).parent == tmp_path, (
