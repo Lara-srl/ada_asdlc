@@ -14,8 +14,9 @@ perso l'uso di `git commit`, perché l'hook esegue il runner a ogni commit.
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 NOME_FILE = "asdlc.toml"
@@ -105,6 +106,10 @@ class Registro:
 class Ambiente:
     venv: str
     prestiti: tuple[str, ...]
+    # Il venv in cui è installato il runner, assoluto dopo `carica()`: relativo
+    # alla radice comune, non a quella del progetto (PBI-384). `None` se il
+    # progetto non lo dichiara.
+    pacchetto: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -159,12 +164,46 @@ def radice(cwd: Path) -> Path:
 
 def carica(repo: Path) -> Config:
     """La configurazione letta da `repo / asdlc.toml`, con sopra le sovrascritture
-    di `asdlc.local.toml` se c'è."""
+    di `asdlc.local.toml` se c'è, e con `[ambiente].pacchetto` e
+    `[worktree].percorso` risolti dalla radice comune (`radice_comune()`)."""
     dati = leggi_toml(repo / NOME_FILE)
     locale = repo / NOME_FILE_LOCALE
     if locale.exists():
         dati = sovrascrivi(dati, leggi_toml(locale), NOME_FILE_LOCALE)
-    return interpreta(dati, NOME_FILE)
+    cfg = interpreta(dati, NOME_FILE)
+    comune = radice_comune(repo)
+    pacchetto = cfg.ambiente.pacchetto
+    return replace(
+        cfg,
+        ambiente=replace(cfg.ambiente,
+                         pacchetto=None if pacchetto is None else risolvi(comune, pacchetto)),
+        worktree=Worktree(percorso=risolvi(comune, cfg.worktree.percorso)),
+    )
+
+
+def radice_comune(repo: Path) -> Path:
+    """Il checkout principale del repository di `repo`: la cartella madre di
+    `git rev-parse --git-common-dir`, la stessa da ogni worktree (PBI-384).
+
+    Fuori da un repository git, o senza `git`, è `repo` stesso: un progetto che
+    non ha worktree ha una radice sola.
+    """
+    try:
+        detto = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--path-format=absolute",
+             "--git-common-dir"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return repo.resolve()
+    if detto.returncode != 0 or not detto.stdout.strip():
+        return repo.resolve()
+    return Path(detto.stdout.strip()).parent
+
+
+def risolvi(comune: Path, percorso: Path) -> Path:
+    """`percorso` in assoluto: com'è se lo è già, altrimenti dalla radice comune,
+    con i `..` sciolti."""
+    return percorso if percorso.is_absolute() else (comune / percorso).resolve()
 
 
 def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
@@ -212,7 +251,8 @@ def interpreta(dati: dict, file: str) -> Config:
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
                         id=backlog.testo("id"), file=backlog.testo("file")),
         registro=Registro(cartella=registro.testo("cartella"), tempi=registro.testo("tempi")),
-        ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti")),
+        ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti"),
+                          pacchetto=_percorso(ambiente.testo("pacchetto", default=None))),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
@@ -221,6 +261,10 @@ def interpreta(dati: dict, file: str) -> Config:
         gate_del_rosso=GateDelRosso(attivo=gate_del_rosso.booleano("attivo")),
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
     )
+
+
+def _percorso(testo: str | None) -> Path | None:
+    return None if testo is None else Path(testo).expanduser()
 
 
 def _gate(sezione: _Sezione) -> Gate:
