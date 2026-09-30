@@ -167,6 +167,7 @@ def carica(repo: Path) -> Config:
     di `asdlc.local.toml` se c'è, e con `[ambiente].pacchetto` e
     `[worktree].percorso` risolti dalla radice comune (`radice_comune()`)."""
     dati = leggi_toml(repo / NOME_FILE)
+    rifiuta_i_percorsi_di_macchina(dati)
     locale = repo / NOME_FILE_LOCALE
     if locale.exists():
         dati = sovrascrivi(dati, leggi_toml(locale), NOME_FILE_LOCALE)
@@ -179,6 +180,25 @@ def carica(repo: Path) -> Config:
                          pacchetto=None if pacchetto is None else risolvi(comune, pacchetto)),
         worktree=Worktree(percorso=risolvi(comune, cfg.worktree.percorso)),
     )
+
+
+# Le chiavi di percorso che si risolvono dalla radice comune: in `asdlc.toml`
+# solo relative, perché il file è versionato e vale su ogni PC (PBI-384).
+PERCORSI_DELLA_RADICE_COMUNE = (("worktree", "percorso"), ("ambiente", "pacchetto"))
+
+
+def rifiuta_i_percorsi_di_macchina(dati: dict) -> None:
+    """Un percorso assoluto o con `~` in `asdlc.toml` si ferma, nominando chiave
+    e valore. Si guarda il file versionato **prima** del locale: in
+    `asdlc.local.toml` lo stesso percorso vale, ed è il suo posto."""
+    for sezione, chiave in PERCORSI_DELLA_RADICE_COMUNE:
+        tabella = dati.get(sezione)
+        valore = tabella.get(chiave) if isinstance(tabella, dict) else None
+        if isinstance(valore, str) and (valore.startswith("~") or Path(valore).is_absolute()):
+            raise ErroreDiConfigurazione(
+                f"{NOME_FILE}: `[{sezione}].{chiave}` è un percorso di macchina, "
+                f"{valore!r} — qui i percorsi sono relativi alla radice comune del "
+                f"repository, e uno assoluto va in {NOME_FILE_LOCALE}, che è gitignored")
 
 
 def radice_comune(repo: Path) -> Path:
