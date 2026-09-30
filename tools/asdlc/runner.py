@@ -57,6 +57,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatch
+import importlib.metadata
 from importlib import resources
 from pathlib import Path
 from typing import Iterable, NamedTuple
@@ -465,6 +466,30 @@ class Esito:
     testa: str = ""
 
 
+def distribuzione_del_runner() -> importlib.metadata.Distribution:
+    """Il pacchetto `asdlc` installato. Alza `PackageNotFoundError` se non lo è,
+    come sotto i test, che girano dal sorgente."""
+    return importlib.metadata.distribution("asdlc")
+
+
+def identita_del_runner() -> dict[str, str | None]:
+    """Quale runner sta girando: `{"versione", "sha"}` (PBI-386, `ADR-0026`
+    decisione 4). Prende il posto di `PROVENIENZA.md`.
+
+    La versione è quella del pacchetto installato; lo sha è il commit da cui
+    l'ha installato `pip`, e c'è solo se l'installazione viene da git
+    (`direct_url.json`, `vcs_info.commit_id`). Con `pip install ./tools` lo sha
+    è `None`; senza il pacchetto installato lo sono tutti e due, e il giro va
+    avanti lo stesso."""
+    try:
+        distribuzione = distribuzione_del_runner()
+    except importlib.metadata.PackageNotFoundError:
+        return {"versione": None, "sha": None}
+    provenienza = json.loads(distribuzione.read_text("direct_url.json"))
+    return {"versione": distribuzione.version,
+            "sha": provenienza.get("vcs_info", {}).get("commit_id")}
+
+
 def apri_rapporto(run: str, pbi: list[str]) -> Path:
     """Scrive il rapporto del giro **prima** di cominciare, con stato `in-corso`.
 
@@ -484,7 +509,8 @@ def apri_rapporto(run: str, pbi: list[str]) -> Path:
     rapporto.write_text(
         json.dumps({"run": run, "stato": "in-corso",
                     "iniziato": datetime.now().isoformat(timespec="seconds"),
-                    "pbi": pbi}, indent=2, ensure_ascii=False),
+                    "pbi": pbi, "asdlc": identita_del_runner()},
+                   indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     return rapporto
@@ -506,6 +532,7 @@ def scrivi_rapporto(run: str, esiti: list[Esito], stato: str) -> Path:
             "run": run, "stato": stato,
             ("finito" if stato == "finito" else "aggiornato"):
                 datetime.now().isoformat(timespec="seconds"),
+            "asdlc": identita_del_runner(),
             "esiti": [{k: v for k, v in e.__dict__.items() if k != "tempi"}
                       | {"tempi": dict(e.tempi)} for e in esiti],
         }, indent=2, ensure_ascii=False),
