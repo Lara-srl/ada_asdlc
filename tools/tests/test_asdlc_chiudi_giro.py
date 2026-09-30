@@ -103,3 +103,99 @@ def test_il_modulo_di_asdlc_chiudi_giro_sta_nel_pacchetto():
     """Il punto d'ingresso `asdlc-chiudi-giro` di `tools/pyproject.toml` punta a
     `asdlc.chiudi_giro:main`: il modulo deve esserci, nel pacchetto `asdlc`."""
     assert importlib.util.find_spec("asdlc.chiudi_giro") is not None
+
+
+# --- I sei passi -------------------------------------------------------------
+
+coda = importlib.import_module("asdlc.coda")
+coda.REPO = REPO
+coda.configura(coda.asdlc_config.carica(REPO))
+
+TESTA = "7e57a00000000000000000000000000000000377"
+ALTRA = "a17a000000000000000000000000000000000377"
+RUN = "20260927-101500-000001"
+TAG = "giro-fermato/pbi-377-giro1-20260927"
+
+
+def chiudi_giro():
+    return importlib.import_module("asdlc.chiudi_giro")
+
+
+def un_giro_fermato(tmp_path, *, testa=TESTA, run=RUN, pbi="PBI-377"):
+    """Il checkout del tick e l'albero del runner, con dentro il rapporto di un
+    giro fermato che porta la sua testa."""
+    repo, albero = tmp_path / "repo", tmp_path / "albero"
+    repo.mkdir()
+    (albero / "runs").mkdir(parents=True)
+    esito = {"pbi": pbi, "stato": "fermato", "iniziato": "2026-09-27T10:15:00"}
+    if testa is not None:
+        esito["testa"] = testa
+    (albero / "runs" / f"{run}.json").write_text(
+        json.dumps({"run": run, "stato": "finito", "esiti": [esito]}), encoding="utf-8")
+    return repo, albero
+
+
+def un_origin(home, rami=(("pbi/pbi-377", TESTA),), tag_presenti=(), fallisce=None):
+    """Un `esegui()` finto: `ls-remote` risponde coi rami e i tag dati, il resto
+    riesce. Ogni comando si registra con la riga della pausa com'era in quel
+    momento, `None` se il file non c'era. `fallisce` è l'inizio di un comando
+    che esce 1."""
+    visti: list[tuple[list[str], Path, str | None]] = []
+
+    def esegui(cmd, cwd):
+        pausa = home / "asdlc-tick.pausa"
+        visti.append((cmd, cwd, pausa.read_text(encoding="utf-8") if pausa.exists() else None))
+        if fallisce is not None and cmd[:len(fallisce)] == fallisce:
+            return 1, "! [remote rejected] (permission denied)"
+        if "ls-remote" in cmd and "--tags" in cmd:
+            return 0, "".join(f"{TESTA}\trefs/tags/{t}\n" for t in tag_presenti)
+        if "ls-remote" in cmd:
+            return 0, "".join(f"{sha}\trefs/heads/{r}\n" for r, sha in rami)
+        return 0, ""
+
+    return visti, esegui
+
+
+def i_passi(visti):
+    """I comandi che cambiano qualcosa: tutto tranne le domande a `ls-remote`."""
+    return [(cmd, cwd, pausa) for cmd, cwd, pausa in visti if "ls-remote" not in cmd]
+
+
+def test_un_giro_fermato_si_chiude_coi_sei_passi_in_ordine(home_finta, tmp_path, monkeypatch):
+    """Il criterio che dà il nome al PBI. Pausa, tag sulla testa del rapporto,
+    push del tag, ramo tolto da `origin`, `ff-only` del checkout del tick, pausa
+    tolta: sette comandi a mano, e l'ordine conta."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui, raising=False)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    passi = i_passi(visti)
+    assert [cmd for cmd, _, _ in passi] == [
+        ["git", "tag", TAG, TESTA],
+        ["git", "push", "origin", f"refs/tags/{TAG}"],
+        ["git", "push", "origin", "--delete", "pbi/pbi-377"],
+        ["git", "fetch", "origin"],
+        ["git", "merge", "--ff-only", "origin/main"],
+    ]
+    assert {cwd for _, cwd, _ in passi} == {repo}
+    assert all(pausa is not None for _, _, pausa in passi), "ogni passo avviene in pausa"
+    assert not (home_finta / "asdlc-tick.pausa").exists(), "alla fine la pausa è tolta"
+
+
+def test_la_pausa_ce_prima_che_il_ramo_si_cancelli(home_finta, tmp_path, monkeypatch):
+    """Il 23/09 il ramo di PBI-365 è stato cancellato prima di spegnere il tick,
+    e il tick ha rilanciato il PBI col testo vecchio. Quando parte la
+    cancellazione del ramo la pausa c'è già, con la ragione del comando."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui, raising=False)
+
+    chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    cancellazione = [pausa for cmd, _, pausa in visti if "--delete" in cmd]
+    assert len(cancellazione) == 1
+    assert cancellazione[0] is not None, "la pausa deve esserci prima della cancellazione"
+    assert cancellazione[0].strip().endswith("asdlc-chiudi-giro PBI-377"), cancellazione
