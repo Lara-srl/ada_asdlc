@@ -124,6 +124,12 @@ def smista(argv: list[str] | None = None) -> int:
         return rifiuta(f"su {coda.REMOTO} {ramo} è {sha}, ma il rapporto {run} dice che la "
                        f"testa del giro è {testa}: il ramo è cambiato dopo il giro.")
     tag = nome_del_tag(a.pbi, ramo, run)
+    _, sul_remoto = esegui(["git", "ls-remote", "--tags", coda.REMOTO, f"refs/tags/{tag}"],
+                           a.repo)
+    if sul_remoto.strip():
+        return rifiuta(f"su {coda.REMOTO} c'è già il tag {tag}: il giro è già stato chiuso, "
+                       "o un altro giro ne ha preso il nome. Spostarlo è un `push -f`, e "
+                       "non lo faccio io.")
 
     pausa = coda.file_di_pausa()
     pausa.write_text(f"{datetime.now():%Y-%m-%d %H:%M} asdlc-chiudi-giro {a.pbi}\n",
