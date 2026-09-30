@@ -1151,7 +1151,9 @@ def test_la_coda_e_l_avviso_delle_domande_si_leggono_dalla_cartella_del_toml(
 
 
 def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura):
-    assert coda.WORKTREE_DEL_RUNNER == Path.home() / "ada-run"
+    # Letto senza `carica()`, il percorso resta com'è scritto: a risolverlo dalla
+    # radice comune è `carica()`, che sa dove sta il repository (PBI-384).
+    assert coda.WORKTREE_DEL_RUNNER == Path("../ada-run")
     assert coda.LOG == Path("runs") / "coda.log"
     assert coda.LUCCHETTO == Path("runs") / ".runner.lock"
 

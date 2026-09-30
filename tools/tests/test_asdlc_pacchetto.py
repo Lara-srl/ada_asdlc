@@ -45,11 +45,10 @@ def un_progetto_col_pacchetto(tmp_path: Path) -> Path:
     pacchetto.mkdir(parents=True)
     for sorgente in (REPO / "tools" / "asdlc").glob("*.py"):
         shutil.copy(sorgente, pacchetto / sorgente.name)
-    toml = (REPO / "asdlc.toml").read_text(encoding="utf-8")
-    assert 'percorso = "~/ada-run"' in toml
-    (progetto / "asdlc.toml").write_text(
-        toml.replace('percorso = "~/ada-run"', f'percorso = "{tmp_path / "altro"}"'),
-        encoding="utf-8")
+    shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    # Il percorso di macchina nel file locale, che è il suo posto (PBI-384).
+    (progetto / "asdlc.local.toml").write_text(
+        f'[worktree]\npercorso = "{tmp_path / "altro"}"\n', encoding="utf-8")
     (progetto / "backlog").mkdir()
     for pbi in (REPO / "backlog").glob("PBI-383-*.md"):
         shutil.copy(pbi, progetto / "backlog" / pbi.name)

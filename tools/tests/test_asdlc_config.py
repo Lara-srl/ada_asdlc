@@ -11,6 +11,7 @@ Il modulo si carica per nome, `asdlc.config`, come `test_asdlc_runner.py` e
 
 import ast
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -311,3 +312,37 @@ def test_senza_asdlc_toml_dalla_cwd_in_su_la_radice_e_un_errore_che_lo_dice(tmp_
         f"nessun `asdlc.toml` da `{vuota}` in su: il runner si lancia dalla "
         "cartella di un progetto ASDLC"
     )
+
+
+# --- I percorsi di macchina si risolvono dalla radice comune (PBI-384) -------
+
+
+def git_in(cartella: Path, *argomenti: str) -> None:
+    subprocess.run(["git", "-c", "user.name=prova", "-c", "user.email=prova@example.invalid",
+                    *argomenti], cwd=cartella, check=True, capture_output=True)
+
+
+def test_pacchetto_e_worktree_si_risolvono_dalla_radice_comune_anche_da_un_worktree(tmp_path):
+    """`[ambiente].pacchetto` e `[worktree].percorso` sono relativi alla radice
+    comune del repository, la cartella madre di `git rev-parse --git-common-dir`:
+    il checkout principale, che è lo stesso da ogni suo worktree. Dal checkout del
+    tick e da `ada-run` il venv del runner è uno solo (decisioni 1 e 2)."""
+    principale = tmp_path / "principale"
+    principale.mkdir()
+    scrivi_toml(principale, TOML_DI_PROVA.replace(
+        'venv = ".venv"\n', 'venv = ".venv"\npacchetto = ".venv-asdlc"\n'
+    ).replace('percorso = "~/prova-run"', 'percorso = "../prova-run"'))
+    git_in(principale, "init", "-q")
+    git_in(principale, "add", "-A")
+    git_in(principale, "commit", "-q", "-m", "progetto")
+    git_in(principale, "worktree", "add", "-q", str(tmp_path / "secondo"))
+
+    dal_principale = asdlc_config.carica(principale)
+    dal_worktree = asdlc_config.carica(tmp_path / "secondo")
+
+    venv = principale.resolve() / ".venv-asdlc"
+    assert getattr(dal_principale.ambiente, "pacchetto", None) == venv
+    assert getattr(dal_worktree.ambiente, "pacchetto", None) == venv
+    albero = tmp_path.resolve() / "prova-run"
+    assert dal_principale.worktree.percorso == albero
+    assert dal_worktree.worktree.percorso == albero
