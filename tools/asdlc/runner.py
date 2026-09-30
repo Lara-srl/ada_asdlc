@@ -84,6 +84,9 @@ LOG_DIR: Path            # `[registro].cartella` — `runs/`
 CSV_TEMPI: Path          # `[registro].tempi` — `runs/tempi.csv`
 BACKLOG: str             # `[backlog].cartella`
 VENV: str                # `[ambiente].venv`
+# `[ambiente].pacchetto`, assoluto: il venv in cui è installato il runner. Ogni
+# comando che il runner lancia o fa lanciare è `<pacchetto>/bin/<comando>`.
+PACCHETTO: Path | None
 PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
 # **nome** del file e non il suo percorso: la cartella è `LOG_DIR`, e un percorso
@@ -122,9 +125,10 @@ CRITIC = ["claude", "-p", "--allowedTools",
           "Read,Grep,Glob,Bash(git diff:*),mcp__asdlc__fatto,mcp__asdlc__fermati",
           "--model", "opus"]
 
-# Il server dell'esito (`PBI-366`, `ADR-0027`): sta accanto al runner, e si
-# estrae con lui. I ruoli sono i suoi: un altro valore lo ferma all'avvio.
-SERVER_DELL_ESITO = Path(__file__).resolve().parent / "esito.py"
+# Il server dell'esito (`PBI-366`, `ADR-0027`) è il comando installato accanto
+# al runner, `<pacchetto>/bin/asdlc-esito` (PBI-384). I ruoli sono i suoi: un
+# altro valore lo ferma all'avvio.
+SERVER_DELL_ESITO = "asdlc-esito"
 RUOLI = ("builder", "critic")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
@@ -228,7 +232,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     dentro un oggetto costruito in `main()` li romperebbe tutti (PBI-358,
     decisione 1). Il guadagno — un posto solo — è lo stesso.
     """
-    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI
+    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI, PACCHETTO
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
     global GATE_DEL_ROSSO_ATTIVO
@@ -266,6 +270,9 @@ def configura(cfg: asdlc_config.Config) -> None:
     # non c'è più, il gate lo leggerebbe come rosso — che è il verso giusto in cui
     # sbagliare.
     PRESTITI = cfg.ambiente.prestiti
+    # Il venv del runner installato, già assoluto: `carica()` lo risolve dalla
+    # radice comune, quindi è lo stesso da ogni worktree.
+    PACCHETTO = cfg.ambiente.pacchetto
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -1040,6 +1047,18 @@ def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
         return prompt, LOG_DIR / f"{prefisso}_{ruolo}_esito.json"
 
 
+def comando_del_pacchetto(nome: str) -> Path:
+    """`<pacchetto>/bin/<nome>`, il percorso assoluto di un comando installato.
+
+    Mai il nome nudo: il cron ha il `PATH` minimo. Mai il file dell'albero: il
+    runner che lavora è quello installato (`ADR-0026`, decisione 3). Senza
+    `[ambiente].pacchetto` alza `ValueError`, prima di ogni lancio."""
+    if PACCHETTO is None:
+        raise ValueError(f"asdlc.toml non dichiara `[ambiente].pacchetto`: non so dove "
+                         f"sta `{nome}`")
+    return PACCHETTO / "bin" / nome
+
+
 def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     """Scrive la config MCP che fa partire il server dell'esito per questa
     invocazione, accanto al suo file d'esito, e ne torna il percorso.
@@ -1059,8 +1078,8 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
         raise ValueError(f"il {ruolo} non ha un file d'esito in cui il server possa scrivere")
     config = esito.with_suffix(".mcp.json")
     config.write_text(json.dumps({"mcpServers": {"asdlc": {
-        "command": sys.executable,
-        "args": [str(SERVER_DELL_ESITO)],
+        "command": str(comando_del_pacchetto(SERVER_DELL_ESITO)),
+        "args": [],
         "env": {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)},
     }}}, indent=2, ensure_ascii=False), encoding="utf-8")
     return config
