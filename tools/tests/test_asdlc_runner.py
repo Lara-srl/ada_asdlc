@@ -19,6 +19,7 @@ sarebbe un test che riscrive il repository in cui gira.
 """
 
 import csv
+import dataclasses
 import importlib.util
 import io
 import json
@@ -8930,18 +8931,6 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert segno.read_text() == "--guardia-fase"
         assert esito.returncode == 1
 
-    def test_il_pre_commit_lancia_il_runner_in_tools_asdlc(self, repo_di_prova):
-        radice = repo_di_prova.radice
-        hook = radice / "pre-commit"
-        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
-        segno = self._runner_finto(radice, "tools/asdlc/runner.py")
-
-        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
-
-        assert segno.is_file(), esito.stderr
-        assert segno.read_text() == "--guardia-commit"
-        assert esito.returncode == 1
-
     def test_fase_tdd_senza_runner_lo_dice_ed_esce_con_1(self, tmp_path):
         """PBI-388, decisione 2: una guardia che non trova il suo codice non ferma
         il repository. Per Claude Code solo il 2 blocca."""
@@ -8951,19 +8940,6 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
                                cwd=tmp_path)
 
         assert esito.returncode == 1
-        assert "guardia del lucchetto: runner non trovato" in esito.stderr
-        assert "tools/asdlc/runner.py" in esito.stderr
-        assert "tools/asdlc_runner.py" in esito.stderr
-
-    def test_il_pre_commit_senza_runner_lo_dice_e_lascia_passare(self, repo_di_prova):
-        """PBI-388, decisione 2 e `ADR-0008`: si segnala e si lascia passare."""
-        radice = repo_di_prova.radice
-        hook = radice / "pre-commit"
-        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
-
-        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
-
-        assert esito.returncode == 0
         assert "guardia del lucchetto: runner non trovato" in esito.stderr
         assert "tools/asdlc/runner.py" in esito.stderr
         assert "tools/asdlc_runner.py" in esito.stderr
@@ -8984,12 +8960,71 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
 
         assert uscite == {runner.FASE_TEST_ONLY: 2, runner.FASE_IMPL: 0}
 
-    def test_guardia_il_pre_commit_col_runner_in_tools_ferma_il_commit(self, repo_di_prova):
-        """PBI-388, quinto criterio: con il runner nella forma di oggi il
-        `pre-commit` installato lo lancia, e un'uscita diversa da 0 ferma il
-        commit come prima di PBI-388."""
+
+
+class TestIlPreCommitLanciaIlRunnerInstallato:
+    """PBI-384, decisione 5: il `pre-commit` lo genera il runner con
+    `<pacchetto>/bin/asdlc-runner` scritto dentro, e non cerca più il sorgente
+    nell'albero. È condiviso anche dalle persone: se il comando manca lo dice e
+    lascia passare (`ADR-0008`)."""
+
+    @pytest.fixture
+    def col_pacchetto(self, tmp_path):
+        """Il runner configurato con un venv del pacchetto temporaneo: il testo
+        del `pre-commit` nasce da `configura()`."""
+        di_prima = runner.CFG
+        venv = tmp_path / "venv-asdlc"
+        runner.configura(dataclasses.replace(
+            runner.CFG, ambiente=dataclasses.replace(runner.CFG.ambiente, pacchetto=venv)))
+        yield venv
+        runner.configura(di_prima)
+
+    @staticmethod
+    def _installato(venv: Path) -> Path:
+        """Un `asdlc-runner` finto nel `bin` del venv: scrive i suoi argomenti
+        accanto a sé ed esce 1, come una guardia che ferma."""
+        comando = venv / "bin" / "asdlc-runner"
+        comando.parent.mkdir(parents=True)
+        comando.write_text('#!/bin/sh\nprintf %s "$*" > "$(dirname "$0")/lanciato"\nexit 1\n',
+                           encoding="utf-8")
+        comando.chmod(0o755)
+        return comando.with_name("lanciato")
+
+    def test_il_pre_commit_generato_lancia_asdlc_runner_del_pacchetto(
+        self, repo_di_prova, col_pacchetto
+    ):
         radice = repo_di_prova.radice
-        segno = self._runner_finto(radice, "tools/asdlc_runner.py")
+        segno = self._installato(col_pacchetto)
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-commit"
+        assert esito.returncode == 1, "l'uscita del runner arriva a git intatta"
+
+    def test_il_pre_commit_senza_asdlc_runner_nel_pacchetto_lo_dice_ed_esce_con_0(
+        self, repo_di_prova, col_pacchetto
+    ):
+        radice = repo_di_prova.radice
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert esito.returncode == 0
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert str(col_pacchetto / "bin" / "asdlc-runner") in esito.stderr
+
+    def test_il_pre_commit_installato_col_runner_del_pacchetto_ferma_il_commit(
+        self, repo_di_prova, col_pacchetto
+    ):
+        """Il giro intero: installato da `installa_la_guardia_del_commit()`, il
+        `pre-commit` lancia il runner del pacchetto, e la sua uscita diversa da 0
+        ferma il commit."""
+        radice = repo_di_prova.radice
+        segno = self._installato(col_pacchetto)
         runner.installa_la_guardia_del_commit()
         (radice / "README.md").write_text("ciao\n", encoding="utf-8")
         repo_di_prova._git("add", "README.md")
