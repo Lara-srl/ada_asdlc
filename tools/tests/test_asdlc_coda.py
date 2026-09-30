@@ -662,7 +662,7 @@ def runner_che_prende_lalbero(albero, esegui):
 
     def si_stacca(cmd, cwd):
         esito = esegui(cmd, cwd)
-        if cmd[0].endswith("/bin/asdlc-runner") or "asdlc/runner.py" in " ".join(cmd):
+        if cmd[0].endswith("/bin/asdlc-runner"):
             (albero / "runs").mkdir(exist_ok=True)
             aperto = (albero / "runs" / ".runner.lock").open("w")
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -758,7 +758,7 @@ def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
     with pytest.raises(coda.Guasto, match="fetch"):
         coda.lancia("PBI-337", albero)
 
-    assert not any("asdlc/runner.py" in " ".join(cmd) for cmd in visti)
+    assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti)
 
 
 def mondo_registrato(pr_mergiate=(), rami_su_origin=()):
@@ -818,7 +818,7 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     assert uscita == 0
     assert "PBI-337" in capsys.readouterr().out
     eseguiti = [" ".join(cmd) for cmd in visti]
-    assert not [c for c in eseguiti if "asdlc/runner.py" in c], eseguiti
+    assert not [c for c in eseguiti if "asdlc-runner" in c], eseguiti
     assert not [c for c in eseguiti if "switch" in c or "fetch" in c or "checkout" in c], eseguiti
 
 
@@ -977,7 +977,7 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
 
     Il codice d'uscita del runner copre ciò che succede **prima** del distacco, e
     solo quello: `--e2e`, che il runner rifiuta con `2`; un argomento che argparse
-    non riconosce; `python3` che su quella macchina non c'è, e allora `esegui()`
+    non riconosce; un `asdlc-runner` che nel venv non c'è, e allora `esegui()`
     rende `127` per la convenzione della shell. Sono i casi di questo test.
 
     Senza leggere quel codice nel log resterebbe «lancia: PBI-337» — il contrario
@@ -995,8 +995,8 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
             return 0, "[]"
         if "ls-remote" in cmd:
             return 0, ""
-        if "asdlc/runner.py" in " ".join(cmd):
-            return 127, "comando non eseguibile: python3 — [Errno 2] No such file"
+        if cmd[0].endswith("/bin/asdlc-runner"):
+            return 127, "comando non eseguibile: asdlc-runner — [Errno 2] No such file"
         return 0, ""
 
     monkeypatch.setattr(coda, "esegui", python_che_non_ce)
@@ -1007,7 +1007,7 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
     log = (repo / coda.LOG).read_text(encoding="utf-8")
     assert "non lanciato" in log, log
     assert "uscita 127" in log, log
-    assert "python3" in log, log
+    assert "asdlc-runner" in log, log
 
 
 def test_un_runner_fermatosi_dopo_il_distacco_non_conta_come_lanciato(
