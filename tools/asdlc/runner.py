@@ -43,6 +43,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1018,7 +1019,8 @@ def misura(e: Esito, voce: str):
 
 
 def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
-           flussi: tuple[Path, Path] | None = None) -> tuple[int, str]:
+           flussi: tuple[Path, Path] | None = None,
+           ambiente: dict[str, str] | None = None) -> tuple[int, str]:
     """Il varco verso il mondo. Un comando che non esiste torna `127`, non alza.
 
     `subprocess.run` alza `FileNotFoundError`, e l'eccezione saliva fino a
@@ -1033,11 +1035,16 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
     Scaduto il tetto, il comando si uccide e si alza `TettoSuperato` con ciò che
     i file hanno raccolto fin lì (PBI-369, decisione 4): raccolti alla fine, come
     fa `subprocess.run`, dopo un timeout non ci sarebbe niente.
+
+    Con `ambiente`, quelle variabili si aggiungono all'ambiente del runner per
+    questo comando soltanto: `ASDLC_GIRO=1` per la sessione del Builder.
     """
+    env = {**os.environ, **ambiente} if ambiente else None
     try:
         if flussi is not None:
-            return esegui_su_file(cmd, cwd, timeout, flussi)
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+            return esegui_su_file(cmd, cwd, timeout, flussi, env)
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                           env=env)
     except FileNotFoundError as exc:
         return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
                      f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
@@ -1058,7 +1065,8 @@ ATTESA_DOPO_SIGTERM = 5
 
 
 def esegui_su_file(cmd: list[str], cwd: Path, timeout: float,
-                   flussi: tuple[Path, Path]) -> tuple[int, str]:
+                   flussi: tuple[Path, Path],
+                   env: dict[str, str] | None = None) -> tuple[int, str]:
     """`esegui` con stdout e stderr scritti nei due file mentre il comando gira.
 
     Il comando parte in una sessione sua, e allo scadere si uccide il **gruppo**:
@@ -1070,7 +1078,7 @@ def esegui_su_file(cmd: list[str], cwd: Path, timeout: float,
     with flussi[0].open("w", encoding="utf-8") as fuori, \
             flussi[1].open("w", encoding="utf-8") as dentro:
         p = subprocess.Popen(cmd, cwd=cwd, stdout=fuori, stderr=dentro, text=True,
-                             start_new_session=True)
+                             start_new_session=True, env=env)
         try:
             p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -1159,6 +1167,27 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     return config
 
 
+# Chi è dentro un giro: `fase-tdd.sh`, l'hook delle sessioni delle persone, con
+# questa variabile tace, perché la guardia del giro è quella che segue.
+AMBIENTE_DEL_GIRO = {"ASDLC_GIRO": "1"}
+
+
+def impostazioni_della_sessione(esito: Path) -> Path:
+    """Scrive le impostazioni della sessione del Builder accanto al suo file
+    d'esito, `<esito>.settings.json`, e ne torna il percorso: l'hook
+    `PreToolUse` della guardia di fase, su `Edit|Write`, che lancia il runner
+    installato, `<pacchetto>/bin/asdlc-runner --guardia-fase` (PBI-384,
+    decisione 3). La guardia di un giro non è mai la copia di lavoro che il
+    Builder sta cambiando (`ADR-0026`, decisione 3)."""
+    comando = f"{shlex.quote(str(comando_del_pacchetto('asdlc-runner')))} --guardia-fase"
+    impostazioni = esito.with_suffix(".settings.json")
+    impostazioni.write_text(json.dumps({"hooks": {"PreToolUse": [{
+        "matcher": "Edit|Write",
+        "hooks": [{"type": "command", "command": comando}],
+    }]}}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return impostazioni
+
+
 class Invocazione(NamedTuple):
     """Cosa resta di un'invocazione: il codice d'uscita di `claude -p`, il suo
     testo, l'esito che il server ha scritto — `None` se l'agente non ha fatto
@@ -1208,16 +1237,25 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     Scaduto, l'esito è `None` anche se l'agente ne aveva dichiarato uno: non ha
     finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
     porta allora `tetto_minuti`, che è ciò che la nota dice.
+
+    Il Builder riceve con `--settings` la guardia di fase del giro, e
+    `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
     """
     config = config_del_server(ruolo, esito)
+    della_sessione: list[str] = []
+    ambiente: dict[str, str] | None = None
+    if ruolo == "builder":
+        della_sessione = ["--settings", str(impostazioni_della_sessione(esito))]
+        ambiente = AMBIENTE_DEL_GIRO
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
     scaduto = False
     t0 = time.monotonic()
     try:
-        codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
-                                           f"@{prompt}"], REPO, timeout=minuti * 60,
-                                flussi=(fuori, dentro))
+        codice, uscita = esegui(comando + della_sessione
+                                + ["--mcp-config", str(config), "--strict-mcp-config",
+                                   f"@{prompt}"], REPO, timeout=minuti * 60,
+                                flussi=(fuori, dentro), ambiente=ambiente)
     except TettoSuperato as tetto:
         codice, uscita, scaduto = tetto.codice, tetto.uscita, True
     registro = {"ruolo": ruolo, "codice": codice,
@@ -4102,9 +4140,10 @@ def apri_la_fase(base: str = "") -> None:
     """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
     Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`.
 
-    L'hook di Claude Code non si installa qui — sta in `.claude/settings.json`,
-    versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
-    albero appena clonato non li avrebbe.
+    L'hook di Claude Code non si installa qui: la guardia di fase del Builder la
+    scrive `impostazioni_della_sessione()` a ogni sessione, e gli arriva con
+    `--settings`. Questi due sì: `.git/hooks` non è nel repository, e un albero
+    appena clonato non li avrebbe.
     """
     if cartella_degli_hook() is None:
         return  # non c'è un repository sotto: non c'è un giro da lucchettare
