@@ -428,3 +428,30 @@ def test_senza_un_rapporto_del_pbi_il_comando_rifiuta(
     assert i_passi(visti) == []
     assert not (home_finta / "asdlc-tick.pausa").exists()
     assert str(albero / "runs") in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("muta", ["--heads", "--tags"])
+def test_un_origin_che_non_risponde_fa_rifiutare_e_il_rifiuto_lo_dice(
+    home_finta, tmp_path, monkeypatch, capsys, muta
+):
+    """Decisione 3: il rifiuto dice quale condizione e con quali valori. Un
+    `ls-remote` che fallisce non è «nessun ramo» né «il tag c'è già»: è un
+    `origin` che non ha risposto, e il rifiuto riporta ciò che git ha detto."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui_sano = un_origin(home_finta)
+
+    def esegui(cmd, cwd):
+        if "ls-remote" in cmd and muta in cmd:
+            visti.append((cmd, cwd, None))
+            return 128, "fatal: unable to access 'https://github.com/': Could not resolve host"
+        return esegui_sano(cmd, cwd)
+
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita != 0
+    assert i_passi(visti) == []
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    detto = capsys.readouterr().out
+    assert "Could not resolve host" in detto, detto
