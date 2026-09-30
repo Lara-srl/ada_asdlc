@@ -433,3 +433,18 @@ def test_un_file_di_aggiunte_che_non_e_un_ruolo_e_un_errore_che_lo_nomina(tmp_pa
 
     with pytest.raises(asdlc_config.ErroreDiConfigurazione, match=re.escape(nome)):
         asdlc_config.carica(tmp_path)
+
+
+def test_il_readme_della_cartella_di_aggiunte_non_e_un_errore(tmp_path):
+    """La cartella delle aggiunte dice da sé cosa ci va, in un `README.md` (lo
+    Scope di PBI-386 lo mette in `asdlc-aggiunte/`): è documentazione per chi
+    la apre, non un refuso di un ruolo."""
+    aggiunte = tmp_path / "aggiunte"
+    aggiunte.mkdir()
+    (aggiunte / "README.md").write_text("# Le aggiunte\n", encoding="utf-8")
+    (aggiunte / "critic.md").write_text("regola\n", encoding="utf-8")
+    scrivi_toml(tmp_path, TOML_DI_PROVA + '\n[prompt]\naggiunte = "aggiunte"\n')
+
+    cfg = asdlc_config.carica(tmp_path)
+
+    assert cfg.prompt.aggiunte == aggiunte.resolve()
