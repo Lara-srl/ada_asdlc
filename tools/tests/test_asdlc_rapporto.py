@@ -10,8 +10,10 @@ Il pacchetto installato è un varco come `git` ed `esegui`: qui lo sostituisce u
 `dist-info` finta in una cartella temporanea, letta da `importlib.metadata`.
 """
 
+import csv
 import importlib
 import importlib.metadata
+import io
 import json
 from pathlib import Path
 
@@ -126,3 +128,46 @@ def test_installato_senza_direct_url_il_rapporto_porta_la_versione_e_lo_sha_null
     rapporto = letto(percorso)
 
     assert rapporto.get("asdlc") == {"versione": "1.2.0", "sha": None}
+
+
+# --- Le guardie: il registro non cambia forma --------------------------------
+
+
+# Le colonne di `tempi.csv` prima di PBI-386: la versione sta nel rapporto, non
+# nel registro su cui si fattura (`SCAFFOLDING.md`, Fase 5c).
+COLONNE_DI_PRIMA = ("run,pbi,stato,iniziato,finito,durata_s,durata_hms,builder_s,gate_s,"
+                    "critic_s,tentativi,revisioni,commit,pr,nota")
+
+
+def esito(pbi: str, iniziato: str) -> dict:
+    return {"pbi": pbi, "stato": "fatto", "iniziato": iniziato, "finito": iniziato,
+            "durata_s": 600.0, "tempi": {"builder": 500.0, "gate": 60.0, "critic": 40.0},
+            "tentativi": 1, "revisioni": 1, "commit": 4, "pr": "", "nota": "giro chiuso"}
+
+
+def test_registra_legge_un_rapporto_senza_asdlc_e_scrive_tempi_csv_con_le_colonne_di_prima(
+    tmp_path, monkeypatch,
+):
+    """Guardia nata verde. I rapporti scritti prima di PBI-386 non hanno la chiave
+    `asdlc`, e `--registra` li deve piegare nel registro come prima, accanto a
+    quelli che ce l'hanno; e il registro resta con le sue quindici colonne."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+    (runs / "20260930-230000.json").write_text(json.dumps({
+        "run": "20260930-230000", "stato": "finito", "finito": "2026-09-30T23:10:00",
+        "esiti": [esito("PBI-385", "2026-09-30T23:00:00")],
+    }), encoding="utf-8")
+    (runs / "20261001-004016.json").write_text(json.dumps({
+        "run": "20261001-004016", "stato": "finito", "finito": "2026-10-01T00:50:16",
+        "asdlc": {"versione": "1.0.0.dev0", "sha": None},
+        "esiti": [esito("PBI-386", "2026-10-01T00:40:16")],
+    }), encoding="utf-8")
+
+    assert runner.registra(runs) == 0
+
+    testo = (tmp_path / "tempi.csv").read_text(encoding="utf-8")
+    assert testo.splitlines()[0] == COLONNE_DI_PRIMA
+    righe = list(csv.DictReader(io.StringIO(testo)))
+    assert [(r["run"], r["pbi"]) for r in righe] == [
+        ("20260930-230000", "PBI-385"), ("20261001-004016", "PBI-386")]
