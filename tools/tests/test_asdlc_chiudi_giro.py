@@ -13,6 +13,7 @@ Tre gruppi:
 togliesse spegnerebbe o riaccenderebbe il cron di chi li lancia.
 """
 
+import fcntl
 import importlib
 import importlib.util
 import json
@@ -239,3 +240,27 @@ def test_senza_testa_nel_rapporto_il_comando_rifiuta(home_finta, tmp_path, monke
     assert not (home_finta / "asdlc-tick.pausa").exists()
     detto = capsys.readouterr().out
     assert "testa" in detto and RUN in detto, detto
+
+
+def test_con_il_lucchetto_tenuto_il_comando_rifiuta_senza_git_e_senza_pausa(
+    home_finta, tmp_path, monkeypatch, capsys
+):
+    """Decisione 3. Un runner al lavoro nell'albero è un giro vivo, non un giro
+    fermato: cancellargli il ramo sotto i piedi è peggio del problema. Il
+    controllo è quello del tick, `giro_in_corso()` — il `flock` sul lucchetto,
+    non la presenza del file (PBI-373) — e viene prima di tutto: nessun
+    comando git, nemmeno una domanda, e nessuna pausa."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    with (albero / coda.LUCCHETTO).open("w") as tenuto:
+        fcntl.flock(tenuto, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        uscita = chiudi_giro().smista(
+            ["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita != 0
+    assert visti == [], "con un giro vivo non si chiama git"
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    detto = capsys.readouterr().out
+    assert "lucchetto" in detto and str(albero) in detto, detto
