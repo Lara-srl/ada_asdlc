@@ -1397,3 +1397,29 @@ def test_un_file_di_pausa_che_non_si_legge_e_pausa_lo_stesso(
     righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert len(righe) == 1 and "  in pausa: " in righe[0], righe
     assert "non si legge" in righe[0], righe
+
+
+def test_la_pausa_nata_dopo_la_decisione_ferma_il_lancio(home_finta, tmp_path, monkeypatch):
+    """Decisione 5: il tick legge la pausa una seconda volta, subito prima di
+    `lancia()`. Un tick partito un attimo prima che `asdlc-chiudi-giro` creasse
+    il file ha già deciso di lanciare, e senza la seconda lettura lancerebbe sul
+    ramo che il comando sta cancellando — il 23/09 con PBI-365."""
+    riga = "2026-09-30 21:30 asdlc-chiudi-giro PBI-385"
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    lanciati: list[str] = []
+
+    def decide_e_intanto_nasce_la_pausa(repo, worktree):
+        (home_finta / "asdlc-tick.pausa").write_text(riga + "\n", encoding="utf-8")
+        return coda.Lancia("PBI-337")
+
+    monkeypatch.setattr(coda, "decidi", decide_e_intanto_nasce_la_pausa)
+    monkeypatch.setattr(coda, "lancia", lambda pbi, worktree: lanciati.append(pbi))
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert lanciati == []
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert righe[-1].endswith(f"  in pausa: {riga}"), righe
