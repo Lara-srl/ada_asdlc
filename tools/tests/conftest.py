@@ -30,18 +30,24 @@ def pytest_sessionstart(session):
     moriva da sé con un'uscita 127: 19 `GuastoDelGate` nel difetto 60 di
     PBI-102, e la causa andava dedotta. Qui si cerca `git` e `pytest` come li
     cerca il runner — nel venv di `[ambiente].venv`, poi sul `PATH` — e la
-    sessione si ferma con le mancanze, una riga ciascuna. Un `asdlc.toml` che non
-    si legge non ferma niente qui: lo diranno i test che lo leggono.
-    """
-    from asdlc import config as asdlc_config
-    from asdlc import runner as asdlc_runner
+    sessione si ferma con le mancanze, una riga ciascuna.
 
+    Un `asdlc.toml` che non si legge, o un lettore che alza, non ferma niente qui:
+    lo diranno i test che lo leggono. Il gate del rosso rigira questi test contro
+    i mutanti di `asdlc.config` e di `asdlc.runner`, e un'eccezione qui dentro
+    interromperebbe pytest prima del rapporto JUnit, che è ciò che il gate legge:
+    il mutante diventerebbe un guasto del gate invece di un test che fallisce.
+    """
     repo = TOOLS.parent
     try:
+        from asdlc import config as asdlc_config
+        from asdlc import runner as asdlc_runner
+
         venv = asdlc_config.carica(repo).ambiente.venv
-    except asdlc_config.ErroreDiConfigurazione:
+        mancanze = asdlc_runner.eseguibili_mancanti(USATI_DAI_TEST, venv, repo)
+    except Exception:  # noqa: BLE001 — vedi sopra: qui non si ferma per un guasto
         return
-    if mancanze := asdlc_runner.eseguibili_mancanti(USATI_DAI_TEST, venv, repo):
+    if mancanze:
         pytest.exit("\n".join(mancanze))
 
 
