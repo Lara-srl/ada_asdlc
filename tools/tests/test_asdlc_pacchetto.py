@@ -82,3 +82,43 @@ def test_il_tick_lanciato_dalla_radice_come_tools_asdlc_coda_fa_il_dry_run(tmp_p
     fatto = lancia_dalla_radice(progetto, ["tools/asdlc/coda.py", "--dry-run"])
 
     assert fatto.returncode == 0, fatto.stdout + fatto.stderr
+
+
+# --- I comandi installabili (PBI-384) ----------------------------------------
+
+
+COMANDI = ("asdlc-runner", "asdlc-coda", "asdlc-esito")
+
+
+def test_pip_install_di_tools_in_un_venv_pulito_mette_i_tre_comandi_e_il_runner_risponde(
+    tmp_path,
+):
+    """`pip install ./tools` è l'installazione del runner (`ADR-0026`, decisione 3):
+    non editabile, in un venv suo. I tre punti d'ingresso finiscono nel `bin/`, e
+    `asdlc-runner --help` risponde anche da una cartella che non è un progetto.
+
+    Si installa una **copia** di `tools/`: la build scrive `build/` e
+    `asdlc.egg-info/` accanto al sorgente, e nel repository vero sporcherebbe
+    l'albero del giro."""
+    sorgente = tmp_path / "sorgente"
+    shutil.copytree(REPO / "tools" / "asdlc", sorgente / "asdlc",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    if (REPO / "tools" / "pyproject.toml").exists():
+        shutil.copy(REPO / "tools" / "pyproject.toml", sorgente / "pyproject.toml")
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True,
+                   capture_output=True, timeout=120)
+
+    installato = subprocess.run(
+        [str(venv / "bin" / "pip"), "install", "-q", "--disable-pip-version-check",
+         str(sorgente)], capture_output=True, text=True, timeout=600)
+
+    assert installato.returncode == 0, installato.stdout + installato.stderr
+    for comando in COMANDI:
+        assert (venv / "bin" / comando).is_file(), comando
+    fuori = tmp_path / "fuori"
+    fuori.mkdir()
+    aiuto = subprocess.run([str(venv / "bin" / "asdlc-runner"), "--help"], cwd=fuori,
+                           capture_output=True, text=True, timeout=60)
+    assert aiuto.returncode == 0, aiuto.stdout + aiuto.stderr
+    assert "--chiedi-impl" in aiuto.stdout
