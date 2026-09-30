@@ -109,3 +109,20 @@ def test_senza_il_pacchetto_installato_versione_e_sha_sono_null(monkeypatch, scr
     rapporto = letto(scrivi())
 
     assert rapporto.get("asdlc") == {"versione": None, "sha": None}
+
+
+@pytest.mark.parametrize("scrivi", SCRITTURE)
+def test_installato_senza_direct_url_il_rapporto_porta_la_versione_e_lo_sha_null(
+    tmp_path, monkeypatch, scrivi,
+):
+    """Un'installazione da un indice o da una wheel non scrive `direct_url.json`:
+    la versione c'è, lo sha no, e il rapporto si scrive lo stesso."""
+    installato(monkeypatch, distribuzione(tmp_path, "1.2.0", None))
+
+    try:
+        percorso = scrivi()
+    except Exception as guasto:  # noqa: BLE001 — il criterio è che non alzi niente
+        pytest.fail(f"senza direct_url.json il rapporto non si scrive: {guasto!r}")
+    rapporto = letto(percorso)
+
+    assert rapporto.get("asdlc") == {"versione": "1.2.0", "sha": None}
