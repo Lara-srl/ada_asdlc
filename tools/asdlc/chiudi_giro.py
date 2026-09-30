@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -66,6 +67,20 @@ def rami_del_pbi(repo: Path, pbi: str) -> list[tuple[str, str]]:
     return rami
 
 
+# Il suffisso che `nome_libero()` del runner dà al secondo giro in poi:
+# `pbi/pbi-377` è il giro 1, `pbi/pbi-377-giro2` il 2.
+RE_GIRO = re.compile(r"-giro(\d+)$")
+
+
+def nome_del_tag(pbi: str, ramo: str, run: str) -> str:
+    """`giro-fermato/<pbi>-giro<N>-<data>` (PBI-385, decisione 4): il PBI in
+    minuscolo, il giro dal nome del ramo, la data del rapporto — le prime otto
+    cifre del run, `AAAAMMGG` — e non quella di oggi."""
+    trovato = RE_GIRO.search(ramo)
+    giro = trovato.group(1) if trovato is not None else "1"
+    return f"giro-fermato/{pbi.lower()}-giro{giro}-{run[:8]}"
+
+
 def smista(argv: list[str] | None = None) -> int:
     """`main()` a configurazione già letta: i test la chiamano da qui."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -79,7 +94,7 @@ def smista(argv: list[str] | None = None) -> int:
     run, esito = ultimo_rapporto(a.worktree, a.pbi)
     testa = esito["testa"]
     ramo, _ = rami_del_pbi(a.repo, a.pbi)[0]
-    tag = f"giro-fermato/{a.pbi.lower()}-giro1-{run[:8]}"
+    tag = nome_del_tag(a.pbi, ramo, run)
 
     pausa = coda.file_di_pausa()
     pausa.write_text(f"{datetime.now():%Y-%m-%d %H:%M} asdlc-chiudi-giro {a.pbi}\n",
