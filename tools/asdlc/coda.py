@@ -612,11 +612,17 @@ def pausa() -> str | None:
     dalla tabella che ha caricato, e fra la modifica e il `RELOAD` il tick
     lanciava con la riga vecchia (difetto 69 di PBI-102). Il file lo legge il
     tick stesso a ogni passaggio, e non c'è una seconda fonte da aspettare.
+
+    Un file che c'è ma non si legge è pausa lo stesso: chi l'ha creato voleva
+    il tick fermo, e la riga lo dice al posto della ragione.
     """
     file = file_di_pausa()
     if not file.exists():
         return None
-    return file.read_text(encoding="utf-8").strip()
+    try:
+        return file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as illeggibile:
+        return f"{file} c'è ma non si legge — {illeggibile}"
 
 
 def main(argv: list[str] | None = None) -> int:
