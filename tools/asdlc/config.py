@@ -286,8 +286,12 @@ def interpreta(dati: dict, file: str) -> Config:
     worktree = sezione.dentro("worktree")
     soglie = sezione.dentro("soglie")
     gate_del_rosso = sezione.dentro("gate_del_rosso")
-    # Facoltativa: un progetto che non estende i prompt non la scrive.
+    # Facoltativa: un progetto che non estende i prompt non la scrive. E ha una
+    # chiave sola: i prompt del pacchetto si estendono, non si sostituiscono
+    # (`ADR-0026`, decisione 2), e un refuso non si ignora in silenzio.
     prompt = sezione.dentro("prompt", default={})
+    prompt.solo("aggiunte", perche="i prompt del pacchetto si estendono con le "
+                "aggiunte, e non si sostituiscono")
     return Config(
         git=Git(base=git.testo("base"), prefisso_ramo=git.testo("prefisso_ramo")),
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
@@ -348,6 +352,13 @@ class _Sezione:
 
     def dentro(self, chiave: str, default=_MANCA) -> _Sezione:
         return _Sezione(self._valore(chiave, dict, "una sezione", default), self.file, chiave)
+
+    def solo(self, *ammesse: str, perche: str) -> None:
+        """Una chiave fuori da `ammesse` si ferma, nominandola."""
+        for chiave in self.dati:
+            if chiave not in ammesse:
+                raise ErroreDiConfigurazione(
+                    f"{self.file}: `{self._chiave(chiave)}` non è una chiave ammessa — {perche}")
 
     def elenco_di_sezioni(self, chiave: str) -> list[_Sezione]:
         elenco = self._valore(chiave, list, "un elenco di sezioni `[[…]]`")
