@@ -6619,6 +6619,33 @@ class TestIlMorsoSiGiudicaAncheAllaPunta:
         assert "nato verde e non morde" in mancati[0]["esito"]
         assert "alla punta il test non è verde" in mancati[0]["esito"]
 
+    def test_il_perimetro_alla_punta_porta_la_funzione_nominata_dal_commit_della_guardia(
+        self, repo_di_prova
+    ):
+        """Decisione 3: alla punta il perimetro è quello di `base...punta`, più le
+        funzioni che il commit della guardia nomina con `Guardia-su:`, cercate
+        nell'albero della punta; un nome che lì non c'è si scrive come oggi."""
+        self._base_e_doppio(repo_di_prova)
+        repo_di_prova.commit("feat: la soglia", {
+            "backend/app/s.py": "def soglia(x):\n    return x > 10\n",
+        })
+        self._il_golden_poi_carica(
+            repo_di_prova,
+            "test: fissa il prompt\n\n"
+            "Guardia-su: backend/app/s.py::soglia\n"
+            "Guardia-su: backend/app/m.py::vecchia")
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD~2")
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+
+        [morso] = morsi
+        assert morso["dove"] == "punta"
+        assert "backend/app/s.py::soglia (nominata)" in morso["perimetro"]
+        assert ("backend/app/m.py::vecchia (funzione nominata non trovata)"
+                in morso["perimetro"])
+        assert "backend/app/s.py::soglia (nominata)" in runner.descrizione_del_morso(morso, "")
+
 
 class TestIlPerimetroPerFunzioneNonCambiaIlResto:
     """PBI-378, criterio 5: le guardie. Descrivono comportamenti che `main` ha già
