@@ -239,6 +239,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     global MINIMI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO, GUARDIA_DEL_COMMIT
+    global PROMPT_BUILDER
     global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
     GATE = list(cfg.gate)
@@ -285,6 +286,11 @@ def configura(cfg: asdlc_config.Config) -> None:
     # percorso è vuoto, e l'hook lo dice e lascia passare.
     GUARDIA_DEL_COMMIT = MODELLO_DELLA_GUARDIA_DEL_COMMIT.format(
         runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "")
+    # Il Builder chiede `--chiedi-impl` al runner installato, per percorso
+    # assoluto, non al sorgente dell'albero che sta cambiando.
+    PROMPT_BUILDER = MODELLO_BUILDER.format(
+        pbi_path="{pbi_path}",
+        runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "asdlc-runner")
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -311,7 +317,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     MINUTI_CRITIC = cfg.soglie.minuti_critic
 
 
-PROMPT_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
+MODELLO_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
 
 Leggi, in quest'ordine:
 1. AGENTS.md — confini di giudizio e toolchain
@@ -328,7 +334,7 @@ Esegui il PBI con queste regole non negoziabili:
   2. **committalo**, da solo: `test(scope): … (RED)`. Un commit di soli test, senza una
      riga di produzione dentro — il rosso non può essere esistito in mezzo a un commit
      misto, e il gate lo ferma dal solo diff;
-  3. `python3 tools/asdlc/runner.py --chiedi-impl` — rigira quei test e apre la fase
+  3. `{runner} --chiedi-impl` — rigira quei test e apre la fase
      `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e non è
      questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
   4. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
@@ -604,6 +610,7 @@ lasciala aperta. Poi chiama `fatto` con il riepilogo, oppure `fermati` con la do
 l'esito il runner lo legge solo da quella chiamata, non dal testo della risposta.
 """
 
+PROMPT_BUILDER: str  # `MODELLO_BUILDER` col runner installato dentro, da `configura()`
 PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
 PROMPT_RIMEDIO: str  # idem, da `MODELLO_RIMEDIO`
 
