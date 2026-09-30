@@ -47,6 +47,9 @@ def un_progetto_col_pacchetto(tmp_path: Path) -> Path:
     shutil.copytree(REPO / "tools" / "asdlc", pacchetto, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    # La cartella delle aggiunte ai prompt che `asdlc.toml` dichiara (PBI-386):
+    # senza, il caricamento si ferma.
+    shutil.copytree(REPO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
     # Il percorso di macchina nel file locale, che è il suo posto (PBI-384).
     (progetto / "asdlc.local.toml").write_text(
         f'[worktree]\npercorso = "{tmp_path / "altro"}"\n', encoding="utf-8")

@@ -163,6 +163,9 @@ def un_progetto_come_ada(tmp_path: Path) -> Path:
     tools.mkdir(parents=True)
     copia_il_pacchetto(tools)
     shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    # La cartella delle aggiunte ai prompt che `asdlc.toml` dichiara (PBI-386):
+    # senza, il caricamento si ferma.
+    shutil.copytree(REPO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
     hooks = progetto / ".claude" / "hooks"
     hooks.mkdir(parents=True)
     shutil.copy(REPO / ".claude" / "hooks" / "fase-tdd.sh", hooks / "fase-tdd.sh")

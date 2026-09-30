@@ -30,6 +30,9 @@ def test_senza_pytest_sul_path_dei_sottoprocessi_la_suite_si_ferma_all_avvio_con
     (progetto / "tools" / "tests" / "test_prova.py").write_text(
         "def test_prova():\n    assert True\n", encoding="utf-8")
     shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    # La cartella delle aggiunte ai prompt che `asdlc.toml` dichiara (PBI-386):
+    # senza, il caricamento si ferma.
+    shutil.copytree(REPO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
     solo_git = tmp_path / "bin"
     solo_git.mkdir()
     (solo_git / "git").symlink_to(shutil.which("git"))
