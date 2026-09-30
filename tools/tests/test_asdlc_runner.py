@@ -5651,6 +5651,39 @@ class TestIComandiPortanoIlServerDellEsito:
         assert server["command"] == str(pacchetto / "bin" / "asdlc-esito")
         assert server["args"] == []
 
+    def test_la_sessione_del_builder_riceve_la_guardia_di_fase_installata_e_asdlc_giro(
+        self, monkeypatch, git_finto, tmp_path
+    ):
+        """PBI-384, criterio 7: la guardia di fase di un giro la genera il runner,
+        in un file di impostazioni accanto alla config MCP che passa con
+        `--settings`, e lancia il runner installato. `ASDLC_GIRO=1`
+        nell'ambiente della sessione fa tacere `fase-tdd.sh`: dentro un giro la
+        guardia è una sola, e mai la copia di lavoro che il Builder cambia."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        ambienti: list[tuple[list[str], dict]] = []
+
+        def registra_l_ambiente(cmd, cwd, timeout=7200, **k):
+            ambienti.append((cmd, k.get("ambiente") or {}))
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "esegui", registra_l_ambiente)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        cmd, ambiente = next((c, a) for c, a in ambienti if ruolo_ed_esito(c)[0] == "builder")
+        assert "--settings" in cmd
+        impostazioni = json.loads(
+            Path(cmd[cmd.index("--settings") + 1]).read_text(encoding="utf-8"))
+        pacchetto = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc"
+        assert impostazioni["hooks"]["PreToolUse"] == [{
+            "matcher": "Edit|Write",
+            "hooks": [{"type": "command",
+                       "command": f"{pacchetto / 'bin' / 'asdlc-runner'} --guardia-fase"}],
+        }]
+        assert ambiente.get("ASDLC_GIRO") == "1"
+
     @pytest.mark.parametrize("ruolo", ["builder", "critic"])
     def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
         self, monkeypatch, git_finto, tmp_path, ruolo
