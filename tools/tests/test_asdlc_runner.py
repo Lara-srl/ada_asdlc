@@ -66,6 +66,26 @@ def clear_event_bus():
     return None
 
 
+# La verifica dell'ambiente all'avvio (PBI-384) guarda il mondo: da quale venv
+# gira l'interprete, cosa c'è sul `PATH`, gli hook installati. È un varco come
+# `git` ed `esegui`, e nei test si sostituisce: su questa macchina e in CI il
+# processo di pytest non gira dal venv del runner, e ogni `smista()` su un PBI si
+# fermerebbe lì. I test della verifica la rimettono con `ambiente_vero`.
+MANCANZE_VERE = getattr(runner, "mancanze_dell_ambiente", None)
+
+
+@pytest.fixture(autouse=True)
+def ambiente_presente(monkeypatch):
+    monkeypatch.setattr(runner, "mancanze_dell_ambiente", lambda: [], raising=False)
+
+
+@pytest.fixture
+def ambiente_vero(monkeypatch):
+    """La verifica dell'ambiente vera, al posto di quella che `ambiente_presente`
+    sostituisce."""
+    monkeypatch.setattr(runner, "mancanze_dell_ambiente", MANCANZE_VERE, raising=False)
+
+
 def elenco_backlog() -> str:
     """Cosa risponde `git ls-tree origin/main backlog/`: il runner cerca lì il file
     del PBI (difetto 7), quindi ogni finto `git` deve saperlo dire."""
@@ -3058,6 +3078,36 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert commentate == []
         assert esito.stato == "fatto"
         assert "PR forse aperta, da verificare" in esito.nota, esito.nota
+
+class TestIlRunnerGiraDalVenvDichiarato:
+    """PBI-384, decisione 1: il runner che lavora è quello installato nel venv di
+    `[ambiente].pacchetto`. Lanciato da un altro interprete — il sorgente
+    dell'albero con `python3`, un altro venv — non parte, e non ripiega sul
+    percorso dell'albero: dice da dove gira e cosa dichiara `asdlc.toml`."""
+
+    def test_un_runner_che_non_gira_dal_venv_dichiarato_esce_con_ambiente_mancante(
+        self, ambiente_vero, tmp_path, monkeypatch, capsys
+    ):
+        dichiarato = tmp_path / "venv-asdlc"
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "PACCHETTO", dichiarato)
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI parte fuori dal venv dichiarato"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc-runner", "PBI-212", "--in-primo-piano"])
+
+        assert runner.smista() == 2
+
+        uscita = capsys.readouterr().out
+        assert "ambiente mancante" in uscita
+        assert sys.executable in uscita, "nomina da dove gira"
+        assert str(dichiarato) in uscita, "e cosa dichiara asdlc.toml"
+        assert not (tmp_path / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
