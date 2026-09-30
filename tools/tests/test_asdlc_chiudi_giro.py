@@ -406,3 +406,25 @@ def test_il_rapporto_e_l_ultimo_che_nomina_il_pbi_o_quello_scelto_con_run(
     assert chiudi_giro().smista([*argomenti, "--run", "20260926-090000-000001"]) == 0
     assert (["git", "tag", "giro-fermato/pbi-377-giro1-20260926", ALTRA]
             in [cmd for cmd, _, _ in visti])
+
+
+@pytest.mark.parametrize("scelto", [[], ["--run", "20260101-000000-000001"]],
+                         ids=["nessun-rapporto-del-pbi", "run-che-non-esiste"])
+def test_senza_un_rapporto_del_pbi_il_comando_rifiuta(
+    home_finta, tmp_path, monkeypatch, capsys, scelto
+):
+    """La Direttiva: il comando rifiuta di partire quando non è sicuro di cosa
+    sta chiudendo. Nell'albero c'è solo il rapporto di un altro PBI, o `--run`
+    nomina un rapporto che non c'è: niente testa, niente tag, e il rifiuto dice
+    dove ha cercato."""
+    repo, albero = un_giro_fermato(tmp_path, pbi="PBI-378")
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(
+        ["PBI-377", "--repo", str(repo), "--worktree", str(albero), *scelto])
+
+    assert uscita != 0
+    assert i_passi(visti) == []
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    assert str(albero / "runs") in capsys.readouterr().out
