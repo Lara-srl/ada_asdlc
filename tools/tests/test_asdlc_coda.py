@@ -58,6 +58,17 @@ def ambiente_vero(monkeypatch):
     monkeypatch.setattr(coda, "mancanze_dell_ambiente", MANCANZE_VERE, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def home_finta(tmp_path, monkeypatch):
+    """`HOME` in una cartella temporanea, per ogni test (PBI-385). Il tick legge la
+    pausa in `~/asdlc-tick.pausa`: con la `HOME` vera, la pausa di chi lancia i
+    test li farebbe fallire, e un test che la creasse spegnerebbe il suo cron."""
+    casa = tmp_path / "casa"
+    casa.mkdir()
+    monkeypatch.setenv("HOME", str(casa))
+    return casa
+
+
 def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
     """La testa sarebbe da lanciare, e non si lancia lo stesso.
 
@@ -1327,3 +1338,41 @@ def test_il_tick_con_l_ambiente_mancante_scrive_la_riga_e_non_lancia(
     assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti), "il runner non parte"
     assert not any(c in cmd for cmd in visti for c in ("fetch", "switch", "checkout")), (
         "e nemmeno il pre-flight")
+
+
+# --- La pausa del tick (PBI-385) ---------------------------------------------
+
+
+def smista_senza_decidere(monkeypatch):
+    """`decidi()` e `lancia()` che registrano di essere stati chiamati: con la
+    pausa il tick non deve arrivare a nessuno dei due."""
+    chiamati: list[str] = []
+    monkeypatch.setattr(coda, "decidi", lambda repo, worktree: (
+        chiamati.append("decidi") or coda.Lancia("PBI-337")))
+    monkeypatch.setattr(coda, "lancia", lambda pbi, worktree: chiamati.append("lancia"))
+    return chiamati
+
+
+@pytest.mark.parametrize("prova", [[], ["--dry-run"]], ids=["tick", "dry-run"])
+def test_il_tick_in_pausa_esce_con_zero_senza_decidere_e_lo_scrive_nel_log(
+    home_finta, tmp_path, monkeypatch, prova
+):
+    """Decisione 5. Il tick non si spegne più nel crontab — cron lancia dalla
+    tabella caricata, e fra la modifica e il `RELOAD` il 30/09 ha lanciato 384
+    (difetto 69 di PBI-102). Con `~/asdlc-tick.pausa` il tick esce subito con 0,
+    non chiede niente al mondo e non lancia, e nel log scrive la riga del file:
+    chi legge `coda.log` vede perché non è successo niente. `--dry-run` la
+    rispetta come un tick vero."""
+    riga = "2026-09-30 21:30 asdlc-chiudi-giro PBI-385"
+    (home_finta / "asdlc-tick.pausa").write_text(riga + "\n", encoding="utf-8")
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero), *prova])
+
+    assert uscita == 0
+    assert chiamati == []
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert len(righe) == 1 and righe[0].endswith(f"  in pausa: {riga}"), righe
