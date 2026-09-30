@@ -6584,6 +6584,41 @@ class TestIlMorsoSiGiudicaAncheAllaPunta:
         assert re.search(r"alla punta: \d+ mutant[ei] provat[io]", esito)
         assert esito.count("perimetro: backend/app/m.py::doppio (dal diff)") == 2
 
+    def test_la_guardia_che_alla_punta_non_ce_piu_ferma_e_lo_dice(self, repo_di_prova):
+        """Decisione 4: il test alla punta si cerca con lo stesso file e lo stesso
+        nome, e non altrove. Qui un commit dopo la guardia cancella il suo file."""
+        self._base_e_doppio(repo_di_prova)
+        golden = repo_di_prova.commit("test: fissa il prompt",
+                                      {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.cancella("backend/tests/test_prompt.py")
+        repo_di_prova.commit_dello_stage("test: togli il golden del prompt")
+        morsi: list[dict] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert [m["commit"] for m in mancati] == [golden[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+        assert "alla punta il test non si trova" in mancati[0]["esito"]
+
+    def test_la_guardia_che_alla_punta_non_e_verde_ferma_e_lo_dice(self, repo_di_prova):
+        """Decisione 4: un test rosso alla punta lo farebbe fallire ogni mutante, e
+        non sarebbe un morso. Qui il ramo, dopo la guardia, cambia il prompt."""
+        self._base_e_doppio(repo_di_prova)
+        golden = repo_di_prova.commit("test: fissa il prompt",
+                                      {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.commit("feat: un altro prompt, da carica()", {
+            "backend/app/m.py": self.DOPO.replace("'ci' + 'ao'", "'sal' + 've'"),
+        })
+        morsi: list[dict] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert [m["commit"] for m in mancati] == [golden[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+        assert "alla punta il test non è verde" in mancati[0]["esito"]
+
 
 class TestIlPerimetroPerFunzioneNonCambiaIlResto:
     """PBI-378, criterio 5: le guardie. Descrivono comportamenti che `main` ha già
