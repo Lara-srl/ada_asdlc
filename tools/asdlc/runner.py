@@ -756,6 +756,25 @@ def venv_sul_path() -> str | None:
     return str(bin_venv)
 
 
+def mancanze_dell_ambiente() -> list[str]:
+    """Ciò che manca perché un giro possa partire, una riga per mancanza, tutte
+    insieme; vuota se non manca niente (PBI-384).
+
+    Il runner deve girare dal venv che `asdlc.toml` dichiara, `[ambiente].pacchetto`:
+    il runner che lavora è quello installato, non il sorgente dell'albero
+    (`ADR-0026`, decisione 3). Non si ripiega sul percorso dell'albero. Si guarda
+    `sys.executable` così com'è, senza risolverlo: in un venv è un collegamento
+    all'interprete di sistema, e risolto uscirebbe dal venv.
+    """
+    if PACCHETTO is None:
+        return ["ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
+                "il venv in cui è installato il runner"]
+    if not Path(sys.executable).is_relative_to(PACCHETTO):
+        return [f"ambiente mancante: il runner gira da `{sys.executable}`, "
+                f"`asdlc.toml` dichiara `{PACCHETTO}`"]
+    return []
+
+
 def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
     """Se il gate gira: sempre, senza `solo_se_tocca`; con, se è fra i nomi
     accesi a prescindere o se il diff del branch tocca uno dei suoi percorsi.
@@ -4226,6 +4245,15 @@ def smista() -> int:
 
     if aggiunto := venv_sul_path():
         print(f"venv del worktree sul PATH: {aggiunto}")
+
+    # L'ambiente si verifica prima del distacco e del lucchetto: un giro che non
+    # può girare si dice qui, con l'uscita che il tick legge, e non a metà del
+    # Builder. Un `--dry-run` stampa il prompt e basta, e non lo pretende.
+    if not a.dry_run and (mancanze := mancanze_dell_ambiente()):
+        print("Non parto:")
+        for mancanza in mancanze:
+            print(f"  {mancanza}")
+        return 2
 
     attivi: set[str] = set()
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
