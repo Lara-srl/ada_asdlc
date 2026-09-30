@@ -57,10 +57,24 @@ def ultimo_rapporto(worktree: Path, pbi: str, run: str | None = None
     return None
 
 
+class OriginMuto(RuntimeError):
+    """`ls-remote` non ha risposto: cosa c'è su `origin` non si sa, e non si chiude."""
+
+
+def chiedi_a_origin(comando: list[str], repo: Path) -> str:
+    """L'uscita di una domanda a `origin`, o `OriginMuto` con ciò che git ha detto.
+    Un errore letto come risposta vuota diventerebbe «nessun ramo», e un messaggio
+    d'errore letto come risposta piena «il tag c'è già»."""
+    codice, uscita = esegui(comando, repo)
+    if codice != 0:
+        raise OriginMuto(f"`{' '.join(comando)}` è uscito {codice}: {uscita.strip()[:200]}")
+    return uscita
+
+
 def rami_del_pbi(repo: Path, pbi: str) -> list[tuple[str, str]]:
     """`(ramo, sha)` dei rami di quel PBI su `origin`, letti come li legge il tick."""
     cartella = coda.PREFISSO_RAMO.rpartition("/")[0]
-    _, uscita = esegui(
+    uscita = chiedi_a_origin(
         ["git", "ls-remote", "--heads", coda.REMOTO, f"refs/heads/{cartella}/*"], repo)
     rami = []
     for riga in uscita.splitlines():
@@ -127,7 +141,10 @@ def smista(argv: list[str] | None = None) -> int:
     # Un solo ramo, e sulla testa: con due il tag andrebbe su un giro e si
     # cancellerebbe l'altro, e un ramo andato avanti dopo il rapporto non è più
     # il giro che il rapporto descrive (il tag di PBI-363, il 25/09).
-    rami = rami_del_pbi(a.repo, a.pbi)
+    try:
+        rami = rami_del_pbi(a.repo, a.pbi)
+    except OriginMuto as muto:
+        return rifiuta(f"{coda.REMOTO} non ha risposto — {muto}")
     if len(rami) != 1:
         trovati = ", ".join(f"{r} ({sha})" for r, sha in rami) or "nessun ramo"
         return rifiuta(f"su {coda.REMOTO} ci dev'essere un solo ramo di {a.pbi}, e ho "
@@ -137,8 +154,11 @@ def smista(argv: list[str] | None = None) -> int:
         return rifiuta(f"su {coda.REMOTO} {ramo} è {sha}, ma il rapporto {run} dice che la "
                        f"testa del giro è {testa}: il ramo è cambiato dopo il giro.")
     tag = nome_del_tag(a.pbi, ramo, run)
-    _, sul_remoto = esegui(["git", "ls-remote", "--tags", coda.REMOTO, f"refs/tags/{tag}"],
-                           a.repo)
+    try:
+        sul_remoto = chiedi_a_origin(
+            ["git", "ls-remote", "--tags", coda.REMOTO, f"refs/tags/{tag}"], a.repo)
+    except OriginMuto as muto:
+        return rifiuta(f"{coda.REMOTO} non ha risposto — {muto}")
     if sul_remoto.strip():
         return rifiuta(f"su {coda.REMOTO} c'è già il tag {tag}: il giro è già stato chiuso, "
                        "o un altro giro ne ha preso il nome. Spostarlo è un `push -f`, e "
