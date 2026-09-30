@@ -25,6 +25,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -3190,6 +3191,50 @@ class TestGliEseguibiliDichiaratiSiVerificanoPrimaDiPartire:
         uscita = capsys.readouterr().out
         assert "ambiente mancante: `node` 18, il minimo è 20 (`node --version`: v18.19.0)" in uscita, (
             uscita)
+
+
+class TestLeGuardieDellAmbienteDichiarato:
+    """PBI-384, criterio 15: ciò che su `main` funziona resta verde con la
+    verifica dell'ambiente accesa."""
+
+    @pytest.fixture
+    def progetto_col_runner(self, ambiente_vero, tmp_path, monkeypatch):
+        """Un progetto fuori da git, col runner installato in un venv del
+        pacchetto da cui l'interprete gira, e un `PATH` vuoto. Nessun hook da
+        guardare: fuori da git non c'è `.git/hooks`."""
+        progetto = tmp_path / "progetto"
+        progetto.mkdir()
+        pacchetto = tmp_path / "venv-asdlc"
+        comando = pacchetto / "bin" / "asdlc-runner"
+        comando.parent.mkdir(parents=True)
+        comando.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        comando.chmod(0o755)
+        vuoto = tmp_path / "vuoto"
+        vuoto.mkdir()
+        monkeypatch.setattr(runner, "REPO", progetto)
+        monkeypatch.setattr(runner, "PACCHETTO", pacchetto)
+        monkeypatch.setattr(runner.sys, "executable", str(pacchetto / "bin" / "python"))
+        monkeypatch.setattr(runner, "MINIMI", {})
+        monkeypatch.setenv("PATH", str(vuoto))
+        return progetto
+
+    def test_guardia_il_gate_del_rosso_trova_pytest_in_backend_venv_come_oggi(
+        self, progetto_col_runner, monkeypatch
+    ):
+        """`pytest` non è sul `PATH`, ed è in `backend/.venv`: `venv_sul_path()`
+        lo mette davanti, come fa per `--gate-rosso` e `--chiedi-impl`, i gate lo
+        trovano, e la verifica non lo dichiara mancante."""
+        pytest_del_venv = progetto_col_runner / "backend" / ".venv" / "bin" / "pytest"
+        pytest_del_venv.parent.mkdir(parents=True)
+        pytest_del_venv.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        pytest_del_venv.chmod(0o755)
+        monkeypatch.setattr(runner, "VENV", "backend/.venv")
+        monkeypatch.setattr(runner, "ESEGUIBILI", ("pytest",))
+
+        runner.venv_sul_path()
+
+        assert shutil.which("pytest") == str(pytest_del_venv)
+        assert runner.mancanze_dell_ambiente() == []
 
 
 class TestGliHookTrovanoIlRunnerPrimaDiPartire:
