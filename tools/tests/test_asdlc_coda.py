@@ -1057,7 +1057,7 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
         f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
         f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda_md}"\nid = "{id}"\nfile = "{file}"\n\n'
         f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
-        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\n\n'
+        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\npacchetto = ".venv-asdlc"\n\n'
         f'[worktree]\npercorso = "{worktree}"\n\n'
         '[soglie]\ntentativi = 3\nigiene = 3\nrevisioni = 4\n\n'
         '[gate_del_rosso]\nattivo = true\n\n'

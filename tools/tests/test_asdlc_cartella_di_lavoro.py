@@ -102,6 +102,7 @@ tempi = "ore.csv"
 [ambiente]
 venv = ".venv"
 prestiti = []
+pacchetto = ".venv-asdlc"
 
 [worktree]
 percorso = "."

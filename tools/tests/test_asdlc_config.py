@@ -59,6 +59,7 @@ tempi = "ore.csv"
 [ambiente]
 venv = ".venv"
 prestiti = ["dati"]
+pacchetto = ".venv-asdlc"
 
 [worktree]
 percorso = "../prova-run"
@@ -332,9 +333,7 @@ def test_pacchetto_e_worktree_si_risolvono_dalla_radice_comune_anche_da_un_workt
     tick e da `ada-run` il venv del runner è uno solo (decisioni 1 e 2)."""
     principale = tmp_path / "principale"
     principale.mkdir()
-    scrivi_toml(principale, TOML_DI_PROVA.replace(
-        'venv = ".venv"\n', 'venv = ".venv"\npacchetto = ".venv-asdlc"\n'
-    ))
+    scrivi_toml(principale)
     git_in(principale, "init", "-q")
     git_in(principale, "add", "-A")
     git_in(principale, "commit", "-q", "-m", "progetto")
@@ -364,7 +363,7 @@ def test_un_percorso_di_macchina_in_asdlc_toml_e_un_errore_che_nomina_la_chiave(
     con `~` funziona solo su quello di chi l'ha scritto. Il suo posto è
     `asdlc.local.toml` (PBI-384, decisione 2)."""
     if chiave == "pacchetto":
-        testo = TOML_DI_PROVA.replace('venv = ".venv"\n', f'venv = ".venv"\npacchetto = "{valore}"\n')
+        testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"', f'pacchetto = "{valore}"')
     else:
         testo = TOML_DI_PROVA.replace('percorso = "../prova-run"', f'percorso = "{valore}"')
 
