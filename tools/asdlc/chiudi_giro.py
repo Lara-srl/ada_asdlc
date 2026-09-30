@@ -97,6 +97,8 @@ def smista(argv: list[str] | None = None) -> int:
                     help="il checkout del tick, da cui si parla con origin")
     ap.add_argument("--worktree", type=Path, default=coda.WORKTREE_DEL_RUNNER,
                     help="l'albero del runner, dove sta il rapporto del giro")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="stampa i sei passi con i valori veri e non esegue niente")
     a = ap.parse_args(argv)
 
     # Prima di tutto, anche delle domande a `origin`: con un runner al lavoro
@@ -131,14 +133,22 @@ def smista(argv: list[str] | None = None) -> int:
                        "o un altro giro ne ha preso il nome. Spostarlo è un `push -f`, e "
                        "non lo faccio io.")
 
+    # I passi da 2 a 5, col loro numero: il quinto, il `ff-only` del checkout
+    # del tick, sono due comandi.
     passi = [
-        ["git", "tag", tag, testa],
-        ["git", "push", coda.REMOTO, f"refs/tags/{tag}"],
-        ["git", "push", coda.REMOTO, "--delete", ramo],
-        ["git", "fetch", coda.REMOTO],
-        ["git", "merge", "--ff-only", coda.BASE],
+        (2, ["git", "tag", tag, testa]),
+        (3, ["git", "push", coda.REMOTO, f"refs/tags/{tag}"]),
+        (4, ["git", "push", coda.REMOTO, "--delete", ramo]),
+        (5, ["git", "fetch", coda.REMOTO]),
+        (5, ["git", "merge", "--ff-only", coda.BASE]),
     ]
     pausa = coda.file_di_pausa()
+    if a.dry_run:
+        print(f"1. pausa: {pausa}")
+        for n, comando in passi:
+            print(f"{n}. {' '.join(comando)}   (in {a.repo})")
+        print(f"6. pausa tolta: {pausa}")
+        return 0
     # Una pausa che c'era già è di qualcun altro, per un'altra ragione: non si
     # riscrive e non si toglie, perché riaccendere il tick non è di questo comando.
     di_prima = coda.pausa()
@@ -148,7 +158,8 @@ def smista(argv: list[str] | None = None) -> int:
     # La pausa si toglie comunque, anche se un passo fallisce o alza: lasciata
     # indietro terrebbe il tick spento senza che nessuno lo sappia.
     try:
-        for n, comando in enumerate(passi):
+        for i, (n, comando) in enumerate(passi):
+            print(f"{n}. {' '.join(comando)}")
             codice, uscita = esegui(comando, a.repo)
             if codice != 0:
                 # Ci si ferma al primo passo fallito: senza il tag su `origin`,
@@ -156,7 +167,7 @@ def smista(argv: list[str] | None = None) -> int:
                 print(f"Passo fallito: `{' '.join(comando)}` (uscita {codice}): "
                       f"{uscita.strip()[:200]}")
                 print(f"Restano da fare a mano, in {a.repo}:")
-                for resto in passi[n:]:
+                for _, resto in passi[i:]:
                     print(f"  {' '.join(resto)}")
                 return 1
     finally:
