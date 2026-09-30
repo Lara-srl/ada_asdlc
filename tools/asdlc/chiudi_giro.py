@@ -139,8 +139,12 @@ def smista(argv: list[str] | None = None) -> int:
         ["git", "merge", "--ff-only", coda.BASE],
     ]
     pausa = coda.file_di_pausa()
-    pausa.write_text(f"{datetime.now():%Y-%m-%d %H:%M} asdlc-chiudi-giro {a.pbi}\n",
-                     encoding="utf-8")
+    # Una pausa che c'era già è di qualcun altro, per un'altra ragione: non si
+    # riscrive e non si toglie, perché riaccendere il tick non è di questo comando.
+    di_prima = coda.pausa()
+    if di_prima is None:
+        pausa.write_text(f"{datetime.now():%Y-%m-%d %H:%M} asdlc-chiudi-giro {a.pbi}\n",
+                         encoding="utf-8")
     # La pausa si toglie comunque, anche se un passo fallisce o alza: lasciata
     # indietro terrebbe il tick spento senza che nessuno lo sappia.
     try:
@@ -156,7 +160,10 @@ def smista(argv: list[str] | None = None) -> int:
                     print(f"  {' '.join(resto)}")
                 return 1
     finally:
-        pausa.unlink(missing_ok=True)
+        if di_prima is None:
+            pausa.unlink(missing_ok=True)
+        else:
+            print(f"Il tick resta in pausa, com'era prima: {di_prima} ({pausa}).")
     return 0
 
 
