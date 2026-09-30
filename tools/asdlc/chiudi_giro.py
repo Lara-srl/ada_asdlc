@@ -111,7 +111,18 @@ def smista(argv: list[str] | None = None) -> int:
         return rifiuta(f"il rapporto {run} di {a.pbi} non ha `testa`, e il tag non saprebbe "
                        "su quale commit andare. È un giro di prima di PBI-385 o un giro che "
                        "non ha pubblicato: si chiude a mano, con il file di pausa.")
-    ramo, _ = rami_del_pbi(a.repo, a.pbi)[0]
+    # Un solo ramo, e sulla testa: con due il tag andrebbe su un giro e si
+    # cancellerebbe l'altro, e un ramo andato avanti dopo il rapporto non è più
+    # il giro che il rapporto descrive (il tag di PBI-363, il 25/09).
+    rami = rami_del_pbi(a.repo, a.pbi)
+    if len(rami) != 1:
+        trovati = ", ".join(f"{r} ({sha})" for r, sha in rami) or "nessun ramo"
+        return rifiuta(f"su {coda.REMOTO} ci dev'essere un solo ramo di {a.pbi}, e ho "
+                       f"trovato: {trovati}.")
+    ramo, sha = rami[0]
+    if sha != testa:
+        return rifiuta(f"su {coda.REMOTO} {ramo} è {sha}, ma il rapporto {run} dice che la "
+                       f"testa del giro è {testa}: il ramo è cambiato dopo il giro.")
     tag = nome_del_tag(a.pbi, ramo, run)
 
     pausa = coda.file_di_pausa()
