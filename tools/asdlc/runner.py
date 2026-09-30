@@ -2715,21 +2715,31 @@ class Punta:
         return self._albero
 
 
-def morso_alla_punta(punta: Punta, base: str, test: TestNuovo
-                     ) -> tuple[dict[str, str] | None, list[dict[str, str]], list[str]]:
-    """La quarta lettura della guardia sull'albero della punta, con il perimetro di
-    `base...punta`: `(ucciso, prove, perimetro)` come `quarta_lettura()`.
+NON_SI_TROVA_ALLA_PUNTA = "alla punta il test non si trova"
+NON_VERDE_ALLA_PUNTA = "alla punta il test non è verde"
 
-    Il test si cerca con lo stesso file e lo stesso nome (decisione 4)."""
+
+def morso_alla_punta(punta: Punta, base: str, test: TestNuovo
+                     ) -> tuple[dict[str, str] | None, list[dict[str, str]], list[str], str]:
+    """La quarta lettura della guardia sull'albero della punta, con il perimetro di
+    `base...punta`: `(ucciso, prove, perimetro)` come `quarta_lettura()`, e il
+    perché se alla punta non si è potuta fare.
+
+    Il test si cerca con lo stesso file e lo stesso nome, e non altrove (decisione
+    4). Deve essere verde: un test rosso lo fa fallire ogni mutante, e non è un morso.
+    """
     albero = punta.albero()
     comandi, _ = comandi_dei_test(albero, [test])
     if not comandi:
-        return None, [], []
+        return None, [], [], NON_SI_TROVA_ALLA_PUNTA
     [comando] = comandi
     [chiave] = comando.etichette
+    esiti, _ = esiti_del_comando(comando)
+    if esiti[chiave] != "verde":
+        return None, [], [], NON_VERDE_ALLA_PUNTA
     perimetro: list[str] = []
     ucciso, prove = quarta_lettura(albero, base, punta.sha, comando, chiave, None, perimetro)
-    return ucciso, prove, perimetro
+    return ucciso, prove, perimetro, ""
 
 
 def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
@@ -2773,7 +2783,7 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                                       "perimetro": perimetro, "dove": "commit"})
                         continue
                     if punta is not None:
-                        ucciso, alla_punta, suo = morso_alla_punta(
+                        ucciso, alla_punta, suo, assente = morso_alla_punta(
                             punta, base, comando.origine[chiave])
                         if ucciso is not None:
                             morsi.append({"commit": sha[:7], "titolo": titolo,
@@ -2783,7 +2793,7 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                                           "punta": punta.sha[:7]})
                             continue
                         lettura = lettura_dei_due_alberi(prove, perimetro, punta.sha,
-                                                         alla_punta, suo)
+                                                         alla_punta, suo, assente)
                     else:
                         lettura = lettura_del_verde(prove, perimetro)
                 per_lettura[lettura].append(etichetta)
@@ -2844,12 +2854,14 @@ def misura_dei_mutanti(prove: list[dict[str, str]], perimetro: list[str] | None)
 
 
 def lettura_dei_due_alberi(prove: list[dict[str, str]], perimetro: list[str], punta: str,
-                           alla_punta: list[dict[str, str]], suo: list[str]) -> str:
+                           alla_punta: list[dict[str, str]], suo: list[str],
+                           assente: str = "") -> str:
     """La lettura della guardia che non morde né al suo commit né alla punta: una
-    sola, che nomina tutti e due gli alberi (PBI-393, decisione 5)."""
+    sola, che nomina tutti e due gli alberi (PBI-393, decisione 5). Se alla punta
+    il test non si è potuto provare, `assente` dice perché (decisione 4)."""
     return (f"nato verde e non morde, né al suo commit né alla punta `{punta[:7]}`: "
             f"al suo commit: {misura_dei_mutanti(prove, perimetro)}; "
-            f"alla punta: {misura_dei_mutanti(alla_punta, suo)}")
+            + (assente or f"alla punta: {misura_dei_mutanti(alla_punta, suo)}"))
 
 
 def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
