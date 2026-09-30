@@ -1,0 +1,29 @@
+# Il runner ASDLC come pacchetto installabile (PBI-384, `ADR-0026` decisione 3).
+#
+#   .venv-asdlc/bin/pip install ./tools
+#
+# Non editabile: il runner che lavora è quello installato, mai la copia di lavoro
+# che il Builder sta cambiando. Dopo ogni merge che tocca `tools/asdlc/` si
+# reinstalla (`backlog/AUTOMAZIONE.md`). Nessuna dipendenza: solo la libreria
+# standard, e `tomllib` chiede Python 3.11.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asdlc"
+version = "1.0.0.dev0"
+description = "Il runner ASDLC: Builder, gate deterministici, Critic e PR, un PBI per volta"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+asdlc-runner = "asdlc.runner:main"
+asdlc-coda = "asdlc.coda:main"
+asdlc-esito = "asdlc.esito:main"
+
+# Il solo pacchetto `asdlc`: in `tools/` stanno anche gli script di aDa, che non
+# sono del runner e non si installano.
+[tool.setuptools]
+packages = ["asdlc"]

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +44,9 @@ SORGENTE = Path(__file__).resolve().parent.parent
 if str(SORGENTE) not in sys.path:
     sys.path.insert(0, str(SORGENTE))
 from asdlc import config as asdlc_config  # noqa: E402
+# La ricerca degli eseguibili e delle versioni è la stessa del runner: il tick la
+# fa prima di lanciare, sullo stesso `asdlc.toml` (PBI-384).
+from asdlc import runner as asdlc_runner  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
 # file che legge il runner, quindi il tick e il runner non possono più dire due
@@ -61,6 +65,9 @@ CODA: Path                     # `[backlog].coda`, relativo al checkout
 BASE: str                      # `[git].base`
 REMOTO: str                    # `origin`, da `BASE`
 PREFISSO_RAMO: str             # `[git].prefisso_ramo`
+# Il venv in cui è installato il runner, assoluto: il tick lancia
+# `<pacchetto>/bin/asdlc-runner`, mai la copia di lavoro dell'albero (PBI-384).
+PACCHETTO: Path | None         # `[ambiente].pacchetto`
 
 
 @dataclass(frozen=True)
@@ -199,7 +206,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     test la richiamano con un `asdlc.toml` di prova. Restano nomi di modulo per
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
-    global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI
+    global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI, PACCHETTO
     CFG = cfg
     WORKTREE_DEL_RUNNER = cfg.worktree.percorso
     LOG = Path(cfg.registro.cartella) / "coda.log"
@@ -208,6 +215,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     CODA = Path(cfg.backlog.coda)
     BASE, REMOTO = cfg.git.base, cfg.git.remoto
     PREFISSO_RAMO = cfg.git.prefisso_ramo
+    PACCHETTO = cfg.ambiente.pacchetto
     id_pbi = asdlc_config.regex_del_modello(cfg.backlog.id).pattern
     ramo = re.escape(PREFISSO_RAMO) + r"(\d+)"
     RE_PBI = re.compile(rf"^-\s+({id_pbi})\s*$")
@@ -471,6 +479,41 @@ def preflight() -> list[list[str]]:
 ATTESA_DEL_DISTACCO = 15.0
 
 
+def runner_installato() -> Path:
+    """`<pacchetto>/bin/asdlc-runner`, per percorso assoluto: il cron ha il `PATH`
+    minimo, e il runner che lavora è quello installato, non il sorgente
+    dell'albero che il giro sta per cambiare (`ADR-0026`, decisione 3)."""
+    if PACCHETTO is None:
+        raise Guasto("asdlc.toml non dichiara `[ambiente].pacchetto`: non so quale "
+                     "runner lanciare")
+    return PACCHETTO / "bin" / "asdlc-runner"
+
+
+def mancanze_dell_ambiente(worktree: Path) -> list[str]:
+    """Ciò che manca perché il runner possa partire in `worktree`, una riga per
+    mancanza; vuota se non manca niente (PBI-384, decisione 7).
+
+    Il runner installato, `<pacchetto>/bin/asdlc-runner`, e l'ambiente che il
+    runner stesso verificherebbe all'avvio: gli `[ambiente].eseguibili` nel venv
+    del worktree o sul `PATH`, alla versione di `[ambiente].minimi`. Il runner li
+    guarda anche lui, ma dopo il distacco, e lì la ragione finisce in un log che
+    il tick non legge.
+    """
+    mancanze: list[str] = []
+    if PACCHETTO is None:
+        mancanze.append("ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
+                        "il venv in cui è installato il runner")
+    else:
+        comando = runner_installato()
+        if not (comando.is_file() and os.access(comando, os.X_OK)):
+            mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile — "
+                            "`pip install ./tools` nel venv del pacchetto")
+    ambiente = CFG.ambiente
+    mancanze += asdlc_runner.eseguibili_mancanti(ambiente.eseguibili, ambiente.venv, worktree)
+    mancanze += asdlc_runner.versioni_sotto_il_minimo(ambiente.minimi, ambiente.venv, worktree)
+    return mancanze
+
+
 def lancia(pbi: str, worktree: Path) -> None:
     """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
 
@@ -488,8 +531,8 @@ def lancia(pbi: str, worktree: Path) -> None:
     di ieri e il ramo nascerebbe su una base vecchia.
 
     Il codice d'uscita del runner copre ciò che succede **prima** del distacco, e
-    solo quello: `--e2e`, un argomento che argparse rifiuta, `python3` che su
-    questa macchina non c'è. Dopo non copre più niente, perché `stacca()` esce
+    solo quello: `--e2e`, un argomento che argparse rifiuta, un `asdlc-runner`
+    che nel venv del pacchetto non c'è. Dopo non copre più niente, perché `stacca()` esce
     dal padre con `os._exit(0)` prima del lucchetto, di `agenti_estranei()` e del
     controllo d'igiene — e l'ordine è deliberato, il `flock` vive nell'open file
     description e un padre che lo prendesse e poi forkasse se lo porterebbe via.
@@ -508,7 +551,7 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    codice, uscita = esegui(["python3", "tools/asdlc/runner.py", pbi], worktree)
+    codice, uscita = esegui([str(runner_installato()), pbi], worktree)
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
@@ -606,6 +649,15 @@ def smista(argv: list[str] | None = None) -> int:
     # **cambia** lo stato — il pre-flight, che sposta il worktree su un altro
     # ramo, e il runner.
     if isinstance(decisione, Lancia) and not a.dry_run:
+        # L'ambiente prima del pre-flight: senza il runner o senza ciò che i gate
+        # lanciano, il giro si fermerebbe dopo aver spostato il worktree. Tutte le
+        # mancanze in una riga, perché il log ne ha una per tick.
+        if mancanze := mancanze_dell_ambiente(a.worktree):
+            prefisso = "ambiente mancante: "
+            riga = prefisso + "; ".join(m.removeprefix(prefisso) for m in mancanze)
+            print(riga)
+            scrivi_nel_log(a.repo, riga)
+            return 1
         try:
             lancia(decisione.pbi, a.worktree)
         except Guasto as guasto:

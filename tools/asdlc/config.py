@@ -14,8 +14,9 @@ perso l'uso di `git commit`, perché l'hook esegue il runner a ogni commit.
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 NOME_FILE = "asdlc.toml"
@@ -105,6 +106,15 @@ class Registro:
 class Ambiente:
     venv: str
     prestiti: tuple[str, ...]
+    # Il venv in cui è installato il runner, assoluto dopo `carica()`: relativo
+    # alla radice comune, non a quella del progetto (PBI-384). `None` se il
+    # progetto non lo dichiara.
+    pacchetto: Path | None = None
+    # Ciò che i gate e il runner lanciano per nome: il runner e il tick lo cercano
+    # prima di partire. Vuoto, non si verifica niente.
+    eseguibili: tuple[str, ...] = ()
+    # La versione principale minima di un eseguibile, `{ node = 20 }`.
+    minimi: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -159,12 +169,66 @@ def radice(cwd: Path) -> Path:
 
 def carica(repo: Path) -> Config:
     """La configurazione letta da `repo / asdlc.toml`, con sopra le sovrascritture
-    di `asdlc.local.toml` se c'è."""
+    di `asdlc.local.toml` se c'è, e con `[ambiente].pacchetto` e
+    `[worktree].percorso` risolti dalla radice comune (`radice_comune()`)."""
     dati = leggi_toml(repo / NOME_FILE)
+    rifiuta_i_percorsi_di_macchina(dati)
     locale = repo / NOME_FILE_LOCALE
     if locale.exists():
         dati = sovrascrivi(dati, leggi_toml(locale), NOME_FILE_LOCALE)
-    return interpreta(dati, NOME_FILE)
+    cfg = interpreta(dati, NOME_FILE)
+    comune = radice_comune(repo)
+    pacchetto = cfg.ambiente.pacchetto
+    return replace(
+        cfg,
+        ambiente=replace(cfg.ambiente,
+                         pacchetto=None if pacchetto is None else risolvi(comune, pacchetto)),
+        worktree=Worktree(percorso=risolvi(comune, cfg.worktree.percorso)),
+    )
+
+
+# Le chiavi di percorso che si risolvono dalla radice comune: in `asdlc.toml`
+# solo relative, perché il file è versionato e vale su ogni PC (PBI-384).
+PERCORSI_DELLA_RADICE_COMUNE = (("worktree", "percorso"), ("ambiente", "pacchetto"))
+
+
+def rifiuta_i_percorsi_di_macchina(dati: dict) -> None:
+    """Un percorso assoluto o con `~` in `asdlc.toml` si ferma, nominando chiave
+    e valore. Si guarda il file versionato **prima** del locale: in
+    `asdlc.local.toml` lo stesso percorso vale, ed è il suo posto."""
+    for sezione, chiave in PERCORSI_DELLA_RADICE_COMUNE:
+        tabella = dati.get(sezione)
+        valore = tabella.get(chiave) if isinstance(tabella, dict) else None
+        if isinstance(valore, str) and (valore.startswith("~") or Path(valore).is_absolute()):
+            raise ErroreDiConfigurazione(
+                f"{NOME_FILE}: `[{sezione}].{chiave}` è un percorso di macchina, "
+                f"{valore!r} — qui i percorsi sono relativi alla radice comune del "
+                f"repository, e uno assoluto va in {NOME_FILE_LOCALE}, che è gitignored")
+
+
+def radice_comune(repo: Path) -> Path:
+    """Il checkout principale del repository di `repo`: la cartella madre di
+    `git rev-parse --git-common-dir`, la stessa da ogni worktree (PBI-384).
+
+    Fuori da un repository git, o senza `git`, è `repo` stesso: un progetto che
+    non ha worktree ha una radice sola.
+    """
+    try:
+        detto = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--path-format=absolute",
+             "--git-common-dir"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return repo.resolve()
+    if detto.returncode != 0 or not detto.stdout.strip():
+        return repo.resolve()
+    return Path(detto.stdout.strip()).parent
+
+
+def risolvi(comune: Path, percorso: Path) -> Path:
+    """`percorso` in assoluto: com'è se lo è già, altrimenti dalla radice comune,
+    con i `..` sciolti."""
+    return percorso if percorso.is_absolute() else (comune / percorso).resolve()
 
 
 def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
@@ -212,7 +276,10 @@ def interpreta(dati: dict, file: str) -> Config:
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
                         id=backlog.testo("id"), file=backlog.testo("file")),
         registro=Registro(cartella=registro.testo("cartella"), tempi=registro.testo("tempi")),
-        ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti")),
+        ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti"),
+                          pacchetto=_percorso(ambiente.testo("pacchetto", default=None)),
+                          eseguibili=ambiente.testi("eseguibili", default=()),
+                          minimi=ambiente.interi_per_nome("minimi", default={})),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
@@ -221,6 +288,10 @@ def interpreta(dati: dict, file: str) -> Config:
         gate_del_rosso=GateDelRosso(attivo=gate_del_rosso.booleano("attivo")),
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
     )
+
+
+def _percorso(testo: str | None) -> Path | None:
+    return None if testo is None else Path(testo).expanduser()
 
 
 def _gate(sezione: _Sezione) -> Gate:
@@ -276,6 +347,13 @@ class _Sezione:
             raise ErroreDiConfigurazione(
                 f"{self.file}: `{self._chiave(chiave)}` deve essere un elenco di stringhe")
         return tuple(elenco)
+
+    def interi_per_nome(self, chiave: str, default=_MANCA) -> dict[str, int]:
+        tabella = self._valore(chiave, dict, "una tabella di numeri interi", default)
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in tabella.values()):
+            raise ErroreDiConfigurazione(
+                f"{self.file}: `{self._chiave(chiave)}` deve essere una tabella di numeri interi")
+        return dict(tabella)
 
     def intero(self, chiave: str, default=_MANCA) -> int:
         return self._valore(chiave, int, "un numero intero", default)

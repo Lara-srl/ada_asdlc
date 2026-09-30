@@ -43,6 +43,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -84,6 +85,11 @@ LOG_DIR: Path            # `[registro].cartella` — `runs/`
 CSV_TEMPI: Path          # `[registro].tempi` — `runs/tempi.csv`
 BACKLOG: str             # `[backlog].cartella`
 VENV: str                # `[ambiente].venv`
+# `[ambiente].pacchetto`, assoluto: il venv in cui è installato il runner. Ogni
+# comando che il runner lancia o fa lanciare è `<pacchetto>/bin/<comando>`.
+PACCHETTO: Path | None
+ESEGUIBILI: tuple[str, ...]  # `[ambiente].eseguibili`
+MINIMI: dict[str, int]       # `[ambiente].minimi`
 PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
 # **nome** del file e non il suo percorso: la cartella è `LOG_DIR`, e un percorso
@@ -94,9 +100,10 @@ NOME_LUCCHETTO = ".runner.lock"
 
 # Chi, girando in questo albero, ci **scrive**. Un `tail -f` sul log o un `git log`
 # aperto non sono un pericolo, e un controllo che grida sempre si impara a spegnere.
-# Il runner in due forme: `asdlc/runner.py` dal pacchetto (PBI-383), e
-# `asdlc_runner` com'era lanciato prima del trasloco.
-AGENTI = ("claude", "asdlc_runner", "asdlc/runner.py")
+# Il runner in tre forme: `asdlc-runner`, il comando installato (PBI-384),
+# `asdlc/runner.py` dal sorgente del pacchetto (PBI-383), e `asdlc_runner` com'era
+# lanciato prima del trasloco.
+AGENTI = ("claude", "asdlc-runner", "asdlc_runner", "asdlc/runner.py")
 
 # I flag di autonomia e di routing stanno qui, in un posto solo, così si vedono e si
 # cambiano. ⚠️ Verifica i nomi con `claude --help`: cambiano fra versioni della CLI.
@@ -122,9 +129,10 @@ CRITIC = ["claude", "-p", "--allowedTools",
           "Read,Grep,Glob,Bash(git diff:*),mcp__asdlc__fatto,mcp__asdlc__fermati",
           "--model", "opus"]
 
-# Il server dell'esito (`PBI-366`, `ADR-0027`): sta accanto al runner, e si
-# estrae con lui. I ruoli sono i suoi: un altro valore lo ferma all'avvio.
-SERVER_DELL_ESITO = Path(__file__).resolve().parent / "esito.py"
+# Il server dell'esito (`PBI-366`, `ADR-0027`) è il comando installato accanto
+# al runner, `<pacchetto>/bin/asdlc-esito` (PBI-384). I ruoli sono i suoi: un
+# altro valore lo ferma all'avvio.
+SERVER_DELL_ESITO = "asdlc-esito"
 RUOLI = ("builder", "critic")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
@@ -228,9 +236,11 @@ def configura(cfg: asdlc_config.Config) -> None:
     dentro un oggetto costruito in `main()` li romperebbe tutti (PBI-358,
     decisione 1). Il guadagno — un posto solo — è lo stesso.
     """
-    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI
+    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI, PACCHETTO, ESEGUIBILI
+    global MINIMI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
-    global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
+    global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO, GUARDIA_DEL_COMMIT
+    global PROMPT_BUILDER
     global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
     GATE = list(cfg.gate)
@@ -266,6 +276,22 @@ def configura(cfg: asdlc_config.Config) -> None:
     # non c'è più, il gate lo leggerebbe come rosso — che è il verso giusto in cui
     # sbagliare.
     PRESTITI = cfg.ambiente.prestiti
+    # Il venv del runner installato, già assoluto: `carica()` lo risolve dalla
+    # radice comune, quindi è lo stesso da ogni worktree.
+    PACCHETTO = cfg.ambiente.pacchetto
+    # Ciò che deve esserci sul `PATH` dei gate prima di partire (`mancanze_dell_ambiente`).
+    ESEGUIBILI = cfg.ambiente.eseguibili
+    # E la versione principale sotto cui un eseguibile non basta.
+    MINIMI = cfg.ambiente.minimi
+    # Il `pre-commit` col percorso del runner installato: senza `pacchetto` il
+    # percorso è vuoto, e l'hook lo dice e lascia passare.
+    GUARDIA_DEL_COMMIT = MODELLO_DELLA_GUARDIA_DEL_COMMIT.format(
+        runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "")
+    # Il Builder chiede `--chiedi-impl` al runner installato, per percorso
+    # assoluto, non al sorgente dell'albero che sta cambiando.
+    PROMPT_BUILDER = MODELLO_BUILDER.format(
+        pbi_path="{pbi_path}",
+        runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "asdlc-runner")
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -292,7 +318,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     MINUTI_CRITIC = cfg.soglie.minuti_critic
 
 
-PROMPT_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
+MODELLO_BUILDER = """Sei l'ingegnere di questo repository. Lavori in ASDLC: la spec è lo stato, il PBI è il delta.
 
 Leggi, in quest'ordine:
 1. AGENTS.md — confini di giudizio e toolchain
@@ -309,7 +335,7 @@ Esegui il PBI con queste regole non negoziabili:
   2. **committalo**, da solo: `test(scope): … (RED)`. Un commit di soli test, senza una
      riga di produzione dentro — il rosso non può essere esistito in mezzo a un commit
      misto, e il gate lo ferma dal solo diff;
-  3. `python3 tools/asdlc/runner.py --chiedi-impl` — rigira quei test e apre la fase
+  3. `{runner} --chiedi-impl` — rigira quei test e apre la fase
      `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e non è
      questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
   4. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
@@ -585,6 +611,7 @@ lasciala aperta. Poi chiama `fatto` con il riepilogo, oppure `fermati` con la do
 l'esito il runner lo legge solo da quella chiamata, non dal testo della risposta.
 """
 
+PROMPT_BUILDER: str  # `MODELLO_BUILDER` col runner installato dentro, da `configura()`
 PROMPT_CRITIC: str   # `MODELLO_CRITIC` col ramo di base dentro, da `configura()`
 PROMPT_RIMEDIO: str  # idem, da `MODELLO_RIMEDIO`
 
@@ -747,6 +774,113 @@ def venv_sul_path() -> str | None:
         return None
     os.environ["PATH"] = f"{bin_venv}{os.pathsep}{os.environ.get('PATH', '')}"
     return str(bin_venv)
+
+
+def mancanze_dell_ambiente() -> list[str]:
+    """Ciò che manca perché un giro possa partire, una riga per mancanza, tutte
+    insieme e non la prima; vuota se non manca niente (PBI-384).
+
+    Il runner deve girare dal venv che `asdlc.toml` dichiara, `[ambiente].pacchetto`:
+    il runner che lavora è quello installato, non il sorgente dell'albero
+    (`ADR-0026`, decisione 3). Non si ripiega sul percorso dell'albero. Si guarda
+    `sys.executable` così com'è, senza risolverlo: in un venv è un collegamento
+    all'interprete di sistema, e risolto uscirebbe dal venv.
+
+    Poi gli hook: devono trovare il runner installato (`gli_hook_trovano_il_runner`).
+    Poi l'ambiente dei gate: il venv di `[ambiente].venv` deve esistere, e gli
+    `[ambiente].eseguibili` si devono trovare lì o sul `PATH`, con la versione
+    principale che `[ambiente].minimi` chiede.
+    """
+    mancanze: list[str] = []
+    if PACCHETTO is None:
+        mancanze.append("ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
+                        "il venv in cui è installato il runner")
+    else:
+        if not Path(sys.executable).is_relative_to(PACCHETTO):
+            mancanze.append(f"ambiente mancante: il runner gira da `{sys.executable}`, "
+                            f"`asdlc.toml` dichiara `{PACCHETTO}`")
+        mancanze += gli_hook_trovano_il_runner()
+    if not (REPO / VENV).is_dir():
+        mancanze.append(f"ambiente mancante: il venv `{VENV}` non c'è")
+    mancanze += eseguibili_mancanti(ESEGUIBILI, VENV, REPO)
+    mancanze += versioni_sotto_il_minimo(MINIMI, VENV, REPO)
+    return mancanze
+
+
+def gli_hook_trovano_il_runner() -> list[str]:
+    """Le mancanze per cui le due guardie di un giro non lancerebbero il runner
+    installato, `<pacchetto>/bin/asdlc-runner` (PBI-384, decisione 6).
+
+    Gli hook che lasciano passare vanno bene per le persone, non per i giri: un
+    Builder senza guardia di fase, o un commit senza guardia, è un giro che non
+    parte. Il comando deve esistere ed essere eseguibile: la guardia di fase della
+    sessione lo lancia, e `impostazioni_della_sessione()` la genera da questo
+    stesso percorso, quindi il controllo sul comando vale anche per lei.
+
+    Il `pre-commit` si guarda e non si scrive: lo installa `apri_la_fase()`, dopo
+    il lucchetto, col testo di `GUARDIA_DEL_COMMIT`, che lancia quel percorso.
+    Uno assente o del runner lo lancerà — il nostro con un testo diverso si
+    riscrive (PBI-388). Uno altrui PBI-388 non lo tocca, ed è una mancanza: se
+    lancia un `asdlc-runner` o `--guardia-commit`, è la guardia di un altro
+    runner.
+    """
+    mancanze: list[str] = []
+    comando = comando_del_pacchetto("asdlc-runner")
+    if not (comando.is_file() and os.access(comando, os.X_OK)):
+        mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile, e gli "
+                        "hook del giro non trovano il runner — `pip install ./tools` nel venv "
+                        "del pacchetto")
+    cartella = cartella_degli_hook()
+    hook = cartella / "pre-commit" if cartella is not None else None
+    if hook is None or not hook.is_file():
+        return mancanze
+    testo = hook.read_text(encoding="utf-8", errors="replace")
+    if e_un_hook_del_runner(testo):
+        return mancanze
+    if "asdlc-runner" in testo or "--guardia-commit" in testo:
+        mancanze.append(f"ambiente mancante: il `pre-commit` in `{cartella}` non lancia "
+                        f"`{comando}`, e il giro non parte con la guardia del commit di un "
+                        "altro runner — PBI-388 non riscrive un hook altrui")
+    else:
+        mancanze.append(f"ambiente mancante: il `pre-commit` in `{cartella}` non è del runner, "
+                        "e il giro non parte senza la guardia del commit — PBI-388 non "
+                        "riscrive un hook altrui")
+    return mancanze
+
+
+def versioni_sotto_il_minimo(minimi: dict[str, int], venv: str, radice: Path) -> list[str]:
+    """Gli eseguibili la cui versione principale, il primo numero di
+    `<eseguibile> --version`, sta sotto il minimo; una riga ciascuno con ciò che
+    hanno risposto. Uno che non si trova non si nomina qui: è di
+    `eseguibili_mancanti()`."""
+    percorso = os.pathsep.join([str(radice / venv / "bin"), os.environ.get("PATH", "")])
+    mancanze: list[str] = []
+    for nome, minimo in minimi.items():
+        trovato = shutil.which(nome, path=percorso)
+        if trovato is None:
+            continue
+        try:
+            detto = subprocess.run([trovato, "--version"], capture_output=True, text=True,
+                                   timeout=30)
+            risposta = (detto.stdout + detto.stderr).strip()
+        except (OSError, subprocess.SubprocessError) as guasto:
+            risposta = str(guasto)
+        numero = re.search(r"\d+", risposta)
+        if numero is None or int(numero.group()) < minimo:
+            versione = numero.group() if numero else "illeggibile"
+            mancanze.append(f"ambiente mancante: `{nome}` {versione}, il minimo è {minimo} "
+                            f"(`{nome} --version`: {risposta})")
+    return mancanze
+
+
+def eseguibili_mancanti(eseguibili: Iterable[str], venv: str, radice: Path) -> list[str]:
+    """Gli eseguibili che non si trovano né nel `bin` del venv né sul `PATH`, una
+    riga ciascuno con dove li si è cercati. Il `PATH` è quello che vedranno i
+    gate: `venv_sul_path()` mette il venv davanti, e qui lo si mette a mano per
+    chi — il tick, `conftest.py` — non l'ha fatto (PBI-384, decisione 7)."""
+    percorso = os.pathsep.join([str(radice / venv / "bin"), os.environ.get("PATH", "")])
+    return [f"ambiente mancante: `{nome}` (cercato in `{venv}/bin` e sul `PATH`)"
+            for nome in eseguibili if shutil.which(nome, path=percorso) is None]
 
 
 def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
@@ -937,7 +1071,8 @@ def misura(e: Esito, voce: str):
 
 
 def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
-           flussi: tuple[Path, Path] | None = None) -> tuple[int, str]:
+           flussi: tuple[Path, Path] | None = None,
+           ambiente: dict[str, str] | None = None) -> tuple[int, str]:
     """Il varco verso il mondo. Un comando che non esiste torna `127`, non alza.
 
     `subprocess.run` alza `FileNotFoundError`, e l'eccezione saliva fino a
@@ -952,11 +1087,16 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
     Scaduto il tetto, il comando si uccide e si alza `TettoSuperato` con ciò che
     i file hanno raccolto fin lì (PBI-369, decisione 4): raccolti alla fine, come
     fa `subprocess.run`, dopo un timeout non ci sarebbe niente.
+
+    Con `ambiente`, quelle variabili si aggiungono all'ambiente del runner per
+    questo comando soltanto: `ASDLC_GIRO=1` per la sessione del Builder.
     """
+    env = {**os.environ, **ambiente} if ambiente else None
     try:
         if flussi is not None:
-            return esegui_su_file(cmd, cwd, timeout, flussi)
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+            return esegui_su_file(cmd, cwd, timeout, flussi, env)
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                           env=env)
     except FileNotFoundError as exc:
         return 127, (f"comando non eseguibile: {cmd[0]} — {exc}\n"
                      f"le dipendenze dei gate stanno in backend/requirements-dev.txt")
@@ -977,7 +1117,8 @@ ATTESA_DOPO_SIGTERM = 5
 
 
 def esegui_su_file(cmd: list[str], cwd: Path, timeout: float,
-                   flussi: tuple[Path, Path]) -> tuple[int, str]:
+                   flussi: tuple[Path, Path],
+                   env: dict[str, str] | None = None) -> tuple[int, str]:
     """`esegui` con stdout e stderr scritti nei due file mentre il comando gira.
 
     Il comando parte in una sessione sua, e allo scadere si uccide il **gruppo**:
@@ -989,7 +1130,7 @@ def esegui_su_file(cmd: list[str], cwd: Path, timeout: float,
     with flussi[0].open("w", encoding="utf-8") as fuori, \
             flussi[1].open("w", encoding="utf-8") as dentro:
         p = subprocess.Popen(cmd, cwd=cwd, stdout=fuori, stderr=dentro, text=True,
-                             start_new_session=True)
+                             start_new_session=True, env=env)
         try:
             p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -1040,6 +1181,18 @@ def file_dell_invocazione(ruolo: str) -> tuple[Path, Path]:
         return prompt, LOG_DIR / f"{prefisso}_{ruolo}_esito.json"
 
 
+def comando_del_pacchetto(nome: str) -> Path:
+    """`<pacchetto>/bin/<nome>`, il percorso assoluto di un comando installato.
+
+    Mai il nome nudo: il cron ha il `PATH` minimo. Mai il file dell'albero: il
+    runner che lavora è quello installato (`ADR-0026`, decisione 3). Senza
+    `[ambiente].pacchetto` alza `ValueError`, prima di ogni lancio."""
+    if PACCHETTO is None:
+        raise ValueError(f"asdlc.toml non dichiara `[ambiente].pacchetto`: non so dove "
+                         f"sta `{nome}`")
+    return PACCHETTO / "bin" / nome
+
+
 def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     """Scrive la config MCP che fa partire il server dell'esito per questa
     invocazione, accanto al suo file d'esito, e ne torna il percorso.
@@ -1059,11 +1212,32 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
         raise ValueError(f"il {ruolo} non ha un file d'esito in cui il server possa scrivere")
     config = esito.with_suffix(".mcp.json")
     config.write_text(json.dumps({"mcpServers": {"asdlc": {
-        "command": sys.executable,
-        "args": [str(SERVER_DELL_ESITO)],
+        "command": str(comando_del_pacchetto(SERVER_DELL_ESITO)),
+        "args": [],
         "env": {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)},
     }}}, indent=2, ensure_ascii=False), encoding="utf-8")
     return config
+
+
+# Chi è dentro un giro: `fase-tdd.sh`, l'hook delle sessioni delle persone, con
+# questa variabile tace, perché la guardia del giro è quella che segue.
+AMBIENTE_DEL_GIRO = {"ASDLC_GIRO": "1"}
+
+
+def impostazioni_della_sessione(esito: Path) -> Path:
+    """Scrive le impostazioni della sessione del Builder accanto al suo file
+    d'esito, `<esito>.settings.json`, e ne torna il percorso: l'hook
+    `PreToolUse` della guardia di fase, su `Edit|Write`, che lancia il runner
+    installato, `<pacchetto>/bin/asdlc-runner --guardia-fase` (PBI-384,
+    decisione 3). La guardia di un giro non è mai la copia di lavoro che il
+    Builder sta cambiando (`ADR-0026`, decisione 3)."""
+    comando = f"{shlex.quote(str(comando_del_pacchetto('asdlc-runner')))} --guardia-fase"
+    impostazioni = esito.with_suffix(".settings.json")
+    impostazioni.write_text(json.dumps({"hooks": {"PreToolUse": [{
+        "matcher": "Edit|Write",
+        "hooks": [{"type": "command", "command": comando}],
+    }]}}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return impostazioni
 
 
 class Invocazione(NamedTuple):
@@ -1115,16 +1289,25 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     Scaduto, l'esito è `None` anche se l'agente ne aveva dichiarato uno: non ha
     finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
     porta allora `tetto_minuti`, che è ciò che la nota dice.
+
+    Il Builder riceve con `--settings` la guardia di fase del giro, e
+    `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
     """
     config = config_del_server(ruolo, esito)
+    della_sessione: list[str] = []
+    ambiente: dict[str, str] | None = None
+    if ruolo == "builder":
+        della_sessione = ["--settings", str(impostazioni_della_sessione(esito))]
+        ambiente = AMBIENTE_DEL_GIRO
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
     scaduto = False
     t0 = time.monotonic()
     try:
-        codice, uscita = esegui(comando + ["--mcp-config", str(config), "--strict-mcp-config",
-                                           f"@{prompt}"], REPO, timeout=minuti * 60,
-                                flussi=(fuori, dentro))
+        codice, uscita = esegui(comando + della_sessione
+                                + ["--mcp-config", str(config), "--strict-mcp-config",
+                                   f"@{prompt}"], REPO, timeout=minuti * 60,
+                                flussi=(fuori, dentro), ambiente=ambiente)
     except TettoSuperato as tetto:
         codice, uscita, scaduto = tetto.codice, tetto.uscita, True
     registro = {"ruolo": ruolo, "codice": codice,
@@ -3913,18 +4096,18 @@ def chiedi_impl() -> int:
 # Il `pre-commit` che il runner installa. Inerte fuori da un giro, come l'hook di
 # Claude Code e per la stessa ragione: sta in `.git/hooks`, che i worktree di
 # questo repository condividono, e non deve farsi sentire da chi non è in un giro.
-# Il runner si cerca in due forme, la nuova prima (PBI-388): `PBI-383` lo sposta
-# in `tools/asdlc/runner.py`, e `python3` su un file che non c'è esce con 2. Se
-# non c'è nessuna delle due il commit passa, con un avviso (ADR-0008).
-GUARDIA_DEL_COMMIT = """#!/bin/sh
+# Lancia il runner installato, `<pacchetto>/bin/asdlc-runner`, col percorso
+# assoluto scritto dentro da `configura()` (PBI-384, decisione 5): mai il sorgente
+# dell'albero, che è la copia di lavoro del Builder. Il `pre-commit` è anche
+# delle persone: se il comando non c'è il commit passa, con un avviso (ADR-0008).
+MODELLO_DELLA_GUARDIA_DEL_COMMIT = """#!/bin/sh
 # Installato dal runner ASDLC (PBI-104): il commit non nasce fuori fase.
-radice="$(git rev-parse --show-toplevel)"
-for sorgente in tools/asdlc/runner.py tools/asdlc_runner.py; do
-    [ -f "$radice/$sorgente" ] && exec python3 "$radice/$sorgente" --guardia-commit
-done
-echo "guardia del lucchetto: runner non trovato in tools/asdlc/runner.py né in tools/asdlc_runner.py" >&2
+runner="{runner}"
+[ -x "$runner" ] && exec "$runner" --guardia-commit
+echo "guardia del lucchetto: runner non trovato in $runner" >&2
 exit 0
 """
+GUARDIA_DEL_COMMIT: str  # il modello col runner del pacchetto dentro, da `configura()`
 
 
 def installa_la_guardia_del_commit() -> bool:
@@ -4009,9 +4192,10 @@ def apri_la_fase(base: str = "") -> None:
     """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
     Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`.
 
-    L'hook di Claude Code non si installa qui — sta in `.claude/settings.json`,
-    versionato, e c'è già. Questi due no: `.git/hooks` non è nel repository, e un
-    albero appena clonato non li avrebbe.
+    L'hook di Claude Code non si installa qui: la guardia di fase del Builder la
+    scrive `impostazioni_della_sessione()` a ogni sessione, e gli arriva con
+    `--settings`. Questi due sì: `.git/hooks` non è nel repository, e un albero
+    appena clonato non li avrebbe.
     """
     if cartella_degli_hook() is None:
         return  # non c'è un repository sotto: non c'è un giro da lucchettare
@@ -4094,7 +4278,13 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
 
 
 def costruisci_parser() -> argparse.ArgumentParser:
-    """I flag, in una funzione sua: così si possono provare senza eseguire un PBI."""
+    """I flag, in una funzione sua: così si possono provare senza eseguire un PBI.
+
+    Si costruisce anche senza configurazione, per `--help` fuori da un progetto:
+    il ramo di base e la cartella del registro li dice allora la chiave del TOML.
+    """
+    base = globals().get("BASE", "[git].base")
+    log_dir = globals().get("LOG_DIR", "[registro].cartella")
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -4112,11 +4302,11 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--in-primo-piano", action="store_true",
                     help="non staccarsi dalla sessione: output a schermo e exit code. "
                          "Di default il giro si stacca e scrive in runs/<run>.log")
-    ap.add_argument("--registra", nargs="?", const=str(LOG_DIR), metavar="CARTELLA",
+    ap.add_argument("--registra", nargs="?", const=str(log_dir), metavar="CARTELLA",
                     help="non esegue niente: piega i rapporti runs/*.json in runs/tempi.csv. "
                          "Si lancia su main dopo il merge (ADR-0020)")
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
-                    help=f"non esegue niente: cammina {BASE}..REF e dice in quali "
+                    help=f"non esegue niente: cammina {base}..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
     ap.add_argument("--guardia-commit", action="store_true",
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
@@ -4152,6 +4342,11 @@ def main() -> int:
         REPO = radice
         configura(asdlc_config.carica(REPO))
     except asdlc_config.ErroreDiConfigurazione as guasto:
+        # `--help` risponde anche fuori da un progetto: è il primo comando che si
+        # prova dopo `pip install ./tools` (PBI-384).
+        if {"-h", "--help"} & set(sys.argv[1:]):
+            costruisci_parser().print_help()
+            return 0
         sys.exit(f"asdlc_runner: {guasto}")
     return smista()
 
@@ -4196,6 +4391,15 @@ def smista() -> int:
 
     if aggiunto := venv_sul_path():
         print(f"venv del worktree sul PATH: {aggiunto}")
+
+    # L'ambiente si verifica prima del distacco e del lucchetto: un giro che non
+    # può girare si dice qui, con l'uscita che il tick legge, e non a metà del
+    # Builder. Un `--dry-run` stampa il prompt e basta, e non lo pretende.
+    if not a.dry_run and (mancanze := mancanze_dell_ambiente()):
+        print("Non parto:")
+        for mancanza in mancanze:
+            print(f"  {mancanza}")
+        return 2
 
     attivi: set[str] = set()
     run = datetime.now().strftime("%Y%m%d-%H%M%S")

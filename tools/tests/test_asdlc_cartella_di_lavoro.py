@@ -102,9 +102,10 @@ tempi = "ore.csv"
 [ambiente]
 venv = ".venv"
 prestiti = []
+pacchetto = ".venv-asdlc"
 
 [worktree]
-percorso = "{progetto}"
+percorso = "."
 
 [soglie]
 tentativi = 2
@@ -185,7 +186,11 @@ def test_guardia_la_guardia_di_fase_dall_hook_lanciato_altrove_decide_come_prima
                 "tool_input": {"file_path": str(progetto / file_path)}}
         return subprocess.run([str(hook)], input=json.dumps(dato), cwd=altrove,
                               capture_output=True, text=True, timeout=60,
-                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                              # Fuori da un giro: con `ASDLC_GIRO`, che la sessione
+                              # del Builder ha, lo script esce subito (PBI-384).
+                              env={**{k: v for k, v in os.environ.items()
+                                      if k != "ASDLC_GIRO"},
+                                   "PYTHONDONTWRITEBYTECODE": "1"})
 
     produzione = chiedi("backend/app/foglio.py")
     test = chiedi("backend/tests/test_foglio.py")

@@ -19,11 +19,13 @@ sarebbe un test che riscrive il repository in cui gira.
 """
 
 import csv
+import dataclasses
 import importlib.util
 import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,6 +66,26 @@ def clear_login_limiter():
 @pytest.fixture(autouse=True)
 def clear_event_bus():
     return None
+
+
+# La verifica dell'ambiente all'avvio (PBI-384) guarda il mondo: da quale venv
+# gira l'interprete, cosa c'è sul `PATH`, gli hook installati. È un varco come
+# `git` ed `esegui`, e nei test si sostituisce: su questa macchina e in CI il
+# processo di pytest non gira dal venv del runner, e ogni `smista()` su un PBI si
+# fermerebbe lì. I test della verifica la rimettono con `ambiente_vero`.
+MANCANZE_VERE = getattr(runner, "mancanze_dell_ambiente", None)
+
+
+@pytest.fixture(autouse=True)
+def ambiente_presente(monkeypatch):
+    monkeypatch.setattr(runner, "mancanze_dell_ambiente", lambda: [], raising=False)
+
+
+@pytest.fixture
+def ambiente_vero(monkeypatch):
+    """La verifica dell'ambiente vera, al posto di quella che `ambiente_presente`
+    sostituisce."""
+    monkeypatch.setattr(runner, "mancanze_dell_ambiente", MANCANZE_VERE, raising=False)
 
 
 def elenco_backlog() -> str:
@@ -1758,6 +1780,17 @@ class TestUnAgenteNelWorktreeFermaIlLancio:
         self._finto(proc, 797078, albero, b"claude\x00-p\x00")
         assert runner.agenti_estranei(albero, proc=proc) == [(797078, "claude -p")]
 
+    def test_trova_il_runner_installato_lanciato_come_asdlc_runner(self, tmp_path):
+        """PBI-384: il runner si lancia come `<pacchetto>/bin/asdlc-runner`, e il
+        suo comando è l'interprete del venv sullo script installato. Nessuna delle
+        forme di prima, `asdlc_runner` e `asdlc/runner.py`, lo nomina."""
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, 4242, albero,
+                    b"/x/.venv-asdlc/bin/python3\x00/x/.venv-asdlc/bin/asdlc-runner\x00PBI-384\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == [
+            (4242, "/x/.venv-asdlc/bin/python3 /x/.venv-asdlc/bin/asdlc-runner PBI-384")]
+
     def test_trova_anche_un_sottoalbero(self, tmp_path):
         proc, albero = tmp_path / "proc", tmp_path / "albero"
         (albero / "frontend").mkdir(parents=True)
@@ -1834,9 +1867,14 @@ class TestIlRunnerSiNominaDalPacchetto:
 
     COMANDO = "tools/asdlc/runner.py --chiedi-impl"
 
-    def test_il_prompt_del_builder(self):
+    def test_il_prompt_del_builder_nomina_chiedi_impl_col_runner_installato(self):
+        """PBI-384: il Builder chiede il permesso al runner installato,
+        `<pacchetto>/bin/asdlc-runner --chiedi-impl`, per percorso assoluto, e
+        non al sorgente dell'albero che sta cambiando (`ADR-0026`, decisione 3)."""
         prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
-        assert f"python3 {self.COMANDO}" in prompt
+        installato = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin" / "asdlc-runner"
+        assert f"`{installato} --chiedi-impl`" in prompt
+        assert "tools/asdlc/runner.py --chiedi-impl" not in prompt
 
     def test_la_guardia_di_fase_sulla_produzione(self):
         ragione = runner.guardia_di_fase("TEST_ONLY", "frontend/src/pages/FoglioPage.tsx")
@@ -3058,6 +3096,249 @@ class TestLaPrSiCercaPrimaDiCrearla:
         assert commentate == []
         assert esito.stato == "fatto"
         assert "PR forse aperta, da verificare" in esito.nota, esito.nota
+
+class TestIlRunnerGiraDalVenvDichiarato:
+    """PBI-384, decisione 1: il runner che lavora è quello installato nel venv di
+    `[ambiente].pacchetto`. Lanciato da un altro interprete — il sorgente
+    dell'albero con `python3`, un altro venv — non parte, e non ripiega sul
+    percorso dell'albero: dice da dove gira e cosa dichiara `asdlc.toml`."""
+
+    def test_un_runner_che_non_gira_dal_venv_dichiarato_esce_con_ambiente_mancante(
+        self, ambiente_vero, tmp_path, monkeypatch, capsys
+    ):
+        dichiarato = tmp_path / "venv-asdlc"
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "PACCHETTO", dichiarato)
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI parte fuori dal venv dichiarato"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc-runner", "PBI-212", "--in-primo-piano"])
+
+        assert runner.smista() == 2
+
+        uscita = capsys.readouterr().out
+        assert "ambiente mancante" in uscita
+        assert sys.executable in uscita, "nomina da dove gira"
+        assert str(dichiarato) in uscita, "e cosa dichiara asdlc.toml"
+        assert not (tmp_path / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
+
+
+class TestGliEseguibiliDichiaratiSiVerificanoPrimaDiPartire:
+    """PBI-384, decisione 7: l'ambiente sta scritto in `[ambiente].eseguibili`, e
+    si verifica all'avvio sul `PATH` che vedranno i gate, cioè dopo
+    `venv_sul_path()`. Prima un `pytest` mancante si scopriva un test alla volta:
+    19 uscite 127 nel difetto 60 di PBI-102."""
+
+    @pytest.fixture
+    def dal_venv_dichiarato(self, ambiente_vero, tmp_path, monkeypatch):
+        """L'interprete dei test **è** nel venv dichiarato: l'unica mancanza che
+        resta da vedere è quella degli eseguibili."""
+        monkeypatch.setattr(runner, "PACCHETTO", Path(sys.executable).parent.parent)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI parte con l'ambiente mancante"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc-runner", "PBI-212", "--in-primo-piano"])
+
+    def test_un_eseguibile_che_manca_ferma_il_lancio_con_tutte_le_mancanze_e_dove_le_ha_cercate(
+        self, dal_venv_dichiarato, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(runner, "ESEGUIBILI", ("git", "pytest", "npm"), raising=False)
+        monkeypatch.setattr(runner, "VENV", "venv-che-non-ce")
+        monkeypatch.setattr(runner.shutil, "which",
+                            lambda c, *a, **k: None if c in ("pytest", "npm") else f"/usr/bin/{c}")
+
+        assert runner.smista() == 2
+
+        uscita = capsys.readouterr().out
+        assert ("ambiente mancante: `pytest` (cercato in `venv-che-non-ce/bin` e sul `PATH`)"
+                in uscita), uscita
+        assert ("ambiente mancante: `npm` (cercato in `venv-che-non-ce/bin` e sul `PATH`)"
+                in uscita), "tutte le mancanze, non la prima"
+        assert "`git`" not in uscita, "ciò che c'è non si nomina"
+        assert "ambiente mancante: il venv `venv-che-non-ce` non c'è" in uscita, (
+            "il venv dichiarato deve esistere")
+        assert not (tmp_path / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
+
+    def test_un_node_sotto_il_minimo_e_ambiente_mancante_e_dice_la_versione_trovata(
+        self, dal_venv_dichiarato, tmp_path, monkeypatch, capsys
+    ):
+        """Il Node di cron era il 18 invece del 20, e nessuno lo diceva prima del
+        gate (PBI-384, decisione 7). Il `node` finto sta nel venv dei gate, che è
+        il primo posto in cui si cerca."""
+        progetto = tmp_path / "progetto"
+        node = progetto / "venv" / "bin" / "node"
+        node.parent.mkdir(parents=True)
+        node.write_text("#!/bin/sh\necho v18.19.0\n", encoding="utf-8")
+        node.chmod(0o755)
+        monkeypatch.setattr(runner, "REPO", progetto)
+        monkeypatch.setattr(runner, "VENV", "venv")
+        monkeypatch.setattr(runner, "ESEGUIBILI", ("node",))
+        monkeypatch.setattr(runner, "MINIMI", {"node": 20}, raising=False)
+        # `venv_sul_path()` scrive nel `PATH` del processo: il test lo rimette.
+        monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
+
+        assert runner.smista() == 2
+
+        uscita = capsys.readouterr().out
+        assert "ambiente mancante: `node` 18, il minimo è 20 (`node --version`: v18.19.0)" in uscita, (
+            uscita)
+
+
+class TestLeGuardieDellAmbienteDichiarato:
+    """PBI-384, criterio 15: ciò che su `main` funziona resta verde con la
+    verifica dell'ambiente accesa."""
+
+    @pytest.fixture
+    def progetto_col_runner(self, ambiente_vero, tmp_path, monkeypatch):
+        """Un progetto fuori da git, col runner installato in un venv del
+        pacchetto da cui l'interprete gira, e un `PATH` vuoto. Nessun hook da
+        guardare: fuori da git non c'è `.git/hooks`."""
+        progetto = tmp_path / "progetto"
+        progetto.mkdir()
+        pacchetto = tmp_path / "venv-asdlc"
+        comando = pacchetto / "bin" / "asdlc-runner"
+        comando.parent.mkdir(parents=True)
+        comando.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        comando.chmod(0o755)
+        vuoto = tmp_path / "vuoto"
+        vuoto.mkdir()
+        monkeypatch.setattr(runner, "REPO", progetto)
+        monkeypatch.setattr(runner, "PACCHETTO", pacchetto)
+        monkeypatch.setattr(runner.sys, "executable", str(pacchetto / "bin" / "python"))
+        monkeypatch.setattr(runner, "MINIMI", {})
+        monkeypatch.setenv("PATH", str(vuoto))
+        return progetto
+
+    def test_guardia_il_gate_del_rosso_trova_pytest_in_backend_venv_come_oggi(
+        self, progetto_col_runner, monkeypatch
+    ):
+        """`pytest` non è sul `PATH`, ed è in `backend/.venv`: `venv_sul_path()`
+        lo mette davanti, come fa per `--gate-rosso` e `--chiedi-impl`, i gate lo
+        trovano, e la verifica non lo dichiara mancante."""
+        pytest_del_venv = progetto_col_runner / "backend" / ".venv" / "bin" / "pytest"
+        pytest_del_venv.parent.mkdir(parents=True)
+        pytest_del_venv.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        pytest_del_venv.chmod(0o755)
+        monkeypatch.setattr(runner, "VENV", "backend/.venv")
+        monkeypatch.setattr(runner, "ESEGUIBILI", ("pytest",))
+
+        runner.venv_sul_path()
+
+        assert shutil.which("pytest") == str(pytest_del_venv)
+        assert runner.mancanze_dell_ambiente() == []
+
+    def test_guardia_un_asdlc_toml_senza_eseguibili_non_verifica_niente_e_non_fallisce(
+        self, progetto_col_runner, monkeypatch
+    ):
+        """Le chiavi `eseguibili` e `minimi` sono facoltative: un progetto che non
+        le scrive non ha niente da verificare, e con un `which` che non trova
+        niente la verifica non rende nessuna mancanza (decisione 7)."""
+        (progetto_col_runner / "asdlc.toml").write_text(toml_di_prova(venv=".venv"),
+                                                         encoding="utf-8")
+        (progetto_col_runner / ".venv").mkdir()
+        cfg = runner.asdlc_config.carica(progetto_col_runner)
+        monkeypatch.setattr(runner, "VENV", cfg.ambiente.venv)
+        monkeypatch.setattr(runner, "ESEGUIBILI", cfg.ambiente.eseguibili)
+        monkeypatch.setattr(runner, "MINIMI", cfg.ambiente.minimi)
+        monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: None)
+
+        assert (cfg.ambiente.eseguibili, cfg.ambiente.minimi) == ((), {})
+        assert runner.mancanze_dell_ambiente() == []
+
+
+class TestGliHookTrovanoIlRunnerPrimaDiPartire:
+    """PBI-384, decisione 6: gli hook che lasciano passare vanno bene per le
+    persone, non per i giri. Il Builder non lavora mai senza guardia di fase, e la
+    guardia del commit è il `pre-commit`: se gli hook non trovano il runner
+    installato è «ambiente mancante», prima del lucchetto e della sessione del
+    Builder. Un caso per uno, con tutto il resto dell'ambiente a posto."""
+
+    @pytest.fixture
+    def giro_nel_repo(self, ambiente_vero, repo_di_prova, tmp_path, monkeypatch):
+        """Il runner gira da un venv del pacchetto temporaneo, nel repository di
+        prova, con il venv dei gate che c'è e nessun eseguibile da cercare.
+        Torna il percorso dell'`asdlc-runner` installato, che il test crea o no."""
+        pacchetto = tmp_path / "venv-asdlc"
+        (pacchetto / "bin").mkdir(parents=True)
+        (repo_di_prova.radice / "venv").mkdir()
+        monkeypatch.setattr(runner, "PACCHETTO", pacchetto)
+        monkeypatch.setattr(runner.sys, "executable", str(pacchetto / "bin" / "python"))
+        monkeypatch.setattr(runner, "VENV", "venv")
+        monkeypatch.setattr(runner, "ESEGUIBILI", ())
+        monkeypatch.setattr(runner, "MINIMI", {})
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path / "runs")
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "runs" / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessuna sessione del Builder senza le guardie"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc-runner", "PBI-212", "--in-primo-piano"])
+        return pacchetto / "bin" / "asdlc-runner"
+
+    @staticmethod
+    def _eseguibile(percorso: Path) -> None:
+        percorso.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        percorso.chmod(0o755)
+
+    @staticmethod
+    def _pre_commit(repo, testo: str) -> Path:
+        hook = repo.radice / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(testo, encoding="utf-8")
+        hook.chmod(0o755)
+        return hook
+
+    def _fermato(self, tmp_path, capsys) -> str:
+        assert runner.smista() == 2
+        uscita = capsys.readouterr().out
+        assert "ambiente mancante" in uscita, uscita
+        assert not (tmp_path / "runs" / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
+        return uscita
+
+    def test_senza_asdlc_runner_nel_venv_del_pacchetto_il_giro_non_parte(
+        self, giro_nel_repo, tmp_path, capsys
+    ):
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"`{giro_nel_repo}` non c'è o non è eseguibile" in uscita, uscita
+
+    def test_un_pre_commit_altrui_ferma_il_giro(
+        self, giro_nel_repo, repo_di_prova, tmp_path, capsys
+    ):
+        """PBI-388 non lo tocca, e il giro non parte senza la guardia del commit."""
+        self._eseguibile(giro_nel_repo)
+        hook = self._pre_commit(repo_di_prova,
+                                "#!/bin/sh\n# il formattatore di qualcun altro\nexec npx lint-staged\n")
+
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"il `pre-commit` in `{hook.parent}` non è del runner" in uscita, uscita
+
+    def test_un_pre_commit_che_lancia_un_altro_runner_ferma_il_giro(
+        self, giro_nel_repo, repo_di_prova, tmp_path, capsys
+    ):
+        """Un `pre-commit` scritto a mano che lancia il runner di un altro venv:
+        non è del runner, quindi PBI-388 non lo riscrive, e non lancia quel
+        percorso."""
+        self._eseguibile(giro_nel_repo)
+        hook = self._pre_commit(repo_di_prova,
+                                "#!/bin/sh\nexec /opt/altro/bin/asdlc-runner --guardia-commit\n")
+
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"il `pre-commit` in `{hook.parent}` non lancia `{giro_nel_repo}`" in uscita, uscita
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
@@ -4953,7 +5234,8 @@ class TestLHookERegistratoEFerma:
                 "tool_input": {"file_path": str(tmp_path / "frontend/src/App.tsx")}}
 
         esito = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
-                               capture_output=True, text=True, cwd=tmp_path)
+                               capture_output=True, text=True, cwd=tmp_path,
+                               env=fuori_da_un_giro())
 
         assert esito.returncode == 2, esito.stderr
         assert "TEST_ONLY" in esito.stderr
@@ -5512,12 +5794,14 @@ class TestIComandiPortanoIlServerDellEsito:
         fine = next((i for i, a in enumerate(dopo) if a.startswith("-")), len(dopo))
         return dopo[:fine]
 
-    def test_la_config_lancia_il_server_da_tools_asdlc_esito(
+    def test_la_config_lancia_asdlc_esito_dal_venv_del_pacchetto_per_percorso_assoluto(
         self, monkeypatch, git_finto, tmp_path
     ):
-        """PBI-383, criterio 5: il server sta nel pacchetto, e la config lo
-        lancia da lì. Un percorso che non esiste la CLI lo scopre solo a giro
-        avviato, come «senza esito»."""
+        """PBI-384, criterio 2: il server dell'esito è il comando installato,
+        `<pacchetto>/bin/asdlc-esito`, col percorso assoluto risolto dalla radice
+        comune. Mai il file dell'albero su cui il Builder lavora (`ADR-0026`,
+        decisione 3), e mai il nome nudo, che col `PATH` minimo di cron non si
+        trova."""
         monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
         monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
         agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
@@ -5528,8 +5812,42 @@ class TestIComandiPortanoIlServerDellEsito:
         cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == "builder")
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        assert server["args"] == [str(REPO / "tools" / "asdlc" / "esito.py")]
-        assert Path(server["args"][0]).is_file()
+        pacchetto = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc"
+        assert server["command"] == str(pacchetto / "bin" / "asdlc-esito")
+        assert server["args"] == []
+
+    def test_la_sessione_del_builder_riceve_la_guardia_di_fase_installata_e_asdlc_giro(
+        self, monkeypatch, git_finto, tmp_path
+    ):
+        """PBI-384, criterio 7: la guardia di fase di un giro la genera il runner,
+        in un file di impostazioni accanto alla config MCP che passa con
+        `--settings`, e lancia il runner installato. `ASDLC_GIRO=1`
+        nell'ambiente della sessione fa tacere `fase-tdd.sh`: dentro un giro la
+        guardia è una sola, e mai la copia di lavoro che il Builder cambia."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        ambienti: list[tuple[list[str], dict]] = []
+
+        def registra_l_ambiente(cmd, cwd, timeout=7200, **k):
+            ambienti.append((cmd, k.get("ambiente") or {}))
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "esegui", registra_l_ambiente)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        cmd, ambiente = next((c, a) for c, a in ambienti if ruolo_ed_esito(c)[0] == "builder")
+        assert "--settings" in cmd
+        impostazioni = json.loads(
+            Path(cmd[cmd.index("--settings") + 1]).read_text(encoding="utf-8"))
+        pacchetto = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc"
+        assert impostazioni["hooks"]["PreToolUse"] == [{
+            "matcher": "Edit|Write",
+            "hooks": [{"type": "command",
+                       "command": f"{pacchetto / 'bin' / 'asdlc-runner'} --guardia-fase"}],
+        }]
+        assert ambiente.get("ASDLC_GIRO") == "1"
 
     @pytest.mark.parametrize("ruolo", ["builder", "critic"])
     def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
@@ -5549,7 +5867,7 @@ class TestIComandiPortanoIlServerDellEsito:
         )
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        assert any(a.endswith("asdlc/esito.py") for a in [server["command"], *server["args"]])
+        assert server["command"].endswith("/bin/asdlc-esito")
         ambiente = server["env"]
         assert ambiente["ASDLC_RUOLO"] == ruolo
         assert Path(ambiente["ASDLC_ESITO"]).parent == tmp_path, (
@@ -6895,8 +7213,9 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
         f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
         f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda}"\nid = "{id}"\nfile = "{file}"\n\n'
         f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
-        f'[ambiente]\nvenv = "{venv}"\nprestiti = {elenco(prestiti)}\n\n'
-        f'[worktree]\npercorso = "~/ada-run"\n\n'
+        f'[ambiente]\nvenv = "{venv}"\nprestiti = {elenco(prestiti)}\n'
+        'pacchetto = ".venv-asdlc"\n\n'
+        f'[worktree]\npercorso = "../ada-run"\n\n'
         f'[soglie]\ntentativi = {tentativi}\nigiene = {igiene}\nrevisioni = {revisioni}\n\n'
         f'[gate_del_rosso]\nattivo = {"true" if gate_del_rosso else "false"}\n'
     )
@@ -8767,6 +9086,13 @@ class TestUnPushCheScadeENonPubblicato:
 # Un runner finto: scrive gli argomenti con cui è stato lanciato accanto a sé, ed
 # esce con 1. Il segno dice quale delle due forme la guardia ha lanciato, l'uscita
 # che il suo verdetto arriva intatto a chi l'ha chiamata.
+def fuori_da_un_giro() -> dict[str, str]:
+    """L'ambiente di una sessione di una persona, per `fase-tdd.sh`: senza
+    `ASDLC_GIRO`, che la sessione del Builder che gira questi test ha (PBI-384),
+    e con cui lo script esce subito."""
+    return {k: v for k, v in os.environ.items() if k != "ASDLC_GIRO"}
+
+
 RUNNER_FINTO = ("import sys\nfrom pathlib import Path\n\n"
                 "Path(__file__).with_name('lanciato').write_text(' '.join(sys.argv[1:]))\n"
                 "sys.exit(1)\n")
@@ -8804,23 +9130,25 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         segno = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
 
         esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
-                               cwd=tmp_path)
+                               cwd=tmp_path, env=fuori_da_un_giro())
 
         assert segno.is_file(), esito.stderr
         assert segno.read_text() == "--guardia-fase"
         assert esito.returncode == 1
 
-    def test_il_pre_commit_lancia_il_runner_in_tools_asdlc(self, repo_di_prova):
-        radice = repo_di_prova.radice
-        hook = radice / "pre-commit"
-        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
-        segno = self._runner_finto(radice, "tools/asdlc/runner.py")
+    def test_fase_tdd_dentro_un_giro_esce_con_0_senza_lanciare_niente(self, tmp_path):
+        """PBI-384, decisione 4: con `ASDLC_GIRO=1` la guardia del giro è l'hook
+        che il runner genera, e lancia il runner installato. `fase-tdd.sh` resta
+        per le sessioni delle persone, e dentro un giro esce subito: mai la copia
+        di lavoro che il Builder sta cambiando."""
+        script = self._albero_con_lo_script(tmp_path)
+        segno = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
 
-        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path, env={**os.environ, "ASDLC_GIRO": "1"})
 
-        assert segno.is_file(), esito.stderr
-        assert segno.read_text() == "--guardia-commit"
-        assert esito.returncode == 1
+        assert esito.returncode == 0, esito.stderr
+        assert not segno.exists(), "il runner dell'albero non si lancia"
 
     def test_fase_tdd_senza_runner_lo_dice_ed_esce_con_1(self, tmp_path):
         """PBI-388, decisione 2: una guardia che non trova il suo codice non ferma
@@ -8828,22 +9156,9 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         script = self._albero_con_lo_script(tmp_path)
 
         esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
-                               cwd=tmp_path)
+                               cwd=tmp_path, env=fuori_da_un_giro())
 
         assert esito.returncode == 1
-        assert "guardia del lucchetto: runner non trovato" in esito.stderr
-        assert "tools/asdlc/runner.py" in esito.stderr
-        assert "tools/asdlc_runner.py" in esito.stderr
-
-    def test_il_pre_commit_senza_runner_lo_dice_e_lascia_passare(self, repo_di_prova):
-        """PBI-388, decisione 2 e `ADR-0008`: si segnala e si lascia passare."""
-        radice = repo_di_prova.radice
-        hook = radice / "pre-commit"
-        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
-
-        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
-
-        assert esito.returncode == 0
         assert "guardia del lucchetto: runner non trovato" in esito.stderr
         assert "tools/asdlc/runner.py" in esito.stderr
         assert "tools/asdlc_runner.py" in esito.stderr
@@ -8859,17 +9174,76 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         for fase in (runner.FASE_TEST_ONLY, runner.FASE_IMPL):
             runner.percorso_della_fase(radice).write_text(f"{fase}\n")
             uscite[fase] = subprocess.run([str(self.SCRIPT)], input=json.dumps(dato),
-                                          capture_output=True, text=True,
-                                          cwd=radice).returncode
+                                          capture_output=True, text=True, cwd=radice,
+                                          env=fuori_da_un_giro()).returncode
 
         assert uscite == {runner.FASE_TEST_ONLY: 2, runner.FASE_IMPL: 0}
 
-    def test_guardia_il_pre_commit_col_runner_in_tools_ferma_il_commit(self, repo_di_prova):
-        """PBI-388, quinto criterio: con il runner nella forma di oggi il
-        `pre-commit` installato lo lancia, e un'uscita diversa da 0 ferma il
-        commit come prima di PBI-388."""
+
+
+class TestIlPreCommitLanciaIlRunnerInstallato:
+    """PBI-384, decisione 5: il `pre-commit` lo genera il runner con
+    `<pacchetto>/bin/asdlc-runner` scritto dentro, e non cerca più il sorgente
+    nell'albero. È condiviso anche dalle persone: se il comando manca lo dice e
+    lascia passare (`ADR-0008`)."""
+
+    @pytest.fixture
+    def col_pacchetto(self, tmp_path):
+        """Il runner configurato con un venv del pacchetto temporaneo: il testo
+        del `pre-commit` nasce da `configura()`."""
+        di_prima = runner.CFG
+        venv = tmp_path / "venv-asdlc"
+        runner.configura(dataclasses.replace(
+            runner.CFG, ambiente=dataclasses.replace(runner.CFG.ambiente, pacchetto=venv)))
+        yield venv
+        runner.configura(di_prima)
+
+    @staticmethod
+    def _installato(venv: Path) -> Path:
+        """Un `asdlc-runner` finto nel `bin` del venv: scrive i suoi argomenti
+        accanto a sé ed esce 1, come una guardia che ferma."""
+        comando = venv / "bin" / "asdlc-runner"
+        comando.parent.mkdir(parents=True)
+        comando.write_text('#!/bin/sh\nprintf %s "$*" > "$(dirname "$0")/lanciato"\nexit 1\n',
+                           encoding="utf-8")
+        comando.chmod(0o755)
+        return comando.with_name("lanciato")
+
+    def test_il_pre_commit_generato_lancia_asdlc_runner_del_pacchetto(
+        self, repo_di_prova, col_pacchetto
+    ):
         radice = repo_di_prova.radice
-        segno = self._runner_finto(radice, "tools/asdlc_runner.py")
+        segno = self._installato(col_pacchetto)
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-commit"
+        assert esito.returncode == 1, "l'uscita del runner arriva a git intatta"
+
+    def test_il_pre_commit_senza_asdlc_runner_nel_pacchetto_lo_dice_ed_esce_con_0(
+        self, repo_di_prova, col_pacchetto
+    ):
+        radice = repo_di_prova.radice
+        hook = radice / "pre-commit"
+        hook.write_text(runner.GUARDIA_DEL_COMMIT, encoding="utf-8")
+
+        esito = subprocess.run(["sh", str(hook)], capture_output=True, text=True, cwd=radice)
+
+        assert esito.returncode == 0
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert str(col_pacchetto / "bin" / "asdlc-runner") in esito.stderr
+
+    def test_il_pre_commit_installato_col_runner_del_pacchetto_ferma_il_commit(
+        self, repo_di_prova, col_pacchetto
+    ):
+        """Il giro intero: installato da `installa_la_guardia_del_commit()`, il
+        `pre-commit` lancia il runner del pacchetto, e la sua uscita diversa da 0
+        ferma il commit."""
+        radice = repo_di_prova.radice
+        segno = self._installato(col_pacchetto)
         runner.installa_la_guardia_del_commit()
         (radice / "README.md").write_text("ciao\n", encoding="utf-8")
         repo_di_prova._git("add", "README.md")

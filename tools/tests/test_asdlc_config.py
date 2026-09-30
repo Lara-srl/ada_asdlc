@@ -11,6 +11,7 @@ Il modulo si carica per nome, `asdlc.config`, come `test_asdlc_runner.py` e
 
 import ast
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -58,9 +59,10 @@ tempi = "ore.csv"
 [ambiente]
 venv = ".venv"
 prestiti = ["dati"]
+pacchetto = ".venv-asdlc"
 
 [worktree]
-percorso = "~/prova-run"
+percorso = "../prova-run"
 
 [soglie]
 tentativi = 2
@@ -99,7 +101,8 @@ def test_carica_un_toml_e_torna_i_campi_tipizzati(tmp_path):
     assert (cfg.registro.cartella, cfg.registro.tempi) == ("giri", "ore.csv")
     assert cfg.ambiente.venv == ".venv"
     assert cfg.ambiente.prestiti == ("dati",)
-    assert cfg.worktree.percorso == Path.home() / "prova-run", "la tilde si espande"
+    assert cfg.worktree.percorso == tmp_path.resolve().parent / "prova-run", (
+        "relativo alla radice comune, che fuori da git è la radice del progetto")
     assert (cfg.soglie.tentativi, cfg.soglie.igiene, cfg.soglie.revisioni) == (2, 5, 7)
     assert cfg.gate_del_rosso.attivo is True
     assert [(g.nome, list(g.comando), g.cwd, list(g.solo_se_tocca)) for g in cfg.gate] == [
@@ -219,15 +222,17 @@ def test_asdlc_local_toml_sovrascrive_ambiente_e_worktree_chiave_per_chiave(tmp_
     dovrebbe ricopiarsi la sezione intera per cambiare una riga."""
     scrivi_toml(tmp_path)
     senza = asdlc_config.carica(tmp_path)
-    scrivi_toml(tmp_path, '[ambiente]\nvenv = "/opt/venv"\n\n[worktree]\npercorso = "/tmp/altro-run"\n',
-                nome="asdlc.local.toml")
+    scrivi_toml(tmp_path, '[ambiente]\nvenv = "/opt/venv"\npacchetto = "/opt/venv-asdlc"\n\n'
+                '[worktree]\npercorso = "/tmp/altro-run"\n', nome="asdlc.local.toml")
     con = asdlc_config.carica(tmp_path)
 
     assert senza.ambiente.venv == ".venv"
-    assert senza.worktree.percorso == Path.home() / "prova-run"
+    assert senza.worktree.percorso == tmp_path.resolve().parent / "prova-run"
     assert con.ambiente.venv == "/opt/venv"
     assert con.ambiente.prestiti == ("dati",), "ciò che il locale non dice resta"
     assert con.worktree.percorso == Path("/tmp/altro-run")
+    assert con.ambiente.pacchetto == Path("/opt/venv-asdlc"), (
+        "nel file locale un percorso assoluto vale (PBI-384, decisione 2)")
     assert con.git.base == "origin/master", "le altre sezioni non le tocca"
 
 
@@ -311,3 +316,82 @@ def test_senza_asdlc_toml_dalla_cwd_in_su_la_radice_e_un_errore_che_lo_dice(tmp_
         f"nessun `asdlc.toml` da `{vuota}` in su: il runner si lancia dalla "
         "cartella di un progetto ASDLC"
     )
+
+
+# --- I percorsi di macchina si risolvono dalla radice comune (PBI-384) -------
+
+
+def git_in(cartella: Path, *argomenti: str) -> None:
+    subprocess.run(["git", "-c", "user.name=prova", "-c", "user.email=prova@example.invalid",
+                    *argomenti], cwd=cartella, check=True, capture_output=True)
+
+
+def test_pacchetto_e_worktree_si_risolvono_dalla_radice_comune_anche_da_un_worktree(tmp_path):
+    """`[ambiente].pacchetto` e `[worktree].percorso` sono relativi alla radice
+    comune del repository, la cartella madre di `git rev-parse --git-common-dir`:
+    il checkout principale, che è lo stesso da ogni suo worktree. Dal checkout del
+    tick e da `ada-run` il venv del runner è uno solo (decisioni 1 e 2)."""
+    principale = tmp_path / "principale"
+    principale.mkdir()
+    scrivi_toml(principale)
+    git_in(principale, "init", "-q")
+    git_in(principale, "add", "-A")
+    git_in(principale, "commit", "-q", "-m", "progetto")
+    git_in(principale, "worktree", "add", "-q", str(tmp_path / "secondo"))
+
+    dal_principale = asdlc_config.carica(principale)
+    dal_worktree = asdlc_config.carica(tmp_path / "secondo")
+
+    venv = principale.resolve() / ".venv-asdlc"
+    assert getattr(dal_principale.ambiente, "pacchetto", None) == venv
+    assert getattr(dal_worktree.ambiente, "pacchetto", None) == venv
+    albero = tmp_path.resolve() / "prova-run"
+    assert dal_principale.worktree.percorso == albero
+    assert dal_worktree.worktree.percorso == albero
+
+
+@pytest.mark.parametrize("sezione,chiave,valore", [
+    ("worktree", "percorso", "~/prova-run"),
+    ("worktree", "percorso", "/tmp/prova-run"),
+    ("ambiente", "pacchetto", "~/.venv-asdlc"),
+    ("ambiente", "pacchetto", "/opt/venv-asdlc"),
+])
+def test_un_percorso_di_macchina_in_asdlc_toml_e_un_errore_che_nomina_la_chiave(
+    tmp_path, sezione, chiave, valore
+):
+    """`asdlc.toml` è versionato e deve valere su ogni PC: un percorso assoluto o
+    con `~` funziona solo su quello di chi l'ha scritto. Il suo posto è
+    `asdlc.local.toml` (PBI-384, decisione 2)."""
+    if chiave == "pacchetto":
+        testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"', f'pacchetto = "{valore}"')
+    else:
+        testo = TOML_DI_PROVA.replace('percorso = "../prova-run"', f'percorso = "{valore}"')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert f"[{sezione}].{chiave}" in str(fermata.value)
+    assert valore in str(fermata.value)
+    assert "asdlc.local.toml" in str(fermata.value), "dice dove va un percorso di macchina"
+
+
+def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
+    """`[ambiente].eseguibili`: ciò che i gate lanciano per nome, e che il runner
+    e il tick verificano prima di partire (PBI-384, decisione 7)."""
+    testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"\n',
+                                  'pacchetto = ".venv-asdlc"\neseguibili = ["git", "pytest"]\n')
+
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert getattr(cfg.ambiente, "eseguibili", None) == ("git", "pytest")
+
+
+def test_i_minimi_dell_ambiente_si_leggono_da_ambiente(tmp_path):
+    """`[ambiente].minimi`: la versione principale sotto cui un eseguibile non
+    basta, `{ node = 20 }` (PBI-384, decisione 7)."""
+    testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"\n',
+                                  'pacchetto = ".venv-asdlc"\nminimi = { node = 20 }\n')
+
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert getattr(cfg.ambiente, "minimi", None) == {"node": 20}

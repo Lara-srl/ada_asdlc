@@ -20,6 +20,7 @@ import fcntl
 import importlib.util
 import datetime
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +35,27 @@ coda = importlib.import_module("asdlc.coda")
 # `smista()`, cioè `main()` senza quel passo.
 coda.REPO = REPO
 coda.configura(coda.asdlc_config.carica(REPO))
+
+# Il runner che il tick lancia: il comando installato nel venv di
+# `[ambiente].pacchetto`, risolto dalla radice comune (PBI-384).
+RUNNER_INSTALLATO = (coda.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin"
+                     / "asdlc-runner")
+
+# La verifica dell'ambiente prima del lancio (PBI-384) guarda il mondo: il venv del
+# runner, il `PATH`, le versioni. Nei test si sostituisce, come `esegui`: su
+# questa macchina e in CI il runner installato non c'è, e ogni lancio si
+# fermerebbe lì. Il test della verifica la rimette con `ambiente_vero`.
+MANCANZE_VERE = getattr(coda, "mancanze_dell_ambiente", None)
+
+
+@pytest.fixture(autouse=True)
+def ambiente_presente(monkeypatch):
+    monkeypatch.setattr(coda, "mancanze_dell_ambiente", lambda worktree: [], raising=False)
+
+
+@pytest.fixture
+def ambiente_vero(monkeypatch):
+    monkeypatch.setattr(coda, "mancanze_dell_ambiente", MANCANZE_VERE, raising=False)
 
 
 def test_un_giro_in_corso_rende_occupato_senza_guardare_la_coda():
@@ -657,7 +679,7 @@ def runner_che_prende_lalbero(albero, esegui):
 
     def si_stacca(cmd, cwd):
         esito = esegui(cmd, cwd)
-        if "asdlc/runner.py" in " ".join(cmd):
+        if cmd[0].endswith("/bin/asdlc-runner"):
             (albero / "runs").mkdir(exist_ok=True)
             aperto = (albero / "runs" / ".runner.lock").open("w")
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -688,29 +710,47 @@ def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch)
         ["git", "checkout", "--", "runs/tempi.csv"],
         ["git", "fetch", "origin"],
         ["git", "switch", "--detach", "origin/main"],
-        ["python3", "tools/asdlc/runner.py", "PBI-337"],
+        [str(RUNNER_INSTALLATO), "PBI-337"],
     ]
     assert {cwd for _, cwd in visti} == {albero}
     for aperto in tenuti:
         aperto.close()
 
 
-def test_il_tick_lancia_il_runner_da_tools_asdlc_runner(tmp_path, monkeypatch):
-    """PBI-383: il runner sta nel pacchetto, e il tick lo lancia da lì. Col
-    percorso di prima `python3` esce 2 su un file che non c'è, e la coda si
-    ferma."""
+def test_il_tick_lancia_asdlc_runner_dal_venv_del_pacchetto_anche_col_path_minimo(
+    configura, tmp_path, monkeypatch
+):
+    """PBI-384, criterio 5: il tick lancia `<pacchetto>/bin/asdlc-runner` per
+    percorso assoluto. Il cron ha il `PATH` minimo, `/usr/bin:/bin`: un nome nudo
+    non si troverebbe, e `python3 tools/asdlc/runner.py` lancerebbe la copia di
+    lavoro dell'albero invece del runner installato (`ADR-0026`, decisione 3).
+
+    Il runner è uno script vero nel `bin/` del venv dichiarato, e parte con il
+    `PATH` del cron; il pre-flight di `git` è finto, e il giro vivo dopo il
+    distacco si dà per visto."""
+    configura(toml_di_prova())
+    installato = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+    installato.parent.mkdir(parents=True)
+    installato.write_text('#!/bin/sh\necho "$@" > "$(dirname "$0")/lanciato"\n',
+                          encoding="utf-8")
+    installato.chmod(0o755)
     albero = tmp_path / "albero"
     albero.mkdir()
-    visti, esegui = registratore()
-    si_stacca, tenuti = runner_che_prende_lalbero(albero, esegui)
-    monkeypatch.setattr(coda, "esegui", si_stacca)
+    vero = coda.esegui
+    monkeypatch.setattr(coda, "esegui",
+                        lambda cmd, cwd: (0, "") if cmd[0] == "git" else vero(cmd, cwd))
     monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+    monkeypatch.setattr(coda, "giro_in_corso", lambda worktree: True)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
-    coda.lancia("PBI-383", albero)
+    try:
+        coda.lancia("PBI-384", albero)
+        fermata = ""
+    except coda.Guasto as guasto:
+        fermata = str(guasto)
 
-    assert [cmd for cmd, _ in visti][-1] == ["python3", "tools/asdlc/runner.py", "PBI-383"]
-    for aperto in tenuti:
-        aperto.close()
+    assert fermata == ""
+    assert (installato.parent / "lanciato").read_text(encoding="utf-8") == "PBI-384\n"
 
 
 def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
@@ -735,7 +775,7 @@ def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
     with pytest.raises(coda.Guasto, match="fetch"):
         coda.lancia("PBI-337", albero)
 
-    assert not any("asdlc/runner.py" in " ".join(cmd) for cmd in visti)
+    assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti)
 
 
 def mondo_registrato(pr_mergiate=(), rami_su_origin=()):
@@ -768,7 +808,7 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 0
-    assert ["python3", "tools/asdlc/runner.py", "PBI-337"] in visti
+    assert [str(RUNNER_INSTALLATO), "PBI-337"] in visti
     assert "PBI-337" in capsys.readouterr().out
     for aperto in tenuti:
         aperto.close()
@@ -795,7 +835,7 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     assert uscita == 0
     assert "PBI-337" in capsys.readouterr().out
     eseguiti = [" ".join(cmd) for cmd in visti]
-    assert not [c for c in eseguiti if "asdlc/runner.py" in c], eseguiti
+    assert not [c for c in eseguiti if "asdlc-runner" in c], eseguiti
     assert not [c for c in eseguiti if "switch" in c or "fetch" in c or "checkout" in c], eseguiti
 
 
@@ -954,7 +994,7 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
 
     Il codice d'uscita del runner copre ciò che succede **prima** del distacco, e
     solo quello: `--e2e`, che il runner rifiuta con `2`; un argomento che argparse
-    non riconosce; `python3` che su quella macchina non c'è, e allora `esegui()`
+    non riconosce; un `asdlc-runner` che nel venv non c'è, e allora `esegui()`
     rende `127` per la convenzione della shell. Sono i casi di questo test.
 
     Senza leggere quel codice nel log resterebbe «lancia: PBI-337» — il contrario
@@ -972,8 +1012,8 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
             return 0, "[]"
         if "ls-remote" in cmd:
             return 0, ""
-        if "asdlc/runner.py" in " ".join(cmd):
-            return 127, "comando non eseguibile: python3 — [Errno 2] No such file"
+        if cmd[0].endswith("/bin/asdlc-runner"):
+            return 127, "comando non eseguibile: asdlc-runner — [Errno 2] No such file"
         return 0, ""
 
     monkeypatch.setattr(coda, "esegui", python_che_non_ce)
@@ -984,7 +1024,7 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
     log = (repo / coda.LOG).read_text(encoding="utf-8")
     assert "non lanciato" in log, log
     assert "uscita 127" in log, log
-    assert "python3" in log, log
+    assert "asdlc-runner" in log, log
 
 
 def test_un_runner_fermatosi_dopo_il_distacco_non_conta_come_lanciato(
@@ -1051,13 +1091,13 @@ def test_il_tick_non_gira_dentro_lalbero_che_comanda(tmp_path, monkeypatch, caps
 def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
                   cartella="backlog", coda_md="backlog/CODA.md",
                   id="PBI-{n}", file="PBI-{n}-{slug}.md",
-                  registro="runs", tempi="tempi.csv", worktree="~/ada-run") -> str:
+                  registro="runs", tempi="tempi.csv", worktree="../ada-run") -> str:
     """Un `asdlc.toml` coi valori di oggi: ogni test nomina solo ciò che cambia."""
     return (
         f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
         f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda_md}"\nid = "{id}"\nfile = "{file}"\n\n'
         f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
-        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\n\n'
+        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\npacchetto = ".venv-asdlc"\n\n'
         f'[worktree]\npercorso = "{worktree}"\n\n'
         '[soglie]\ntentativi = 3\nigiene = 3\nrevisioni = 4\n\n'
         '[gate_del_rosso]\nattivo = true\n\n'
@@ -1150,14 +1190,16 @@ def test_la_coda_e_l_avviso_delle_domande_si_leggono_dalla_cartella_del_toml(
     assert coda.avviso_domande(repo, "US-7") == "## ❓ Aperta"
 
 
-def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura):
-    assert coda.WORKTREE_DEL_RUNNER == Path.home() / "ada-run"
+def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura, tmp_path):
+    # Letto senza `carica()`, il percorso resta com'è scritto: a risolverlo dalla
+    # radice comune è `carica()`, che sa dove sta il repository (PBI-384).
+    assert coda.WORKTREE_DEL_RUNNER == Path("../ada-run")
     assert coda.LOG == Path("runs") / "coda.log"
     assert coda.LUCCHETTO == Path("runs") / ".runner.lock"
 
-    configura(toml_di_prova(registro="giri", worktree="/tmp/altro-run"))
+    configura(toml_di_prova(registro="giri", worktree="../altro-run"))
 
-    assert coda.WORKTREE_DEL_RUNNER == Path("/tmp/altro-run")
+    assert coda.WORKTREE_DEL_RUNNER == tmp_path.resolve().parent / "altro-run"
     assert coda.LOG == Path("giri") / "coda.log"
     assert coda.LUCCHETTO == Path("giri") / ".runner.lock"
 
@@ -1249,3 +1291,39 @@ def test_guardia_il_dry_run_dal_checkout_scrive_il_log_nel_temporaneo(tmp_path, 
     assert not coda.LOG.is_relative_to(REPO), coda.LOG
     righe = coda.LOG.read_text(encoding="utf-8").splitlines()
     assert [r.split("  ", 1)[1] for r in righe] == [decisa]
+
+
+# --- Il tick verifica l'ambiente prima di lanciare (PBI-384) -----------------
+
+
+def test_il_tick_con_l_ambiente_mancante_scrive_la_riga_e_non_lancia(
+    configura, ambiente_vero, tmp_path, monkeypatch
+):
+    """Decisione 7: senza `<pacchetto>/bin/asdlc-runner`, o con un eseguibile
+    dichiarato che manca, il tick scrive una riga `ambiente mancante: …` e non
+    lancia — né il runner né il pre-flight, che sposta il worktree su un altro
+    ramo. Il `PATH` del cron è minimo, e il runner si fermerebbe lo stesso dopo il
+    distacco, dove la ragione finisce in un log che il tick non legge."""
+    configura(toml_di_prova().replace(
+        'pacchetto = ".venv-asdlc"', 'pacchetto = ".venv-asdlc"\neseguibili = ["git", "pytest"]'))
+    monkeypatch.setattr(shutil, "which",
+                        lambda c, *a, **k: None if c == "pytest" else f"/usr/bin/{c}")
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    mancante = [r for r in righe if "  ambiente mancante: " in r]
+    assert len(mancante) == 1, righe
+    runner_del_pacchetto = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+    assert str(runner_del_pacchetto) in mancante[0]
+    assert "`pytest`" in mancante[0], "tutte le mancanze, nella stessa riga"
+    assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti), "il runner non parte"
+    assert not any(c in cmd for cmd in visti for c in ("fetch", "switch", "checkout")), (
+        "e nemmeno il pre-flight")
