@@ -395,3 +395,19 @@ def test_i_minimi_dell_ambiente_si_leggono_da_ambiente(tmp_path):
     cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
 
     assert getattr(cfg.ambiente, "minimi", None) == {"node": 20}
+
+
+# --- [prompt] (PBI-386) -------------------------------------------------------
+
+
+@pytest.mark.parametrize("chiave", ["builder", "sostituisci"])
+def test_una_chiave_di_prompt_diversa_da_aggiunte_e_un_errore_che_la_nomina(tmp_path, chiave):
+    """I prompt del pacchetto si estendono e non si sostituiscono (`ADR-0026`,
+    decisione 2): una chiave che promettesse un prompt sostitutivo, o un refuso
+    di `aggiunte`, non si ignora in silenzio."""
+    (tmp_path / "aggiunte").mkdir()
+    scrivi_toml(tmp_path, TOML_DI_PROVA
+                + f'\n[prompt]\naggiunte = "aggiunte"\n{chiave} = "mio.md"\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione, match=rf"\[prompt\]\.{chiave}"):
+        asdlc_config.carica(tmp_path)
