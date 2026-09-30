@@ -1855,9 +1855,14 @@ class TestIlRunnerSiNominaDalPacchetto:
 
     COMANDO = "tools/asdlc/runner.py --chiedi-impl"
 
-    def test_il_prompt_del_builder(self):
+    def test_il_prompt_del_builder_nomina_chiedi_impl_col_runner_installato(self):
+        """PBI-384: il Builder chiede il permesso al runner installato,
+        `<pacchetto>/bin/asdlc-runner --chiedi-impl`, per percorso assoluto, e
+        non al sorgente dell'albero che sta cambiando (`ADR-0026`, decisione 3)."""
         prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
-        assert f"python3 {self.COMANDO}" in prompt
+        installato = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin" / "asdlc-runner"
+        assert f"`{installato} --chiedi-impl`" in prompt
+        assert "tools/asdlc/runner.py --chiedi-impl" not in prompt
 
     def test_la_guardia_di_fase_sulla_produzione(self):
         ragione = runner.guardia_di_fase("TEST_ONLY", "frontend/src/pages/FoglioPage.tsx")
