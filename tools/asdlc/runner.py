@@ -485,7 +485,8 @@ def identita_del_runner() -> dict[str, str | None]:
         distribuzione = distribuzione_del_runner()
     except importlib.metadata.PackageNotFoundError:
         return {"versione": None, "sha": None}
-    provenienza = json.loads(distribuzione.read_text("direct_url.json"))
+    # Un'installazione da un indice o da una wheel il file non lo scrive.
+    provenienza = json.loads(distribuzione.read_text("direct_url.json") or "{}")
     return {"versione": distribuzione.version,
             "sha": provenienza.get("vcs_info", {}).get("commit_id")}
 
