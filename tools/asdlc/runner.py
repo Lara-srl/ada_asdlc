@@ -4094,7 +4094,13 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
 
 
 def costruisci_parser() -> argparse.ArgumentParser:
-    """I flag, in una funzione sua: così si possono provare senza eseguire un PBI."""
+    """I flag, in una funzione sua: così si possono provare senza eseguire un PBI.
+
+    Si costruisce anche senza configurazione, per `--help` fuori da un progetto:
+    il ramo di base e la cartella del registro li dice allora la chiave del TOML.
+    """
+    base = globals().get("BASE", "[git].base")
+    log_dir = globals().get("LOG_DIR", "[registro].cartella")
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -4112,11 +4118,11 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--in-primo-piano", action="store_true",
                     help="non staccarsi dalla sessione: output a schermo e exit code. "
                          "Di default il giro si stacca e scrive in runs/<run>.log")
-    ap.add_argument("--registra", nargs="?", const=str(LOG_DIR), metavar="CARTELLA",
+    ap.add_argument("--registra", nargs="?", const=str(log_dir), metavar="CARTELLA",
                     help="non esegue niente: piega i rapporti runs/*.json in runs/tempi.csv. "
                          "Si lancia su main dopo il merge (ADR-0020)")
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
-                    help=f"non esegue niente: cammina {BASE}..REF e dice in quali "
+                    help=f"non esegue niente: cammina {base}..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
     ap.add_argument("--guardia-commit", action="store_true",
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
@@ -4152,6 +4158,11 @@ def main() -> int:
         REPO = radice
         configura(asdlc_config.carica(REPO))
     except asdlc_config.ErroreDiConfigurazione as guasto:
+        # `--help` risponde anche fuori da un progetto: è il primo comando che si
+        # prova dopo `pip install ./tools` (PBI-384).
+        if {"-h", "--help"} & set(sys.argv[1:]):
+            costruisci_parser().print_help()
+            return 0
         sys.exit(f"asdlc_runner: {guasto}")
     return smista()
 
