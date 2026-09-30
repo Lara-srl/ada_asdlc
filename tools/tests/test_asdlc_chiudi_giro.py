@@ -218,3 +218,24 @@ def test_il_nome_del_tag_porta_il_giro_dal_ramo_e_la_data_dal_rapporto(
     assert tag == [["git", "tag", "giro-fermato/pbi-376-giro2-20260929", TESTA]]
     cancellato = [cmd for cmd, _, _ in visti if "--delete" in cmd]
     assert cancellato == [["git", "push", "origin", "--delete", "pbi/pbi-376-giro2"]]
+
+
+# --- I rifiuti -----------------------------------------------------------------
+
+
+def test_senza_testa_nel_rapporto_il_comando_rifiuta(home_finta, tmp_path, monkeypatch, capsys):
+    """Decisione 3. Un rapporto senza `testa` è di un giro di prima di PBI-385, o
+    di un giro che non ha pubblicato: su cosa mettere il tag non lo dice, e il
+    comando non lo indovina. Rifiuta prima di toccare qualsiasi cosa, e nomina
+    il rapporto che ha letto."""
+    repo, albero = un_giro_fermato(tmp_path, testa=None)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita != 0
+    assert i_passi(visti) == []
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    detto = capsys.readouterr().out
+    assert "testa" in detto and RUN in detto, detto
