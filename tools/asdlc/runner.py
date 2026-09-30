@@ -88,6 +88,7 @@ VENV: str                # `[ambiente].venv`
 # comando che il runner lancia o fa lanciare è `<pacchetto>/bin/<comando>`.
 PACCHETTO: Path | None
 ESEGUIBILI: tuple[str, ...]  # `[ambiente].eseguibili`
+MINIMI: dict[str, int]       # `[ambiente].minimi`
 PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
 # **nome** del file e non il suo percorso: la cartella è `LOG_DIR`, e un percorso
@@ -234,6 +235,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     decisione 1). Il guadagno — un posto solo — è lo stesso.
     """
     global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI, PACCHETTO, ESEGUIBILI
+    global MINIMI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
     global GATE_DEL_ROSSO_ATTIVO
@@ -276,6 +278,8 @@ def configura(cfg: asdlc_config.Config) -> None:
     PACCHETTO = cfg.ambiente.pacchetto
     # Ciò che deve esserci sul `PATH` dei gate prima di partire (`mancanze_dell_ambiente`).
     ESEGUIBILI = cfg.ambiente.eseguibili
+    # E la versione principale sotto cui un eseguibile non basta.
+    MINIMI = cfg.ambiente.minimi
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -770,7 +774,8 @@ def mancanze_dell_ambiente() -> list[str]:
     all'interprete di sistema, e risolto uscirebbe dal venv.
 
     Poi l'ambiente dei gate: il venv di `[ambiente].venv` deve esistere, e gli
-    `[ambiente].eseguibili` si devono trovare lì o sul `PATH`.
+    `[ambiente].eseguibili` si devono trovare lì o sul `PATH`, con la versione
+    principale che `[ambiente].minimi` chiede.
     """
     mancanze: list[str] = []
     if PACCHETTO is None:
@@ -782,6 +787,32 @@ def mancanze_dell_ambiente() -> list[str]:
     if not (REPO / VENV).is_dir():
         mancanze.append(f"ambiente mancante: il venv `{VENV}` non c'è")
     mancanze += eseguibili_mancanti(ESEGUIBILI, VENV, REPO)
+    mancanze += versioni_sotto_il_minimo(MINIMI, VENV, REPO)
+    return mancanze
+
+
+def versioni_sotto_il_minimo(minimi: dict[str, int], venv: str, radice: Path) -> list[str]:
+    """Gli eseguibili la cui versione principale, il primo numero di
+    `<eseguibile> --version`, sta sotto il minimo; una riga ciascuno con ciò che
+    hanno risposto. Uno che non si trova non si nomina qui: è di
+    `eseguibili_mancanti()`."""
+    percorso = os.pathsep.join([str(radice / venv / "bin"), os.environ.get("PATH", "")])
+    mancanze: list[str] = []
+    for nome, minimo in minimi.items():
+        trovato = shutil.which(nome, path=percorso)
+        if trovato is None:
+            continue
+        try:
+            detto = subprocess.run([trovato, "--version"], capture_output=True, text=True,
+                                   timeout=30)
+            risposta = (detto.stdout + detto.stderr).strip()
+        except (OSError, subprocess.SubprocessError) as guasto:
+            risposta = str(guasto)
+        numero = re.search(r"\d+", risposta)
+        if numero is None or int(numero.group()) < minimo:
+            versione = numero.group() if numero else "illeggibile"
+            mancanze.append(f"ambiente mancante: `{nome}` {versione}, il minimo è {minimo} "
+                            f"(`{nome} --version`: {risposta})")
     return mancanze
 
 

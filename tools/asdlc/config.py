@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import subprocess
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 NOME_FILE = "asdlc.toml"
@@ -113,6 +113,8 @@ class Ambiente:
     # Ciò che i gate e il runner lanciano per nome: il runner e il tick lo cercano
     # prima di partire. Vuoto, non si verifica niente.
     eseguibili: tuple[str, ...] = ()
+    # La versione principale minima di un eseguibile, `{ node = 20 }`.
+    minimi: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -276,7 +278,8 @@ def interpreta(dati: dict, file: str) -> Config:
         registro=Registro(cartella=registro.testo("cartella"), tempi=registro.testo("tempi")),
         ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti"),
                           pacchetto=_percorso(ambiente.testo("pacchetto", default=None)),
-                          eseguibili=ambiente.testi("eseguibili", default=())),
+                          eseguibili=ambiente.testi("eseguibili", default=()),
+                          minimi=ambiente.interi_per_nome("minimi", default={})),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
@@ -344,6 +347,13 @@ class _Sezione:
             raise ErroreDiConfigurazione(
                 f"{self.file}: `{self._chiave(chiave)}` deve essere un elenco di stringhe")
         return tuple(elenco)
+
+    def interi_per_nome(self, chiave: str, default=_MANCA) -> dict[str, int]:
+        tabella = self._valore(chiave, dict, "una tabella di numeri interi", default)
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in tabella.values()):
+            raise ErroreDiConfigurazione(
+                f"{self.file}: `{self._chiave(chiave)}` deve essere una tabella di numeri interi")
+        return dict(tabella)
 
     def intero(self, chiave: str, default=_MANCA) -> int:
         return self._valore(chiave, int, "un numero intero", default)
