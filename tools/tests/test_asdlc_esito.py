@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-SORGENTE = REPO / "tools" / "asdlc_esito.py"
+SORGENTE = REPO / "tools" / "asdlc" / "esito.py"
 
 # Una versione che il server non ha motivo di conoscere: deve rispondere con
 # quella del client, non con una sua (decisione 5).

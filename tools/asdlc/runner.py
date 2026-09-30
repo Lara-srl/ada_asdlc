@@ -23,10 +23,10 @@ Ogni esecuzione scrive i **tempi** in `runs/tempi.csv` (una riga per PBI, in app
 Un PBI = una sessione = un contesto pulito. È il motivo per cui il PBI è un puntatore
 alla spec invece che una copia: tutto ciò che serve si rilegge dai file.
 
-    python3 tools/asdlc_runner.py PBI-201
-    python3 tools/asdlc_runner.py PBI-313 --senza-critic   # due gate su tre, e lo dichiara
-    python3 tools/asdlc_runner.py PBI-201 PBI-203 --dry-run
-    python3 tools/asdlc_runner.py --riepilogo --tariffa 90
+    python3 tools/asdlc/runner.py PBI-201
+    python3 tools/asdlc/runner.py PBI-313 --senza-critic   # due gate su tre, e lo dichiara
+    python3 tools/asdlc/runner.py PBI-201 PBI-203 --dry-run
+    python3 tools/asdlc/runner.py --riepilogo --tariffa 90
 
 ⚠️ Da usare in un clone o in un worktree dedicato, mai sull'albero che stai guardando:
    l'agente gira in modalità non interattiva e scrive senza chiedere conferma.
@@ -64,14 +64,14 @@ from typing import Iterable, NamedTuple
 # codice sta in site-packages (`ADR-0026`, decisione 3).
 REPO: Path
 
-# `tools/` non è un pacchetto e non deve diventarlo: il runner si lancia per
-# percorso, e sotto i test si carica con `importlib` da `backend/tests/`. Il
-# lettore della configurazione sta accanto a questo file, e si importa da lì:
-# qui conta dove sta il codice, non dove sta il progetto.
-SORGENTE = Path(__file__).resolve().parent
+# Il runner è un modulo del pacchetto `asdlc`, in `tools/asdlc/` (PBI-383), e si
+# lancia ancora per percorso finché non ci sono i comandi (PBI-384): `tools/` va
+# sul `sys.path`, o `asdlc.config` non si trova. Qui conta dove sta il codice,
+# non dove sta il progetto.
+SORGENTE = Path(__file__).resolve().parent.parent
 if str(SORGENTE) not in sys.path:
     sys.path.insert(0, str(SORGENTE))
-import asdlc_config  # noqa: E402
+from asdlc import config as asdlc_config  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: i percorsi
 # sono relativi a `REPO`, e la ragione di ogni valore sta accanto a dove si legge.
@@ -94,7 +94,9 @@ NOME_LUCCHETTO = ".runner.lock"
 
 # Chi, girando in questo albero, ci **scrive**. Un `tail -f` sul log o un `git log`
 # aperto non sono un pericolo, e un controllo che grida sempre si impara a spegnere.
-AGENTI = ("claude", "asdlc_runner")
+# Il runner in due forme: `asdlc/runner.py` dal pacchetto (PBI-383), e
+# `asdlc_runner` com'era lanciato prima del trasloco.
+AGENTI = ("claude", "asdlc_runner", "asdlc/runner.py")
 
 # I flag di autonomia e di routing stanno qui, in un posto solo, così si vedono e si
 # cambiano. ⚠️ Verifica i nomi con `claude --help`: cambiano fra versioni della CLI.
@@ -122,7 +124,7 @@ CRITIC = ["claude", "-p", "--allowedTools",
 
 # Il server dell'esito (`PBI-366`, `ADR-0027`): sta accanto al runner, e si
 # estrae con lui. I ruoli sono i suoi: un altro valore lo ferma all'avvio.
-SERVER_DELL_ESITO = Path(__file__).resolve().parent / "asdlc_esito.py"
+SERVER_DELL_ESITO = Path(__file__).resolve().parent / "esito.py"
 RUOLI = ("builder", "critic")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
@@ -307,7 +309,7 @@ Esegui il PBI con queste regole non negoziabili:
   2. **committalo**, da solo: `test(scope): … (RED)`. Un commit di soli test, senza una
      riga di produzione dentro — il rosso non può essere esistito in mezzo a un commit
      misto, e il gate lo ferma dal solo diff;
-  3. `python3 tools/asdlc_runner.py --chiedi-impl` — rigira quei test e apre la fase
+  3. `python3 tools/asdlc/runner.py --chiedi-impl` — rigira quei test e apre la fase
      `IMPL` **solo se li vede fallire**. Se passano, quel comportamento c'è già e non è
      questo il commit in cui nasce: non insistere, vai a vedere cosa lo copre;
   4. scrivi **solo il codice** che li fa passare. Non il resto del PBI, non il criterio
@@ -1368,13 +1370,13 @@ def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
         return None
     if Path(percorso).name == FILE_DELLA_FASE:
         return (f"{percorso}: la fase non la decidi tu. Il passaggio a {FASE_IMPL} lo "
-                f"apre `asdlc_runner.py --chiedi-impl`, e solo se i test nuovi "
+                f"apre `tools/asdlc/runner.py --chiedi-impl`, e solo se i test nuovi "
                 f"falliscono davvero.")
     if fase == FASE_TEST_ONLY:
         if e_file_di_produzione(percorso):
             return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
                     f"qui si scrivono solo i test. Scrivi il test del comportamento che "
-                    f"ti serve, poi `asdlc_runner.py --chiedi-impl`: se è rosso, la "
+                    f"ti serve, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
                     f"produzione si apre. Se il test passa già, quel comportamento c'è "
                     f"di suo e non è questo il commit in cui nasce.")
         return None
@@ -2852,7 +2854,7 @@ def apri_pr(pbi: str, pbi_path: Path, branch: str, e: Esito) -> str:
         return adotta_pr(aperte, "PR già aperta sul ramo", e)
     corpo = (
         f"Esecuzione automatica di `{pbi_path.relative_to(REPO)}` "
-        f"(`tools/asdlc_runner.py`).\n\n"
+        f"(`tools/asdlc/runner.py`).\n\n"
         + (f"Gate deterministici verdi · **Review Gate saltato** (`--senza-critic`): "
            f"di questo lavoro non esiste una lettura avversariale, e la revisione è "
            f"tutta qui.\n"
@@ -4207,7 +4209,7 @@ def smista() -> int:
             albero.enter_context(lucchetto())
         except AlberoOccupato as exc:
             print(f"Non parto: {exc}.\n"
-                  "Il lucchetto è di un runner vivo — `ps aux | grep asdlc_runner` dice "
+                  "Il lucchetto è di un runner vivo — `ps aux | grep asdlc/runner` dice "
                   "quale.\nPer un secondo giro in parallelo serve un altro worktree, non "
                   "un altro processo.")
             return 2
@@ -4271,7 +4273,7 @@ def smista() -> int:
         # (`ADR-0020`). Il giro lascia il suo rapporto; le righe entrano in `main`
         # dopo il merge, con `--registra`.
         rapporto = chiudi_rapporto(run, esiti)
-        print(f"\nRegistro: `python3 tools/asdlc_runner.py --registra {LOG_DIR}` "
+        print(f"\nRegistro: `python3 tools/asdlc/runner.py --registra {LOG_DIR}` "
               f"su main, dopo il merge. Rapporto del giro: {rapporto}")
         totale = sum(e.durata_s for e in esiti)
         print(f"\n{len(esiti)} PBI · tempo totale {hms(totale)}"

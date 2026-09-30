@@ -8,7 +8,7 @@ regolari per togliere quell'attesa (`backlog/PBI-350`).
 
 Quello che **non** fa, ed è la riga che lo tiene dentro i suoi confini: non
 mergia — il merge è il terzo gate, il confine dell'accountability, e non è
-delegabile (`asdlc_runner.py:17`) — e non decide cosa entra in coda. La coda la
+delegabile (`runner.py:17`) — e non decide cosa entra in coda. La coda la
 scrive Francesco a mano in `backlog/CODA.md`; il tick è un esecutore d'ordini già
 dati, e non ne inventa nessuno.
 
@@ -35,13 +35,14 @@ from pathlib import Path
 # versionato è il difetto che la configurazione toglie.
 REPO: Path
 
-# `tools/` non è un pacchetto: il lettore della configurazione sta accanto a
-# questo file e si importa da lì, come fa il runner. Qui conta dove sta il
-# codice, non dove sta il progetto.
-SORGENTE = Path(__file__).resolve().parent
+# Il tick è un modulo del pacchetto `asdlc`, in `tools/asdlc/` (PBI-383), e si
+# lancia ancora per percorso, come il runner: `tools/` va sul `sys.path`, o
+# `asdlc.config` non si trova. Qui conta dove sta il codice, non dove sta il
+# progetto.
+SORGENTE = Path(__file__).resolve().parent.parent
 if str(SORGENTE) not in sys.path:
     sys.path.insert(0, str(SORGENTE))
-import asdlc_config  # noqa: E402
+from asdlc import config as asdlc_config  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
 # file che legge il runner, quindi il tick e il runner non possono più dire due
@@ -301,7 +302,7 @@ def pbi_mergiati(repo: Path) -> set[str]:
             f"gh ha reso {len(elenco)} PR mergiate, cioè tutta la finestra di "
             f"{LIMITE_PR} che gli è stata chiesta: l'elenco può essere tagliato, e un "
             "PBI già in main che non ci compaia si rilancerebbe. Alza LIMITE_PR in "
-            "tools/asdlc_coda.py."
+            "tools/asdlc/coda.py."
         )
     return {
         nome
@@ -507,7 +508,7 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    codice, uscita = esegui(["python3", "tools/asdlc_runner.py", pbi], worktree)
+    codice, uscita = esegui(["python3", "tools/asdlc/runner.py", pbi], worktree)
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"

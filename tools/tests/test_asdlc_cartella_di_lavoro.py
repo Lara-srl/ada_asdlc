@@ -18,15 +18,19 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-MODULI = ("asdlc_runner.py", "asdlc_coda.py", "asdlc_config.py", "asdlc_esito.py")
+
+
+def copia_il_pacchetto(tools: Path) -> None:
+    """Il pacchetto `asdlc` in `tools/asdlc/`, com'è nel repository (PBI-383)."""
+    shutil.copytree(REPO / "tools" / "asdlc", tools / "asdlc",
+                    ignore=shutil.ignore_patterns("__pycache__"))
 
 
 def copia_il_codice(tmp_path: Path) -> Path:
-    """I moduli in `<tmp>/codice/tools`, lontani da ogni `asdlc.toml`."""
+    """Il pacchetto in `<tmp>/codice/tools`, lontano da ogni `asdlc.toml`."""
     tools = tmp_path / "codice" / "tools"
     tools.mkdir(parents=True)
-    for nome in MODULI:
-        shutil.copy(REPO / "tools" / nome, tools / nome)
+    copia_il_pacchetto(tools)
     return tools
 
 
@@ -39,7 +43,7 @@ def test_importare_runner_e_tick_non_legge_asdlc_toml(tmp_path):
 
     fatto = subprocess.run(
         [sys.executable, "-c",
-         f"import sys; sys.path.insert(0, {str(tools)!r}); import asdlc_runner, asdlc_coda"],
+         f"import sys; sys.path.insert(0, {str(tools)!r}); import asdlc.runner, asdlc.coda"],
         cwd=vuota, capture_output=True, text=True, timeout=60,
     )
 
@@ -65,8 +69,8 @@ def test_runner_e_tick_senza_asdlc_toml_dalla_cwd_in_su_escono_col_motivo(tmp_pa
     vuota.mkdir()
     prima = tutti_i_file(tmp_path)
 
-    for modulo, argomenti in (("asdlc_runner.py", ["PBI-1", "--in-primo-piano"]),
-                              ("asdlc_coda.py", ["--dry-run"])):
+    for modulo, argomenti in (("asdlc/runner.py", ["PBI-1", "--in-primo-piano"]),
+                              ("asdlc/coda.py", ["--dry-run"])):
         fatto = lancia(tools, modulo, argomenti, vuota)
 
         assert fatto.returncode != 0, modulo
@@ -127,7 +131,7 @@ def test_il_runner_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(t
     tools = copia_il_codice(tmp_path)
     progetto = un_progetto(tmp_path)
 
-    fatto = lancia(tools, "asdlc_runner.py", ["--riepilogo"], progetto / "src" / "moduli")
+    fatto = lancia(tools, "asdlc/runner.py", ["--riepilogo"], progetto / "src" / "moduli")
 
     assert "Nessun tempo registrato: giri/ore.csv non esiste ancora." in fatto.stdout, (
         fatto.stderr)
@@ -139,7 +143,7 @@ def test_il_tick_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp
     tools = copia_il_codice(tmp_path)
     progetto = un_progetto(tmp_path)
 
-    fatto = lancia(tools, "asdlc_coda.py", ["--dry-run"], progetto / "src" / "moduli")
+    fatto = lancia(tools, "asdlc/coda.py", ["--dry-run"], progetto / "src" / "moduli")
 
     assert fatto.returncode == 2, fatto.stderr
     assert f"--repo e --worktree sono lo stesso albero ({progetto})" in fatto.stdout
@@ -149,15 +153,14 @@ def test_il_tick_lanciato_da_una_sottocartella_lavora_sul_progetto_della_cwd(tmp
 
 
 def un_progetto_come_ada(tmp_path: Path) -> Path:
-    """La forma di aDa oggi: il codice in `<progetto>/tools`, l'hook in
+    """La forma di aDa oggi: il codice in `<progetto>/tools/asdlc`, l'hook in
     `.claude/hooks/`, l'`asdlc.toml` versionato alla radice, e un giro in
     `TEST_ONLY`. Prima di PBI-382 il progetto lo diceva `__file__`, ora la cwd:
     qui coincidono, e le guardie devono decidere uguale."""
     progetto = tmp_path / "progetto"
     tools = progetto / "tools"
     tools.mkdir(parents=True)
-    for nome in MODULI:
-        shutil.copy(REPO / "tools" / nome, tools / nome)
+    copia_il_pacchetto(tools)
     shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
     hooks = progetto / ".claude" / "hooks"
     hooks.mkdir(parents=True)
@@ -202,7 +205,7 @@ def test_guardia_la_guardia_del_commit_dalla_radice_decide_come_prima(tmp_path):
         (progetto / percorso).parent.mkdir(parents=True, exist_ok=True)
         (progetto / percorso).write_text("x = 1\n", encoding="utf-8")
         subprocess.run(["git", "add", percorso], cwd=progetto, check=True)
-        return lancia(progetto / "tools", "asdlc_runner.py", ["--guardia-commit"], progetto)
+        return lancia(progetto / "tools", "asdlc/runner.py", ["--guardia-commit"], progetto)
 
     solo_test = in_stage("backend/tests/test_foglio.py")
     con_produzione = in_stage("backend/app/foglio.py")

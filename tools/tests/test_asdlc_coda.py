@@ -12,8 +12,8 @@ Tre gruppi, dal centro verso fuori:
   partire e da quelli che non devono. Nessun test avvia un giro: un test che
   lancia il runner non è un test, è una notte.
 
-`tools/` non è un pacchetto installato e non deve diventarlo per un test: si
-carica il modulo dal suo percorso, come fa `test_importa_storico.py`.
+Il modulo si carica per nome, `asdlc.coda`: `conftest.py` mette `tools/` sul
+`sys.path` (PBI-383).
 """
 
 import fcntl
@@ -28,10 +28,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
-_spec = importlib.util.spec_from_file_location("asdlc_coda", REPO / "tools" / "asdlc_coda.py")
-coda = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = coda
-_spec.loader.exec_module(coda)
+coda = importlib.import_module("asdlc.coda")
 # L'import non legge `asdlc.toml` (PBI-382): lo fa `main()` dalla cwd. Qui la
 # configurazione è quella del repository di questo file, e i test chiamano
 # `smista()`, cioè `main()` senza quel passo.
@@ -570,6 +567,20 @@ def test_una_finestra_di_pr_mergiate_piena_non_produce_lancia(tmp_path, monkeypa
     assert str(coda.LIMITE_PR) in decisione.testo, decisione.testo
 
 
+def test_la_finestra_piena_nomina_il_tick_in_tools_asdlc_coda(tmp_path, monkeypatch):
+    """PBI-383: la riga del log dice in che file alzare `LIMITE_PR`, e il file
+    è `tools/asdlc/coda.py`."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    piene = [f"PBI-{n}: una PR mergiata mesi fa" for n in range(1000, 1000 + coda.LIMITE_PR)]
+    monkeypatch.setattr(coda, "esegui", mondo(pr_mergiate=piene))
+
+    decisione = coda.decidi(repo, albero)
+
+    assert "tools/asdlc/coda.py" in decisione.testo, decisione.testo
+
+
 def test_una_coda_illeggibile_non_produce_lancia(tmp_path, monkeypatch):
     """Senza la coda non ci sono ordini, e senza ordini non si lancia niente."""
     repo = tmp_path / "repo"
@@ -646,7 +657,7 @@ def runner_che_prende_lalbero(albero, esegui):
 
     def si_stacca(cmd, cwd):
         esito = esegui(cmd, cwd)
-        if "asdlc_runner.py" in " ".join(cmd):
+        if "asdlc/runner.py" in " ".join(cmd):
             (albero / "runs").mkdir(exist_ok=True)
             aperto = (albero / "runs" / ".runner.lock").open("w")
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -677,9 +688,27 @@ def test_il_lancio_fa_il_preflight_e_poi_chiama_il_runner(tmp_path, monkeypatch)
         ["git", "checkout", "--", "runs/tempi.csv"],
         ["git", "fetch", "origin"],
         ["git", "switch", "--detach", "origin/main"],
-        ["python3", "tools/asdlc_runner.py", "PBI-337"],
+        ["python3", "tools/asdlc/runner.py", "PBI-337"],
     ]
     assert {cwd for _, cwd in visti} == {albero}
+    for aperto in tenuti:
+        aperto.close()
+
+
+def test_il_tick_lancia_il_runner_da_tools_asdlc_runner(tmp_path, monkeypatch):
+    """PBI-383: il runner sta nel pacchetto, e il tick lo lancia da lì. Col
+    percorso di prima `python3` esce 2 su un file che non c'è, e la coda si
+    ferma."""
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    visti, esegui = registratore()
+    si_stacca, tenuti = runner_che_prende_lalbero(albero, esegui)
+    monkeypatch.setattr(coda, "esegui", si_stacca)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    coda.lancia("PBI-383", albero)
+
+    assert [cmd for cmd, _ in visti][-1] == ["python3", "tools/asdlc/runner.py", "PBI-383"]
     for aperto in tenuti:
         aperto.close()
 
@@ -706,7 +735,7 @@ def test_un_preflight_che_fallisce_non_chiama_il_runner(tmp_path, monkeypatch):
     with pytest.raises(coda.Guasto, match="fetch"):
         coda.lancia("PBI-337", albero)
 
-    assert not any("asdlc_runner.py" in " ".join(cmd) for cmd in visti)
+    assert not any("asdlc/runner.py" in " ".join(cmd) for cmd in visti)
 
 
 def mondo_registrato(pr_mergiate=(), rami_su_origin=()):
@@ -739,7 +768,7 @@ def test_il_tick_lancia_il_pbi_che_la_coda_indica(tmp_path, monkeypatch, capsys)
     uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
 
     assert uscita == 0
-    assert ["python3", "tools/asdlc_runner.py", "PBI-337"] in visti
+    assert ["python3", "tools/asdlc/runner.py", "PBI-337"] in visti
     assert "PBI-337" in capsys.readouterr().out
     for aperto in tenuti:
         aperto.close()
@@ -766,7 +795,7 @@ def test_il_dry_run_stampa_la_decisione_e_non_esegue_niente(tmp_path, monkeypatc
     assert uscita == 0
     assert "PBI-337" in capsys.readouterr().out
     eseguiti = [" ".join(cmd) for cmd in visti]
-    assert not [c for c in eseguiti if "asdlc_runner.py" in c], eseguiti
+    assert not [c for c in eseguiti if "asdlc/runner.py" in c], eseguiti
     assert not [c for c in eseguiti if "switch" in c or "fetch" in c or "checkout" in c], eseguiti
 
 
@@ -943,7 +972,7 @@ def test_un_runner_che_esce_male_lo_scrive_nel_log(tmp_path, monkeypatch):
             return 0, "[]"
         if "ls-remote" in cmd:
             return 0, ""
-        if "asdlc_runner.py" in " ".join(cmd):
+        if "asdlc/runner.py" in " ".join(cmd):
             return 127, "comando non eseguibile: python3 — [Errno 2] No such file"
         return 0, ""
 

@@ -38,12 +38,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
-_spec = importlib.util.spec_from_file_location(
-    "asdlc_runner", REPO / "tools" / "asdlc_runner.py"
-)
-runner = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = runner
-_spec.loader.exec_module(runner)
+# `conftest.py` mette `tools/` sul `sys.path`: il runner è `asdlc.runner` (PBI-383).
+runner = importlib.import_module("asdlc.runner")
 # L'import non legge `asdlc.toml` (PBI-382): la radice e la configurazione le
 # prende `main()` dalla cwd. Qui il repository è quello di questo file, come per
 # trovare il codice, e i test chiamano `smista()`, cioè `main()` senza quel
@@ -1768,6 +1764,17 @@ class TestUnAgenteNelWorktreeFermaIlLancio:
         self._finto(proc, 42, albero / "frontend", b"claude\x00")
         assert [p for p, _ in runner.agenti_estranei(albero, proc=proc)] == [42]
 
+    def test_trova_il_runner_lanciato_come_tools_asdlc_runner(self, tmp_path):
+        """PBI-383, criterio 6: dopo il `git mv` il runner si lancia come
+        `tools/asdlc/runner.py`, e nella sua riga di comando `asdlc_runner`
+        non c'è più."""
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, 4242, albero,
+                    b"/usr/bin/python3\x00tools/asdlc/runner.py\x00PBI-383\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == [
+            (4242, "/usr/bin/python3 tools/asdlc/runner.py PBI-383")]
+
     def test_ignora_chi_lavora_altrove(self, tmp_path):
         proc, albero = tmp_path / "proc", tmp_path / "albero"
         albero.mkdir()
@@ -1818,6 +1825,73 @@ class TestIlLancioSiFermaPrimaDiScrivere:
         with runner.lucchetto():
             assert runner.smista() == 2
         assert "lucchetto" in capsys.readouterr().out.lower()
+
+
+class TestIlRunnerSiNominaDalPacchetto:
+    """PBI-383: i testi che dicono come lanciare il runner lo nominano come
+    `tools/asdlc/runner.py`. Chi li legge — il Builder, chi apre la PR, chi
+    registra i giri — copia il comando, e `tools/asdlc_runner.py` non c'è più."""
+
+    COMANDO = "tools/asdlc/runner.py --chiedi-impl"
+
+    def test_il_prompt_del_builder(self):
+        prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
+        assert f"python3 {self.COMANDO}" in prompt
+
+    def test_la_guardia_di_fase_sulla_produzione(self):
+        ragione = runner.guardia_di_fase("TEST_ONLY", "frontend/src/pages/FoglioPage.tsx")
+        assert self.COMANDO in ragione
+
+    def test_la_guardia_di_fase_sul_file_della_fase(self):
+        ragione = runner.guardia_di_fase("TEST_ONLY", runner.FILE_DELLA_FASE)
+        assert self.COMANDO in ragione
+
+    def test_il_corpo_della_pr(self, monkeypatch, git_finto):
+        catturato: dict[str, list[str]] = {}
+
+        def finto_esegui(cmd, cwd, timeout=7200):
+            catturato.setdefault("cmd", cmd)
+            return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
+
+        monkeypatch.setattr(runner, "esegui", senza_pr_aperte(finto_esegui))
+        pbi_path = REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
+        esito = runner.Esito("PBI-102", "fatto", critic_saltato=True)
+
+        runner.apri_pr("PBI-102", pbi_path, "pbi/pbi-102", esito)
+
+        cmd = catturato["cmd"]
+        assert "`tools/asdlc/runner.py`" in cmd[cmd.index("--body") + 1]
+
+    def test_la_riga_del_registro_a_fine_giro(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi", lambda pbi, *a, **k: runner.Esito(pbi, "saltato")
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["asdlc_runner", "PBI-212", "--dry-run", "--in-primo-piano"]
+        )
+
+        runner.smista()
+
+        assert "`python3 tools/asdlc/runner.py --registra " in capsys.readouterr().out
+
+    def test_il_lucchetto_occupato_dice_come_cercare_il_runner(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI deve partire con l'albero occupato"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "PBI-212", "--in-primo-piano"])
+
+        with runner.lucchetto():
+            assert runner.smista() == 2
+
+        assert "`ps aux | grep asdlc/runner`" in capsys.readouterr().out
 
 
 class TestSiPuoSaltareIlCritic:
@@ -4024,7 +4098,7 @@ class TestLoSchermoDiPytestNonDecide:
     decidere è il rapporto JUnit."""
 
     def test_nel_runner_non_ci_sono_le_regex_sullo_schermo_di_pytest(self):
-        sorgente = (REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8")
+        sorgente = (REPO / "tools" / "asdlc" / "runner.py").read_text(encoding="utf-8")
 
         assert "RE_ESITO_PYTEST" not in sorgente
         assert "RE_RIEPILOGO_PYTEST" not in sorgente
@@ -5402,6 +5476,25 @@ class TestIComandiPortanoIlServerDellEsito:
         fine = next((i for i, a in enumerate(dopo) if a.startswith("-")), len(dopo))
         return dopo[:fine]
 
+    def test_la_config_lancia_il_server_da_tools_asdlc_esito(
+        self, monkeypatch, git_finto, tmp_path
+    ):
+        """PBI-383, criterio 5: il server sta nel pacchetto, e la config lo
+        lancia da lì. Un percorso che non esiste la CLI lo scopre solo a giro
+        avviato, come «senza esito»."""
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        agente = agente_finto({"builder": FATTO, "critic": verdetto("pass")})
+        monkeypatch.setattr(runner, "esegui", agente)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == "builder")
+        config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
+        server = config["mcpServers"]["asdlc"]
+        assert server["args"] == [str(REPO / "tools" / "asdlc" / "esito.py")]
+        assert Path(server["args"][0]).is_file()
+
     @pytest.mark.parametrize("ruolo", ["builder", "critic"])
     def test_la_config_porta_ruolo_ed_esito_dell_invocazione(
         self, monkeypatch, git_finto, tmp_path, ruolo
@@ -5420,7 +5513,7 @@ class TestIComandiPortanoIlServerDellEsito:
         )
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        assert any(a.endswith("asdlc_esito.py") for a in [server["command"], *server["args"]])
+        assert any(a.endswith("asdlc/esito.py") for a in [server["command"], *server["args"]])
         ambiente = server["env"]
         assert ambiente["ASDLC_RUOLO"] == ruolo
         assert Path(ambiente["ASDLC_ESITO"]).parent == tmp_path, (
@@ -5732,7 +5825,7 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         chiamate, e la terza — il difetto 61 — non l'aveva avuta."""
         import ast
 
-        albero = ast.parse((REPO / "tools" / "asdlc_runner.py").read_text(encoding="utf-8"))
+        albero = ast.parse((REPO / "tools" / "asdlc" / "runner.py").read_text(encoding="utf-8"))
         fuori: list[str] = []
         for funzione in ast.walk(albero):
             if (not isinstance(funzione, (ast.FunctionDef, ast.AsyncFunctionDef))
