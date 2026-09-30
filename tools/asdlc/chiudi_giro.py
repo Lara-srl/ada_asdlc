@@ -37,10 +37,14 @@ from asdlc import config as asdlc_config  # noqa: E402
 esegui = coda.esegui
 
 
-def ultimo_rapporto(worktree: Path, pbi: str) -> tuple[str, dict] | None:
-    """`(run, esito)` dell'ultimo `runs/<run>.json` dell'albero che nomina il PBI."""
+def ultimo_rapporto(worktree: Path, pbi: str, run: str | None = None
+                    ) -> tuple[str, dict] | None:
+    """`(run, esito)` dell'ultimo `runs/<run>.json` dell'albero che nomina il PBI,
+    o di `runs/<run>.json` se `run` è dato (PBI-385, decisione 2)."""
     cartella = worktree / coda.CFG.registro.cartella
-    for file in sorted(cartella.glob("*.json"), reverse=True):
+    candidati = [cartella / f"{run}.json"] if run else sorted(cartella.glob("*.json"),
+                                                              reverse=True)
+    for file in candidati:
         try:
             dati = json.loads(file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -97,6 +101,8 @@ def smista(argv: list[str] | None = None) -> int:
                     help="il checkout del tick, da cui si parla con origin")
     ap.add_argument("--worktree", type=Path, default=coda.WORKTREE_DEL_RUNNER,
                     help="l'albero del runner, dove sta il rapporto del giro")
+    ap.add_argument("--run", metavar="ID",
+                    help="il rapporto runs/<ID>.json al posto dell'ultimo che nomina il PBI")
     ap.add_argument("--dry-run", action="store_true",
                     help="stampa i sei passi con i valori veri e non esegue niente")
     a = ap.parse_args(argv)
@@ -107,7 +113,7 @@ def smista(argv: list[str] | None = None) -> int:
     if coda.giro_in_corso(a.worktree):
         return rifiuta(f"il lucchetto {a.worktree / coda.LUCCHETTO} è tenuto: in "
                        f"{a.worktree} c'è un runner al lavoro, e il giro non è fermo.")
-    run, esito = ultimo_rapporto(a.worktree, a.pbi)
+    run, esito = ultimo_rapporto(a.worktree, a.pbi, a.run)
     testa = esito.get("testa", "")
     if not testa:
         return rifiuta(f"il rapporto {run} di {a.pbi} non ha `testa`, e il tag non saprebbe "
