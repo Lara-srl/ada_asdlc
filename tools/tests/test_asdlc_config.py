@@ -373,3 +373,14 @@ def test_un_percorso_di_macchina_in_asdlc_toml_e_un_errore_che_nomina_la_chiave(
     assert f"[{sezione}].{chiave}" in str(fermata.value)
     assert valore in str(fermata.value)
     assert "asdlc.local.toml" in str(fermata.value), "dice dove va un percorso di macchina"
+
+
+def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
+    """`[ambiente].eseguibili`: ciò che i gate lanciano per nome, e che il runner
+    e il tick verificano prima di partire (PBI-384, decisione 7)."""
+    testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"\n',
+                                  'pacchetto = ".venv-asdlc"\neseguibili = ["git", "pytest"]\n')
+
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert getattr(cfg.ambiente, "eseguibili", None) == ("git", "pytest")

@@ -3109,6 +3109,48 @@ class TestIlRunnerGiraDalVenvDichiarato:
         assert not (tmp_path / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
 
 
+class TestGliEseguibiliDichiaratiSiVerificanoPrimaDiPartire:
+    """PBI-384, decisione 7: l'ambiente sta scritto in `[ambiente].eseguibili`, e
+    si verifica all'avvio sul `PATH` che vedranno i gate, cioè dopo
+    `venv_sul_path()`. Prima un `pytest` mancante si scopriva un test alla volta:
+    19 uscite 127 nel difetto 60 di PBI-102."""
+
+    @pytest.fixture
+    def dal_venv_dichiarato(self, ambiente_vero, tmp_path, monkeypatch):
+        """L'interprete dei test **è** nel venv dichiarato: l'unica mancanza che
+        resta da vedere è quella degli eseguibili."""
+        monkeypatch.setattr(runner, "PACCHETTO", Path(sys.executable).parent.parent)
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessun PBI parte con l'ambiente mancante"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc-runner", "PBI-212", "--in-primo-piano"])
+
+    def test_un_eseguibile_che_manca_ferma_il_lancio_con_tutte_le_mancanze_e_dove_le_ha_cercate(
+        self, dal_venv_dichiarato, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(runner, "ESEGUIBILI", ("git", "pytest", "npm"), raising=False)
+        monkeypatch.setattr(runner, "VENV", "venv-che-non-ce")
+        monkeypatch.setattr(runner.shutil, "which",
+                            lambda c, *a, **k: None if c in ("pytest", "npm") else f"/usr/bin/{c}")
+
+        assert runner.smista() == 2
+
+        uscita = capsys.readouterr().out
+        assert ("ambiente mancante: `pytest` (cercato in `venv-che-non-ce/bin` e sul `PATH`)"
+                in uscita), uscita
+        assert ("ambiente mancante: `npm` (cercato in `venv-che-non-ce/bin` e sul `PATH`)"
+                in uscita), "tutte le mancanze, non la prima"
+        assert "`git`" not in uscita, "ciò che c'è non si nomina"
+        assert "ambiente mancante: il venv `venv-che-non-ce` non c'è" in uscita, (
+            "il venv dichiarato deve esistere")
+        assert not (tmp_path / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
+
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
