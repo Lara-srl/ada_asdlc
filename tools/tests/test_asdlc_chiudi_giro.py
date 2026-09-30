@@ -264,3 +264,31 @@ def test_con_il_lucchetto_tenuto_il_comando_rifiuta_senza_git_e_senza_pausa(
     assert not (home_finta / "asdlc-tick.pausa").exists()
     detto = capsys.readouterr().out
     assert "lucchetto" in detto and str(albero) in detto, detto
+
+
+@pytest.mark.parametrize("rami, nominati", [
+    ((("pbi/pbi-377", ALTRA),), (TESTA, ALTRA)),
+    ((), ("nessun ramo",)),
+    ((("pbi/pbi-377", TESTA), ("pbi/pbi-377-giro2", ALTRA)),
+     ("pbi/pbi-377", "pbi/pbi-377-giro2")),
+], ids=["ramo-diverso-dalla-testa", "nessun-ramo", "due-rami"])
+def test_senza_un_solo_ramo_sulla_testa_del_rapporto_il_comando_rifiuta(
+    home_finta, tmp_path, monkeypatch, capsys, rami, nominati
+):
+    """Decisione 3. Su `origin` ci dev'essere esattamente un ramo del PBI, e deve
+    puntare alla testa del rapporto. Un ramo andato avanti dopo il giro — una
+    correzione a mano, un secondo giro — non è ciò che il rapporto descrive, e
+    il tag finirebbe su un commit mentre si cancella un altro: il 25/09 il tag
+    di PBI-363 è finito su 739fc08 e c'è voluto un `push -f`. Il rifiuto nomina
+    i due sha, o i rami che ha trovato."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta, rami=rami)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita != 0
+    assert i_passi(visti) == []
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    detto = capsys.readouterr().out
+    assert all(n in detto for n in nominati), detto
