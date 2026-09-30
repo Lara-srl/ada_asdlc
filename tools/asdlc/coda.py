@@ -596,6 +596,29 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
         log.write(f"{datetime.now().isoformat(timespec='seconds')}  {riga}\n")
 
 
+def file_di_pausa() -> Path:
+    """`~/asdlc-tick.pausa`, calcolato quando serve e non all'import: i test
+    spostano `HOME` (PBI-385, decisione 5). Non sta in `asdlc.toml`, che non
+    porta percorsi di macchina, e vale per ogni tick dell'utente su questa
+    macchina, di qualsiasi progetto."""
+    return Path.home() / "asdlc-tick.pausa"
+
+
+def pausa() -> str | None:
+    """La riga del file di pausa — data, ora e ragione — o `None` se il tick non
+    è in pausa.
+
+    Il tick non si spegne più commentando la sua riga nel crontab: cron lancia
+    dalla tabella che ha caricato, e fra la modifica e il `RELOAD` il tick
+    lanciava con la riga vecchia (difetto 69 di PBI-102). Il file lo legge il
+    tick stesso a ogni passaggio, e non c'è una seconda fonte da aspettare.
+    """
+    file = file_di_pausa()
+    if not file.exists():
+        return None
+    return file.read_text(encoding="utf-8").strip()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Un tick: legge `asdlc.toml`, poi guarda, decide una cosa, la fa, e finisce.
 
@@ -633,6 +656,14 @@ def smista(argv: list[str] | None = None) -> int:
               "eseguendo. Lancialo dal checkout principale, con --worktree sull'albero "
               "del runner.")
         return 2
+
+    # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
+    # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
+    if (motivo := pausa()) is not None:
+        riga = f"in pausa: {motivo}"
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
+        return 0
 
     decisione = decidi(a.repo, a.worktree)
     riga = racconta(decisione)
