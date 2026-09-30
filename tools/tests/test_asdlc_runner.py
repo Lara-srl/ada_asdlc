@@ -1779,6 +1779,17 @@ class TestUnAgenteNelWorktreeFermaIlLancio:
         self._finto(proc, 797078, albero, b"claude\x00-p\x00")
         assert runner.agenti_estranei(albero, proc=proc) == [(797078, "claude -p")]
 
+    def test_trova_il_runner_installato_lanciato_come_asdlc_runner(self, tmp_path):
+        """PBI-384: il runner si lancia come `<pacchetto>/bin/asdlc-runner`, e il
+        suo comando è l'interprete del venv sullo script installato. Nessuna delle
+        forme di prima, `asdlc_runner` e `asdlc/runner.py`, lo nomina."""
+        proc, albero = tmp_path / "proc", tmp_path / "albero"
+        albero.mkdir()
+        self._finto(proc, 4242, albero,
+                    b"/x/.venv-asdlc/bin/python3\x00/x/.venv-asdlc/bin/asdlc-runner\x00PBI-384\x00")
+        assert runner.agenti_estranei(albero, proc=proc) == [
+            (4242, "/x/.venv-asdlc/bin/python3 /x/.venv-asdlc/bin/asdlc-runner PBI-384")]
+
     def test_trova_anche_un_sottoalbero(self, tmp_path):
         proc, albero = tmp_path / "proc", tmp_path / "albero"
         (albero / "frontend").mkdir(parents=True)
