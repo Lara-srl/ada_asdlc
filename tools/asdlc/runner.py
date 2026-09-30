@@ -237,7 +237,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI, PACCHETTO, ESEGUIBILI
     global MINIMI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
-    global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
+    global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO, GUARDIA_DEL_COMMIT
     global GATE_DEL_ROSSO_ATTIVO
     CFG = cfg
     GATE = list(cfg.gate)
@@ -280,6 +280,10 @@ def configura(cfg: asdlc_config.Config) -> None:
     ESEGUIBILI = cfg.ambiente.eseguibili
     # E la versione principale sotto cui un eseguibile non basta.
     MINIMI = cfg.ambiente.minimi
+    # Il `pre-commit` col percorso del runner installato: senza `pacchetto` il
+    # percorso è vuoto, e l'hook lo dice e lascia passare.
+    GUARDIA_DEL_COMMIT = MODELLO_DELLA_GUARDIA_DEL_COMMIT.format(
+        runner=PACCHETTO / "bin" / "asdlc-runner" if PACCHETTO else "")
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -4002,18 +4006,18 @@ def chiedi_impl() -> int:
 # Il `pre-commit` che il runner installa. Inerte fuori da un giro, come l'hook di
 # Claude Code e per la stessa ragione: sta in `.git/hooks`, che i worktree di
 # questo repository condividono, e non deve farsi sentire da chi non è in un giro.
-# Il runner si cerca in due forme, la nuova prima (PBI-388): `PBI-383` lo sposta
-# in `tools/asdlc/runner.py`, e `python3` su un file che non c'è esce con 2. Se
-# non c'è nessuna delle due il commit passa, con un avviso (ADR-0008).
-GUARDIA_DEL_COMMIT = """#!/bin/sh
+# Lancia il runner installato, `<pacchetto>/bin/asdlc-runner`, col percorso
+# assoluto scritto dentro da `configura()` (PBI-384, decisione 5): mai il sorgente
+# dell'albero, che è la copia di lavoro del Builder. Il `pre-commit` è anche
+# delle persone: se il comando non c'è il commit passa, con un avviso (ADR-0008).
+MODELLO_DELLA_GUARDIA_DEL_COMMIT = """#!/bin/sh
 # Installato dal runner ASDLC (PBI-104): il commit non nasce fuori fase.
-radice="$(git rev-parse --show-toplevel)"
-for sorgente in tools/asdlc/runner.py tools/asdlc_runner.py; do
-    [ -f "$radice/$sorgente" ] && exec python3 "$radice/$sorgente" --guardia-commit
-done
-echo "guardia del lucchetto: runner non trovato in tools/asdlc/runner.py né in tools/asdlc_runner.py" >&2
+runner="{runner}"
+[ -x "$runner" ] && exec "$runner" --guardia-commit
+echo "guardia del lucchetto: runner non trovato in $runner" >&2
 exit 0
 """
+GUARDIA_DEL_COMMIT: str  # il modello col runner del pacchetto dentro, da `configura()`
 
 
 def installa_la_guardia_del_commit() -> bool:
