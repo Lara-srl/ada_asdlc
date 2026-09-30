@@ -448,3 +448,11 @@ def test_il_readme_della_cartella_di_aggiunte_non_e_un_errore(tmp_path):
     cfg = asdlc_config.carica(tmp_path)
 
     assert cfg.prompt.aggiunte == aggiunte.resolve()
+
+
+def test_l_asdlc_toml_del_repository_dichiara_le_aggiunte_in_asdlc_aggiunte():
+    """aDa dichiara la sua cartella delle aggiunte, vuota di aggiunte: chi vuole
+    estendere un prompt sa dove scrivere (PBI-386)."""
+    cfg = asdlc_config.carica(REPO)
+
+    assert cfg.prompt.aggiunte == (REPO / "asdlc-aggiunte").resolve()
