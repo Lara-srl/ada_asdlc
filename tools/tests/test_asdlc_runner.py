@@ -3176,6 +3176,91 @@ class TestGliEseguibiliDichiaratiSiVerificanoPrimaDiPartire:
             uscita)
 
 
+class TestGliHookTrovanoIlRunnerPrimaDiPartire:
+    """PBI-384, decisione 6: gli hook che lasciano passare vanno bene per le
+    persone, non per i giri. Il Builder non lavora mai senza guardia di fase, e la
+    guardia del commit è il `pre-commit`: se gli hook non trovano il runner
+    installato è «ambiente mancante», prima del lucchetto e della sessione del
+    Builder. Un caso per uno, con tutto il resto dell'ambiente a posto."""
+
+    @pytest.fixture
+    def giro_nel_repo(self, ambiente_vero, repo_di_prova, tmp_path, monkeypatch):
+        """Il runner gira da un venv del pacchetto temporaneo, nel repository di
+        prova, con il venv dei gate che c'è e nessun eseguibile da cercare.
+        Torna il percorso dell'`asdlc-runner` installato, che il test crea o no."""
+        pacchetto = tmp_path / "venv-asdlc"
+        (pacchetto / "bin").mkdir(parents=True)
+        (repo_di_prova.radice / "venv").mkdir()
+        monkeypatch.setattr(runner, "PACCHETTO", pacchetto)
+        monkeypatch.setattr(runner.sys, "executable", str(pacchetto / "bin" / "python"))
+        monkeypatch.setattr(runner, "VENV", "venv")
+        monkeypatch.setattr(runner, "ESEGUIBILI", ())
+        monkeypatch.setattr(runner, "MINIMI", {})
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path / "runs")
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "runs" / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        monkeypatch.setattr(
+            runner, "esegui_pbi",
+            lambda *a, **k: pytest.fail("nessuna sessione del Builder senza le guardie"),
+        )
+        monkeypatch.setattr(sys, "argv", ["asdlc-runner", "PBI-212", "--in-primo-piano"])
+        return pacchetto / "bin" / "asdlc-runner"
+
+    @staticmethod
+    def _eseguibile(percorso: Path) -> None:
+        percorso.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        percorso.chmod(0o755)
+
+    @staticmethod
+    def _pre_commit(repo, testo: str) -> Path:
+        hook = repo.radice / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(testo, encoding="utf-8")
+        hook.chmod(0o755)
+        return hook
+
+    def _fermato(self, tmp_path, capsys) -> str:
+        assert runner.smista() == 2
+        uscita = capsys.readouterr().out
+        assert "ambiente mancante" in uscita, uscita
+        assert not (tmp_path / "runs" / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
+        return uscita
+
+    def test_senza_asdlc_runner_nel_venv_del_pacchetto_il_giro_non_parte(
+        self, giro_nel_repo, tmp_path, capsys
+    ):
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"`{giro_nel_repo}` non c'è o non è eseguibile" in uscita, uscita
+
+    def test_un_pre_commit_altrui_ferma_il_giro(
+        self, giro_nel_repo, repo_di_prova, tmp_path, capsys
+    ):
+        """PBI-388 non lo tocca, e il giro non parte senza la guardia del commit."""
+        self._eseguibile(giro_nel_repo)
+        hook = self._pre_commit(repo_di_prova,
+                                "#!/bin/sh\n# il formattatore di qualcun altro\nexec npx lint-staged\n")
+
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"il `pre-commit` in `{hook.parent}` non è del runner" in uscita, uscita
+
+    def test_un_pre_commit_che_lancia_un_altro_runner_ferma_il_giro(
+        self, giro_nel_repo, repo_di_prova, tmp_path, capsys
+    ):
+        """Un `pre-commit` scritto a mano che lancia il runner di un altro venv:
+        non è del runner, quindi PBI-388 non lo riscrive, e non lancia quel
+        percorso."""
+        self._eseguibile(giro_nel_repo)
+        hook = self._pre_commit(repo_di_prova,
+                                "#!/bin/sh\nexec /opt/altro/bin/asdlc-runner --guardia-commit\n")
+
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"il `pre-commit` in `{hook.parent}` non lancia `{giro_nel_repo}`" in uscita, uscita
+
+
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.
 
