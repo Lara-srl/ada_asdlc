@@ -193,9 +193,12 @@ def carica(repo: Path) -> Config:
     comune = radice_comune(repo)
     pacchetto = cfg.ambiente.pacchetto
     aggiunte = cfg.prompt.aggiunte
+    if aggiunte is not None:
+        aggiunte = (repo / aggiunte).resolve()
+        controlla_le_aggiunte(aggiunte)
     return replace(
         cfg,
-        prompt=Prompt(aggiunte=None if aggiunte is None else (repo / aggiunte).resolve()),
+        prompt=Prompt(aggiunte=aggiunte),
         ambiente=replace(cfg.ambiente,
                          pacchetto=None if pacchetto is None else risolvi(comune, pacchetto)),
         worktree=Worktree(percorso=risolvi(comune, cfg.worktree.percorso)),
@@ -219,6 +222,23 @@ def rifiuta_i_percorsi_di_macchina(dati: dict) -> None:
                 f"{NOME_FILE}: `[{sezione}].{chiave}` è un percorso di macchina, "
                 f"{valore!r} — qui i percorsi sono relativi alla radice comune del "
                 f"repository, e uno assoluto va in {NOME_FILE_LOCALE}, che è gitignored")
+
+
+def controlla_le_aggiunte(cartella: Path) -> None:
+    """La cartella di `[prompt].aggiunte` c'è, e porta solo file `<ruolo>.md`.
+
+    Una cartella dichiarata e assente, o un file con un nome che non è un ruolo,
+    si fermano nominandoli: un refuso non diventa un'aggiunta persa in silenzio
+    (PBI-386, decisione 3)."""
+    if not cartella.is_dir():
+        raise ErroreDiConfigurazione(
+            f"{NOME_FILE}: `[prompt].aggiunte` è {cartella}, che non è una cartella")
+    ruoli = {f"{ruolo}.md" for ruolo in RUOLI_DEI_PROMPT}
+    for file in sorted(cartella.iterdir()):
+        if file.name not in ruoli:
+            raise ErroreDiConfigurazione(
+                f"{NOME_FILE}: `{file.name}` in {cartella} non è un ruolo — le aggiunte "
+                f"sono file `<ruolo>.md`, con ruolo fra {', '.join(RUOLI_DEI_PROMPT)}")
 
 
 def radice_comune(repo: Path) -> Path:
