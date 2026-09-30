@@ -100,9 +100,10 @@ NOME_LUCCHETTO = ".runner.lock"
 
 # Chi, girando in questo albero, ci **scrive**. Un `tail -f` sul log o un `git log`
 # aperto non sono un pericolo, e un controllo che grida sempre si impara a spegnere.
-# Il runner in due forme: `asdlc/runner.py` dal pacchetto (PBI-383), e
-# `asdlc_runner` com'era lanciato prima del trasloco.
-AGENTI = ("claude", "asdlc_runner", "asdlc/runner.py")
+# Il runner in tre forme: `asdlc-runner`, il comando installato (PBI-384),
+# `asdlc/runner.py` dal sorgente del pacchetto (PBI-383), e `asdlc_runner` com'era
+# lanciato prima del trasloco.
+AGENTI = ("claude", "asdlc-runner", "asdlc_runner", "asdlc/runner.py")
 
 # I flag di autonomia e di routing stanno qui, in un posto solo, così si vedono e si
 # cambiano. ⚠️ Verifica i nomi con `claude --help`: cambiano fra versioni della CLI.
