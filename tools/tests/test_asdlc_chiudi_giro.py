@@ -333,3 +333,24 @@ def test_un_passo_che_fallisce_toglie_la_pausa_e_dice_cosa_resta(
     detto = capsys.readouterr().out
     assert " ".join(push_del_tag) in detto, detto
     assert "git push origin --delete pbi/pbi-377" in detto, detto
+
+
+def test_una_pausa_che_cera_gia_resta_con_la_sua_riga_e_il_comando_lo_dice(
+    home_finta, tmp_path, monkeypatch, capsys
+):
+    """Decisione 6, l'eccezione. Il tick era già in pausa per un'altra ragione:
+    il comando non riscrive il file e non lo toglie — riaccendere il tick non è
+    una sua decisione — e alla fine dice che il tick resta in pausa e da quando."""
+    riga = "2026-09-30 17:51 ripassata dell'import, Francesco\n"
+    (home_finta / "asdlc-tick.pausa").write_text(riga, encoding="utf-8")
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert (home_finta / "asdlc-tick.pausa").read_text(encoding="utf-8") == riga
+    assert all(pausa == riga for _, _, pausa in i_passi(visti)), "il file non si riscrive"
+    detto = capsys.readouterr().out
+    assert "resta in pausa" in detto and riga.strip() in detto, detto
