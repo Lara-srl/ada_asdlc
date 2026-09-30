@@ -10,6 +10,7 @@ Il modulo si carica per nome, `asdlc.config`, come `test_asdlc_runner.py` e
 """
 
 import ast
+import re
 import importlib.util
 import subprocess
 import sys
@@ -410,4 +411,25 @@ def test_una_chiave_di_prompt_diversa_da_aggiunte_e_un_errore_che_la_nomina(tmp_
                 + f'\n[prompt]\naggiunte = "aggiunte"\n{chiave} = "mio.md"\n')
 
     with pytest.raises(asdlc_config.ErroreDiConfigurazione, match=rf"\[prompt\]\.{chiave}"):
+        asdlc_config.carica(tmp_path)
+
+
+def test_una_cartella_di_aggiunte_dichiarata_e_assente_e_un_errore_che_la_nomina(tmp_path):
+    scrivi_toml(tmp_path, TOML_DI_PROVA + '\n[prompt]\naggiunte = "aggiunte"\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione, match=r"\[prompt\]\.aggiunte"):
+        asdlc_config.carica(tmp_path)
+
+
+@pytest.mark.parametrize("nome", ["bulder.md", "critic.txt", "tutti.md"])
+def test_un_file_di_aggiunte_che_non_e_un_ruolo_e_un_errore_che_lo_nomina(tmp_path, nome):
+    """Un refuso nel nome non diventa un'aggiunta persa in silenzio: il file
+    c'è, e nessun prompt lo riceverebbe."""
+    aggiunte = tmp_path / "aggiunte"
+    aggiunte.mkdir()
+    (aggiunte / "critic.md").write_text("regola\n", encoding="utf-8")
+    (aggiunte / nome).write_text("regola\n", encoding="utf-8")
+    scrivi_toml(tmp_path, TOML_DI_PROVA + '\n[prompt]\naggiunte = "aggiunte"\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione, match=re.escape(nome)):
         asdlc_config.carica(tmp_path)
