@@ -354,3 +354,28 @@ def test_una_pausa_che_cera_gia_resta_con_la_sua_riga_e_il_comando_lo_dice(
     assert all(pausa == riga for _, _, pausa in i_passi(visti)), "il file non si riscrive"
     detto = capsys.readouterr().out
     assert "resta in pausa" in detto and riga.strip() in detto, detto
+
+
+def test_il_dry_run_stampa_i_sei_passi_coi_valori_veri_e_non_esegue_niente(
+    home_finta, tmp_path, monkeypatch, capsys
+):
+    """Decisione 7. Le domande a `origin` restano — senza non ci sarebbero i
+    valori veri, il ramo e il tag — ma nessun comando che cambia qualcosa parte,
+    e la pausa non nasce."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(
+        ["PBI-377", "--repo", str(repo), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert i_passi(visti) == []
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    detto = capsys.readouterr().out
+    for atteso in (str(home_finta / "asdlc-tick.pausa"),
+                   f"git tag {TAG} {TESTA}",
+                   f"git push origin refs/tags/{TAG}",
+                   "git push origin --delete pbi/pbi-377",
+                   "git merge --ff-only origin/main"):
+        assert atteso in detto, (atteso, detto)
