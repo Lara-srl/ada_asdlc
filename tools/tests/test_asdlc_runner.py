@@ -3150,6 +3150,30 @@ class TestGliEseguibiliDichiaratiSiVerificanoPrimaDiPartire:
             "il venv dichiarato deve esistere")
         assert not (tmp_path / runner.NOME_LUCCHETTO).exists(), "prima del lucchetto"
 
+    def test_un_node_sotto_il_minimo_e_ambiente_mancante_e_dice_la_versione_trovata(
+        self, dal_venv_dichiarato, tmp_path, monkeypatch, capsys
+    ):
+        """Il Node di cron era il 18 invece del 20, e nessuno lo diceva prima del
+        gate (PBI-384, decisione 7). Il `node` finto sta nel venv dei gate, che è
+        il primo posto in cui si cerca."""
+        progetto = tmp_path / "progetto"
+        node = progetto / "venv" / "bin" / "node"
+        node.parent.mkdir(parents=True)
+        node.write_text("#!/bin/sh\necho v18.19.0\n", encoding="utf-8")
+        node.chmod(0o755)
+        monkeypatch.setattr(runner, "REPO", progetto)
+        monkeypatch.setattr(runner, "VENV", "venv")
+        monkeypatch.setattr(runner, "ESEGUIBILI", ("node",))
+        monkeypatch.setattr(runner, "MINIMI", {"node": 20}, raising=False)
+        # `venv_sul_path()` scrive nel `PATH` del processo: il test lo rimette.
+        monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
+
+        assert runner.smista() == 2
+
+        uscita = capsys.readouterr().out
+        assert "ambiente mancante: `node` 18, il minimo è 20 (`node --version`: v18.19.0)" in uscita, (
+            uscita)
+
 
 class TestIGateSiDichiaranoPrimaDiPartire:
     """Difetto 21 di PBI-102: un gate che non può girare si dice in tre secondi.

@@ -384,3 +384,14 @@ def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
     cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
 
     assert getattr(cfg.ambiente, "eseguibili", None) == ("git", "pytest")
+
+
+def test_i_minimi_dell_ambiente_si_leggono_da_ambiente(tmp_path):
+    """`[ambiente].minimi`: la versione principale sotto cui un eseguibile non
+    basta, `{ node = 20 }` (PBI-384, decisione 7)."""
+    testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"\n',
+                                  'pacchetto = ".venv-asdlc"\nminimi = { node = 20 }\n')
+
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert getattr(cfg.ambiente, "minimi", None) == {"node": 20}
