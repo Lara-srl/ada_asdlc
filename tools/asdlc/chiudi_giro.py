@@ -81,6 +81,14 @@ def nome_del_tag(pbi: str, ramo: str, run: str) -> str:
     return f"giro-fermato/{pbi.lower()}-giro{giro}-{run[:8]}"
 
 
+def rifiuta(ragione: str) -> int:
+    """Il comando non parte, e dice quale condizione e con quali valori. Esce
+    con 2, come il runner che non parte: non è un passo fallito, perché nessun
+    passo è cominciato."""
+    print(f"Non chiudo: {ragione}")
+    return 2
+
+
 def smista(argv: list[str] | None = None) -> int:
     """`main()` a configurazione già letta: i test la chiamano da qui."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -92,7 +100,11 @@ def smista(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     run, esito = ultimo_rapporto(a.worktree, a.pbi)
-    testa = esito["testa"]
+    testa = esito.get("testa", "")
+    if not testa:
+        return rifiuta(f"il rapporto {run} di {a.pbi} non ha `testa`, e il tag non saprebbe "
+                       "su quale commit andare. È un giro di prima di PBI-385 o un giro che "
+                       "non ha pubblicato: si chiude a mano, con il file di pausa.")
     ramo, _ = rami_del_pbi(a.repo, a.pbi)[0]
     tag = nome_del_tag(a.pbi, ramo, run)
 
