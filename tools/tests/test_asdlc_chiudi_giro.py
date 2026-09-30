@@ -14,6 +14,7 @@ togliesse spegnerebbe o riaccenderebbe il cron di chi li lancia.
 """
 
 import importlib
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -93,3 +94,12 @@ def test_guardia_un_rapporto_senza_testa_si_registra_ancora(tmp_path, monkeypatc
     righe = list(runner.csv.DictReader((tmp_path / "tempi.csv").open(encoding="utf-8")))
     assert [(r["run"], r["pbi"], r["stato"], r["commit"]) for r in righe] == [
         ("20260927-100000-000001", "PBI-377", "fermato", "4")]
+
+
+# --- Il comando --------------------------------------------------------------
+
+
+def test_il_modulo_di_asdlc_chiudi_giro_sta_nel_pacchetto():
+    """Il punto d'ingresso `asdlc-chiudi-giro` di `tools/pyproject.toml` punta a
+    `asdlc.chiudi_giro:main`: il modulo deve esserci, nel pacchetto `asdlc`."""
+    assert importlib.util.find_spec("asdlc.chiudi_giro") is not None
