@@ -110,6 +110,9 @@ class Ambiente:
     # alla radice comune, non a quella del progetto (PBI-384). `None` se il
     # progetto non lo dichiara.
     pacchetto: Path | None = None
+    # Ciò che i gate e il runner lanciano per nome: il runner e il tick lo cercano
+    # prima di partire. Vuoto, non si verifica niente.
+    eseguibili: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -272,7 +275,8 @@ def interpreta(dati: dict, file: str) -> Config:
                         id=backlog.testo("id"), file=backlog.testo("file")),
         registro=Registro(cartella=registro.testo("cartella"), tempi=registro.testo("tempi")),
         ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti"),
-                          pacchetto=_percorso(ambiente.testo("pacchetto", default=None))),
+                          pacchetto=_percorso(ambiente.testo("pacchetto", default=None)),
+                          eseguibili=ambiente.testi("eseguibili", default=())),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),

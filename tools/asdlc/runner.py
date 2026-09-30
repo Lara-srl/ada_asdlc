@@ -87,6 +87,7 @@ VENV: str                # `[ambiente].venv`
 # `[ambiente].pacchetto`, assoluto: il venv in cui è installato il runner. Ogni
 # comando che il runner lancia o fa lanciare è `<pacchetto>/bin/<comando>`.
 PACCHETTO: Path | None
+ESEGUIBILI: tuple[str, ...]  # `[ambiente].eseguibili`
 PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
 # **nome** del file e non il suo percorso: la cartella è `LOG_DIR`, e un percorso
@@ -232,7 +233,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     dentro un oggetto costruito in `main()` li romperebbe tutti (PBI-358,
     decisione 1). Il guadagno — un posto solo — è lo stesso.
     """
-    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI, PACCHETTO
+    global CFG, GATE, LOG_DIR, CSV_TEMPI, BACKLOG, VENV, PRESTITI, PACCHETTO, ESEGUIBILI
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO
     global GATE_DEL_ROSSO_ATTIVO
@@ -273,6 +274,8 @@ def configura(cfg: asdlc_config.Config) -> None:
     # Il venv del runner installato, già assoluto: `carica()` lo risolve dalla
     # radice comune, quindi è lo stesso da ogni worktree.
     PACCHETTO = cfg.ambiente.pacchetto
+    # Ciò che deve esserci sul `PATH` dei gate prima di partire (`mancanze_dell_ambiente`).
+    ESEGUIBILI = cfg.ambiente.eseguibili
 
     # Gate rossi: oltre, il problema non è che l'agente non ci ha provato.
     MAX_TENTATIVI = cfg.soglie.tentativi
@@ -758,21 +761,38 @@ def venv_sul_path() -> str | None:
 
 def mancanze_dell_ambiente() -> list[str]:
     """Ciò che manca perché un giro possa partire, una riga per mancanza, tutte
-    insieme; vuota se non manca niente (PBI-384).
+    insieme e non la prima; vuota se non manca niente (PBI-384).
 
     Il runner deve girare dal venv che `asdlc.toml` dichiara, `[ambiente].pacchetto`:
     il runner che lavora è quello installato, non il sorgente dell'albero
     (`ADR-0026`, decisione 3). Non si ripiega sul percorso dell'albero. Si guarda
     `sys.executable` così com'è, senza risolverlo: in un venv è un collegamento
     all'interprete di sistema, e risolto uscirebbe dal venv.
+
+    Poi l'ambiente dei gate: il venv di `[ambiente].venv` deve esistere, e gli
+    `[ambiente].eseguibili` si devono trovare lì o sul `PATH`.
     """
+    mancanze: list[str] = []
     if PACCHETTO is None:
-        return ["ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
-                "il venv in cui è installato il runner"]
-    if not Path(sys.executable).is_relative_to(PACCHETTO):
-        return [f"ambiente mancante: il runner gira da `{sys.executable}`, "
-                f"`asdlc.toml` dichiara `{PACCHETTO}`"]
-    return []
+        mancanze.append("ambiente mancante: asdlc.toml non dichiara `[ambiente].pacchetto`, "
+                        "il venv in cui è installato il runner")
+    elif not Path(sys.executable).is_relative_to(PACCHETTO):
+        mancanze.append(f"ambiente mancante: il runner gira da `{sys.executable}`, "
+                        f"`asdlc.toml` dichiara `{PACCHETTO}`")
+    if not (REPO / VENV).is_dir():
+        mancanze.append(f"ambiente mancante: il venv `{VENV}` non c'è")
+    mancanze += eseguibili_mancanti(ESEGUIBILI, VENV, REPO)
+    return mancanze
+
+
+def eseguibili_mancanti(eseguibili: Iterable[str], venv: str, radice: Path) -> list[str]:
+    """Gli eseguibili che non si trovano né nel `bin` del venv né sul `PATH`, una
+    riga ciascuno con dove li si è cercati. Il `PATH` è quello che vedranno i
+    gate: `venv_sul_path()` mette il venv davanti, e qui lo si mette a mano per
+    chi — il tick, `conftest.py` — non l'ha fatto (PBI-384, decisione 7)."""
+    percorso = os.pathsep.join([str(radice / venv / "bin"), os.environ.get("PATH", "")])
+    return [f"ambiente mancante: `{nome}` (cercato in `{venv}/bin` e sul `PATH`)"
+            for nome in eseguibili if shutil.which(nome, path=percorso) is None]
 
 
 def acceso(g: Gate, attivi: set[str], toccati: set[str]) -> bool:
