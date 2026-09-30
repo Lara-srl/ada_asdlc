@@ -4090,6 +4090,42 @@ class TestIlCasoJUnitSiLegaAllaChiave:
         assert {runner.caso_junit(chiave) for chiave in chiavi} == scritti
 
 
+class TestIlRootdirDiPytestELaCartellaDiLancio:
+    """PBI-391, il difetto 67 di `PBI-102`. `caso_junit()` ricava il caso dal
+    node id relativo alla cartella da cui il gate lancia pytest, e presuppone
+    che quella sia il rootdir. Da pytest 8.1 un `pyproject.toml` fra la
+    cartella di lancio e i test vale come configurazione anche senza
+    `[tool.pytest.ini_options]`, e sposta il rootdir: il `classname` di
+    `tools/tests/test_x.py` diventa `tests.test_x`, e nessuna chiave combacia
+    più col suo caso. Gira un pytest vero, col comando di `comandi_dei_test()`."""
+
+    @staticmethod
+    def _casi_scritti(tmp_path, configurazione: dict[str, str]):
+        albero = tmp_path / "albero"
+        (albero / "tools" / "tests").mkdir(parents=True)
+        (albero / "tools" / "tests" / "test_x.py").write_text(
+            "def test_a():\n    assert 1 == 2\n", encoding="utf-8")
+        for nome, testo in configurazione.items():
+            (albero / "tools" / nome).write_text(testo, encoding="utf-8")
+        [comando], _ = runner.comandi_dei_test(
+            albero, [runner.TestNuovo("tools/tests/test_x.py", "test_a", "python")])
+        runner.esiti_del_comando(comando)
+        scritti = {(caso.get("classname"), caso.get("name"))
+                   for caso in ET.parse(comando.rapporto).getroot().iter("testcase")}
+        return comando, scritti
+
+    @pytest.mark.parametrize("configurazione", [
+        pytest.param({"pyproject.toml": "[project]\nname = \"x\"\nversion = \"0\"\n"},
+                     id="pyproject-con-solo-project"),
+        pytest.param({"pytest.ini": "[pytest]\n"}, id="pytest-ini-con-solo-pytest"),
+    ])
+    def test_un_file_di_configurazione_in_tools_non_cambia_il_caso_della_chiave(
+            self, tmp_path, configurazione):
+        comando, scritti = self._casi_scritti(tmp_path, configurazione)
+
+        assert {runner.caso_junit(chiave) for chiave in comando.etichette} == scritti
+
+
 class TestLoSchermoDiPytestNonDecide:
     """PBI-390, criterio 7: nel runner non resta una regex sull'uscita a schermo
     di pytest che decida un esito o un tipo. Le due che c'erano cercavano l'id
