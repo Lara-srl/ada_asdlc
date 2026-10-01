@@ -63,7 +63,7 @@ def ambiente_vero(monkeypatch):
 # di decidere (PBI-392): sono comandi `git` e `pip` veri sul `--repo`. Nei test si
 # sostituiscono come la verifica dell'ambiente, e i test del checkout rimettono
 # le funzioni vere con `checkout_vero`.
-VERE_DEL_CHECKOUT = {nome: getattr(coda, nome, None) for nome in ("allinea",)}
+VERE_DEL_CHECKOUT = {nome: getattr(coda, nome, None) for nome in ("allinea", "reinstalla")}
 
 
 @pytest.fixture(autouse=True)
@@ -1711,3 +1711,45 @@ def test_guardia_in_pausa_il_tick_non_tocca_il_checkout(
     assert uscita == 0
     assert not [c for c in visti if "fetch" in c or "merge" in c], visti
     assert git_in(checkout, "rev-parse", "HEAD") == prima != git_in(origin, "rev-parse", "main")
+
+
+def pip_finto(monkeypatch, pacchetto: Path, codice=0):
+    """`esegui()` vero per `git`, finto per `<pacchetto>/bin/pip`, che esce con
+    `codice`. Torna la lista dei comandi `pip` visti, con la cartella."""
+    vero, visti = coda.esegui, []
+
+    def esegui(cmd, cwd):
+        if cmd[0] == str(pacchetto / "bin" / "pip"):
+            visti.append((cmd, Path(cwd)))
+            return codice, "" if codice == 0 else "ERROR: No matching distribution found"
+        return vero(cmd, cwd)
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+    return visti
+
+
+def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-392, decisioni 8 e 10. La firma è l'albero di `tools/` a `HEAD`,
+    scritta in `<pacchetto>/.installato-da` all'ultima installazione. Dopo un
+    merge che tocca `tools/` non è più quella: il tick, col lucchetto del runner
+    libero, chiama `<pacchetto>/bin/pip install ./tools` nel checkout, scrive la
+    firma nuova e la riga `reinstallato:`, ed esce senza decidere — il processo
+    che gira è ancora la versione di prima, e decide il tick dopo."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
+                                                  tocca="tools/modulo.py")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    albero_di_tools = git_in(checkout, "rev-parse", "HEAD:tools")
+    assert uscita == 0
+    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "./tools"], checkout)]
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == albero_di_tools
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert righe[-1].split("  ", 1)[1] == f"reinstallato: tools/ a {albero_di_tools}", righe
+    assert chiamati == []
