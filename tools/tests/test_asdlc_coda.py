@@ -1835,3 +1835,28 @@ def test_il_dry_run_dice_che_il_checkout_e_indietro_e_non_lo_sposta(
              for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
     assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
     assert "indietro" in righe[0], righe
+
+
+def test_il_dry_run_dice_che_la_firma_non_e_quella_dell_albero_e_non_reinstalla(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 12, l'altra metà: il checkout è allineato a mano ma il
+    pacchetto no — la firma in `.installato-da` non è l'albero di `tools/` a
+    `HEAD`. Il `--dry-run` non chiama `pip`, e lo scrive nella riga prima della
+    decisione."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
+                                                  tocca="tools/modulo.py")
+    git_in(checkout, "pull", "-q", "--ff-only")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert pip == []
+    righe = [r.split("  ", 1)[1]
+             for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
+    assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
+    assert "firma" in righe[0] and git_in(checkout, "rev-parse", "HEAD:tools") in righe[0], righe
