@@ -1753,3 +1753,32 @@ def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
     righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert righe[-1].split("  ", 1)[1] == f"reinstallato: tools/ a {albero_di_tools}", righe
     assert chiamati == []
+
+
+def test_con_la_firma_cambiata_e_un_giro_in_corso_il_tick_non_reinstalla_e_non_lancia(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 9. Un pacchetto cambiato a metà giro darebbe al
+    Builder un server dell'esito di un'altra versione: si reinstalla solo col
+    lucchetto del runner libero. Con il lucchetto tenuto un giro è in corso, il
+    tick non chiama `pip`, la firma resta quella di prima, e `decidi()` dice
+    `occupato` come sempre."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
+                                                  tocca="tools/modulo.py")
+    firma_di_prima = (pacchetto / ".installato-da").read_text(encoding="utf-8")
+    albero = tmp_path / "albero"
+    (albero / "runs").mkdir(parents=True)
+    lanciati: list[str] = []
+    monkeypatch.setattr(coda, "lancia", lambda pbi, worktree: lanciati.append(pbi))
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    with (albero / coda.LUCCHETTO).open("w") as runner_al_lavoro:
+        fcntl.flock(runner_al_lavoro, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == []
+    assert lanciati == []
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8") == firma_di_prima
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert righe[-1].split("  ", 1)[1] == coda.racconta(coda.Occupato()), righe
