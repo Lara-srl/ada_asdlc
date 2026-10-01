@@ -1645,3 +1645,47 @@ def test_il_tick_porta_il_checkout_indietro_a_origin_main_e_decide(
     assert uscita == 0
     assert git_in(checkout, "rev-parse", "HEAD") == git_in(origin, "rev-parse", "main")
     assert chiamati == ["decidi"]
+
+
+def diverge(checkout: Path) -> None:
+    """Un commit locale sul checkout, che `origin` non ha: rami divergenti."""
+    (checkout / "LOCALE.md").write_text("di una persona\n", encoding="utf-8")
+    git_in(checkout, "add", "LOCALE.md")
+    git_in(checkout, "commit", "-q", "-m", "locale")
+
+
+def su_un_altro_ramo(checkout: Path) -> None:
+    git_in(checkout, "switch", "-q", "-c", "prova-a-mano")
+
+
+def fetch_che_fallisce(checkout: Path) -> None:
+    git_in(checkout, "remote", "set-url", "origin", str(checkout.parent / "non-ce.git"))
+
+
+@pytest.mark.parametrize("guasta", [diverge, su_un_altro_ramo, fetch_che_fallisce],
+                         ids=["divergente", "altro-ramo", "fetch-fallito"])
+def test_il_checkout_che_non_si_allinea_ferma_il_tick_senza_toccarlo(
+    checkout_vero, tmp_path, monkeypatch, guasta
+):
+    """PBI-392, decisione 7. Il checkout deve stare su `main`, il `fetch` deve
+    riuscire e `git` deve accettare il `ff-only`. Se no il tick scrive `non
+    allineato: <la ragione>` in `coda.log`, esce con 0, non decide e non lancia —
+    col runner di prima sarebbe il difetto 75. È un avviso e non una
+    correzione: il checkout resta com'era, sullo stesso commit e sullo stesso
+    ramo (`ADR-0008`)."""
+    _, checkout, _ = un_checkout_indietro(tmp_path, monkeypatch)
+    guasta(checkout)
+    prima = (git_in(checkout, "rev-parse", "HEAD"),
+             git_in(checkout, "branch", "--show-current"))
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert chiamati == []
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert len(righe) == 1 and righe[0].split("  ", 1)[1].startswith("non allineato: "), righe
+    assert (git_in(checkout, "rev-parse", "HEAD"),
+            git_in(checkout, "branch", "--show-current")) == prima
