@@ -556,3 +556,20 @@ def test_guardia_un_passo_che_fallisce_rilascia_il_lucchetto_del_tick(
     assert uscita == 1, "il passo è fallito"
     assert libero_al_passo_fallito == [False]
     assert lucchetto_del_tick_libero(repo), "uscito il comando, il lucchetto è libero"
+
+
+def test_guardia_un_tick_lock_senza_nessuno_che_lo_tiene_non_ferma_il_comando(
+    home_finta, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 1: un `runs/.tick.lock` rimasto su disco senza nessuno
+    che tiene il `flock` non è un tick in corso, e il comando fa i suoi passi."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+    (repo / "runs").mkdir()
+    (repo / "runs" / ".tick.lock").write_text("", encoding="utf-8")
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert len(i_passi(visti)) == 5

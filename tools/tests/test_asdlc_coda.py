@@ -1546,3 +1546,23 @@ def test_guardia_il_runner_lanciato_non_eredita_il_lucchetto_del_tick(tmp_path, 
         for figlio in lanciati:
             figlio.kill()
             figlio.wait()
+
+
+def test_guardia_un_tick_lock_senza_nessuno_che_lo_tiene_non_ferma_il_tick(
+    tmp_path, monkeypatch
+):
+    """PBI-392, decisione 1: il lucchetto è un `flock`, del processo e non del
+    file. Il file resta su disco dopo ogni tick, e letto come presenza il primo
+    tick della storia fermerebbe la coda per sempre (`PBI-373`, difetto 9). Con
+    `runs/.tick.lock` lasciato da un tick finito il tick decide e lancia."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    (repo / "runs").mkdir(exist_ok=True)
+    (repo / "runs" / ".tick.lock").write_text("", encoding="utf-8")
+    chiamati = smista_senza_decidere(monkeypatch)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert chiamati == ["decidi", "lancia"]
