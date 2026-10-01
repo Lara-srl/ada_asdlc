@@ -1782,3 +1782,30 @@ def test_con_la_firma_cambiata_e_un_giro_in_corso_il_tick_non_reinstalla_e_non_l
     assert (pacchetto / ".installato-da").read_text(encoding="utf-8") == firma_di_prima
     righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert righe[-1].split("  ", 1)[1] == coda.racconta(coda.Occupato()), righe
+
+
+def test_con_pip_che_fallisce_la_firma_resta_e_il_tick_non_lancia(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 11. Lanciare col runner vecchio è il difetto 75: se
+    `pip` esce diverso da 0 la firma resta quella di prima — il tick dopo ci
+    riprova — il tick scrive `reinstallazione fallita: <uscita di pip>`, ed
+    esce con 0 senza decidere né lanciare."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
+                                                  tocca="tools/modulo.py")
+    firma_di_prima = (pacchetto / ".installato-da").read_text(encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto, codice=1)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert len(pip) == 1
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8") == firma_di_prima
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    riga = righe[-1].split("  ", 1)[1]
+    assert riga.startswith("reinstallazione fallita: "), righe
+    assert "No matching distribution found" in riga, riga
+    assert chiamati == []
