@@ -480,17 +480,38 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     return decisione
 
 
-def allinea(repo: Path) -> None:
+def allinea(repo: Path) -> str | None:
     """Porta il checkout del tick a `origin/main`: `git fetch` e poi `git merge
-    --ff-only` nel `--repo` (PBI-392, decisione 7).
+    --ff-only` nel `--repo` (PBI-392, decisione 7). `None` se c'è riuscito,
+    altrimenti la ragione, con l'uscita di `git`.
 
     Il tick decide da `origin/main`, ma il runner che lancia è quello installato
     dal `HEAD` di questo checkout, che avanzava solo col `ff-only` a mano dopo il
     merge. Il 01/10 quel passo è saltato, e il giro 2 di PBI-386 è partito col
     runner di prima (difetto 75 di PBI-102).
+
+    Il checkout deve stare sul ramo di `BASE`. Se non ci sta, o se `git` rifiuta,
+    si dice e basta: niente `reset`, `stash` né `switch` sul checkout di una
+    persona (`ADR-0008`). Il `fetch` ha il tetto di `esegui()`, lo stesso del
+    pre-flight.
     """
-    esegui(["git", "fetch", REMOTO], repo)
-    esegui(["git", "merge", "--ff-only", BASE], repo)
+    ramo = BASE.removeprefix(f"{REMOTO}/")
+    codice, uscita = esegui(["git", "branch", "--show-current"], repo)
+    if codice != 0:
+        return f"`git branch --show-current` è uscito {codice}: {in_una_riga(uscita)}"
+    if uscita.strip() != ramo:
+        return f"il checkout {repo} è su «{uscita.strip()}», non su {ramo}"
+    for comando in (["git", "fetch", REMOTO], ["git", "merge", "--ff-only", BASE]):
+        codice, uscita = esegui(comando, repo)
+        if codice != 0:
+            return f"`{' '.join(comando)}` è uscito {codice}: {in_una_riga(uscita)}"
+    return None
+
+
+def in_una_riga(uscita: str) -> str:
+    """L'uscita di un comando in una riga sola di `coda.log`, e la coda e non la
+    testa: `git` mette prima i suggerimenti e in fondo la ragione (`fatal: …`)."""
+    return " ".join(uscita.split())[-200:]
 
 
 def preflight() -> list[list[str]]:
@@ -739,8 +760,11 @@ def passaggio(a: argparse.Namespace) -> int:
         return 0
     # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
     # di decidere, col lucchetto del tick già preso.
-    if not a.dry_run:
-        allinea(a.repo)
+    if not a.dry_run and (ragione := allinea(a.repo)) is not None:
+        riga = f"non allineato: {ragione}"
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
+        return 0
 
     decisione = decidi(a.repo, a.worktree)
     riga = racconta(decisione)
