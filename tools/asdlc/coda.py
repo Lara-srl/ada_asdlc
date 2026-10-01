@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import IO
 
 # Il checkout da cui si legge la coda e si interroga `origin`: il primo antenato
 # della cwd che contiene `asdlc.toml`, trovato da `main()` (PBI-382). Non la
@@ -60,6 +61,9 @@ WORKTREE_DEL_RUNNER: Path      # `[worktree].percorso`
 LOG: Path                      # `[registro].cartella` / coda.log
 # Dove il runner tiene il lucchetto del suo albero (`lucchetto()`, `NOME_LUCCHETTO`).
 LUCCHETTO: Path                # `[registro].cartella` / .runner.lock
+# Il lucchetto del tick, nel checkout da cui si legge la coda: lo prendono il
+# tick e `asdlc-chiudi-giro` (PBI-392, `lucchetto_del_tick()`).
+LUCCHETTO_DEL_TICK: Path       # `[registro].cartella` / .tick.lock
 BACKLOG: str                   # `[backlog].cartella`
 CODA: Path                     # `[backlog].coda`, relativo al checkout
 BASE: str                      # `[git].base`
@@ -207,10 +211,12 @@ def configura(cfg: asdlc_config.Config) -> None:
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
     global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI, PACCHETTO
+    global LUCCHETTO_DEL_TICK
     CFG = cfg
     WORKTREE_DEL_RUNNER = cfg.worktree.percorso
     LOG = Path(cfg.registro.cartella) / "coda.log"
     LUCCHETTO = Path(cfg.registro.cartella) / ".runner.lock"
+    LUCCHETTO_DEL_TICK = Path(cfg.registro.cartella) / ".tick.lock"
     BACKLOG = cfg.backlog.cartella
     CODA = Path(cfg.backlog.coda)
     BASE, REMOTO = cfg.git.base, cfg.git.remoto
@@ -414,6 +420,28 @@ def giro_in_corso(worktree: Path) -> bool:
         except OSError:
             return True
     return False
+
+
+def lucchetto_del_tick(repo: Path) -> IO[str] | None:
+    """Il file di `<repo>/runs/.tick.lock` col `flock` preso, o `None` se lo tiene
+    già qualcun altro: un altro tick, o `asdlc-chiudi-giro` (PBI-392).
+
+    Senza aspettare (`LOCK_NB`): chi lo trova tenuto esce, e il tick dopo arriva
+    fra dieci minuti. Come il lucchetto del runner è un `flock`, del processo e
+    non del file — il kernel lo rilascia quando il descrittore si chiude o il
+    processo muore, e un file rimasto su disco senza nessuno che lo tiene non
+    ferma niente (`PBI-373`, difetto 9). Il descrittore che Python apre non è
+    ereditabile: il runner lanciato dal tick non se lo porta via.
+    """
+    file = repo / LUCCHETTO_DEL_TICK
+    file.parent.mkdir(parents=True, exist_ok=True)
+    aperto = file.open("w")
+    try:
+        fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        aperto.close()
+        return None
+    return aperto
 
 
 def decidi(repo: Path, worktree: Path) -> Decisione:
@@ -675,6 +703,23 @@ def smista(argv: list[str] | None = None) -> int:
               "del runner.")
         return 2
 
+    # Il lucchetto del tick prima della prima lettura della pausa, tenuto fino
+    # alla fine: anche per il pre-flight, l'avvio del runner e l'attesa del
+    # distacco. Senza, `asdlc-chiudi-giro` trovava libero il lucchetto del runner
+    # e faceva i suoi passi mentre questo tick lanciava (difetto 70 di PBI-102).
+    tenuto = lucchetto_del_tick(a.repo)
+    if tenuto is None:
+        riga = ("occupato: il lucchetto del tick è tenuto — un altro tick o "
+                "asdlc-chiudi-giro")
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
+        return 0
+    with tenuto:
+        return passaggio(a)
+
+
+def passaggio(a: argparse.Namespace) -> int:
+    """Il tick col suo lucchetto in mano: la pausa, la decisione, il lancio."""
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
