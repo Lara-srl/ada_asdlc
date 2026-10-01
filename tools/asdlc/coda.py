@@ -508,6 +508,36 @@ def allinea(repo: Path) -> str | None:
     return None
 
 
+# Il file del pacchetto in cui sta la firma dell'installazione: l'albero di
+# `tools/` da cui è stato installato. È quello che scriveva `~/asdlc-tick.sh`.
+FIRMA = ".installato-da"
+
+
+def reinstalla(repo: Path, worktree: Path) -> str | None:
+    """Reinstalla il pacchetto se la firma non è quella di `tools/` a `HEAD`, e
+    torna la riga da scrivere; `None` se la firma è già quella (PBI-392,
+    decisioni 8 e 10).
+
+    La firma è `git rev-parse HEAD:tools`, scritta in `<pacchetto>/.installato-da`.
+    L'installazione è `<pacchetto>/bin/pip install ./tools` dal checkout, non
+    editabile. Dopo il tick non decide: il processo che gira è ancora la
+    versione di prima, caricata in memoria, e decide il tick dopo.
+    """
+    if PACCHETTO is None:
+        # Senza pacchetto non c'è niente da reinstallare: lo dice la verifica
+        # dell'ambiente, prima del lancio.
+        return None
+    _, albero = esegui(["git", "rev-parse", "HEAD:tools"], repo)
+    albero = albero.strip()
+    firma = PACCHETTO / FIRMA
+    scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
+    if scritta == albero:
+        return None
+    esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
+    firma.write_text(albero + "\n", encoding="utf-8")
+    return f"reinstallato: tools/ a {albero}"
+
+
 def in_una_riga(uscita: str) -> str:
     """L'uscita di un comando in una riga sola di `coda.log`, e la coda e non la
     testa: `git` mette prima i suggerimenti e in fondo la ragione (`fatal: …`)."""
@@ -762,6 +792,10 @@ def passaggio(a: argparse.Namespace) -> int:
     # di decidere, col lucchetto del tick già preso.
     if not a.dry_run and (ragione := allinea(a.repo)) is not None:
         riga = f"non allineato: {ragione}"
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
+        return 0
+    if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
