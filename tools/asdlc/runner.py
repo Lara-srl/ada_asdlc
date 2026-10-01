@@ -2719,11 +2719,13 @@ NON_SI_TROVA_ALLA_PUNTA = "alla punta il test non si trova"
 NON_VERDE_ALLA_PUNTA = "alla punta il test non è verde"
 
 
-def morso_alla_punta(punta: Punta, base: str, test: TestNuovo
+def morso_alla_punta(punta: Punta, base: str, sha: str, test: TestNuovo
                      ) -> tuple[dict[str, str] | None, list[dict[str, str]], list[str], str]:
     """La quarta lettura della guardia sull'albero della punta, con il perimetro di
-    `base...punta`: `(ucciso, prove, perimetro)` come `quarta_lettura()`, e il
-    perché se alla punta non si è potuta fare.
+    `base...punta` più le funzioni che il commit `sha` della guardia nomina con
+    `Guardia-su:`, cercate nell'albero della punta (decisione 3): `(ucciso,
+    prove, perimetro)` come `quarta_lettura()`, e il perché se alla punta non si
+    è potuta fare.
 
     Il test si cerca con lo stesso file e lo stesso nome, e non altrove (decisione
     4). Deve essere verde: un test rosso lo fa fallire ogni mutante, e non è un morso.
@@ -2737,9 +2739,11 @@ def morso_alla_punta(punta: Punta, base: str, test: TestNuovo
     esiti, _ = esiti_del_comando(comando)
     if esiti[chiave] != "verde":
         return None, [], [], NON_VERDE_ALLA_PUNTA
+    nominate, note = funzioni_nominate(albero, sha)
     perimetro: list[str] = []
-    ucciso, prove = quarta_lettura(albero, base, punta.sha, comando, chiave, None, perimetro)
-    return ucciso, prove, perimetro, ""
+    ucciso, prove = quarta_lettura(albero, base, punta.sha, comando, chiave, nominate,
+                                   perimetro)
+    return ucciso, prove, perimetro + note, ""
 
 
 def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
@@ -2784,7 +2788,7 @@ def esamina_il_commit(sha: str, titolo: str, nuovi: list[TestNuovo], base: str,
                         continue
                     if punta is not None:
                         ucciso, alla_punta, suo, assente = morso_alla_punta(
-                            punta, base, comando.origine[chiave])
+                            punta, base, sha, comando.origine[chiave])
                         if ucciso is not None:
                             morsi.append({"commit": sha[:7], "titolo": titolo,
                                           "test": etichetta, "mutante": ucciso["mutante"],
