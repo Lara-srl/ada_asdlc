@@ -1476,3 +1476,39 @@ def test_con_il_lucchetto_del_tick_tenuto_il_tick_esce_senza_decidere(
     assert chiamati == []
     righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert len(righe) == 1 and righe[0].endswith(f"  {OCCUPATO_DAL_TICK}"), righe
+
+
+def prova_il_lucchetto_del_tick(repo: Path) -> bool:
+    """Un secondo `flock` non bloccante su `runs/.tick.lock`, da un descrittore
+    nuovo: `True` se il lucchetto era libero. Il `flock` è dell'open file
+    description, quindi due aperture dello stesso processo si escludono."""
+    file = repo / "runs" / ".tick.lock"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with file.open("a") as altro:
+        try:
+            fcntl.flock(altro, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(altro, fcntl.LOCK_UN)
+        return True
+
+
+def test_guardia_il_tick_tiene_il_suo_lucchetto_mentre_lancia(tmp_path, monkeypatch):
+    """PBI-392, decisione 3. Il lucchetto si tiene fino alla fine di `smista()`,
+    quindi anche durante `lancia()`: il pre-flight, l'avvio del runner e
+    l'attesa del distacco. È la finestra in cui `asdlc-chiudi-giro` creava la
+    pausa e cancellava un ramo mentre il tick lanciava (difetto 70 di PBI-102).
+    Con `lancia()` finto, un secondo `flock` sullo stesso file fallisce."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    libero_durante_il_lancio: list[bool] = []
+    monkeypatch.setattr(coda, "decidi", lambda repo, worktree: coda.Lancia("PBI-337"))
+    monkeypatch.setattr(coda, "lancia", lambda pbi, worktree: libero_durante_il_lancio.append(
+        prova_il_lucchetto_del_tick(repo)))
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert libero_durante_il_lancio == [False]
+    assert prova_il_lucchetto_del_tick(repo), "finito il tick, il lucchetto è libero"
