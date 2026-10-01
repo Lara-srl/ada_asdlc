@@ -13,6 +13,11 @@ PBI col testo vecchio (`PBI-365`, 23/09). I passi qui sono sei:
 5. `ff-only` del checkout del tick;
 6. pausa tolta.
 
+Prima dei passi e dei rifiuti il comando prende il lucchetto del tick,
+`runs/.tick.lock` del checkout, e lo tiene fino alla fine (PBI-392): un tick
+che sta lanciando non tiene ancora il lucchetto del runner, e senza questo i sei
+passi correvano accanto al suo lancio.
+
 Rilanciare il PBI non è di questo comando: lo fa il tick, al primo passaggio
 dopo la riaccensione.
 """
@@ -121,6 +126,22 @@ def smista(argv: list[str] | None = None) -> int:
                     help="stampa i sei passi con i valori veri e non esegue niente")
     a = ap.parse_args(argv)
 
+    # Il `--dry-run` non cambia niente, e non prende il lucchetto del tick.
+    if a.dry_run:
+        return chiudi(a)
+    # Il lucchetto del tick prima di ogni rifiuto e di ogni `git`, tenuto per
+    # tutti i passi anche quando uno fallisce. Chi lo trova tenuto non aspetta:
+    # il tick finisce in pochi secondi, e si riprova a mano (PBI-392).
+    tenuto = coda.lucchetto_del_tick(a.repo)
+    if tenuto is None:
+        return rifiuta(f"il lucchetto {a.repo / coda.LUCCHETTO_DEL_TICK} è tenuto: un tick "
+                       "è in corso in questo checkout: riprova fra un minuto.")
+    with tenuto:
+        return chiudi(a)
+
+
+def chiudi(a: argparse.Namespace) -> int:
+    """I rifiuti e i sei passi, coi valori di `smista()`."""
     # Prima di tutto, anche delle domande a `origin`: con un runner al lavoro
     # il giro non è fermo, e il suo ramo non si tocca. Lo stesso controllo del
     # tick, il `flock` sul lucchetto (PBI-373).
