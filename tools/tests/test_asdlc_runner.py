@@ -6195,6 +6195,55 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
 
         assert fuori == []
 
+    def test_nessun_git_diff_con_name_only_nel_runner(self):
+        """PBI-389, decisione 5: `--name-only` dà di un rename il solo percorso
+        nuovo, con o senza pathspec. I nomi dei file di un diff si leggono solo
+        da `voci_del_name_status()` su `--name-status -M`."""
+        import ast
+
+        albero = ast.parse((REPO / "tools" / "asdlc" / "runner.py").read_text(encoding="utf-8"))
+        trovate: list[int] = []
+        for nodo in ast.walk(albero):
+            if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name)
+                    and nodo.func.id == "git" and nodo.args):
+                continue
+            costanti = [a.value for a in nodo.args if isinstance(a, ast.Constant)]
+            if costanti[:1] == ["diff"] and "--name-only" in costanti:
+                trovate.append(nodo.lineno)
+
+        assert trovate == []
+
+
+class TestLElencoDeiFileDelGiroNominaIDueLati:
+    """PBI-389, difetto 64 di PBI-102: a giro chiuso `esegui_pbi()` stampava i
+    file toccati con `git diff --name-only`, che di un rename dà il solo percorso
+    nuovo. È l'elenco dello Scope di `ADR-0015` che chi mergia legge: si prende
+    da `file_toccati()`, come il gate con `solo_se_tocca` (decisione 3)."""
+
+    def test_l_elenco_dei_file_del_giro_nomina_i_due_lati_di_un_rename(
+            self, git_finto, monkeypatch, capsys):
+        risponde = runner.git
+
+        def _git(*args: str) -> str:
+            if args[:3] == ("diff", "--name-status", "-M"):
+                risponde(*args)
+                return "R100\tbackend/app/m.py\ttools/asdlc/m.py\nM\tdocs/m.md\n"
+            return risponde(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "PASS"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        uscita = capsys.readouterr().out
+        assert "backend/app/m.py" in uscita
+        assert "tools/asdlc/m.py" in uscita
+        assert "docs/m.md" in uscita
+
 
 class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
     """PBI-389, difetto 63 di PBI-102: il perimetro guardava solo il lato nuovo di
@@ -7612,7 +7661,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
         assert ("rev-parse", "origin/master") in git_finto
         assert ("rev-list", "--count", f"{SHA_DELLA_BASE}..HEAD") in git_finto
         assert ("rev-list", "--reverse", f"{SHA_DELLA_BASE}..HEAD") in git_finto
-        assert ("diff", "--name-only", f"{SHA_DELLA_BASE}...HEAD") in git_finto
+        assert ("diff", "--name-status", "-M", f"{SHA_DELLA_BASE}...HEAD") in git_finto
         assert not [c for c in git_finto if any("origin/main" in arg for arg in c)], (
             "una lettura è rimasta sul ramo scritto a mano"
         )
