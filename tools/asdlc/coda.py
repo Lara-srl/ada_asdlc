@@ -512,20 +512,34 @@ def indietro(repo: Path) -> str | None:
     """Ciò che un tick vero farebbe al checkout prima di decidere, per il
     `--dry-run`, o `None` se non c'è niente da fare (PBI-392, decisione 12).
 
-    Il `--dry-run` non allinea: fa solo il `fetch`, che non sposta il checkout,
-    e conta i commit di `origin/main` che il `HEAD` non ha.
+    Il `--dry-run` non allinea e non reinstalla: fa solo il `fetch`, che non
+    sposta il checkout, conta i commit di `origin/main` che il `HEAD` non ha, e
+    confronta la firma del pacchetto con l'albero di `tools/` a `HEAD`.
     """
     esegui(["git", "fetch", REMOTO], repo)
     _, quanti = esegui(["git", "rev-list", "--count", f"HEAD..{BASE}"], repo)
-    if quanti.strip() in ("", "0"):
-        return None
-    return (f"dry-run: il checkout è indietro di {quanti.strip()} commit rispetto a "
-            f"{BASE}, e un tick lo allineerebbe prima di decidere")
+    da_fare = []
+    if quanti.strip() not in ("", "0"):
+        da_fare.append(f"il checkout è indietro di {quanti.strip()} commit rispetto a "
+                       f"{BASE}, e un tick lo allineerebbe prima di decidere")
+    if PACCHETTO is not None and (firma := firme(repo))[0] != firma[1]:
+        da_fare.append(f"la firma del pacchetto è {firma[1]}, non l'albero di tools/ a "
+                       f"HEAD {firma[0]}, e un tick reinstallerebbe")
+    return "dry-run: " + "; ".join(da_fare) if da_fare else None
 
 
 # Il file del pacchetto in cui sta la firma dell'installazione: l'albero di
 # `tools/` da cui è stato installato. È quello che scriveva `~/asdlc-tick.sh`.
 FIRMA = ".installato-da"
+
+
+def firme(repo: Path) -> tuple[str, str | None]:
+    """`(albero, scritta)`: l'albero di `tools/` a `HEAD` del checkout, e la
+    firma in `<pacchetto>/.installato-da`, `None` se il file non c'è."""
+    _, albero = esegui(["git", "rev-parse", "HEAD:tools"], repo)
+    firma = PACCHETTO / FIRMA
+    scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
+    return albero.strip(), scritta
 
 
 def reinstalla(repo: Path, worktree: Path) -> str | None:
@@ -547,10 +561,7 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
         # Senza pacchetto non c'è niente da reinstallare: lo dice la verifica
         # dell'ambiente, prima del lancio.
         return None
-    _, albero = esegui(["git", "rev-parse", "HEAD:tools"], repo)
-    albero = albero.strip()
-    firma = PACCHETTO / FIRMA
-    scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
+    albero, scritta = firme(repo)
     if scritta == albero:
         return None
     lucchetto_del_runner = worktree / LUCCHETTO
@@ -565,7 +576,7 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
         # resta, il tick dopo ci riprova, e intanto non si lancia (decisione 11).
         if codice != 0:
             return f"reinstallazione fallita: {in_una_riga(uscita)}"
-        firma.write_text(albero + "\n", encoding="utf-8")
+        (PACCHETTO / FIRMA).write_text(albero + "\n", encoding="utf-8")
     return f"reinstallato: tools/ a {albero}"
 
 
