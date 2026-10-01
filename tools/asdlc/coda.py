@@ -522,6 +522,11 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
     L'installazione è `<pacchetto>/bin/pip install ./tools` dal checkout, non
     editabile. Dopo il tick non decide: il processo che gira è ancora la
     versione di prima, caricata in memoria, e decide il tick dopo.
+
+    Solo col lucchetto del runner libero, preso senza aspettare e tenuto per
+    tutto `pip`: un pacchetto cambiato a metà giro darebbe al Builder un server
+    dell'esito di un'altra versione. Tenuto vuol dire un giro in corso, e si
+    torna `None`: `decidi()` dice `occupato` come sempre (decisione 9).
     """
     if PACCHETTO is None:
         # Senza pacchetto non c'è niente da reinstallare: lo dice la verifica
@@ -533,8 +538,15 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
     scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
     if scritta == albero:
         return None
-    esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
-    firma.write_text(albero + "\n", encoding="utf-8")
+    lucchetto_del_runner = worktree / LUCCHETTO
+    lucchetto_del_runner.parent.mkdir(parents=True, exist_ok=True)
+    with lucchetto_del_runner.open("a") as aperto:
+        try:
+            fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return None
+        esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
+        firma.write_text(albero + "\n", encoding="utf-8")
     return f"reinstallato: tools/ a {albero}"
 
 
