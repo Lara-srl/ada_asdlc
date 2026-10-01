@@ -6309,6 +6309,18 @@ class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
         assert runner.hunk_di_produzione("origin/main", sha) == {"backend/app/x.py": []}
         assert self._perimetro(repo_di_prova, sha) == []
 
+    def test_un_test_spostato_fra_due_cartelle_di_test_non_fa_nascere_niente(
+            self, repo_di_prova):
+        """Guardia, verde su `main`: il lato dei test non cambia. I test passano
+        `lati` esplicito con `lati_del_diff()`, la regola del confine non si
+        applica, e un trasloco fra due cartelle di test resta senza nascite come
+        dice `PBI-361`."""
+        repo_di_prova.commit("test: i tre casi (RED)", {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
     @pytest.mark.parametrize("da", ["nota.txt", "backend/tests/test_x.py"])
     def test_l_ingresso_in_produzione_non_dipende_da_diff_renames(self, repo_di_prova, da):
         """Guardia, decisione 2: con `diff.renames` spento il `-M` scritto nel
