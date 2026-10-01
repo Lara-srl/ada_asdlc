@@ -1512,3 +1512,37 @@ def test_guardia_il_tick_tiene_il_suo_lucchetto_mentre_lancia(tmp_path, monkeypa
     assert uscita == 0
     assert libero_durante_il_lancio == [False]
     assert prova_il_lucchetto_del_tick(repo), "finito il tick, il lucchetto è libero"
+
+
+def test_guardia_il_runner_lanciato_non_eredita_il_lucchetto_del_tick(tmp_path, monkeypatch):
+    """PBI-392, decisione 3. Un giro in corso tiene il lucchetto del runner, non
+    quello del tick: se il runner staccato ereditasse il descrittore, il tick
+    dopo e `asdlc-chiudi-giro` troverebbero il lucchetto tenuto per tutta l'ora
+    del giro. Al posto del runner un processo che dorme, avviato da `lancia()`
+    mentre il tick tiene il lucchetto: finito il tick il lucchetto è libero, e
+    il processo è ancora vivo."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    lanciati: list[subprocess.Popen] = []
+    libero_al_lancio: list[bool] = []
+
+    def lancia_uno_che_dorme(pbi, worktree):
+        libero_al_lancio.append(prova_il_lucchetto_del_tick(repo))
+        lanciati.append(subprocess.Popen(["sleep", "30"], cwd=worktree,
+                                         start_new_session=True))
+
+    monkeypatch.setattr(coda, "decidi", lambda repo, worktree: coda.Lancia("PBI-337"))
+    monkeypatch.setattr(coda, "lancia", lancia_uno_che_dorme)
+
+    try:
+        uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+        assert uscita == 0
+        assert libero_al_lancio == [False], "il runner parte col lucchetto del tick tenuto"
+        assert lanciati[0].poll() is None, "il runner è ancora vivo"
+        assert prova_il_lucchetto_del_tick(repo), "e il lucchetto del tick è libero"
+    finally:
+        for figlio in lanciati:
+            figlio.kill()
+            figlio.wait()
