@@ -3681,8 +3681,10 @@ def esegui_pbi(
                 base=base, rapporto=rapporto, pbi_path=pbi_path.relative_to(REPO)
             )
 
-        print(f"    commit sul branch: {e.commit} · "
-              f"file: {git('diff', '--name-only', f'{base}...HEAD')}")
+        # L'elenco dello Scope di ADR-0015: di un rename i due lati, come il gate
+        # con `solo_se_tocca` — `--name-only` dava il solo nuovo (PBI-389).
+        toccati = "\n".join(sorted(file_toccati(base)))
+        print(f"    commit sul branch: {e.commit} · file: {toccati}")
         return "fatto", ""
 
     try:
