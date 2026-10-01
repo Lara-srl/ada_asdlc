@@ -455,3 +455,33 @@ def test_un_origin_che_non_risponde_fa_rifiutare_e_il_rifiuto_lo_dice(
     assert not (home_finta / "asdlc-tick.pausa").exists()
     detto = capsys.readouterr().out
     assert "Could not resolve host" in detto, detto
+
+
+# --- Il lucchetto del tick (PBI-392) -----------------------------------------
+
+
+def test_con_il_lucchetto_del_tick_tenuto_il_comando_rifiuta_senza_git_e_senza_pausa(
+    home_finta, tmp_path, monkeypatch, capsys
+):
+    """PBI-392, decisione 4. Un tick che sta lanciando non tiene ancora il
+    lucchetto del runner, e il comando lo trovava libero: creava la pausa e
+    cancellava il ramo mentre il tick finiva il lancio (difetto 70 di PBI-102).
+    Con `runs/.tick.lock` del checkout tenuto il comando rifiuta prima di ogni
+    altra cosa — nessun `git`, nemmeno una domanda, e nessuna pausa — dice che
+    un tick è in corso e di riprovare fra un minuto, ed esce diverso da 0."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, esegui = un_origin(home_finta)
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+    (repo / "runs").mkdir()
+
+    with (repo / "runs" / ".tick.lock").open("w") as tenuto:
+        fcntl.flock(tenuto, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        uscita = chiudi_giro().smista(
+            ["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita not in (0, None)
+    assert visti == [], "con un tick in corso non si chiama git"
+    assert not (home_finta / "asdlc-tick.pausa").exists()
+    detto = capsys.readouterr().out
+    assert "tick" in detto and "riprova" in detto and "minuto" in detto, detto
+
