@@ -6248,6 +6248,19 @@ class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
             "backend/app/x.py": [(1, 15)]}
         assert self._perimetro(repo_di_prova, sha) == self.TUTTE
 
+    @pytest.mark.parametrize("da", ["nota.txt", "backend/tests/test_x.py"])
+    def test_l_ingresso_in_produzione_non_dipende_da_diff_renames(self, repo_di_prova, da):
+        """Guardia, decisione 2: con `diff.renames` spento il `-M` scritto nel
+        comando continua a riconoscere il rename, e l'esito resta lo stesso."""
+        repo_di_prova.configura("diff.renames", "false")
+        self._base_con(repo_di_prova, da)
+        repo_di_prova.sposta(da, "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il file diventa un modulo")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/x.py": [(1, 15)]}
+        assert self._perimetro(repo_di_prova, sha) == self.TUTTE
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
