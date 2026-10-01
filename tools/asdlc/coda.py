@@ -545,7 +545,11 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return None
-        esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
+        codice, uscita = esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
+        # Con `pip` fallito il pacchetto è ancora quello di prima: la firma
+        # resta, il tick dopo ci riprova, e intanto non si lancia (decisione 11).
+        if codice != 0:
+            return f"reinstallazione fallita: {in_una_riga(uscita)}"
         firma.write_text(albero + "\n", encoding="utf-8")
     return f"reinstallato: tools/ a {albero}"
 
