@@ -6297,6 +6297,18 @@ class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
             "backend/app/x.py": [(1, 15)]}
         assert self._perimetro(repo_di_prova, sha) == self.TUTTE
 
+    def test_un_git_mv_fra_due_file_di_produzione_lascia_il_perimetro_vuoto(
+            self, repo_di_prova):
+        """Guardia, verde su `main`: il confine si attraversa solo da fuori verso
+        la produzione. Fra due file di produzione resta la decisione 3 di
+        `PBI-387`, niente hunk se non cambia niente."""
+        self._base_con(repo_di_prova, "backend/app/m.py")
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il modulo cambia nome")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {"backend/app/x.py": []}
+        assert self._perimetro(repo_di_prova, sha) == []
+
     @pytest.mark.parametrize("da", ["nota.txt", "backend/tests/test_x.py"])
     def test_l_ingresso_in_produzione_non_dipende_da_diff_renames(self, repo_di_prova, da):
         """Guardia, decisione 2: con `diff.renames` spento il `-M` scritto nel
