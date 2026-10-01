@@ -2096,10 +2096,18 @@ def diff_del_file(voce: VoceDiCommit, *dove: str, lati: list[str] | None = None)
     intero (difetti 31 e 61 di PBI-102). `-M` è scritto e non lasciato a
     `diff.renames`, come in `file_del_commit`. `lati` sostituisce i due lati
     quando la regola è un'altra: per i test la dà `lati_del_diff`.
+
+    Un rename che **entra** in produzione — il lato vecchio non è produzione, il
+    nuovo sì — si chiede col solo percorso nuovo, cioè come un file aggiunto per
+    intero: un `git mv nota.txt backend/app/x.py` non porta hunk, e il modulo
+    entrerebbe senza una riga e senza un RED (difetto 63, PBI-389). Il confine
+    lo decide `e_file_di_produzione`; con `lati` esplicito la regola non vale.
     """
     if lati is None:
         lati = [voce.percorso]
-        if voce.vecchio:
+        entra = (not e_file_di_produzione(voce.vecchio or voce.percorso)
+                 and e_file_di_produzione(voce.percorso))
+        if voce.vecchio and not entra:
             lati.insert(0, voce.vecchio)
     return git(*dove, "--unified=0", "-M", "--", *lati)
 
@@ -2112,8 +2120,9 @@ def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
     andato avanti nel frattempo non entra nel conto come se fosse del branch.
 
     La chiave è il percorso a `sha`, anche per un file spostato: è lì che le
-    righe sono numerate. Un rename senza cambi non porta hunk, e nessuna sua
-    funzione entra nel perimetro.
+    righe sono numerate. Un rename senza cambi fra due file di produzione non
+    porta hunk, e nessuna sua funzione entra nel perimetro; uno che entra in
+    produzione da fuori porta il file intero (`diff_del_file`, PBI-389).
     """
     hunk: dict[str, list[tuple[int, int]]] = {}
     for voce in voci_del_name_status(git("diff", "--name-status", "-M", f"{base}...{sha}")):
