@@ -6558,6 +6558,20 @@ class TestIlMorsoSiGiudicaAncheAllaPunta:
         assert [m["dove"] for m in morsi] == ["punta", "punta"]
         assert runner.USA_E_GETTA["montati"] - prima == 3
 
+    def test_su_un_tag_annotato_la_punta_e_lo_sha_del_commit(self, repo_di_prova):
+        """Decisione 1: la punta è il ref chiesto con `--gate-rosso`, e i rami
+        fermati si conservano come tag annotati (`giro-fermato/…`). Lo sha nel
+        rapporto è quello del commit, non dell'oggetto tag, che `git log` non trova."""
+        self._base_e_doppio(repo_di_prova)
+        self._il_golden_poi_carica(repo_di_prova)
+        punta = repo_di_prova._git("rev-parse", "HEAD")
+        repo_di_prova._git("tag", "-a", "-m", "giro fermato", "giro-fermato/prova")
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(ref="giro-fermato/prova", morsi=morsi) == []
+
+        assert [m["punta"] for m in morsi] == [punta[:7]]
+
     def test_la_guardia_che_non_morde_da_nessuna_parte_ferma_e_nomina_i_due_alberi(
         self, repo_di_prova
     ):
