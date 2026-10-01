@@ -508,6 +508,21 @@ def allinea(repo: Path) -> str | None:
     return None
 
 
+def indietro(repo: Path) -> str | None:
+    """Ciò che un tick vero farebbe al checkout prima di decidere, per il
+    `--dry-run`, o `None` se non c'è niente da fare (PBI-392, decisione 12).
+
+    Il `--dry-run` non allinea: fa solo il `fetch`, che non sposta il checkout,
+    e conta i commit di `origin/main` che il `HEAD` non ha.
+    """
+    esegui(["git", "fetch", REMOTO], repo)
+    _, quanti = esegui(["git", "rev-list", "--count", f"HEAD..{BASE}"], repo)
+    if quanti.strip() in ("", "0"):
+        return None
+    return (f"dry-run: il checkout è indietro di {quanti.strip()} commit rispetto a "
+            f"{BASE}, e un tick lo allineerebbe prima di decidere")
+
+
 # Il file del pacchetto in cui sta la firma dell'installazione: l'albero di
 # `tools/` da cui è stato installato. È quello che scriveva `~/asdlc-tick.sh`.
 FIRMA = ".installato-da"
@@ -815,6 +830,9 @@ def passaggio(a: argparse.Namespace) -> int:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
+    if a.dry_run and (riga := indietro(a.repo)) is not None:
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
 
     decisione = decidi(a.repo, a.worktree)
     riga = racconta(decisione)
