@@ -59,6 +59,25 @@ def ambiente_vero(monkeypatch):
     monkeypatch.setattr(coda, "mancanze_dell_ambiente", MANCANZE_VERE, raising=False)
 
 
+# Il tick allinea il suo checkout a `origin/main` e reinstalla il pacchetto prima
+# di decidere (PBI-392): sono comandi `git` e `pip` veri sul `--repo`. Nei test si
+# sostituiscono come la verifica dell'ambiente, e i test del checkout rimettono
+# le funzioni vere con `checkout_vero`.
+VERE_DEL_CHECKOUT = {nome: getattr(coda, nome, None) for nome in ("allinea",)}
+
+
+@pytest.fixture(autouse=True)
+def checkout_allineato(monkeypatch):
+    for nome in VERE_DEL_CHECKOUT:
+        monkeypatch.setattr(coda, nome, lambda *a, **k: None, raising=False)
+
+
+@pytest.fixture
+def checkout_vero(monkeypatch):
+    for nome, vera in VERE_DEL_CHECKOUT.items():
+        monkeypatch.setattr(coda, nome, vera, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def home_finta(tmp_path, monkeypatch):
     """`HOME` in una cartella temporanea, per ogni test (PBI-385). Il tick legge la
@@ -1566,3 +1585,63 @@ def test_guardia_un_tick_lock_senza_nessuno_che_lo_tiene_non_ferma_il_tick(
 
     assert uscita == 0
     assert chiamati == ["decidi", "lancia"]
+
+
+# --- Il checkout del tick (PBI-392, difetto 75) ------------------------------
+
+
+def git_in(cartella: Path, *args: str) -> str:
+    """`git` vero in `cartella`, con un autore e il ramo `main` di default."""
+    fatto = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                            "-c", "init.defaultBranch=main", *args],
+                           cwd=cartella, capture_output=True, text=True, check=True)
+    return fatto.stdout.strip()
+
+
+def un_checkout_indietro(tmp_path, monkeypatch, *, tocca="README.md"):
+    """Un `origin` nudo, il checkout del tick clonato su `main`, e un merge
+    arrivato su `origin` dopo il clone, che cambia il file `tocca`. Il pacchetto
+    è una cartella temporanea con la firma dell'albero di `tools/` del checkout,
+    com'era all'ultima installazione. Torna `(origin, checkout, pacchetto)`."""
+    origin, semina, checkout = tmp_path / "origin.git", tmp_path / "semina", tmp_path / "checkout"
+    git_in(tmp_path, "init", "-q", "--bare", str(origin))
+    git_in(tmp_path, "clone", "-q", str(origin), str(semina))
+    (semina / "tools").mkdir()
+    (semina / "tools" / "modulo.py").write_text("x = 1\n", encoding="utf-8")
+    (semina / "README.md").write_text("prima\n", encoding="utf-8")
+    git_in(semina, "add", "-A")
+    git_in(semina, "commit", "-q", "-m", "base")
+    git_in(semina, "push", "-q", "origin", "main")
+    git_in(tmp_path, "clone", "-q", str(origin), str(checkout))
+    (semina / tocca).write_text("dopo\n", encoding="utf-8")
+    git_in(semina, "commit", "-q", "-am", "il merge")
+    git_in(semina, "push", "-q", "origin", "main")
+    pacchetto = tmp_path / "pacchetto"
+    (pacchetto / "bin").mkdir(parents=True)
+    (pacchetto / ".installato-da").write_text(
+        git_in(checkout, "rev-parse", "HEAD:tools") + "\n", encoding="utf-8")
+    monkeypatch.setattr(coda, "PACCHETTO", pacchetto)
+    return origin, checkout, pacchetto
+
+
+def test_il_tick_porta_il_checkout_indietro_a_origin_main_e_decide(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 7. Il tick decide da `origin/main`, ma il runner che
+    lancia è quello installato dal suo checkout, che avanzava solo col `ff-only`
+    a mano: il 01/10 quel passo è saltato e il giro 2 di PBI-386 è partito col
+    runner di prima (difetto 75 di PBI-102). Con il checkout indietro di un
+    merge che non tocca `tools/`, il tick lo porta a `origin/main` col `ff-only`
+    e decide nello stesso passaggio."""
+    origin, checkout, _ = un_checkout_indietro(tmp_path, monkeypatch)
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    monkeypatch.setattr(coda, "decidi", lambda repo, worktree: (
+        chiamati.append("decidi") or coda.Finita()))
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert git_in(checkout, "rev-parse", "HEAD") == git_in(origin, "rev-parse", "main")
+    assert chiamati == ["decidi"]
