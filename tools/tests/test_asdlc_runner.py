@@ -6196,6 +6196,47 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
         assert fuori == []
 
 
+class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
+    """PBI-389, difetto 63 di PBI-102: il perimetro guardava solo il lato nuovo di
+    un rename. Un `git mv nota.txt backend/app/x.py` al 100% non porta hunk, e un
+    file intero entrava in produzione senza una riga aggiunta e senza un RED che
+    l'avesse chiesto. Un rename con il lato vecchio fuori dalla produzione e il
+    nuovo dentro conta come tutte righe aggiunte (decisione 1).
+
+    Qui git non si finge, come in `TestUnModuloSpostatoSiLeggeComeSpostato`.
+    """
+
+    MODULO = TestUnModuloSpostatoSiLeggeComeSpostato.MODULO
+    TUTTE = ["backend/app/x.py::soglia (dal diff)",
+             "backend/app/x.py::doppio (dal diff)",
+             "backend/app/x.py::cartella (dal diff)"]
+
+    def _base_con(self, repo, percorso):
+        vecchio = repo.commit("chore: il file fuori dalla produzione", {percorso: self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+
+    def _perimetro(self, repo, sha):
+        cambiate = runner.righe_cambiate("origin/main", sha)
+        cancellate = runner.cancellazioni("origin/main", sha)
+        voci: list[str] = []
+        for percorso in sorted(cambiate.keys() | cancellate.keys()):
+            sorgente = repo._git("show", f"{sha}:{percorso}")
+            voci += runner.righe_del_perimetro(percorso, sorgente,
+                                               cambiate.get(percorso, set()),
+                                               cancellate.get(percorso, set()))[1]
+        return voci
+
+    def test_un_file_che_entra_in_produzione_da_fuori_mette_nel_perimetro_tutte_le_funzioni(
+            self, repo_di_prova):
+        self._base_con(repo_di_prova, "nota.txt")
+        repo_di_prova.sposta("nota.txt", "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("feat: la nota diventa un modulo")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/x.py": [(1, 15)]}
+        assert self._perimetro(repo_di_prova, sha) == self.TUTTE
+
+
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
     toccate dal diff, non le righe (revisione del 26/09 di ADR-0022).
