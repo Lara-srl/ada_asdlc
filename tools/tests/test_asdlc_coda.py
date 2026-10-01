@@ -1689,3 +1689,25 @@ def test_il_checkout_che_non_si_allinea_ferma_il_tick_senza_toccarlo(
     assert len(righe) == 1 and righe[0].split("  ", 1)[1].startswith("non allineato: "), righe
     assert (git_in(checkout, "rev-parse", "HEAD"),
             git_in(checkout, "branch", "--show-current")) == prima
+
+
+def test_guardia_in_pausa_il_tick_non_tocca_il_checkout(
+    checkout_vero, home_finta, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 6: l'allineamento viene dopo la prima lettura della
+    pausa. Chi ha messo la pausa sta lavorando a mano — `asdlc-chiudi-giro` fa
+    il suo `ff-only` — e il tick in pausa non fa né `fetch` né `ff-only`."""
+    origin, checkout, _ = un_checkout_indietro(tmp_path, monkeypatch)
+    (home_finta / "asdlc-tick.pausa").write_text("2026-10-01 22:00 a mano\n", encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    vero, visti = coda.esegui, []
+    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: visti.append(cmd) or vero(cmd, cwd))
+    prima = git_in(checkout, "rev-parse", "HEAD")
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert not [c for c in visti if "fetch" in c or "merge" in c], visti
+    assert git_in(checkout, "rev-parse", "HEAD") == prima != git_in(origin, "rev-parse", "main")
