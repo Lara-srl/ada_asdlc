@@ -2710,7 +2710,9 @@ class Punta:
 
     def albero(self) -> Path:
         if self._albero is None:
-            self.sha = git("rev-parse", self.ref)
+            # `^{commit}`: un ramo fermato si conserva come tag annotato, e lo
+            # sha dell'oggetto tag nel rapporto non si ritrova in `git log`.
+            self.sha = git("rev-parse", f"{self.ref}^{{commit}}")
             self._albero = self._pila.enter_context(worktree_usa_e_getta(self.sha))
         return self._albero
 
