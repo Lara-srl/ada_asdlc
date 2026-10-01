@@ -16,6 +16,7 @@ Il modulo si carica per nome, `asdlc.coda`: `conftest.py` mette `tools/` sul
 `sys.path` (PBI-383).
 """
 
+import contextlib
 import fcntl
 import importlib.util
 import datetime
@@ -1423,3 +1424,55 @@ def test_la_pausa_nata_dopo_la_decisione_ferma_il_lancio(home_finta, tmp_path, m
     assert lanciati == []
     righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert righe[-1].endswith(f"  in pausa: {riga}"), righe
+
+
+# --- Il lucchetto del tick (PBI-392) -----------------------------------------
+
+
+@contextlib.contextmanager
+def tenuto_da_un_figlio(file: Path):
+    """Un processo figlio che prende il `flock` su `file` e lo tiene finché il
+    blocco `with` non finisce. Un processo e non un descrittore di questo: il
+    lucchetto vero lo tiene un altro tick, o `asdlc-chiudi-giro`."""
+    file.parent.mkdir(parents=True, exist_ok=True)
+    figlio = subprocess.Popen(
+        [sys.executable, "-c",
+         "import fcntl, sys\n"
+         "f = open(sys.argv[1], 'w')\n"
+         "fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+         "print('preso', flush=True)\n"
+         "sys.stdin.read()\n",
+         str(file)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert figlio.stdout.readline().strip() == "preso"
+        yield
+    finally:
+        figlio.stdin.close()
+        figlio.wait(timeout=10)
+
+
+OCCUPATO_DAL_TICK = "occupato: il lucchetto del tick è tenuto — un altro tick o asdlc-chiudi-giro"
+
+
+@pytest.mark.parametrize("prova", [[], ["--dry-run"]], ids=["tick", "dry-run"])
+def test_con_il_lucchetto_del_tick_tenuto_il_tick_esce_senza_decidere(
+    tmp_path, monkeypatch, prova
+):
+    """PBI-392, decisione 2. Fino al `flock` del runner il tick non teneva nessun
+    lucchetto, e `asdlc-chiudi-giro` faceva i suoi sei passi mentre un tick
+    finiva il lancio (difetto 70 di PBI-102). Con `runs/.tick.lock` tenuto da un
+    altro processo il tick esce con 0, non decide e non lancia, e lo scrive in
+    `coda.log`. Il `--dry-run` fa lo stesso."""
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+
+    with tenuto_da_un_figlio(repo / "runs" / ".tick.lock"):
+        uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero), *prova])
+
+    assert uscita == 0
+    assert chiamati == []
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert len(righe) == 1 and righe[0].endswith(f"  {OCCUPATO_DAL_TICK}"), righe
