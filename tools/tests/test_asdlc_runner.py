@@ -6478,6 +6478,189 @@ class TestIlRapportoDiceIlPerimetro:
         assert voci == ["backend/app/rotto.py (per riga: il file non si analizza)"]
 
 
+class TestIlMorsoSiGiudicaAncheAllaPunta:
+    """PBI-393, revisione del 01/10 di ADR-0022: una guardia nata verde che non
+    morde al suo commit si riprova sullo stato finale del ramo, e ferma solo se non
+    morde neanche lì.
+
+    È la forma di PBI-386 in piccolo: la guardia nasce su un dato di modulo, e un
+    commit dopo porta quel dato dentro una funzione che il ramo tocca. Al suo commit
+    i mutanti sono quelli di `doppio`, che il test non guarda; alla punta c'è
+    `carica()`, e la sua riga cancellata lascia il prompt a `None`.
+    """
+
+    MODULO = ("PROMPT = 'ciao'\n"
+              "\n\n"
+              "def doppio(x):\n"
+              "    return x * 2\n")
+    DOPO = ("def carica():\n"
+            "    return 'ci' + 'ao'\n"
+            "\n\n"
+            "PROMPT = carica()\n"
+            "\n\n"
+            "def doppio(x):\n"
+            "    return x + x\n")
+    GOLDEN = ("from app.m import PROMPT\n\n\n"
+              "def test_il_prompt_resta_quello():\n    assert PROMPT == 'ciao'\n")
+
+    def _base_e_doppio(self, repo):
+        vecchio = repo.commit("feat: il prompt e il doppio", {"backend/app/m.py": self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+        repo.commit("refactor: il doppio come somma", {
+            "backend/app/m.py": self.MODULO.replace("return x * 2", "return x + x"),
+        })
+
+    def _il_golden_poi_carica(self, repo, messaggio: str = "test: fissa il prompt") -> str:
+        golden = repo.commit(messaggio, {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo.commit("refactor: il prompt da carica()", {"backend/app/m.py": self.DOPO})
+        return golden
+
+    def test_la_guardia_che_morde_solo_alla_punta_passa_e_il_rapporto_lo_dice(
+        self, repo_di_prova
+    ):
+        self._base_e_doppio(repo_di_prova)
+        al_commit = repo_di_prova.commit("test: presidia il doppio", {
+            "backend/tests/test_doppio.py":
+                "from app.m import doppio\n\n\n"
+                "def test_il_doppio_di_due():\n    assert doppio(2) == 4\n",
+        })
+        golden = self._il_golden_poi_carica(repo_di_prova)
+        punta = repo_di_prova._git("rev-parse", "HEAD")
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+
+        assert [(m["commit"], m["dove"]) for m in morsi] == [
+            (al_commit[:7], "commit"), (golden[:7], "punta")]
+        assert "punta" not in morsi[0]
+        assert morsi[1]["punta"] == punta[:7]
+        assert "backend/app/m.py:2" in morsi[1]["mutante"]
+        assert "backend/app/m.py::carica (dal diff)" in morsi[1]["perimetro"]
+        riga = runner.descrizione_del_morso(morsi[1], "").splitlines()[0]
+        assert riga.startswith(f"→ nato verde, non morde al suo commit, morde alla punta "
+                               f"`{punta[:7]}`: backend/app/m.py:2")
+
+    def test_la_punta_si_estrae_una_volta_sola_per_tutte_le_guardie(self, repo_di_prova):
+        """Decisione 1: il worktree della punta si crea alla prima guardia che ne ha
+        bisogno e vale per tutte. Due guardie, due commit estratti, una punta."""
+        self._base_e_doppio(repo_di_prova)
+        repo_di_prova.commit("test: fissa il prompt", {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.commit("test: fissa il prompt, di nuovo", {
+            "backend/tests/test_prompt_bis.py":
+                self.GOLDEN.replace("test_il_prompt_resta_quello", "test_il_prompt_bis"),
+        })
+        repo_di_prova.commit("refactor: il prompt da carica()", {"backend/app/m.py": self.DOPO})
+        prima = runner.USA_E_GETTA["montati"]
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+
+        assert [m["dove"] for m in morsi] == ["punta", "punta"]
+        assert runner.USA_E_GETTA["montati"] - prima == 3
+
+    def test_su_un_tag_annotato_la_punta_e_lo_sha_del_commit(self, repo_di_prova):
+        """Decisione 1: la punta è il ref chiesto con `--gate-rosso`, e i rami
+        fermati si conservano come tag annotati (`giro-fermato/…`). Lo sha nel
+        rapporto è quello del commit, non dell'oggetto tag, che `git log` non trova."""
+        self._base_e_doppio(repo_di_prova)
+        self._il_golden_poi_carica(repo_di_prova)
+        punta = repo_di_prova._git("rev-parse", "HEAD")
+        repo_di_prova._git("tag", "-a", "-m", "giro fermato", "giro-fermato/prova")
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(ref="giro-fermato/prova", morsi=morsi) == []
+
+        assert [m["punta"] for m in morsi] == [punta[:7]]
+
+    def test_la_guardia_che_non_morde_da_nessuna_parte_ferma_e_nomina_i_due_alberi(
+        self, repo_di_prova
+    ):
+        """Decisione 5: una lettura sola, e per ciascuno dei due alberi i mutanti
+        provati e il perimetro. Il ramo dopo la guardia tocca ancora `doppio`, e il
+        prompt resta un dato: alla punta non c'è niente che il golden guardi."""
+        self._base_e_doppio(repo_di_prova)
+        golden = repo_di_prova.commit("test: fissa il prompt",
+                                      {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.commit("refactor: il doppio come prodotto a sinistra", {
+            "backend/app/m.py": self.MODULO.replace("return x * 2", "return 2 * x"),
+        })
+        punta = repo_di_prova._git("rev-parse", "HEAD")
+        morsi: list[dict] = []
+
+        [mancato] = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert mancato["commit"] == golden[:7]
+        esito = mancato["esito"]
+        assert esito.startswith(
+            f"nato verde e non morde, né al suo commit né alla punta `{punta[:7]}`")
+        assert re.search(r"al suo commit: \d+ mutant[ei] provat[io]", esito)
+        assert re.search(r"alla punta: \d+ mutant[ei] provat[io]", esito)
+        assert esito.count("perimetro: backend/app/m.py::doppio (dal diff)") == 2
+
+    def test_la_guardia_che_alla_punta_non_ce_piu_ferma_e_lo_dice(self, repo_di_prova):
+        """Decisione 4: il test alla punta si cerca con lo stesso file e lo stesso
+        nome, e non altrove. Qui un commit dopo la guardia cancella il suo file."""
+        self._base_e_doppio(repo_di_prova)
+        golden = repo_di_prova.commit("test: fissa il prompt",
+                                      {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.cancella("backend/tests/test_prompt.py")
+        repo_di_prova.commit_dello_stage("test: togli il golden del prompt")
+        morsi: list[dict] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert [m["commit"] for m in mancati] == [golden[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+        assert "alla punta il test non si trova" in mancati[0]["esito"]
+
+    def test_la_guardia_che_alla_punta_non_e_verde_ferma_e_lo_dice(self, repo_di_prova):
+        """Decisione 4: un test rosso alla punta lo farebbe fallire ogni mutante, e
+        non sarebbe un morso. Qui il ramo, dopo la guardia, cambia il prompt."""
+        self._base_e_doppio(repo_di_prova)
+        golden = repo_di_prova.commit("test: fissa il prompt",
+                                      {"backend/tests/test_prompt.py": self.GOLDEN})
+        repo_di_prova.commit("feat: un altro prompt, da carica()", {
+            "backend/app/m.py": self.DOPO.replace("'ci' + 'ao'", "'sal' + 've'"),
+        })
+        morsi: list[dict] = []
+
+        mancati = runner.gate_del_rosso(morsi=morsi)
+
+        assert morsi == []
+        assert [m["commit"] for m in mancati] == [golden[:7]]
+        assert "nato verde e non morde" in mancati[0]["esito"]
+        assert "alla punta il test non è verde" in mancati[0]["esito"]
+
+    def test_il_perimetro_alla_punta_porta_la_funzione_nominata_dal_commit_della_guardia(
+        self, repo_di_prova
+    ):
+        """Decisione 3: alla punta il perimetro è quello di `base...punta`, più le
+        funzioni che il commit della guardia nomina con `Guardia-su:`, cercate
+        nell'albero della punta; un nome che lì non c'è si scrive come oggi."""
+        self._base_e_doppio(repo_di_prova)
+        repo_di_prova.commit("feat: la soglia", {
+            "backend/app/s.py": "def soglia(x):\n    return x > 10\n",
+        })
+        self._il_golden_poi_carica(
+            repo_di_prova,
+            "test: fissa il prompt\n\n"
+            "Guardia-su: backend/app/s.py::soglia\n"
+            "Guardia-su: backend/app/m.py::vecchia")
+        repo_di_prova._git("update-ref", "refs/remotes/origin/main", "HEAD~2")
+        morsi: list[dict] = []
+
+        assert runner.gate_del_rosso(morsi=morsi) == []
+
+        [morso] = morsi
+        assert morso["dove"] == "punta"
+        assert "backend/app/s.py::soglia (nominata)" in morso["perimetro"]
+        assert ("backend/app/m.py::vecchia (funzione nominata non trovata)"
+                in morso["perimetro"])
+        assert "backend/app/s.py::soglia (nominata)" in runner.descrizione_del_morso(morso, "")
+
+
 class TestIlPerimetroPerFunzioneNonCambiaIlResto:
     """PBI-378, criterio 5: le guardie. Descrivono comportamenti che `main` ha già
     — una riga di modulo porta solo sé stessa, un `.ts` resta per riga, un mutante
