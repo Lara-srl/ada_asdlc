@@ -517,3 +517,42 @@ def test_guardia_un_tick_lanciato_durante_un_passo_esce_occupato(
     assert len(righe_dei_tick) == len(i_passi(visti)) == 5
     assert all(r.split("  ", 1)[1].startswith("occupato: il lucchetto del tick")
                for r in righe_dei_tick), righe_dei_tick
+
+
+def lucchetto_del_tick_libero(repo: Path) -> bool:
+    """Un `flock` non bloccante su `runs/.tick.lock` da un descrittore nuovo:
+    `True` se nessuno lo tiene."""
+    with (repo / "runs" / ".tick.lock").open("a") as altro:
+        try:
+            fcntl.flock(altro, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(altro, fcntl.LOCK_UN)
+        return True
+
+
+def test_guardia_un_passo_che_fallisce_rilascia_il_lucchetto_del_tick(
+    home_finta, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 4: il lucchetto si tiene fino alla fine anche quando
+    un passo fallisce, e alla fine si rilascia. Un lucchetto rimasto preso
+    terrebbe fermo il tick senza una riga che dica perché. Il push del tag è
+    rifiutato: mentre fallisce il lucchetto è tenuto, e uscito il comando è
+    libero."""
+    repo, albero = un_giro_fermato(tmp_path)
+    push_del_tag = ["git", "push", "origin", f"refs/tags/{TAG}"]
+    _, rispondi = un_origin(home_finta, fallisce=push_del_tag)
+    libero_al_passo_fallito: list[bool] = []
+
+    def esegui(cmd, cwd):
+        if cmd == push_del_tag:
+            libero_al_passo_fallito.append(lucchetto_del_tick_libero(repo))
+        return rispondi(cmd, cwd)
+
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1, "il passo è fallito"
+    assert libero_al_passo_fallito == [False]
+    assert lucchetto_del_tick_libero(repo), "uscito il comando, il lucchetto è libero"
