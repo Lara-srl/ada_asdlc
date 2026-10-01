@@ -63,7 +63,7 @@ def ambiente_vero(monkeypatch):
 # di decidere (PBI-392): sono comandi `git` e `pip` veri sul `--repo`. Nei test si
 # sostituiscono come la verifica dell'ambiente, e i test del checkout rimettono
 # le funzioni vere con `checkout_vero`.
-VERE_DEL_CHECKOUT = {nome: getattr(coda, nome, None) for nome in ("allinea", "reinstalla")}
+VERE_DEL_CHECKOUT = {nome: getattr(coda, nome, None) for nome in ("allinea", "reinstalla", "indietro")}
 
 
 @pytest.fixture(autouse=True)
@@ -1809,3 +1809,29 @@ def test_con_pip_che_fallisce_la_firma_resta_e_il_tick_non_lancia(
     assert riga.startswith("reinstallazione fallita: "), righe
     assert "No matching distribution found" in riga, riga
     assert chiamati == []
+
+
+def test_il_dry_run_dice_che_il_checkout_e_indietro_e_non_lo_sposta(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 12. Il `--dry-run` non cambia niente: non allinea e
+    non reinstalla. Fa il `fetch`, e se il checkout è indietro rispetto a
+    `origin/main` lo scrive nella riga prima della decisione — è ciò che un
+    tick vero farebbe per primo."""
+    origin, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
+                                                       tocca="tools/modulo.py")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+    prima = git_in(checkout, "rev-parse", "HEAD")
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert git_in(checkout, "rev-parse", "HEAD") == prima != git_in(origin, "rev-parse", "main")
+    assert pip == []
+    righe = [r.split("  ", 1)[1]
+             for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
+    assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
+    assert "indietro" in righe[0], righe
