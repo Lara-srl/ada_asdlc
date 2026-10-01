@@ -6195,6 +6195,145 @@ class TestUnModuloSpostatoSiLeggeComeSpostato:
 
         assert fuori == []
 
+    def test_nessun_git_diff_con_name_only_nel_runner(self):
+        """PBI-389, decisione 5: `--name-only` dà di un rename il solo percorso
+        nuovo, con o senza pathspec. I nomi dei file di un diff si leggono solo
+        da `voci_del_name_status()` su `--name-status -M`."""
+        import ast
+
+        albero = ast.parse((REPO / "tools" / "asdlc" / "runner.py").read_text(encoding="utf-8"))
+        trovate: list[int] = []
+        for nodo in ast.walk(albero):
+            if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name)
+                    and nodo.func.id == "git" and nodo.args):
+                continue
+            costanti = [a.value for a in nodo.args if isinstance(a, ast.Constant)]
+            if costanti[:1] == ["diff"] and "--name-only" in costanti:
+                trovate.append(nodo.lineno)
+
+        assert trovate == []
+
+
+class TestLElencoDeiFileDelGiroNominaIDueLati:
+    """PBI-389, difetto 64 di PBI-102: a giro chiuso `esegui_pbi()` stampava i
+    file toccati con `git diff --name-only`, che di un rename dà il solo percorso
+    nuovo. È l'elenco dello Scope di `ADR-0015` che chi mergia legge: si prende
+    da `file_toccati()`, come il gate con `solo_se_tocca` (decisione 3)."""
+
+    def test_l_elenco_dei_file_del_giro_nomina_i_due_lati_di_un_rename(
+            self, git_finto, monkeypatch, capsys):
+        risponde = runner.git
+
+        def _git(*args: str) -> str:
+            if args[:3] == ("diff", "--name-status", "-M"):
+                risponde(*args)
+                return "R100\tbackend/app/m.py\ttools/asdlc/m.py\nM\tdocs/m.md\n"
+            return risponde(*args)
+
+        monkeypatch.setattr(runner, "git", _git)
+        monkeypatch.setattr(runner, "esegui", agente_finto({"builder": FATTO}))
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        monkeypatch.setattr(
+            runner, "revisione_critica", lambda p, **_: runner.Verdetto("pass", "", "PASS"))
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+        assert esito.stato == "fatto"
+        uscita = capsys.readouterr().out
+        assert "backend/app/m.py" in uscita
+        assert "tools/asdlc/m.py" in uscita
+        assert "docs/m.md" in uscita
+
+
+class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
+    """PBI-389, difetto 63 di PBI-102: il perimetro guardava solo il lato nuovo di
+    un rename. Un `git mv nota.txt backend/app/x.py` al 100% non porta hunk, e un
+    file intero entrava in produzione senza una riga aggiunta e senza un RED che
+    l'avesse chiesto. Un rename con il lato vecchio fuori dalla produzione e il
+    nuovo dentro conta come tutte righe aggiunte (decisione 1).
+
+    Qui git non si finge, come in `TestUnModuloSpostatoSiLeggeComeSpostato`.
+    """
+
+    MODULO = TestUnModuloSpostatoSiLeggeComeSpostato.MODULO
+    TUTTE = ["backend/app/x.py::soglia (dal diff)",
+             "backend/app/x.py::doppio (dal diff)",
+             "backend/app/x.py::cartella (dal diff)"]
+
+    def _base_con(self, repo, percorso):
+        vecchio = repo.commit("chore: il file fuori dalla produzione", {percorso: self.MODULO})
+        repo._git("update-ref", "refs/remotes/origin/main", vecchio)
+
+    def _perimetro(self, repo, sha):
+        cambiate = runner.righe_cambiate("origin/main", sha)
+        cancellate = runner.cancellazioni("origin/main", sha)
+        voci: list[str] = []
+        for percorso in sorted(cambiate.keys() | cancellate.keys()):
+            sorgente = repo._git("show", f"{sha}:{percorso}")
+            voci += runner.righe_del_perimetro(percorso, sorgente,
+                                               cambiate.get(percorso, set()),
+                                               cancellate.get(percorso, set()))[1]
+        return voci
+
+    def test_un_file_che_entra_in_produzione_da_fuori_mette_nel_perimetro_tutte_le_funzioni(
+            self, repo_di_prova):
+        self._base_con(repo_di_prova, "nota.txt")
+        repo_di_prova.sposta("nota.txt", "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("feat: la nota diventa un modulo")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/x.py": [(1, 15)]}
+        assert self._perimetro(repo_di_prova, sha) == self.TUTTE
+
+    def test_un_test_spostato_in_produzione_mette_nel_perimetro_tutte_le_funzioni(
+            self, repo_di_prova):
+        """Guardia: un file di test non è produzione, e il suo `git mv` sotto
+        `app/` attraversa il confine come la nota."""
+        self._base_con(repo_di_prova, "backend/tests/test_x.py")
+        repo_di_prova.sposta("backend/tests/test_x.py", "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il test diventa un modulo")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/x.py": [(1, 15)]}
+        assert self._perimetro(repo_di_prova, sha) == self.TUTTE
+
+    def test_un_git_mv_fra_due_file_di_produzione_lascia_il_perimetro_vuoto(
+            self, repo_di_prova):
+        """Guardia, verde su `main`: il confine si attraversa solo da fuori verso
+        la produzione. Fra due file di produzione resta la decisione 3 di
+        `PBI-387`, niente hunk se non cambia niente."""
+        self._base_con(repo_di_prova, "backend/app/m.py")
+        repo_di_prova.sposta("backend/app/m.py", "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il modulo cambia nome")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {"backend/app/x.py": []}
+        assert self._perimetro(repo_di_prova, sha) == []
+
+    def test_un_test_spostato_fra_due_cartelle_di_test_non_fa_nascere_niente(
+            self, repo_di_prova):
+        """Guardia, verde su `main`: il lato dei test non cambia. I test passano
+        `lati` esplicito con `lati_del_diff()`, la regola del confine non si
+        applica, e un trasloco fra due cartelle di test resta senza nascite come
+        dice `PBI-361`."""
+        repo_di_prova.commit("test: i tre casi (RED)", {"backend/tests/test_tre.py": TRE_TEST})
+        repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: i test in tools/tests")
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    @pytest.mark.parametrize("da", ["nota.txt", "backend/tests/test_x.py"])
+    def test_l_ingresso_in_produzione_non_dipende_da_diff_renames(self, repo_di_prova, da):
+        """Guardia, decisione 2: con `diff.renames` spento il `-M` scritto nel
+        comando continua a riconoscere il rename, e l'esito resta lo stesso."""
+        repo_di_prova.configura("diff.renames", "false")
+        self._base_con(repo_di_prova, da)
+        repo_di_prova.sposta(da, "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il file diventa un modulo")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/x.py": [(1, 15)]}
+        assert self._perimetro(repo_di_prova, sha) == self.TUTTE
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
@@ -7546,7 +7685,7 @@ class TestIlRamoDiBaseVieneDaAsdlcToml:
         assert ("rev-parse", "origin/master") in git_finto
         assert ("rev-list", "--count", f"{SHA_DELLA_BASE}..HEAD") in git_finto
         assert ("rev-list", "--reverse", f"{SHA_DELLA_BASE}..HEAD") in git_finto
-        assert ("diff", "--name-only", f"{SHA_DELLA_BASE}...HEAD") in git_finto
+        assert ("diff", "--name-status", "-M", f"{SHA_DELLA_BASE}...HEAD") in git_finto
         assert not [c for c in git_finto if any("origin/main" in arg for arg in c)], (
             "una lettura è rimasta sul ramo scritto a mano"
         )
