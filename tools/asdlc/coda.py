@@ -480,6 +480,19 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     return decisione
 
 
+def allinea(repo: Path) -> None:
+    """Porta il checkout del tick a `origin/main`: `git fetch` e poi `git merge
+    --ff-only` nel `--repo` (PBI-392, decisione 7).
+
+    Il tick decide da `origin/main`, ma il runner che lancia è quello installato
+    dal `HEAD` di questo checkout, che avanzava solo col `ff-only` a mano dopo il
+    merge. Il 01/10 quel passo è saltato, e il giro 2 di PBI-386 è partito col
+    runner di prima (difetto 75 di PBI-102).
+    """
+    esegui(["git", "fetch", REMOTO], repo)
+    esegui(["git", "merge", "--ff-only", BASE], repo)
+
+
 def preflight() -> list[list[str]]:
     """Il pre-flight del lancio a mano, nell'ordine in cui va fatto.
 
@@ -724,6 +737,10 @@ def passaggio(a: argparse.Namespace) -> int:
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
         return 0
+    # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
+    # di decidere, col lucchetto del tick già preso.
+    if not a.dry_run:
+        allinea(a.repo)
 
     decisione = decidi(a.repo, a.worktree)
     riga = racconta(decisione)
