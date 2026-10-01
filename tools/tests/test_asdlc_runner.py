@@ -6236,6 +6236,18 @@ class TestUnFileCheEntraInProduzioneSiLeggeComeNuovo:
             "backend/app/x.py": [(1, 15)]}
         assert self._perimetro(repo_di_prova, sha) == self.TUTTE
 
+    def test_un_test_spostato_in_produzione_mette_nel_perimetro_tutte_le_funzioni(
+            self, repo_di_prova):
+        """Guardia: un file di test non è produzione, e il suo `git mv` sotto
+        `app/` attraversa il confine come la nota."""
+        self._base_con(repo_di_prova, "backend/tests/test_x.py")
+        repo_di_prova.sposta("backend/tests/test_x.py", "backend/app/x.py")
+        sha = repo_di_prova.commit_dello_stage("refactor: il test diventa un modulo")
+
+        assert runner.hunk_di_produzione("origin/main", sha) == {
+            "backend/app/x.py": [(1, 15)]}
+        assert self._perimetro(repo_di_prova, sha) == self.TUTTE
+
 
 class TestIlPerimetroSonoLeFunzioniToccate:
     """PBI-378, difetto 53 di PBI-102: il perimetro dei mutanti sono le **funzioni**
