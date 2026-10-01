@@ -485,3 +485,35 @@ def test_con_il_lucchetto_del_tick_tenuto_il_comando_rifiuta_senza_git_e_senza_p
     detto = capsys.readouterr().out
     assert "tick" in detto and "riprova" in detto and "minuto" in detto, detto
 
+
+
+def test_guardia_un_tick_lanciato_durante_un_passo_esce_occupato(
+    home_finta, tmp_path, monkeypatch
+):
+    """PBI-392, decisione 4: il comando tiene il lucchetto del tick per tutti i
+    sei passi. A ogni comando che cambia qualcosa il `git` finto fa partire un
+    tick sullo stesso checkout, e ogni tick esce con la riga `occupato:` del
+    lucchetto — non `in pausa:`, che vorrebbe dire che il tick è arrivato fin
+    lì perché il lucchetto era libero."""
+    repo, albero = un_giro_fermato(tmp_path)
+    visti, rispondi = un_origin(home_finta)
+    tick_albero = tmp_path / "albero-del-tick"
+    tick_albero.mkdir()
+    righe_dei_tick: list[str] = []
+
+    def esegui(cmd, cwd):
+        esito = rispondi(cmd, cwd)
+        if "ls-remote" not in cmd:
+            assert coda.smista(["--repo", str(repo), "--worktree", str(tick_albero)]) == 0
+            righe_dei_tick.append(
+                (repo / coda.LOG).read_text(encoding="utf-8").splitlines()[-1])
+        return esito
+
+    monkeypatch.setattr(chiudi_giro(), "esegui", esegui)
+
+    uscita = chiudi_giro().smista(["PBI-377", "--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert len(righe_dei_tick) == len(i_passi(visti)) == 5
+    assert all(r.split("  ", 1)[1].startswith("occupato: il lucchetto del tick")
+               for r in righe_dei_tick), righe_dei_tick
