@@ -19,6 +19,7 @@ per nome come negli altri file di questa cartella: vedi sotto.
 """
 
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -119,11 +120,47 @@ sys.exit(esito)
 """
 
 
-def test_i_test_di_tools_tests_non_aprono_connessioni_a_un_database():
+# Ciò che il commit di nascita del passo 2.3 aggiunge alla radice del repository
+# `asdlc`, oltre ai percorsi dell'estrazione: l'hook di fase e le sue impostazioni,
+# e il progetto di prova come progetto della radice (PBI-394, decisione 4).
+DELL_OSPITE = (".claude/hooks/fase-tdd.sh", ".claude/settings.json")
+DEL_PROGETTO_DI_PROVA = ("asdlc.toml", "asdlc-aggiunte", "backlog/CODA.md")
+
+
+def forma_del_repository_asdlc(cartella: Path) -> Path:
+    """Una cartella con i soli file che traslocano, e nessun altro file di aDa.
+
+    Fuori da un repository git, in una cartella temporanea: i test che ci girano
+    non possono trovare né il checkout di aDa né i suoi file per la strada.
+    """
+    for file in file_dell_estrazione(REPO):
+        copia = cartella / file.relative_to(REPO)
+        copia.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file, copia)
+    for relativo in DELL_OSPITE:
+        (cartella / relativo).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / relativo, cartella / relativo)
+    for relativo in DEL_PROGETTO_DI_PROVA:
+        if (PROGETTO / relativo).is_dir():
+            shutil.copytree(PROGETTO / relativo, cartella / relativo)
+        else:
+            (cartella / relativo).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(PROGETTO / relativo, cartella / relativo)
+    return cartella
+
+
+def test_i_test_di_tools_tests_non_aprono_connessioni_a_un_database(tmp_path):
+    """La suite gira **nella forma del repository `asdlc`**, non dalla radice di
+    aDa: è il controllo del passo 0.2 del runbook, e si rifà identico al 2.5.
+
+    Un sottoprocesso solo, che conta anche le connessioni: la suite gira già due
+    volte a ogni gate, e una terza costerebbe un altro mezzo minuto a ogni gate
+    di ogni giro (PBI-394, decisione 4)."""
+    forma = forma_del_repository_asdlc(tmp_path / "asdlc")
     fatto = subprocess.run(
         [sys.executable, "-c", SONDA, "-q", "-p", "no:cacheprovider",
-         str(QUI.parent), "-k", "not non_aprono_connessioni"],
-        cwd=REPO, capture_output=True, text=True, timeout=600,
+         "tools/tests", "-k", "not non_aprono_connessioni"],
+        cwd=forma, capture_output=True, text=True, timeout=600,
     )
     uscita = fatto.stdout + fatto.stderr
 
