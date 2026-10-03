@@ -1241,7 +1241,7 @@ class TestNuovo:
     """Un test che **nasce** in un commit: dove sta, come si chiama, chi lo esegue."""
 
     file: str       # dalla radice del repository
-    nome: str       # la funzione (python) o il titolo (vitest)
+    nome: str       # `Classe::funzione` dalla collezione (python), o il titolo (vitest)
     linguaggio: str  # python | vitest
 
 
@@ -1527,11 +1527,12 @@ def raccolta_di_pytest(cartella: Path, comando: list[str]) -> Raccolta:
 
 
 def nome_del_nodo(nodo: str) -> tuple[str, str]:
-    """`(file, nome)` di un nodeid di pytest: il file relativo al `--rootdir`, e
-    il nome della funzione senza il suffisso `[…]` della parametrizzazione, che
-    può contenere a sua volta un `::`."""
+    """`(file, nome)` di un nodeid di pytest (PBI-396, decisione 2): il file
+    relativo al `--rootdir`, e il resto senza il suffisso `[…]` della
+    parametrizzazione, che può contenere a sua volta un `::` — `Classe::funzione`,
+    `Esterna::Interna::funzione`, o `funzione` fuori da una classe."""
     percorso, _, resto = nodo.partition("::")
-    return percorso, resto.partition("[")[0].split("::")[-1]
+    return percorso, resto.partition("[")[0]
 
 
 def collezione_dellalbero(albero: Path) -> dict[str, str]:
@@ -1727,7 +1728,11 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
 
     Prende la sorgente e non un percorso, perché il file a quel commit si legge in
     due modi: dal worktree quando c'è, e da `git show sha:percorso` quando il gate
-    ferma dal solo diff e non deve estrarre niente.
+    ferma dal solo diff e non esegue niente.
+
+    Il `nome` di un test Python nato viene dalla collezione e porta già le sue
+    classi, `Classe::funzione` (PBI-396, decisione 2): si cerca quel cammino. Un
+    nome senza `::` si cerca a livello di modulo e dentro le classi.
 
     E non `-k`, che seleziona per sottostringa: `test_somma` prenderebbe anche
     `test_somma_negativa`, e il rosso di un test vicino coprirebbe quello nato
@@ -1739,6 +1744,18 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
     except (SyntaxError, ValueError):
         return None
     definizioni = (ast.FunctionDef, ast.AsyncFunctionDef)
+    if "::" in nome:
+        # Il nome della collezione porta già le sue classi (PBI-396, decisione 2):
+        # si segue quel cammino, e non si cerca altrove.
+        *classi, funzione = nome.split("::")
+        corpo = modulo.body
+        for classe in classi:
+            dentro = [n for n in corpo if isinstance(n, ast.ClassDef) and n.name == classe]
+            if len(dentro) != 1:
+                return None
+            corpo = dentro[0].body
+        uniche = [n for n in corpo if isinstance(n, definizioni) and n.name == funzione]
+        return f"{relativo}::{nome}" if len(uniche) == 1 else None
     trovati: list[str] = []
     for nodo in modulo.body:
         if isinstance(nodo, definizioni) and nodo.name == nome:
@@ -1747,8 +1764,8 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
             for figlio in nodo.body:
                 if isinstance(figlio, definizioni) and figlio.name == nome:
                     trovati.append(f"{relativo}::{nodo.name}::{nome}")
-    # Due classi che definiscono un test omonimo sono normali, e il diff dice solo
-    # che *un* `def` con quel nome è nato: quale delle due, non lo dice. Prendere il
+    # Due classi che definiscono un test omonimo sono normali, e un nome senza le
+    # classi dice solo che *un* `def` con quel nome è nato: quale, non lo dice. Prendere il
     # primo è la scelta che sembra innocua e non lo è — il gate esegue il test
     # vecchio, lo trova verde, e stampa «nato verde» su un test che era rosso.
     return trovati[0] if len(trovati) == 1 else None
