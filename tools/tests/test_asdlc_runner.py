@@ -3854,8 +3854,9 @@ class TestNascitaECancellazioneRestanoQuelleDiPrima:
 
     Un file di test davvero nuovo fa nascere i suoi test; uno cancellato non ne
     fa nascere nessuno e non alza. Nascono verdi — è il comportamento di sempre —
-    e presidiano il ciclo delle nascite, `nomi_dei_test` compresa, che questo
-    branch ha riscritto tutt'attorno senza doverlo cambiare.
+    e presidiano il ciclo delle nascite, che questo branch ha riscritto
+    tutt'attorno senza doverlo cambiare. Da PBI-396 i file sono Python, e le
+    nascite si leggono dalla collezione di pytest e non da `nomi_dei_test`.
 
     Quanto mordono, però, va detto per quel che è, e al giro 3 il Critic ha
     trovato che qui c'era scritto di più: nessuno dei quattro casi contiene un
@@ -5717,12 +5718,13 @@ class TestUnNomeDiTestAmbiguoNonSiIndovina:
     un `if`, e questo è lo stesso dubbio.
     """
 
-    # `def ` sta fuori dalla stringa apposta: `nomi_dei_test` legge i nomi dal
-    # **testo del diff**, quindi un `def test_…` dentro un letterale conterebbe
-    # come test nato in questo commit. Il gate del rosso di questa stessa PR ci è
+    # `def ` sta fuori dalla stringa apposta: `nomi_dei_test` leggeva i nomi dal
+    # **testo del diff**, quindi un `def test_…` dentro un letterale contava come
+    # test nato in questo commit. Il gate del rosso di questa stessa PR ci è
     # cascato: ha eseguito un omonimo vero, l'ha trovato verde, e ha fermato il
-    # branch per un test che qui non esiste. Il difetto è suo e resta scritto in
-    # PBI-104; questa riga evita di darglielo in pasto.
+    # branch per un test che qui non esiste. Il difetto resta scritto in PBI-104;
+    # da PBI-396 la nascita di un test Python si legge dalla collezione di
+    # pytest, dove un letterale non è un test.
     DEF = "def "
     SORGENTE = f"""
 class TestVecchia:
