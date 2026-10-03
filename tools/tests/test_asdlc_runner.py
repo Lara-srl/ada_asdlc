@@ -3979,6 +3979,32 @@ class TestUnTestSpostatoFraDueFileNonNasce:
         assert runner.test_nuovi_del_commit(spostato) == []
 
 
+class TestIlNomeDiUnTestPythonPortaLaSuaClasse:
+    """PBI-396, decisione 2, criterio 4: il nome è il nodeid senza il file e senza
+    il suffisso `[…]`. Il solo nome della funzione non basta: un omonimo in
+    un'altra classe della base nasconderebbe una nascita vera."""
+
+    def test_un_omonimo_in_unaltra_classe_della_base_non_nasconde_la_nascita(
+            self, repo_di_prova):
+        base = repo_di_prova.commit("test: TestA", {
+            "backend/tests/test_a.py": "class TestA:\n    def test_x(self):\n        assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        sha = repo_di_prova.commit("test: TestB, annidati e parametrizzati (RED)", {
+            "backend/tests/test_b.py": (
+                "import pytest\n\n\n"
+                "class TestB:\n    def test_x(self):\n        assert False\n\n\n"
+                "class TestEsterna:\n    class TestInterna:\n"
+                "        def test_y(self):\n            assert False\n\n\n"
+                "@pytest.mark.parametrize('n', [1, 2, 3])\n"
+                "def test_p(n):\n    assert False\n")})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
+            ("backend/tests/test_b.py", "TestB::test_x"),
+            ("backend/tests/test_b.py", "TestEsterna::TestInterna::test_y"),
+            ("backend/tests/test_b.py", "test_p"),
+        ]
+
+
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
 
