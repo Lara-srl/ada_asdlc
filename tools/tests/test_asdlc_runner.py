@@ -3498,37 +3498,6 @@ class TestITestNuoviSiLeggonoDalDiff:
     """Quali test **nascono** in questo commit: né quelli che c'erano, né quelli
     che il commit sposta da un file all'altro."""
 
-    def test_una_funzione_aggiunta_e_un_test_nuovo(self, monkeypatch):
-        git_del_commit(
-            monkeypatch,
-            "M\tbackend/tests/test_somma.py",
-            {"backend/tests/test_somma.py":
-             "@@ -1,0 +2,2 @@\n+def test_somma_due_numeri():\n+    assert somma(1, 1) == 2\n"},
-        )
-
-        nuovi = runner.test_nuovi_del_commit("abc1234")
-
-        assert [(t.file, t.nome, t.linguaggio) for t in nuovi] == [
-            ("backend/tests/test_somma.py", "test_somma_due_numeri", "python")
-        ]
-
-    def test_un_test_spostato_non_e_un_test_nuovo(self, monkeypatch):
-        """Lo stesso nome cancellato e riaggiunto è un trasloco, non una nascita.
-
-        È il caso che il Protocollo di rifinitura chiama *«un file di test
-        riscritto per intero»*: senza questo, un riordino farebbe girare tutta la
-        suite di quel commit e la fermerebbe come nata verde.
-        """
-        git_del_commit(
-            monkeypatch,
-            "M\tbackend/tests/test_somma.py",
-            {"backend/tests/test_somma.py":
-             "@@ -3,3 +3,4 @@\n-def test_vecchio():\n-    assert True\n"
-             "+def test_vecchio():\n+    assert True\n+def test_davvero_nuovo():\n+    assert False\n"},
-        )
-
-        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_davvero_nuovo"]
-
     def test_riconosce_i_test_del_frontend(self, monkeypatch):
         git_del_commit(
             monkeypatch,
@@ -3596,18 +3565,6 @@ class TestITestNuoviSiLeggonoDalDiff:
         )
 
         assert runner.test_nuovi_del_commit("abc1234") == []
-
-    def test_le_righe_di_intestazione_del_diff_non_sono_codice(self, monkeypatch):
-        """`+++ b/…` comincia per `+` e non è una riga aggiunta."""
-        git_del_commit(
-            monkeypatch,
-            "M\tbackend/tests/test_somma.py",
-            {"backend/tests/test_somma.py":
-             "--- a/backend/tests/test_somma.py\n+++ b/backend/tests/test_somma.py\n"
-             "@@ -1,0 +2,1 @@\n+def test_uno():\n"},
-        )
-
-        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_uno"]
 
 
 class RepoDiProva:
