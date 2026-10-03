@@ -3935,6 +3935,28 @@ class TestNascitaECancellazioneRestanoQuelleDiPrima:
         assert runner.test_nuovi_dellalbero() == []
 
 
+class TestLaCollezioneSiLeggeDalPlugin:
+    """PBI-396, decisione 3: la collezione di pytest si legge da un dato.
+
+    Il plugin `asdlc.collezione` scrive in un JSON i nodeid che pytest ha
+    raccolto. L'output di `-q` non si legge: un id con uno spazio o con un `::`
+    dentro la parametrizzazione, letto dallo schermo, si spezzerebbe nel punto
+    sbagliato.
+    """
+
+    def test_un_id_con_uno_spazio_o_un_doppio_due_punti_arriva_intero(self, tmp_path):
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_p.py").write_text(
+            "import pytest\n\n\n"
+            "@pytest.mark.parametrize('x', [1, 2], ids=['con uno spazio', 'a::b'])\n"
+            "def test_p(x):\n    assert x\n", encoding="utf-8")
+
+        raccolta = runner.raccolta_di_pytest(tmp_path, ["pytest", "-q"])
+
+        assert raccolta.nodi == ["tests/test_p.py::test_p[con uno spazio]",
+                                 "tests/test_p.py::test_p[a::b]"]
+
+
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
 
