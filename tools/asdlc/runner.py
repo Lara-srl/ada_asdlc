@@ -1556,14 +1556,16 @@ def collezione_al_commit(sha: str) -> dict[str, str]:
         return collezione_dellalbero(albero)
 
 
-def nascite_python(collezione: dict[str, str],
-                   genitore: dict[str, str]) -> list[TestNuovo]:
+def nascite_python(collezione: dict[str, str], genitore: dict[str, str],
+                   base: dict[str, str]) -> list[TestNuovo]:
     """La regola della nascita di un test Python, una per il gate e per il
     lucchetto (PBI-396, decisione 1): nasce ciò che c'è nella `collezione` e non
-    in quella del `genitore`. Un test tolto da un file e scritto in un altro ha
-    lo stesso nome dall'una e dall'altra parte, e non nasce."""
+    in quella del `genitore` né in quella della `base`. Un test tolto da un file
+    e scritto in un altro ha lo stesso nome dall'una e dall'altra parte, e non
+    nasce; un nome che c'è alla base non nasce mai nel ramo, anche se un commit
+    del ramo lo aveva tolto."""
     return [TestNuovo(file, nome, "python") for nome, file in collezione.items()
-            if nome not in genitore]
+            if nome not in genitore and nome not in base]
 
 
 def tocca_un_test_python(voce: VoceDiCommit) -> bool:
@@ -1581,12 +1583,23 @@ def genitore_del_commit(sha: str) -> str | None:
         return None
 
 
-def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> list[TestNuovo]:
-    """I test che **nascono** in questo commit.
+def base_del_commit(base: str, sha: str) -> str | None:
+    """Il commit da cui il ramo di `sha` si è staccato da `base`: la base contro
+    cui si decide una nascita. `None` se le due storie non si incontrano."""
+    try:
+        return git("merge-base", base, sha) or None
+    except RuntimeError:
+        return None
+
+
+def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
+                          base: str | None = None) -> list[TestNuovo]:
+    """I test che **nascono** in questo commit del ramo che parte da `base`, il
+    ramo di `asdlc.toml` se non è detto.
 
     Per i test Python la nascita si legge dalla collezione di pytest
-    (`nascite_python`, PBI-396): un nome che c'era nel genitore non nasce, in
-    qualunque file finisca. Il diff, file per file, non vedeva un test tolto da
+    (`nascite_python`, PBI-396): un nome che c'era nel genitore o alla base non
+    nasce, in qualunque file finisca. Il diff, file per file, non vedeva un test tolto da
     un file e scritto in un altro senza `git mv` (difetto 81 di PBI-102).
 
     Per vitest la nascita si legge ancora dal diff. Uno stesso nome cancellato e
@@ -1612,8 +1625,10 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> l
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in voci):
         genitore = genitore_del_commit(sha)
+        alla_base = base_del_commit(base if base is not None else BASE, sha)
         nuovi += nascite_python(collezione_al_commit(sha),
-                                collezione_al_commit(genitore) if genitore else {})
+                                collezione_al_commit(genitore) if genitore else {},
+                                collezione_al_commit(alla_base) if alla_base else {})
     return nuovi
 
 
@@ -2806,7 +2821,7 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
         for sha in commit_da_esaminare(base, ref, visti):
             visti.add(sha)
             file = file_del_commit(sha)
-            nuovi = test_nuovi_del_commit(sha, file)
+            nuovi = test_nuovi_del_commit(sha, file, base)
             if not nuovi:
                 continue  # un refactor non porta test nuovi, e la regola morde su quelli
             titolo = git("show", "--no-patch", "--format=%s", sha)
@@ -4069,7 +4084,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     file = file_del_commit("HEAD")
     if any(e_file_di_produzione(v.percorso) for v in file):
         return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
-    return test_nuovi_del_commit("HEAD", file)
+    return test_nuovi_del_commit("HEAD", file, base)
 
 
 def chiedi_impl() -> int:
