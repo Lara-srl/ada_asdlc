@@ -3630,6 +3630,10 @@ class RepoDiProva:
         f.write_text(contenuto, encoding="utf-8")
         self._git("add", percorso)
 
+    def sposta_la_base(self, sha: str) -> None:
+        """`origin/main` su `sha`: ciò che c'è fino a lì sta alla base del ramo."""
+        self._git("update-ref", "refs/remotes/origin/main", sha)
+
 
 @pytest.fixture
 def repo_di_prova(tmp_path, monkeypatch):
@@ -3912,6 +3916,40 @@ class TestLaCollezioneSiLeggeDalPlugin:
 
         assert raccolta.nodi == ["tests/test_p.py::test_p[con uno spazio]",
                                  "tests/test_p.py::test_p[a::b]"]
+
+
+class TestUnTestSpostatoFraDueFileNonNasce:
+    """PBI-396, decisione 1; difetto 81 di PBI-102.
+
+    Il commit `6406151` del giro 1 di PBI-394 ha tolto un test da un file e lo ha
+    scritto in un altro, senza `git mv`. Letto dal diff, `+def test_…` in un file e
+    `-def test_…` nell'altro non si incontravano, e il gate l'ha fermato come un
+    test nato verde. Letto dalla collezione di pytest, quel nome c'era già.
+    """
+
+    def _base_con_due_test(self, repo_di_prova) -> None:
+        base = repo_di_prova.commit("test: due casi", {
+            "backend/tests/test_a.py": ("def test_resta():\n    assert True\n\n\n"
+                                        "def test_x():\n    assert True\n")})
+        repo_di_prova.sposta_la_base(base)
+
+    def test_un_test_spostato_da_un_file_a_un_altro_non_nasce(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        sha = repo_di_prova.commit("refactor: test_x in test_b", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_un_test_nuovo_accanto_a_uno_spostato_nasce_lui_solo(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        sha = repo_di_prova.commit("test: test_x in test_b, e un caso nuovo (RED)", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": ("def test_x():\n    assert True\n\n\n"
+                                        "def test_nuovo():\n    assert False\n")})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
+            ("backend/tests/test_b.py", "test_nuovo")]
 
 
 class TestIlGateDelRossoCamminaICommit:
