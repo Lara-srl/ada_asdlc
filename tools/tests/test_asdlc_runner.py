@@ -3951,6 +3951,19 @@ class TestUnTestSpostatoFraDueFileNonNasce:
         assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
             ("backend/tests/test_b.py", "test_nuovo")]
 
+    def test_un_nome_che_ce_alla_base_non_nasce_anche_se_il_genitore_non_lo_ha(
+            self, repo_di_prova):
+        """Decisione 1: un nome che c'è alla base non nasce mai nel ramo, in
+        qualunque file finisca. Qui il ramo lo toglie in un commit e lo rimette in
+        un altro file nel commit dopo: il genitore non lo ha, la base sì."""
+        self._base_con_due_test(repo_di_prova)
+        repo_di_prova.commit("refactor: test_x esce da test_a", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n"})
+        sha = repo_di_prova.commit("refactor: test_x torna, in test_b", {
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
 
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
