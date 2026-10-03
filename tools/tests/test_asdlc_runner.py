@@ -5508,6 +5508,7 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
         assert "guardia" in capsys.readouterr().err
 
 
+@pytest.mark.progetto_ospite
 class TestLHookERegistratoEFerma:
     """Lo script e la sua registrazione, provati sul file vero.
 
@@ -9734,6 +9735,7 @@ RUNNER_FINTO = ("import sys\nfrom pathlib import Path\n\n"
                 "sys.exit(1)\n")
 
 
+@pytest.mark.progetto_ospite
 class TestLeGuardieTrovanoIlRunnerSpostato:
     """PBI-388: le due guardie del lucchetto lanciano il runner per percorso, e
     `PBI-383` quel percorso lo sposta in `tools/asdlc/runner.py`.

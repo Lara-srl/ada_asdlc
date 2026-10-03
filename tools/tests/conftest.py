@@ -28,6 +28,14 @@ PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 USATI_DAI_TEST = ("git", "pytest")
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "progetto_ospite: il test legge apposta un file del progetto che ospita la "
+        "suite — la coda vera, l'hook di fase, la KB — e non il progetto di prova "
+        "(PBI-394, decisione 2)")
+
+
 def pytest_sessionstart(session):
     """L'ambiente dei test, prima della raccolta (PBI-384, decisione 8).
 

@@ -232,6 +232,7 @@ def test_le_voci_escono_nellordine_del_file_e_la_prosa_resta_fuori():
     ]
 
 
+@pytest.mark.progetto_ospite
 def test_la_coda_vera_si_legge():
     """Il collaudo su `backlog/CODA.md`, che è il file che il tick eseguirà.
 
