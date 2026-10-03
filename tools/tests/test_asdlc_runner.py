@@ -4174,6 +4174,30 @@ class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
 
         assert not cartella.exists()
 
+    def test_su_tre_commit_il_gate_raccoglie_ogni_albero_una_volta_sola(
+            self, repo_di_prova, monkeypatch):
+        """Decisione 9, criterio 11: una collezione per commit, non tre. Al giro 1
+        ogni commit raccoglieva sé, il genitore e la base, e la suite di
+        `tools/tests` è passata da circa 70 s a circa 200 s. Il genitore di un
+        commit è il commit prima, o la base: su tre commit gli alberi da
+        raccogliere sono quattro, base compresa, per ogni gate di pytest."""
+        raccolte: list[str] = []
+        vera = runner.raccolta_di_pytest
+
+        def conta(cartella, comando):
+            raccolte.append(Path(cartella).name)
+            return vera(cartella, comando)
+
+        monkeypatch.setattr(runner, "raccolta_di_pytest", conta)
+        for nome in ("a", "b", "c"):
+            repo_di_prova.commit(f"test: il caso {nome} (RED)", {
+                f"backend/tests/test_{nome}.py": f"def test_{nome}():\n    assert False\n"})
+
+        assert runner.gate_del_rosso() == []
+
+        assert raccolte.count("backend") == 4
+        assert all(raccolte.count(c) <= 4 for c in set(raccolte))
+
     def test_fuori_da_un_giro_la_collezione_non_si_scrive(self, repo_di_prova):
         """Decisione 5: fuori da un giro — `--gate-rosso` a mano — le collezioni si
         calcolano e non si scrivono, né nella `LOG_DIR` né nel git dir."""
