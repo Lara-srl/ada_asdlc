@@ -1,6 +1,6 @@
 """Il plugin di pytest che scrive la collezione in un dato (PBI-396, decisione 3).
 
-Si carica con `-p asdlc.collezione --asdlc-collezione=<file>`, accanto a
+Si carica con `-p asdlc_collezione --asdlc-collezione=<file>`, accanto a
 `--collect-only`: a fine sessione scrive nel file un JSON con i nodeid raccolti
 e i file che pytest non ha potuto raccogliere, di cui il runner legge i nomi
 dall'AST (decisione 4).
@@ -11,6 +11,10 @@ spezzerebbe nel punto sbagliato.
 Il file si scrive in `pytest_sessionfinish` e non in `pytest_collection_finish`:
 un percorso che non esiste ferma pytest prima della fine della raccolta, e il
 runner deve trovare lo stesso una collezione, vuota.
+
+Il modulo non sta sotto il nome `asdlc` (difetto 84 di PBI-102): caricato come
+`asdlc.collezione` metteva in `sys.modules` il pacchetto del runner prima della
+raccolta, e un albero con un suo `asdlc` riceveva quello nei test raccolti.
 """
 
 import json

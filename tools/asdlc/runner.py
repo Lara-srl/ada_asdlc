@@ -1491,7 +1491,7 @@ def nomi_dei_test(diff: str) -> tuple[list[str], set[str]]:
 
 
 class Raccolta(NamedTuple):
-    """Ciò che il plugin `asdlc.collezione` ha scritto: i nodeid raccolti e i
+    """Ciò che il plugin `asdlc_collezione` ha scritto: i nodeid raccolti e i
     file che non si raccolgono, relativi al `--rootdir` del comando."""
 
     nodi: list[str]
@@ -1500,16 +1500,20 @@ class Raccolta(NamedTuple):
 
 @contextmanager
 def plugin_della_collezione():
-    """Il `PYTHONPATH` da cui pytest importa `asdlc.collezione`.
+    """Il `PYTHONPATH` da cui pytest importa il plugin `asdlc_collezione`.
 
     I gate girano col venv del progetto, dove il pacchetto del runner non è
-    installato. Si mette sul percorso una cartella con dentro il solo pacchetto
-    `asdlc`, con un link, e non la cartella che lo contiene: nel venv del
-    runner quella è `site-packages`, e porterebbe nei test del progetto ogni
-    altra libreria del runner.
+    installato. Si mette sul percorso una cartella con dentro il solo modulo del
+    plugin, con un link, e non la cartella che lo contiene: nel venv del runner
+    quella è `site-packages`, e porterebbe nei test del progetto ogni altra
+    libreria del runner. Il plugin sta accanto al pacchetto `asdlc`, nel
+    sorgente come installato (`py-modules`), e non dentro: il pacchetto del
+    runner sul percorso metterebbe in ombra l'`asdlc` dell'albero esaminato
+    (PBI-396, decisione 3; difetto 84 di PBI-102).
     """
+    plugin = Path(__file__).resolve().parent.parent / "asdlc_collezione.py"
     with tempfile.TemporaryDirectory(prefix="asdlc-plugin-") as cartella:
-        (Path(cartella) / "asdlc").symlink_to(Path(__file__).resolve().parent)
+        (Path(cartella) / plugin.name).symlink_to(plugin)
         yield os.pathsep.join(filter(None, [cartella, os.environ.get("PYTHONPATH")]))
 
 
@@ -1520,7 +1524,7 @@ def raccolta_di_pytest(cartella: Path, comando: list[str]) -> Raccolta:
     with tempfile.TemporaryDirectory(prefix="asdlc-collezione-") as tmp, \
             plugin_della_collezione() as percorso:
         dato = Path(tmp) / "collezione.json"
-        argv = [*comando, "--collect-only", "-p", "asdlc.collezione",
+        argv = [*comando, "--collect-only", "-p", "asdlc_collezione",
                 f"--asdlc-collezione={dato}", f"--rootdir={Path(cartella).resolve()}"]
         codice, uscita = esegui(argv, cartella, timeout=TETTO_DEI_TEST,
                                 ambiente={"PYTHONPATH": percorso})
