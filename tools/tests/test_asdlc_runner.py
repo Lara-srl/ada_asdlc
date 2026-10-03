@@ -4073,6 +4073,49 @@ class TestIlLucchettoLeggeLaNascitaDallaCollezione:
             ("backend/tests/test_b.py", "test_nuovo")]
 
 
+class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
+    """PBI-396, decisione 5, criterio 8: `apri_la_fase()` calcola la collezione
+    della base e la scrive accanto allo sha di base; le collezioni dei commit del
+    ramo si tengono lì, una per sha. `chiudi_la_fase()` le toglie con la fase.
+
+    Si contano i worktree usa e getta estratti per sha: la collezione di un
+    commit si legge lì dentro, e un albero non estratto è un pytest non lanciato.
+    """
+
+    def test_due_chiamate_del_lucchetto_non_raccolgono_la_base(self, repo_di_prova,
+                                                               monkeypatch):
+        base = repo_di_prova.commit("test: due casi", {
+            "backend/tests/test_a.py": "def test_x():\n    assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        testa = repo_di_prova.commit("test: un caso del ramo (RED)", {
+            "backend/tests/test_c.py": "def test_c():\n    assert False\n"})
+        runner.apri_la_fase(base)
+        (repo_di_prova.radice / "backend/tests/test_b.py").write_text(
+            "def test_nuovo():\n    assert False\n", encoding="utf-8")
+        estratti: list[str] = []
+        vero = runner.worktree_usa_e_getta
+
+        def conta(sha: str):
+            estratti.append(sha)
+            return vero(sha)
+
+        monkeypatch.setattr(runner, "worktree_usa_e_getta", conta)
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == ["test_nuovo"]
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == ["test_nuovo"]
+
+        assert estratti.count(base) == 0, "la base la raccoglie apri_la_fase(), una volta"
+        assert estratti.count(testa) == 1, "la collezione di un commit non si ricalcola"
+        cartella = runner.percorso_della_fase(repo_di_prova.radice,
+                                              runner.CARTELLA_DELLE_COLLEZIONI)
+        assert sorted(p.name for p in cartella.iterdir()) == sorted(
+            [f"{base}.json", f"{testa}.json"])
+
+        runner.chiudi_la_fase()
+
+        assert not cartella.exists()
+
+
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
 
