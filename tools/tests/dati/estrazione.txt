@@ -1,0 +1,30 @@
+# I percorsi che traslocano nel repository `asdlc` (RUNBOOK-FASE-5.md, passo 2.2).
+#
+# Un percorso per riga, `#` per i commenti. Lo legge `git filter-repo
+# --paths-from-file` all'estrazione, e lo legge la sonda di
+# `test_asdlc_fuori_da_backend.py` per provare la suite nella forma di quel
+# repository: è lo stesso elenco, e non due (PBI-394, decisione 3).
+#
+# Una riga che finisce in `/` è una cartella; `glob:` è un modello, come lo legge
+# filter-repo. `tools/tests/` non si nomina intera: `test_aggiorna_kb.py` resta in
+# aDa con `aggiorna_kb.py` (D8 del runbook), e filter-repo non sa togliere un file
+# da una cartella che prende.
+
+tools/asdlc/
+tools/pyproject.toml
+tools/plancia/
+tools/tests/conftest.py
+tools/tests/dati/
+glob:tools/tests/test_asdlc_*.py
+
+# La storia: i nomi di prima del `git mv` di PBI-383 (il runner in `tools/asdlc/`)
+# e di PBI-360 (i test fuori da `backend/`), trovati con `git log --follow`. Oggi
+# non esistono, e la forma li salta; filter-repo li prende, perché senza la storia
+# di quei file comincerebbe dal trasloco.
+tools/asdlc_runner.py
+tools/asdlc_coda.py
+tools/asdlc_config.py
+tools/asdlc_esito.py
+backend/tests/test_asdlc_runner.py
+backend/tests/test_asdlc_coda.py
+backend/tests/test_asdlc_config.py
