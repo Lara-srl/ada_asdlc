@@ -1593,11 +1593,13 @@ def collezione_dellalbero(albero: Path) -> dict[str, str]:
 def collezione_al_commit(sha: str) -> dict[str, str]:
     """La collezione del commit `sha`, nel suo albero usa e getta.
 
-    Si tiene accanto alla fase, in `CARTELLA_DELLE_COLLEZIONI`, e non si
-    ricalcola: la base vale per tutto il giro, e un commit non cambia (PBI-396,
-    decisione 5).
+    Dentro un giro si tiene accanto alla fase, in `CARTELLA_DELLE_COLLEZIONI`,
+    e non si ricalcola: la base vale per tutto il giro, e un commit non cambia
+    (PBI-396, decisione 5). Fuori da un giro si calcola e non si scrive: non
+    c'è un `chiudi_la_fase()` che la tolga.
     """
-    cartella = percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI)
+    cartella = (percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI)
+                if fase_corrente(REPO) is not None else None)
     file = cartella / f"{sha}.json" if cartella is not None else None
     if file is not None and file.is_file():
         return json.loads(file.read_text(encoding="utf-8"))
