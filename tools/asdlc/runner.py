@@ -1526,29 +1526,94 @@ def raccolta_di_pytest(cartella: Path, comando: list[str]) -> Raccolta:
     return Raccolta(list(letto["nodi"]))
 
 
+def nome_del_nodo(nodo: str) -> tuple[str, str]:
+    """`(file, nome)` di un nodeid di pytest: il file relativo al `--rootdir`, e
+    il nome della funzione senza il suffisso `[…]` della parametrizzazione, che
+    può contenere a sua volta un `::`."""
+    percorso, _, resto = nodo.partition("::")
+    return percorso, resto.partition("[")[0].split("::")[-1]
+
+
+def collezione_dellalbero(albero: Path) -> dict[str, str]:
+    """I test Python che esistono in `albero`, per nome, ognuno col suo file
+    dalla radice del repository: la collezione dei gate di pytest di
+    `asdlc.toml`, ognuno lanciato dal suo `cwd` (PBI-396, decisione 3). I casi
+    di un test parametrizzato fanno un nome solo."""
+    nomi: dict[str, str] = {}
+    for g in GATE:
+        if "pytest" not in g.comando:
+            continue
+        raccolta = raccolta_di_pytest(albero / g.cwd, list(g.comando))
+        for nodo in raccolta.nodi:
+            percorso, nome = nome_del_nodo(nodo)
+            nomi.setdefault(nome, (Path(g.cwd) / percorso).as_posix())
+    return nomi
+
+
+def collezione_al_commit(sha: str) -> dict[str, str]:
+    """La collezione del commit `sha`, nel suo albero usa e getta."""
+    with worktree_usa_e_getta(sha) as albero:
+        return collezione_dellalbero(albero)
+
+
+def nascite_python(collezione: dict[str, str],
+                   genitore: dict[str, str]) -> list[TestNuovo]:
+    """La regola della nascita di un test Python, una per il gate e per il
+    lucchetto (PBI-396, decisione 1): nasce ciò che c'è nella `collezione` e non
+    in quella del `genitore`. Un test tolto da un file e scritto in un altro ha
+    lo stesso nome dall'una e dall'altra parte, e non nasce."""
+    return [TestNuovo(file, nome, "python") for nome, file in collezione.items()
+            if nome not in genitore]
+
+
+def tocca_un_test_python(voce: VoceDiCommit) -> bool:
+    """Se la voce tocca un file di test Python, su uno dei suoi due lati: solo un
+    commit così chiede la collezione (PBI-396, decisione 6)."""
+    return any(p is not None and e_file_di_test(p) and linguaggio_del_test(p) == "python"
+               for p in (voce.percorso, voce.vecchio))
+
+
+def genitore_del_commit(sha: str) -> str | None:
+    """Il primo genitore di `sha`, o `None` per il primo commit della storia."""
+    try:
+        return git("rev-parse", "--verify", "--quiet", f"{sha}^") or None
+    except RuntimeError:
+        return None
+
+
 def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> list[TestNuovo]:
     """I test che **nascono** in questo commit.
 
-    Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
-    caso del file di test riscritto per intero, e senza questa sottrazione il gate
-    farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
+    Per i test Python la nascita si legge dalla collezione di pytest
+    (`nascite_python`, PBI-396): un nome che c'era nel genitore non nasce, in
+    qualunque file finisca. Il diff, file per file, non vedeva un test tolto da
+    un file e scritto in un altro senza `git mv` (difetto 81 di PBI-102).
 
-    Il diff di un rename si chiede nominando **tutti e due** i lati. Con il solo
-    nome nuovo git non applica il rename detection — per riconoscere una copia
-    deve vedere da dove arriva — e il file risulta interamente aggiunto: da lì il
-    gate leggeva una nascita per ogni test dentro un file semplicemente spostato.
+    Per vitest la nascita si legge ancora dal diff. Uno stesso nome cancellato e
+    riaggiunto è un trasloco, non una nascita: è il caso del file di test
+    riscritto per intero, e senza questa sottrazione il gate farebbe girare tutta
+    la suite di quel commit per poi fermarla come nata verde. Il diff di un rename
+    si chiede nominando **tutti e due** i lati. Con il solo nome nuovo git non
+    applica il rename detection — per riconoscere una copia deve vedere da dove
+    arriva — e il file risulta interamente aggiunto: da lì il gate leggeva una
+    nascita per ogni test dentro un file semplicemente spostato.
     """
+    voci = file if file is not None else file_del_commit(sha)
     nuovi: list[TestNuovo] = []
-    for voce in (file if file is not None else file_del_commit(sha)):
+    for voce in voci:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio is None:
+        if linguaggio != "vitest":
             continue
         aggiunti, tolti = nomi_dei_test(
             diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)),
             linguaggio,
         )
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    if any(tocca_un_test_python(v) for v in voci):
+        genitore = genitore_del_commit(sha)
+        nuovi += nascite_python(collezione_al_commit(sha),
+                                collezione_al_commit(genitore) if genitore else {})
     return nuovi
 
 
