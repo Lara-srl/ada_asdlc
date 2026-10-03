@@ -3918,6 +3918,28 @@ class TestLaCollezioneSiLeggeDalPlugin:
         assert raccolta.nodi == ["tests/test_p.py::test_p[con uno spazio]",
                                  "tests/test_p.py::test_p[a::b]"]
 
+    def test_un_test_raccolto_importa_lasdlc_dellalbero_e_non_quello_del_runner(
+            self, repo_di_prova):
+        """Decisione 3, difetto 84 di PBI-102: il plugin non sta sotto il nome
+        `asdlc`. Caricato come `asdlc.collezione`, metteva in `sys.modules` il
+        pacchetto del runner prima della raccolta, e un test dell'albero che
+        importa il suo `asdlc` riceveva quello.
+
+        Il test esiste solo se l'import vede l'`asdlc` dell'albero, e sta dentro
+        un `if`, dove l'AST della decisione 4 non lo legge: con l'`asdlc` del
+        runner il file non si raccoglie, e il nome non compare."""
+        sha = repo_di_prova.commit("test: l'asdlc dell'albero (RED)", {
+            "backend/conftest.py": "",
+            "backend/asdlc/__init__.py": "DI_CHI = 'dellalbero'\n",
+            "backend/tests/test_asdlc.py": (
+                "import asdlc\n\n"
+                "if asdlc.DI_CHI == 'dellalbero':\n"
+                "    def test_vede_lasdlc_dellalbero():\n"
+                "        assert True\n")})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
+            ("backend/tests/test_asdlc.py", "test_vede_lasdlc_dellalbero")]
+
 
 class TestUnTestSpostatoFraDueFileNonNasce:
     """PBI-396, decisione 1; difetto 81 di PBI-102.
