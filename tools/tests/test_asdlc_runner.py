@@ -4042,6 +4042,36 @@ class TestUnRedCheNonSiRaccoglieSiLeggeDallAst:
         assert runner.test_nuovi_del_commit(dopo) == []
 
 
+class TestIlLucchettoLeggeLaNascitaDallaCollezione:
+    """PBI-396, decisione 1, criterio 7: il lucchetto *ex ante* usa la stessa
+    regola del gate. Il commit è l'albero di lavoro, il genitore è `HEAD`."""
+
+    def _base_con_due_test(self, repo_di_prova) -> None:
+        base = repo_di_prova.commit("test: due casi", {
+            "backend/tests/test_a.py": ("def test_resta():\n    assert True\n\n\n"
+                                        "def test_x():\n    assert True\n")})
+        repo_di_prova.sposta_la_base(base)
+
+    def _sposta_test_x(self, repo_di_prova, test_b: str) -> None:
+        (repo_di_prova.radice / "backend/tests/test_a.py").write_text(
+            "def test_resta():\n    assert True\n", encoding="utf-8")
+        (repo_di_prova.radice / "backend/tests/test_b.py").write_text(test_b, encoding="utf-8")
+
+    def test_un_test_spostato_nellalbero_non_chiede_un_rosso(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        self._sposta_test_x(repo_di_prova, "def test_x():\n    assert True\n")
+
+        assert runner.test_nuovi_dellalbero() == []
+
+    def test_un_test_nuovo_nellalbero_chiede_un_rosso(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        self._sposta_test_x(repo_di_prova, ("def test_x():\n    assert True\n\n\n"
+                                            "def test_nuovo():\n    assert False\n"))
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_dellalbero()] == [
+            ("backend/tests/test_b.py", "test_nuovo")]
+
+
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
 
