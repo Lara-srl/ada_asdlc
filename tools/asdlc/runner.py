@@ -1481,6 +1481,51 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
     return aggiunti, tolti
 
 
+# --- La collezione di pytest: quali test esistono in un albero (PBI-396) --------
+
+
+class Raccolta(NamedTuple):
+    """Ciò che il plugin `asdlc.collezione` ha scritto: i nodeid raccolti,
+    relativi al `--rootdir` del comando."""
+
+    nodi: list[str]
+
+
+@contextmanager
+def plugin_della_collezione():
+    """Il `PYTHONPATH` da cui pytest importa `asdlc.collezione`.
+
+    I gate girano col venv del progetto, dove il pacchetto del runner non è
+    installato. Si mette sul percorso una cartella con dentro il solo pacchetto
+    `asdlc`, con un link, e non la cartella che lo contiene: nel venv del
+    runner quella è `site-packages`, e porterebbe nei test del progetto ogni
+    altra libreria del runner.
+    """
+    with tempfile.TemporaryDirectory(prefix="asdlc-plugin-") as cartella:
+        (Path(cartella) / "asdlc").symlink_to(Path(__file__).resolve().parent)
+        yield os.pathsep.join(filter(None, [cartella, os.environ.get("PYTHONPATH")]))
+
+
+def raccolta_di_pytest(cartella: Path, comando: list[str]) -> Raccolta:
+    """La collezione del `comando` di pytest lanciato da `cartella`, con
+    `--collect-only` e il plugin (PBI-396, decisione 3). Il `--rootdir` è la
+    cartella di lancio, come per i test che il gate esegue (PBI-391)."""
+    with tempfile.TemporaryDirectory(prefix="asdlc-collezione-") as tmp, \
+            plugin_della_collezione() as percorso:
+        dato = Path(tmp) / "collezione.json"
+        argv = [*comando, "--collect-only", "-p", "asdlc.collezione",
+                f"--asdlc-collezione={dato}", f"--rootdir={Path(cartella).resolve()}"]
+        codice, uscita = esegui(argv, cartella, timeout=TETTO_DEI_TEST,
+                                ambiente={"PYTHONPATH": percorso})
+        try:
+            letto = json.loads(dato.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise GuastoDelGate(f"`{' '.join(argv)}` in {cartella} → uscita {codice}, "
+                                f"collezione non scritta in {dato}\n"
+                                f"{uscita.strip()[-1000:]}") from exc
+    return Raccolta(list(letto["nodi"]))
+
+
 def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> list[TestNuovo]:
     """I test che **nascono** in questo commit.
 
