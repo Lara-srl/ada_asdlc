@@ -22,13 +22,15 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): la configurazione del runner sotto
+# test, al posto del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 runner = importlib.import_module("asdlc.runner")
 # L'import non legge `asdlc.toml` (PBI-382): lo si legge qui, come fa
-# `test_asdlc_runner.py`, sulla radice di questo repository.
-runner.REPO = REPO
-runner.configura(runner.asdlc_config.carica(REPO))
+# `test_asdlc_runner.py`, sul progetto di prova.
+runner.REPO = PROGETTO
+runner.configura(runner.asdlc_config.carica(PROGETTO))
 
 
 @pytest.fixture(autouse=True)
@@ -109,8 +111,8 @@ def test_il_modulo_di_asdlc_chiudi_giro_sta_nel_pacchetto():
 # --- I sei passi -------------------------------------------------------------
 
 coda = importlib.import_module("asdlc.coda")
-coda.REPO = REPO
-coda.configura(coda.asdlc_config.carica(REPO))
+coda.REPO = PROGETTO
+coda.configura(coda.asdlc_config.carica(PROGETTO))
 
 TESTA = "7e57a00000000000000000000000000000000377"
 ALTRA = "a17a000000000000000000000000000000000377"

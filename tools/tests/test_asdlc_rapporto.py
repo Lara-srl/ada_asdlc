@@ -19,11 +19,13 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): la configurazione del runner sotto
+# test, al posto del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 runner = importlib.import_module("asdlc.runner")
-runner.REPO = REPO
-runner.configura(runner.asdlc_config.carica(REPO))
+runner.REPO = PROGETTO
+runner.configura(runner.asdlc_config.carica(PROGETTO))
 
 
 @pytest.fixture(autouse=True)

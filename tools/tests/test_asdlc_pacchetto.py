@@ -13,6 +13,9 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): il suo `asdlc.toml` e le sue
+# aggiunte, al posto di quelli del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 
 def trovato(nome: str):
@@ -46,15 +49,15 @@ def un_progetto_col_pacchetto(tmp_path: Path) -> Path:
     # Tutto il pacchetto e non i soli `.py`: i prompt sono file suoi (PBI-386).
     shutil.copytree(REPO / "tools" / "asdlc", pacchetto, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    shutil.copy(PROGETTO / "asdlc.toml", progetto / "asdlc.toml")
     # La cartella delle aggiunte ai prompt che `asdlc.toml` dichiara (PBI-386):
     # senza, il caricamento si ferma.
-    shutil.copytree(REPO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
+    shutil.copytree(PROGETTO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
     # Il percorso di macchina nel file locale, che è il suo posto (PBI-384).
     (progetto / "asdlc.local.toml").write_text(
         f'[worktree]\npercorso = "{tmp_path / "altro"}"\n', encoding="utf-8")
     (progetto / "backlog").mkdir()
-    for pbi in (REPO / "backlog").glob("PBI-383-*.md"):
+    for pbi in (PROGETTO / "backlog").glob("PBI-383-*.md"):
         shutil.copy(pbi, progetto / "backlog" / pbi.name)
     (progetto / "backlog" / "CODA.md").write_text("", encoding="utf-8")
     git = ["git", "-c", "user.name=prova", "-c", "user.email=prova@example.invalid"]

@@ -18,6 +18,9 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): il suo `asdlc.toml` e le sue
+# aggiunte, al posto di quelli del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 
 def copia_il_pacchetto(tools: Path) -> None:
@@ -162,10 +165,10 @@ def un_progetto_come_ada(tmp_path: Path) -> Path:
     tools = progetto / "tools"
     tools.mkdir(parents=True)
     copia_il_pacchetto(tools)
-    shutil.copy(REPO / "asdlc.toml", progetto / "asdlc.toml")
+    shutil.copy(PROGETTO / "asdlc.toml", progetto / "asdlc.toml")
     # La cartella delle aggiunte ai prompt che `asdlc.toml` dichiara (PBI-386):
     # senza, il caricamento si ferma.
-    shutil.copytree(REPO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
+    shutil.copytree(PROGETTO / "asdlc-aggiunte", progetto / "asdlc-aggiunte")
     hooks = progetto / ".claude" / "hooks"
     hooks.mkdir(parents=True)
     shutil.copy(REPO / ".claude" / "hooks" / "fase-tdd.sh", hooks / "fase-tdd.sh")

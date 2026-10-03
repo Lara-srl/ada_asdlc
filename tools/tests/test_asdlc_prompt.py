@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): la configurazione del runner sotto
+# test, al posto del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 GOLDEN = Path(__file__).resolve().parent / "dati" / "prompt"
 
 runner = importlib.import_module("asdlc.runner")
@@ -23,8 +25,8 @@ asdlc_config = runner.asdlc_config
 # Come in `test_asdlc_runner.py`: `configura()` ricava i percorsi da `REPO`, che
 # fuori da `main()` nessuno ha ancora trovato, e la fixture `configura` rimette
 # alla fine la configurazione di prima, che deve esserci.
-runner.REPO = REPO
-runner.configura(asdlc_config.carica(REPO))
+runner.REPO = PROGETTO
+runner.configura(asdlc_config.carica(PROGETTO))
 
 
 @pytest.fixture(autouse=True)

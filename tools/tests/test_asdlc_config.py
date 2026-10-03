@@ -19,6 +19,9 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): la configurazione del runner sotto
+# test, al posto del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 SORGENTE = REPO / "tools" / "asdlc" / "config.py"
 
 asdlc_config = importlib.import_module("asdlc.config")
@@ -113,9 +116,9 @@ def test_carica_un_toml_e_torna_i_campi_tipizzati(tmp_path):
 
 
 def test_l_asdlc_toml_del_repository_si_carica():
-    """Il file vero, non uno di prova: è quello che il runner leggerà al prossimo
-    giro, e un errore lì ferma `git commit` a chi lo sta usando (decisione 4)."""
-    cfg = asdlc_config.carica(REPO)
+    """L'`asdlc.toml` del progetto di prova, su cui girano i test del runner: un
+    errore lì li ferma tutti all'import (PBI-394; decisione 4 di PBI-358)."""
+    cfg = asdlc_config.carica(PROGETTO)
 
     assert cfg.git.base == "origin/main"
     assert cfg.soglie.revisioni == 4
@@ -156,7 +159,7 @@ def test_un_tetto_non_positivo_si_ferma_nominando_la_chiave(tmp_path, chiave, va
 def test_l_asdlc_toml_del_repository_dichiara_i_tetti():
     """I due valori stanno scritti nel TOML, con la loro ragione accanto: un
     default del lettore non si vede da chi apre il file."""
-    testo = (REPO / "asdlc.toml").read_text(encoding="utf-8")
+    testo = (PROGETTO / "asdlc.toml").read_text(encoding="utf-8")
 
     assert "minuti_builder = 90" in testo
     assert "minuti_critic = 25" in testo
@@ -451,8 +454,8 @@ def test_il_readme_della_cartella_di_aggiunte_non_e_un_errore(tmp_path):
 
 
 def test_l_asdlc_toml_del_repository_dichiara_le_aggiunte_in_asdlc_aggiunte():
-    """aDa dichiara la sua cartella delle aggiunte, vuota di aggiunte: chi vuole
-    estendere un prompt sa dove scrivere (PBI-386)."""
-    cfg = asdlc_config.carica(REPO)
+    """Il progetto di prova dichiara la sua cartella delle aggiunte, coi file dei
+    ruoli vuoti (PBI-386, PBI-394)."""
+    cfg = asdlc_config.carica(PROGETTO)
 
-    assert cfg.prompt.aggiunte == (REPO / "asdlc-aggiunte").resolve()
+    assert cfg.prompt.aggiunte == (PROGETTO / "asdlc-aggiunte").resolve()

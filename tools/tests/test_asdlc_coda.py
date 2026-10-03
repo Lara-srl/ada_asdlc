@@ -29,17 +29,20 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): la radice e la configurazione del
+# tick sotto test, al posto del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 coda = importlib.import_module("asdlc.coda")
 # L'import non legge `asdlc.toml` (PBI-382): lo fa `main()` dalla cwd. Qui la
-# configurazione è quella del repository di questo file, e i test chiamano
-# `smista()`, cioè `main()` senza quel passo.
-coda.REPO = REPO
-coda.configura(coda.asdlc_config.carica(REPO))
+# configurazione è quella del progetto di prova, e i test chiamano `smista()`,
+# cioè `main()` senza quel passo.
+coda.REPO = PROGETTO
+coda.configura(coda.asdlc_config.carica(PROGETTO))
 
 # Il runner che il tick lancia: il comando installato nel venv di
 # `[ambiente].pacchetto`, risolto dalla radice comune (PBI-384).
-RUNNER_INSTALLATO = (coda.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin"
+RUNNER_INSTALLATO = (coda.asdlc_config.radice_comune(PROGETTO) / ".venv-asdlc" / "bin"
                      / "asdlc-runner")
 
 # La verifica dell'ambiente prima del lancio (PBI-384) guarda il mondo: il venv del
@@ -1146,7 +1149,7 @@ def configura(tmp_path):
     # La `configura()` vera e non quella che `log_dir_temporanea` avvolge per
     # spostare il `LOG` (PBI-382): qui si prova ciò che deriva da `asdlc.toml`.
     configura = getattr(coda.configura, "__wrapped__", coda.configura)
-    configura(config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE))
+    configura(config.interpreta(config.leggi_toml(PROGETTO / config.NOME_FILE), config.NOME_FILE))
 
     def _applica(testo: str):
         (tmp_path / "asdlc.toml").write_text(testo, encoding="utf-8")
@@ -1224,7 +1227,7 @@ def test_la_coda_e_l_avviso_delle_domande_si_leggono_dalla_cartella_del_toml(
 def test_il_worktree_il_log_e_il_lucchetto_vengono_dal_toml(configura, tmp_path):
     # Letto senza `carica()`, il percorso resta com'è scritto: a risolverlo dalla
     # radice comune è `carica()`, che sa dove sta il repository (PBI-384).
-    assert coda.WORKTREE_DEL_RUNNER == Path("../ada-run")
+    assert coda.WORKTREE_DEL_RUNNER == Path("../progetto-run")
     assert coda.LOG == Path("runs") / "coda.log"
     assert coda.LUCCHETTO == Path("runs") / ".runner.lock"
 
@@ -1261,8 +1264,9 @@ def test_il_preflight_si_stacca_sul_ramo_del_toml(configura, tmp_path, monkeypat
 
 
 def tick_dal_checkout(tmp_path, monkeypatch):
-    """`main()` lanciato con la cwd nel checkout vero, come fa il cron da
-    `ada_controller`, con un mondo finto al posto di `gh` e `git ls-remote`.
+    """`main()` lanciato con la cwd nella radice di un progetto — quella del
+    progetto di prova (PBI-394) — come fa il cron dal checkout, con un mondo
+    finto al posto di `gh` e `git ls-remote`.
 
     `main()` rilegge `asdlc.toml` e rimette i nomi di modulo: si registrano
     prima, perché `monkeypatch` li restituisca ai test dopo. Il worktree è una
@@ -1283,7 +1287,7 @@ def tick_dal_checkout(tmp_path, monkeypatch):
     monkeypatch.setattr(coda, "esegui", esegui)
     albero = tmp_path / "albero"
     albero.mkdir()
-    monkeypatch.chdir(REPO)
+    monkeypatch.chdir(PROGETTO)
     return cartelle, albero
 
 
@@ -1297,13 +1301,13 @@ def test_guardia_il_dry_run_lanciato_dal_checkout_decide_come_col_repo_esplicito
 
     dalla_cwd = coda.main(["--worktree", str(albero), "--dry-run"])
     decisa_dalla_cwd = capsys.readouterr().out
-    col_repo = coda.main(["--repo", str(REPO), "--worktree", str(albero), "--dry-run"])
+    col_repo = coda.main(["--repo", str(PROGETTO), "--worktree", str(albero), "--dry-run"])
     decisa_col_repo = capsys.readouterr().out
 
     assert dalla_cwd == col_repo == 0
     assert decisa_dalla_cwd == decisa_col_repo
     assert decisa_dalla_cwd.strip()
-    assert set(cartelle) == {REPO}
+    assert set(cartelle) == {PROGETTO}
 
 
 def test_guardia_il_dry_run_dal_checkout_scrive_il_log_nel_temporaneo(tmp_path, monkeypatch, capsys):
@@ -1312,14 +1316,14 @@ def test_guardia_il_dry_run_dal_checkout_scrive_il_log_nel_temporaneo(tmp_path, 
     di `log_dir_temporanea` — la classe del difetto 38 è un test che sporca il
     registro vero."""
     _, albero = tick_dal_checkout(tmp_path, monkeypatch)
-    vero = REPO / "runs" / "coda.log"
+    vero = PROGETTO / "runs" / "coda.log"
     prima = vero.read_bytes() if vero.is_file() else None
 
     coda.main(["--worktree", str(albero), "--dry-run"])
     decisa = capsys.readouterr().out.strip()
 
     assert (vero.read_bytes() if vero.is_file() else None) == prima
-    assert not coda.LOG.is_relative_to(REPO), coda.LOG
+    assert not coda.LOG.is_relative_to(PROGETTO), coda.LOG
     righe = coda.LOG.read_text(encoding="utf-8").splitlines()
     assert [r.split("  ", 1)[1] for r in righe] == [decisa]
 

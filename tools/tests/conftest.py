@@ -17,6 +17,11 @@ TOOLS = Path(__file__).resolve().parents[1]
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+# Il progetto di prova su cui girano questi test (PBI-394, decisione 1): il loro
+# `asdlc.toml`, e non quello del progetto che li ospita, che nel repository
+# `asdlc` non ci sarà.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
+
 # Ciò che i test di questa cartella lanciano per nome in un sottoprocesso: il gate
 # del rosso gira `pytest` in un worktree di `git`. `gh`, `npm` e `node` i test li
 # sostituiscono con dei finti, e non si chiedono: la CI non li deve avere.
@@ -32,19 +37,21 @@ def pytest_sessionstart(session):
     cerca il runner — nel venv di `[ambiente].venv`, poi sul `PATH` — e la
     sessione si ferma con le mancanze, una riga ciascuna.
 
+    Il venv è quello del progetto di prova, che uno suo non ce l'ha: i due si
+    cercano sul `PATH`, come nel repository `asdlc` (PBI-394, decisione 6).
+
     Un `asdlc.toml` che non si legge, o un lettore che alza, non ferma niente qui:
     lo diranno i test che lo leggono. Il gate del rosso rigira questi test contro
     i mutanti di `asdlc.config` e di `asdlc.runner`, e un'eccezione qui dentro
     interromperebbe pytest prima del rapporto JUnit, che è ciò che il gate legge:
     il mutante diventerebbe un guasto del gate invece di un test che fallisce.
     """
-    repo = TOOLS.parent
     try:
         from asdlc import config as asdlc_config
         from asdlc import runner as asdlc_runner
 
-        venv = asdlc_config.carica(repo).ambiente.venv
-        mancanze = asdlc_runner.eseguibili_mancanti(USATI_DAI_TEST, venv, repo)
+        venv = asdlc_config.carica(PROGETTO).ambiente.venv
+        mancanze = asdlc_runner.eseguibili_mancanti(USATI_DAI_TEST, venv, PROGETTO)
     except Exception:  # noqa: BLE001 — vedi sopra: qui non si ferma per un guasto
         return
     if mancanze:
