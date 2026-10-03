@@ -3,10 +3,11 @@
 
 Due cose che il trasloco deve rendere vere, e che nessun altro test guarda:
 
-- **Il gate `asdlc` esiste e gira fra gli altri.** Il gate `pytest` lancia
+- **Il gate `asdlc` gira la suite.** Il gate `pytest` lancia
   `cd backend && pytest -q`: appena i test escono da lì, smette di eseguirli. Se
   `asdlc.toml` non li riprende con un gate suo, il giro si certifica verde su una
-  suite che non gira più.
+  suite che non gira più. Lo si prova sul progetto di prova (PBI-394), che ha
+  quel gate solo.
 - **Nessuna connessione a un database.** `backend/tests/conftest.py` monta uno
   SQLite in memoria per ogni test, `autouse`; i test del runner non toccano un
   database e fuori da lì non devono pagarlo. La sonda li gira in un processo suo,
@@ -36,9 +37,9 @@ runner = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = runner
 _spec.loader.exec_module(runner)
 # L'import non legge `asdlc.toml` (PBI-382): la configurazione è quella del
-# repository di questo file.
-runner.REPO = REPO
-runner.configura(runner.asdlc_config.carica(REPO))
+# progetto di prova, e non del progetto che ospita questi test (PBI-394).
+runner.REPO = PROGETTO
+runner.configura(runner.asdlc_config.carica(PROGETTO))
 
 
 # L'elenco del passo 2.2 di `RUNBOOK-FASE-5.md`: ciò che trasloca nel repository
