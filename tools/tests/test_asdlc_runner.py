@@ -7890,14 +7890,11 @@ def configura(tmp_path):
 
 
 class TestIGateVengonoDaAsdlcToml:
-    def test_i_quattro_gate_di_oggi_nome_per_nome_e_cwd_per_cwd(self):
-        """Nessun numero cambia in questo giro (decisione 5): il TOML del
-        repository dichiara i gate di prima, alla lettera."""
+    def test_il_gate_del_progetto_di_prova_nome_comando_e_cwd(self):
+        """Il TOML del progetto di prova dichiara un gate solo, la suite del
+        runner (PBI-394, decisione 1): i gate del runner sono quelli, alla
+        lettera."""
         assert [(g.nome, list(g.comando), g.cwd) for g in runner.GATE] == [
-            ("pytest", ["pytest", "-q"], "backend"),
-            ("tsc", ["npm", "run", "build"], "frontend"),
-            ("eslint", ["npm", "run", "lint"], "frontend"),
-            ("vitest", ["npm", "test"], "frontend"),
             ("asdlc", ["python3", "-m", "pytest", "-q", "tools/tests"], "."),
         ]
         assert [g.nome for g in runner.GATE] == [g.nome for g in runner.CFG.gate], (
