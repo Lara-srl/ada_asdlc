@@ -37,7 +37,11 @@ Esegui il PBI con queste regole non negoziabili:
   **scheletro** che compila e non fa niente — il componente che rende un contenitore
   vuoto, la funzione che torna `None` — committalo, e da lì ogni rosso è un'asserzione
   che fallisce. Uno scheletro generoso però si ritorce contro di te: se fa già quello
-  che il test chiede, il test passa e la fase non si apre.
+  che il test chiede, il test passa e la fase non si apre. Nei test importa il modulo
+  e chiamane l'attributo (`import modulo` e `modulo.funzione()`), non
+  `from modulo import funzione`. Così il file si raccoglie anche al RED, e il rosso è
+  un `AttributeError` dentro il test. Se il file non si raccoglie, il gate ne legge i
+  nomi dall'AST, ma è la rete e non la strada.
 - **Micro-commit**: una coppia RED→GREEN **per criterio** della checklist del PBI. Un
   PBI da otto criteri fa sedici commit, ed è giusto così — i commit sono i punti di
   ripristino, e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa
