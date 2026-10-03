@@ -4005,6 +4005,43 @@ class TestIlNomeDiUnTestPythonPortaLaSuaClasse:
         ]
 
 
+class TestUnRedCheNonSiRaccoglieSiLeggeDallAst:
+    """PBI-396, decisione 4, criterio 5: il RED più comune in Python importa ciò
+    che non c'è ancora, e a quel commit pytest non raccoglie il file. I suoi nomi
+    si leggono dall'AST del sorgente, così i test nascono nel RED, e non nel
+    commit dopo, quando il file si raccoglie e nella collezione compaiono."""
+
+    RED = ("from app.m import f\n\n\n"
+           "def test_f():\n    assert f() == 1\n\n\n"
+           "class TestF:\n    def test_g(self):\n        assert f() == 1\n\n"
+           "    class TestDentro:\n        def test_h(self):\n            assert f() == 1\n\n"
+           "    def aiuto(self):\n        pass\n\n\n"
+           "def aiuto():\n    pass\n")
+
+    def test_i_test_di_un_red_che_non_si_raccoglie_nascono_nel_red(self, repo_di_prova):
+        red = repo_di_prova.commit("test: f torna uno (RED)",
+                                   {"backend/tests/test_m.py": self.RED})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(red)] == [
+            ("backend/tests/test_m.py", "test_f"),
+            ("backend/tests/test_m.py", "TestF::test_g"),
+            ("backend/tests/test_m.py", "TestF::TestDentro::test_h"),
+        ]
+
+    def test_il_commit_che_rende_il_file_raccoglibile_non_li_fa_rinascere(
+            self, repo_di_prova):
+        """Il commit dopo il RED porta f e tocca anche un file di test, perché la
+        sua collezione si calcoli (decisione 6): i nomi che compaiono lì c'erano
+        già nel genitore, letti dall'AST."""
+        repo_di_prova.commit("test: f torna uno (RED)", {"backend/tests/test_m.py": self.RED})
+        dopo = repo_di_prova.commit("feat: f, e il conftest della cartella", {
+            "backend/app/m.py": "def f():\n    return 1\n",
+            "backend/tests/conftest.py": "",
+        })
+
+        assert runner.test_nuovi_del_commit(dopo) == []
+
+
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
 
