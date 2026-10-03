@@ -39,6 +39,50 @@ runner.REPO = REPO
 runner.configura(runner.asdlc_config.carica(REPO))
 
 
+# L'elenco del passo 2.2 di `RUNBOOK-FASE-5.md`: ciò che trasloca nel repository
+# `asdlc`. Lo legge `git filter-repo --paths-from-file`, e lo legge la sonda qui
+# sotto per costruire la forma di quel repository (PBI-394, decisione 3).
+ESTRAZIONE = QUI.parent / "dati" / "estrazione.txt"
+
+
+def voci_dell_estrazione() -> list[str]:
+    """Le righe di `estrazione.txt`, senza commenti né righe vuote."""
+    righe = ESTRAZIONE.read_text(encoding="utf-8").splitlines()
+    return [r.strip() for r in righe if r.strip() and not r.lstrip().startswith("#")]
+
+
+def file_dell_estrazione(radice: Path) -> list[Path]:
+    """I file sotto `radice` che le voci dell'estrazione prendono, oggi.
+
+    Una voce che finisce in `/` è una cartella, una `glob:` è un modello come
+    lo legge `git filter-repo`, le altre sono un file. Un percorso che oggi non
+    esiste è storia — il nome di prima di un `git mv` — e non prende niente.
+    """
+    presi: set[Path] = set()
+    for voce in voci_dell_estrazione():
+        if voce.startswith("glob:"):
+            presi.update(p for p in radice.glob(voce.removeprefix("glob:")) if p.is_file())
+        elif (radice / voce).is_dir():
+            presi.update(p for p in (radice / voce).rglob("*")
+                         if p.is_file() and "__pycache__" not in p.parts)
+        elif (radice / voce).is_file():
+            presi.add(radice / voce)
+    return sorted(presi)
+
+
+def test_l_estrazione_porta_il_pacchetto_e_i_nomi_di_prima_e_lascia_aggiorna_kb():
+    voci = voci_dell_estrazione()
+    presi = [p.relative_to(REPO).as_posix() for p in file_dell_estrazione(REPO)]
+
+    assert "tools/asdlc/" in voci
+    assert "tools/asdlc_runner.py" in voci, "il nome di prima del `git mv` di PBI-383"
+    assert "backend/tests/test_asdlc_runner.py" in voci, "il nome di prima di PBI-360"
+    assert "tools/asdlc/runner.py" in presi
+    assert "tools/tests/test_asdlc_runner.py" in presi
+    assert "tools/tests/test_aggiorna_kb.py" not in voci
+    assert "tools/tests/test_aggiorna_kb.py" not in presi, "aggiorna_kb.py resta in aDa (D8)"
+
+
 def test_gira_gate_esegue_cinque_comandi_e_il_quinto_e_la_suite_asdlc(monkeypatch):
     chiamati: list[tuple[list[str], Path]] = []
     monkeypatch.setattr(
