@@ -24,6 +24,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 QUI = Path(__file__).resolve()
+# Il progetto di prova dei test del runner (PBI-394, decisione 1).
+PROGETTO = QUI.parent / "dati" / "progetto"
 
 # Un nome suo in `sys.modules`: `test_asdlc_runner.py` registra il runner come
 # `asdlc.runner` e lo riconfigura nei suoi test, e questo modulo non glielo tocca.
@@ -83,7 +85,7 @@ def test_l_estrazione_porta_il_pacchetto_e_i_nomi_di_prima_e_lascia_aggiorna_kb(
     assert "tools/tests/test_aggiorna_kb.py" not in presi, "aggiorna_kb.py resta in aDa (D8)"
 
 
-def test_gira_gate_esegue_cinque_comandi_e_il_quinto_e_la_suite_asdlc(monkeypatch):
+def test_gira_gate_esegue_la_suite_asdlc_del_progetto_di_prova(monkeypatch):
     chiamati: list[tuple[list[str], Path]] = []
     monkeypatch.setattr(
         runner, "esegui",
@@ -92,8 +94,7 @@ def test_gira_gate_esegue_cinque_comandi_e_il_quinto_e_la_suite_asdlc(monkeypatc
 
     assert runner.gira_gate(set()) == []
 
-    assert len(chiamati) == 5, [cmd for cmd, _ in chiamati]
-    assert chiamati[4] == (["python3", "-m", "pytest", "-q", "tools/tests"], REPO / ".")
+    assert chiamati == [(["python3", "-m", "pytest", "-q", "tools/tests"], PROGETTO / ".")]
 
 
 # Il processo figlio conta le connessioni SQLite intorno a un `pytest`
