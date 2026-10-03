@@ -1623,6 +1623,16 @@ def nascite_python(collezione: dict[str, str], genitore: dict[str, str],
             if nome not in genitore and nome not in base]
 
 
+def spostamenti_python(collezione: dict[str, str], genitore: dict[str, str],
+                       base: dict[str, str]) -> list[str]:
+    """I test che non nascono e cambiano file: c'erano nel `genitore`, o alla
+    `base`, in un file diverso da quello dove stanno nella `collezione`. È ciò che
+    `nascite_python` lascia fuori, contato perché il gate lo scriva (PBI-396,
+    decisione 7)."""
+    return [nome for nome, file in collezione.items()
+            if genitore.get(nome, base.get(nome, file)) != file]
+
+
 def tocca_un_test_python(voce: VoceDiCommit) -> bool:
     """Se la voce tocca un file di test Python, su uno dei suoi due lati: solo un
     commit così chiede la collezione (PBI-396, decisione 6)."""
@@ -1648,9 +1658,11 @@ def base_del_commit(base: str, sha: str) -> str | None:
 
 
 def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
-                          base: str | None = None) -> list[TestNuovo]:
+                          base: str | None = None,
+                          spostati: list[str] | None = None) -> list[TestNuovo]:
     """I test che **nascono** in questo commit del ramo che parte da `base`, il
-    ramo di `asdlc.toml` se non è detto.
+    ramo di `asdlc.toml` se non è detto. In `spostati`, se c'è, si aggiungono i
+    test Python che il commit ha spostato di file (`spostamenti_python`).
 
     Per i test Python la nascita si legge dalla collezione di pytest
     (`nascite_python`, PBI-396): un nome che c'era nel genitore o alla base non
@@ -1679,9 +1691,12 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     if any(tocca_un_test_python(v) for v in voci):
         genitore = genitore_del_commit(sha)
         alla_base = base_del_commit(base if base is not None else BASE, sha)
-        nuovi += nascite_python(collezione_al_commit(sha),
-                                collezione_al_commit(genitore) if genitore else {},
-                                collezione_al_commit(alla_base) if alla_base else {})
+        collezioni = (collezione_al_commit(sha),
+                      collezione_al_commit(genitore) if genitore else {},
+                      collezione_al_commit(alla_base) if alla_base else {})
+        nuovi += nascite_python(*collezioni)
+        if spostati is not None:
+            spostati += spostamenti_python(*collezioni)
     return nuovi
 
 
@@ -2884,7 +2899,8 @@ def lettura_dei_due_alberi(prove: list[dict[str, str]], perimetro: list[str], pu
 
 def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
                    visti: set[str] | None = None,
-                   morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+                   morsi: list[dict[str, str]] | None = None,
+                   spostati: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     """I commit del branch in cui un test è nato senza essere mai stato rosso.
 
     `base` è il ramo di `asdlc.toml` se non è detto: un default scritto nella
@@ -2894,7 +2910,9 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     **riempito**: il gate sta dentro un ciclo che può ripetersi cinque volte, e
     rigirare ogni volta la storia intera moltiplicherebbe il tempo macchina per le
     revisioni. `morsi` si riempie allo stesso modo, con i test nati verdi che hanno
-    ucciso un mutante: passano, e il rapporto deve dire perché.
+    ucciso un mutante: passano, e il rapporto deve dire perché. E `spostati`, coi
+    commit che spostano test Python di file: non nascono, e chi legge deve vedere
+    che la regola ha agito (PBI-396, decisione 7).
 
     Non si ferma al primo mancato: chi legge deve avere l'elenco intero — commit,
     test, esito — perché la lettura la fa una persona, e una persona decide meglio
@@ -2908,7 +2926,11 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
         for sha in commit_da_esaminare(base, ref, visti):
             visti.add(sha)
             file = file_del_commit(sha)
-            nuovi = test_nuovi_del_commit(sha, file, base)
+            suoi: list[str] = []
+            nuovi = test_nuovi_del_commit(sha, file, base, suoi)
+            if suoi and spostati is not None:
+                spostati.append({"commit": sha[:7], "spostati": str(len(suoi)),
+                                 "titolo": git("show", "--no-patch", "--format=%s", sha)})
             if not nuovi:
                 continue  # un refactor non porta test nuovi, e la regola morde su quelli
             titolo = git("show", "--no-patch", "--format=%s", sha)
@@ -4398,13 +4420,19 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
     if not separatore:
         base, solo_ref = BASE, ref
     morsi: list[dict[str, str]] = []
+    spostati: list[dict[str, str]] = []
     try:
-        mancati = gate_del_rosso(base=base, ref=solo_ref, morsi=morsi)
+        mancati = gate_del_rosso(base=base, ref=solo_ref, morsi=morsi, spostati=spostati)
     except GuastoDelGate as guasto:
         # `2` e non `1`: chi lancia il gate a mano deve distinguere «il rosso non
         # c'è stato» da «il gate non ha potuto guardare».
         print(f"Il gate non ha potuto guardare {base}..{solo_ref}: {guasto}")
         return 2
+    if spostati:
+        print(f"{len(spostati)} commit che spostano test Python di file, in "
+              f"{base}..{solo_ref}: non nascono, e non chiedono un rosso.\n")
+        for s in spostati:
+            print(f"  {s['commit']}  {s['titolo']}\n    spostati: {s['spostati']}\n")
     if morsi:
         print(f"{len(morsi)} test nati verdi che mordono, in {base}..{solo_ref}:\n")
         for m in morsi:
