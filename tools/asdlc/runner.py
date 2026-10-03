@@ -1485,10 +1485,11 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
 
 
 class Raccolta(NamedTuple):
-    """Ciò che il plugin `asdlc.collezione` ha scritto: i nodeid raccolti,
-    relativi al `--rootdir` del comando."""
+    """Ciò che il plugin `asdlc.collezione` ha scritto: i nodeid raccolti e i
+    file che non si raccolgono, relativi al `--rootdir` del comando."""
 
     nodi: list[str]
+    non_raccolti: list[str]
 
 
 @contextmanager
@@ -1523,7 +1524,7 @@ def raccolta_di_pytest(cartella: Path, comando: list[str]) -> Raccolta:
             raise GuastoDelGate(f"`{' '.join(argv)}` in {cartella} → uscita {codice}, "
                                 f"collezione non scritta in {dato}\n"
                                 f"{uscita.strip()[-1000:]}") from exc
-    return Raccolta(list(letto["nodi"]))
+    return Raccolta(list(letto["nodi"]), list(letto["non_raccolti"]))
 
 
 def nome_del_nodo(nodo: str) -> tuple[str, str]:
@@ -1535,11 +1536,39 @@ def nome_del_nodo(nodo: str) -> tuple[str, str]:
     return percorso, resto.partition("[")[0]
 
 
+def nomi_dallast(sorgente: str) -> list[str]:
+    """I nomi dei test di un file che pytest non raccoglie, letti col parser
+    (PBI-396, decisione 4): le funzioni `test*` a livello di modulo e quelle
+    dentro le classi `Test*`, annidate comprese, nella forma di `nome_del_nodo`.
+
+    Valgono i predefiniti di pytest: `python_functions`, `python_classes` e
+    `python_files` di una configurazione non si leggono qui (PBI-396, §Fuori
+    scope). Un sorgente che non si analizza non ha nomi.
+    """
+    try:
+        modulo = ast.parse(sorgente)
+    except (SyntaxError, ValueError):
+        return []
+
+    def dentro(corpo: list[ast.stmt], classi: list[str]) -> list[str]:
+        nomi: list[str] = []
+        for nodo in corpo:
+            if (isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and nodo.name.startswith("test")):
+                nomi.append("::".join([*classi, nodo.name]))
+            elif isinstance(nodo, ast.ClassDef) and nodo.name.startswith("Test"):
+                nomi += dentro(nodo.body, [*classi, nodo.name])
+        return nomi
+
+    return dentro(modulo.body, [])
+
+
 def collezione_dellalbero(albero: Path) -> dict[str, str]:
     """I test Python che esistono in `albero`, per nome, ognuno col suo file
     dalla radice del repository: la collezione dei gate di pytest di
     `asdlc.toml`, ognuno lanciato dal suo `cwd` (PBI-396, decisione 3). I casi
-    di un test parametrizzato fanno un nome solo."""
+    di un test parametrizzato fanno un nome solo. I file che pytest non
+    raccoglie hanno i nomi letti dall'AST, in quell'albero (decisione 4)."""
     nomi: dict[str, str] = {}
     for g in GATE:
         if "pytest" not in g.comando:
@@ -1548,6 +1577,10 @@ def collezione_dellalbero(albero: Path) -> dict[str, str]:
         for nodo in raccolta.nodi:
             percorso, nome = nome_del_nodo(nodo)
             nomi.setdefault(nome, (Path(g.cwd) / percorso).as_posix())
+        for percorso in raccolta.non_raccolti:
+            sorgente = leggi_sorgente(albero / g.cwd / percorso)
+            for nome in nomi_dallast(sorgente or ""):
+                nomi.setdefault(nome, (Path(g.cwd) / percorso).as_posix())
     return nomi
 
 
