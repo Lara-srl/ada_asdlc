@@ -4115,6 +4115,16 @@ class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
 
         assert not cartella.exists()
 
+    def test_fuori_da_un_giro_la_collezione_non_si_scrive(self, repo_di_prova):
+        """Decisione 5: fuori da un giro — `--gate-rosso` a mano — le collezioni si
+        calcolano e non si scrivono."""
+        sha = repo_di_prova.commit("test: un caso (RED)", {
+            "backend/tests/test_c.py": "def test_c():\n    assert False\n"})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_c"]
+        assert not runner.percorso_della_fase(repo_di_prova.radice,
+                                              runner.CARTELLA_DELLE_COLLEZIONI).exists()
+
 
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
