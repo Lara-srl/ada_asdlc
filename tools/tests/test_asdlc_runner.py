@@ -4111,9 +4111,10 @@ class TestIlLucchettoLeggeLaNascitaDallaCollezione:
 
 
 class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
-    """PBI-396, decisione 5, criterio 8: `apri_la_fase()` calcola la collezione
-    della base e la scrive accanto allo sha di base; le collezioni dei commit del
-    ramo si tengono lì, una per sha. `chiudi_la_fase()` le toglie con la fase.
+    """PBI-396, decisione 5, criteri 8 e 10: `apri_la_fase()` calcola la
+    collezione della base e la scrive in una cartella della `LOG_DIR` del giro;
+    le collezioni dei commit del ramo si tengono lì, una per sha.
+    `chiudi_la_fase()` le toglie con la fase.
 
     Si contano i worktree usa e getta estratti per sha: la collezione di un
     commit si legge lì dentro, e un albero non estratto è un pytest non lanciato.
@@ -4143,8 +4144,7 @@ class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
 
         assert estratti.count(base) == 0, "la base la raccoglie apri_la_fase(), una volta"
         assert estratti.count(testa) == 1, "la collezione di un commit non si ricalcola"
-        cartella = runner.percorso_della_fase(repo_di_prova.radice,
-                                              runner.CARTELLA_DELLE_COLLEZIONI)
+        cartella = next(runner.LOG_DIR.glob(f"**/{base}.json")).parent
         assert sorted(p.name for p in cartella.iterdir()) == sorted(
             [f"{base}.json", f"{testa}.json"])
 
@@ -4152,15 +4152,38 @@ class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
 
         assert not cartella.exists()
 
+    def test_le_collezioni_stanno_nella_log_dir_del_giro_e_non_nel_git_dir(
+            self, repo_di_prova):
+        """Decisione 5, criterio 10: al giro 1 le collezioni stavano accanto alla
+        fase, in `.git/worktrees/<nome>/`, e ne sono rimaste dieci accanto alla
+        fase di `ada-run`. Ora stanno in una cartella sua della `LOG_DIR` del
+        giro, e `chiudi_la_fase()` la toglie."""
+        base = repo_di_prova.commit("test: un caso", {
+            "backend/tests/test_a.py": "def test_x():\n    assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        git_dir = Path(repo_di_prova._git("rev-parse", "--absolute-git-dir"))
+
+        runner.apri_la_fase(base)
+
+        assert list(git_dir.glob("**/*.json")) == []
+        [collezione] = runner.LOG_DIR.glob(f"**/{base}.json")
+        cartella = collezione.parent
+        assert cartella != runner.LOG_DIR, "una cartella sua, dentro la LOG_DIR"
+
+        runner.chiudi_la_fase()
+
+        assert not cartella.exists()
+
     def test_fuori_da_un_giro_la_collezione_non_si_scrive(self, repo_di_prova):
         """Decisione 5: fuori da un giro — `--gate-rosso` a mano — le collezioni si
-        calcolano e non si scrivono."""
+        calcolano e non si scrivono, né nella `LOG_DIR` né nel git dir."""
         sha = repo_di_prova.commit("test: un caso (RED)", {
             "backend/tests/test_c.py": "def test_c():\n    assert False\n"})
+        git_dir = Path(repo_di_prova._git("rev-parse", "--absolute-git-dir"))
 
         assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_c"]
-        assert not runner.percorso_della_fase(repo_di_prova.radice,
-                                              runner.CARTELLA_DELLE_COLLEZIONI).exists()
+        assert list(runner.LOG_DIR.glob("**/*.json")) == []
+        assert list(git_dir.glob("**/*.json")) == []
 
 
 class TestIlGateDelRossoCamminaICommit:
