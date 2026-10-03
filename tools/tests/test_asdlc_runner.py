@@ -4024,12 +4024,13 @@ class TestIlGateDelRossoCamminaICommit:
         Chi copia dal `fermato` si prende un «not found» e conclude che il gate ha
         sbagliato: il difetto che `e64555f` chiude, lasciato aperto proprio lì.
 
-        L'AST si legge dal blob (`git show sha:percorso`): niente worktree, quindi
-        «ferma **senza** girare i test» resta intatto.
+        L'AST si legge dal blob (`git show sha:percorso`), e nessun test si esegue:
+        «ferma **senza** girare i test» resta intatto. Il commit si estrae solo per
+        leggerne la collezione, che dice quali test nascono (PBI-396, decisione 3).
         """
         monkeypatch.setattr(
-            runner, "worktree_usa_e_getta",
-            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+            runner, "esiti_del_comando",
+            lambda c: pytest.fail("il diff bastava: nessun test va eseguito"),
         )
         repo_di_prova.commit("feat: la somma, con il suo test", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
@@ -4103,10 +4104,11 @@ class TestIlGateDelRossoCamminaICommit:
         self, repo_di_prova, monkeypatch
     ):
         """Un test generato, o dentro un `if`: il gate non indovina, e non scrive un
-        `::` che promette a chi legge un comando che non esiste."""
+        `::` che promette a chi legge un comando che non esiste. Il commit si
+        estrae per leggerne la collezione (PBI-396), e nessun test si esegue."""
         monkeypatch.setattr(
-            runner, "worktree_usa_e_getta",
-            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+            runner, "esiti_del_comando",
+            lambda c: pytest.fail("il diff bastava: nessun test va eseguito"),
         )
         repo_di_prova.commit("feat: la somma, con i suoi test generati", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
@@ -6696,23 +6698,34 @@ class TestIlMorsoSiGiudicaAncheAllaPunta:
         assert riga.startswith(f"→ nato verde, non morde al suo commit, morde alla punta "
                                f"`{punta[:7]}`: backend/app/m.py:2")
 
-    def test_la_punta_si_estrae_una_volta_sola_per_tutte_le_guardie(self, repo_di_prova):
+    def test_la_punta_si_estrae_una_volta_sola_per_tutte_le_guardie(
+            self, repo_di_prova, monkeypatch):
         """Decisione 1: il worktree della punta si crea alla prima guardia che ne ha
-        bisogno e vale per tutte. Due guardie, due commit estratti, una punta."""
+        bisogno e vale per tutte. Due guardie, una punta. Si contano i worktree
+        della punta e non tutti: anche la collezione di pytest si legge in un
+        worktree usa e getta (PBI-396, decisione 3)."""
         self._base_e_doppio(repo_di_prova)
         repo_di_prova.commit("test: fissa il prompt", {"backend/tests/test_prompt.py": self.GOLDEN})
         repo_di_prova.commit("test: fissa il prompt, di nuovo", {
             "backend/tests/test_prompt_bis.py":
                 self.GOLDEN.replace("test_il_prompt_resta_quello", "test_il_prompt_bis"),
         })
-        repo_di_prova.commit("refactor: il prompt da carica()", {"backend/app/m.py": self.DOPO})
-        prima = runner.USA_E_GETTA["montati"]
+        punta = repo_di_prova.commit("refactor: il prompt da carica()",
+                                     {"backend/app/m.py": self.DOPO})
+        estratti: list[str] = []
+        vero = runner.worktree_usa_e_getta
+
+        def conta(sha: str):
+            estratti.append(sha)
+            return vero(sha)
+
+        monkeypatch.setattr(runner, "worktree_usa_e_getta", conta)
         morsi: list[dict] = []
 
         assert runner.gate_del_rosso(morsi=morsi) == []
 
         assert [m["dove"] for m in morsi] == ["punta", "punta"]
-        assert runner.USA_E_GETTA["montati"] - prima == 3
+        assert estratti.count(punta) == 1
 
     def test_su_un_tag_annotato_la_punta_e_lo_sha_del_commit(self, repo_di_prova):
         """Decisione 1: la punta è il ref chiesto con `--gate-rosso`, e i rami
