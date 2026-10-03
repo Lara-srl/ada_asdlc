@@ -1305,9 +1305,12 @@ FILE_DELLA_FASE = "asdlc-fase"
 # Accanto alla fase, e per la stessa strada, lo sha di base del giro: è da lì che
 # `--chiedi-impl` conta i commit del ramo (PBI-380, decisione 3).
 FILE_DELLA_BASE = "asdlc-base"
-# E nello stesso posto le collezioni di pytest del giro, un JSON per sha: quella
-# della base la scrive `apri_la_fase()`, quelle dei commit del ramo chi le legge
-# per primo (PBI-396, decisione 5).
+# E nello stesso posto il percorso della cartella delle collezioni di pytest del
+# giro, un JSON per sha. La cartella sta nella `LOG_DIR`, non qui: al giro 1 di
+# PBI-396 ne sono rimaste dieci in `.git/worktrees/ada-run/`, accanto a una fase
+# che il runner installato non conosceva. Quella della base la scrive
+# `apri_la_fase()`, quelle dei commit del ramo chi le legge per primo (PBI-396,
+# decisione 5).
 CARTELLA_DELLE_COLLEZIONI = "asdlc-collezioni"
 FASE_TEST_ONLY = "TEST_ONLY"
 FASE_IMPL = "IMPL"
@@ -1316,7 +1319,8 @@ FASE_IMPL = "IMPL"
 def percorso_della_fase(cartella: Path, nome: str = FILE_DELLA_FASE) -> Path | None:
     """Dove sta la fase per l'albero che contiene `cartella`, o `None` se non c'è
     un repository sotto — e allora non si scrive da nessuna parte. Con `nome`
-    un altro file dello stesso posto: la base del giro."""
+    un altro file dello stesso posto: la base del giro, o dove stanno le sue
+    collezioni."""
     try:
         detto = git("-C", str(cartella), "rev-parse", "--git-path", nome)
     except RuntimeError:
@@ -1594,16 +1598,26 @@ def collezione_dellalbero(albero: Path) -> dict[str, str]:
     return nomi
 
 
+def cartella_delle_collezioni() -> Path | None:
+    """La cartella della `LOG_DIR` in cui il giro tiene le sue collezioni, letta
+    dal file che `apri_la_fase()` lascia accanto alla fase. `None` fuori da un
+    giro (PBI-396, decisione 5)."""
+    file = percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI)
+    if file is None or not file.is_file():
+        return None
+    detto = file.read_text(encoding="utf-8").strip()
+    return Path(detto) if detto else None
+
+
 def collezione_al_commit(sha: str) -> dict[str, str]:
     """La collezione del commit `sha`, nel suo albero usa e getta.
 
-    Dentro un giro si tiene accanto alla fase, in `CARTELLA_DELLE_COLLEZIONI`,
-    e non si ricalcola: la base vale per tutto il giro, e un commit non cambia
+    Dentro un giro si tiene nella cartella di `cartella_delle_collezioni()`, e
+    non si ricalcola: la base vale per tutto il giro, e un commit non cambia
     (PBI-396, decisione 5). Fuori da un giro si calcola e non si scrive: non
     c'è un `chiudi_la_fase()` che la tolga.
     """
-    cartella = (percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI)
-                if fase_corrente(REPO) is not None else None)
+    cartella = cartella_delle_collezioni()
     file = cartella / f"{sha}.json" if cartella is not None else None
     if file is not None and file.is_file():
         return json.loads(file.read_text(encoding="utf-8"))
@@ -4345,9 +4359,10 @@ def installa_il_ritorno_in_test_only() -> bool:
 
 def apri_la_fase(base: str = "") -> None:
     """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
-    Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`, e la
-    collezione di pytest della base, che vale per tutto il giro (PBI-396,
-    decisione 5).
+    Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`, e il
+    percorso della cartella della `LOG_DIR` dove sta la collezione di pytest
+    della base, che vale per tutto il giro (PBI-396, decisione 5). La cartella
+    porta l'ora dell'apertura, come i file del giro accanto.
 
     Una collezione che non si legge non ferma l'apertura: il giro non è ancora
     nel suo `try`, e un'eccezione qui lascerebbe la fase aperta. Chi ne ha
@@ -4365,6 +4380,10 @@ def apri_la_fase(base: str = "") -> None:
     percorso_della_fase(REPO).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
     if base:
         percorso_della_fase(REPO, FILE_DELLA_BASE).write_text(f"{base}\n", encoding="utf-8")
+        aperta = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        collezioni = (LOG_DIR / f"{aperta}_collezioni").resolve()
+        percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI).write_text(
+            f"{collezioni}\n", encoding="utf-8")
         try:
             collezione_al_commit(base)
         except GuastoDelGate as guasto:
@@ -4375,14 +4394,15 @@ def chiudi_la_fase() -> None:
     """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
     sessione dopo non può scrivere, e la diagnosi costerebbe più del giro. Con
     la fase se ne va la base del giro: fuori da un giro si conta da `BASE`. E se
-    ne vanno le collezioni del giro (PBI-396, decisione 5)."""
-    for nome in (FILE_DELLA_FASE, FILE_DELLA_BASE):
+    ne va la cartella delle collezioni del giro, nella `LOG_DIR` (PBI-396,
+    decisione 5)."""
+    collezioni = cartella_delle_collezioni()
+    if collezioni is not None:
+        shutil.rmtree(collezioni, ignore_errors=True)
+    for nome in (FILE_DELLA_FASE, FILE_DELLA_BASE, CARTELLA_DELLE_COLLEZIONI):
         file = percorso_della_fase(REPO, nome)
         if file is not None:
             file.unlink(missing_ok=True)
-    collezioni = percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI)
-    if collezioni is not None:
-        shutil.rmtree(collezioni, ignore_errors=True)
 
 
 def guardia_del_commit() -> int:
