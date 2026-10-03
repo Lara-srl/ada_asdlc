@@ -3964,6 +3964,20 @@ class TestUnTestSpostatoFraDueFileNonNasce:
 
         assert runner.test_nuovi_del_commit(sha) == []
 
+    def test_un_test_nato_nel_ramo_e_spostato_dopo_nasce_una_volta_sola(self, repo_di_prova):
+        """Decisione 1, criterio 3: test_x nasce nel commit che lo scrive, e il
+        commit che poi lo sposta in un altro file non lo fa rinascere, perché il
+        genitore lo ha già."""
+        nato = repo_di_prova.commit("test: due casi (RED)", {
+            "backend/tests/test_a.py": ("def test_resta():\n    assert True\n\n\n"
+                                        "def test_x():\n    assert True\n")})
+        spostato = repo_di_prova.commit("refactor: test_x in test_b", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(nato)] == ["test_resta", "test_x"]
+        assert runner.test_nuovi_del_commit(spostato) == []
+
 
 class TestIlGateDelRossoCamminaICommit:
     """PBI-103: *quei test sono mai stati rossi?*
