@@ -3979,6 +3979,21 @@ class TestUnTestSpostatoFraDueFileNonNasce:
         assert [t.nome for t in runner.test_nuovi_del_commit(nato)] == ["test_resta", "test_x"]
         assert runner.test_nuovi_del_commit(spostato) == []
 
+    def test_il_gate_lanciato_a_mano_scrive_quanti_test_il_commit_ha_spostato(
+            self, repo_di_prova, capsys):
+        """Decisione 7: uno spostamento non compare fra i mancati, e il conteggio
+        si scrive nella riga del commit, così chi legge vede che la regola ha
+        agito."""
+        self._base_con_due_test(repo_di_prova)
+        sha = repo_di_prova.commit("refactor: test_x in test_b", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert runner.stampa_il_gate_del_rosso("HEAD") == 0
+
+        uscita = capsys.readouterr().out
+        assert f"  {sha[:7]}  refactor: test_x in test_b\n    spostati: 1\n" in uscita
+
 
 class TestIlNomeDiUnTestPythonPortaLaSuaClasse:
     """PBI-396, decisione 2, criterio 4: il nome è il nodeid senza il file e senza
