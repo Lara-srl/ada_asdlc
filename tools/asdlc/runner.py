@@ -1197,7 +1197,6 @@ def gira_gate(attivi: set[str], base: str | None = None) -> list[tuple[str, str]
 # contarla come produzione fermerebbe ogni commit di soli test con la sua spec.
 ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh"}
 
-RE_TEST_PY = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
 # `it('…')`, `test("…")`, e le loro varianti `.each` / `.skip`: il nome è ciò che
 # vitest filtra con `-t`. Un apice **scappato** non chiude la stringa —
 # `(?:\\.|[^\\])+?` mangia il `\'` invece di fermarcisi — o di `it('l\'officina…')`
@@ -1454,6 +1453,10 @@ def lati_del_diff(voce: VoceDiCommit) -> list[str]:
     Una funzione sola per il commit e per l'albero di lavoro, come
     `voci_del_name_status`: due copie di questa regola divergerebbero alla prima
     correzione, e il lucchetto fermerebbe ciò che il gate lascia passare.
+
+    Da PBI-396 serve alla sola lettura di vitest. Per Python la nascita si legge
+    dalla collezione di pytest: i test di un `note.txt` diventato file di test
+    nascono perché il genitore non li ha, senza guardare il diff.
     """
     if (voce.vecchio and e_file_di_test(voce.vecchio)
             and linguaggio_del_test(voce.vecchio) is not None):
@@ -1461,19 +1464,18 @@ def lati_del_diff(voce: VoceDiCommit) -> list[str]:
     return [voce.percorso]
 
 
-def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
-    """I nomi di test aggiunti e quelli cancellati, dalle righe del diff."""
-    regola = RE_TEST_PY if linguaggio == "python" else RE_TEST_JS
+def nomi_dei_test(diff: str) -> tuple[list[str], set[str]]:
+    """I titoli dei test vitest aggiunti e quelli cancellati, dalle righe del
+    diff. Per Python la nascita si legge dalla collezione (PBI-396)."""
     aggiunti: list[str] = []
     tolti: set[str] = set()
     for riga in diff.splitlines():
         if riga.startswith(("+++", "---")) or riga[:1] not in ("+", "-"):
             continue
-        trovato = regola.match(riga[1:])
+        trovato = RE_TEST_JS.match(riga[1:])
         if trovato is None:
             continue
-        nome = (trovato.group(1) if linguaggio == "python"
-                else decodifica_escape(trovato.group(2)))
+        nome = decodifica_escape(trovato.group(2))
         if riga[0] == "+":
             aggiunti.append(nome)
         else:
@@ -1653,9 +1655,7 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
         if linguaggio != "vitest":
             continue
         aggiunti, tolti = nomi_dei_test(
-            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)),
-            linguaggio,
-        )
+            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in voci):
         genitore = genitore_del_commit(sha)
@@ -1666,12 +1666,25 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     return nuovi
 
 
+def base_del_lucchetto() -> str:
+    """La base da cui il lucchetto conta: lo sha che `apri_la_fase()` lascia
+    accanto alla fase, e fuori da un giro il ramo di `asdlc.toml` (PBI-380,
+    decisione 3)."""
+    file = percorso_della_fase(REPO, FILE_DELLA_BASE)
+    return (file.read_text(encoding="utf-8").strip()
+            if file is not None and file.is_file() else "") or BASE
+
+
 def test_nuovi_dellalbero() -> list[TestNuovo]:
     """I test che nascono nell'**albero di lavoro**, rispetto a `HEAD`.
 
     Il gate del rosso legge un commit; il lucchetto deve leggere ciò che non è
     ancora committato, perché il permesso di implementare si chiede **prima** del
     commit — è tutto il punto della differenza fra impedire e accertare.
+
+    Per Python la regola è quella del gate, `nascite_python` (PBI-396, decisione
+    1): il commit è l'albero di lavoro, il genitore è `HEAD`, e la base è quella
+    del giro. Per vitest si legge il diff.
 
     I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
     appena creato, e il primo test di un modulo nuovo è il caso più comune di
@@ -1688,15 +1701,20 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     for voce in tracciati + non_tracciati:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio is None:
+        if linguaggio != "vitest":
             continue
         if voce in non_tracciati:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
             diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
-        aggiunti, tolti = nomi_dei_test(diff, linguaggio)
+        aggiunti, tolti = nomi_dei_test(diff)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    if any(tocca_un_test_python(v) for v in tracciati + non_tracciati):
+        testa = git("rev-parse", "HEAD")
+        alla_base = base_del_commit(base_del_lucchetto(), testa)
+        nuovi += nascite_python(collezione_dellalbero(REPO), collezione_al_commit(testa),
+                                collezione_al_commit(alla_base) if alla_base else {})
     return nuovi
 
 
@@ -4123,9 +4141,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
-    file = percorso_della_fase(REPO, FILE_DELLA_BASE)
-    base = (file.read_text(encoding="utf-8").strip()
-            if file is not None and file.is_file() else "") or BASE
+    base = base_del_lucchetto()
     if git("rev-list", "--count", f"{base}..HEAD") == "0":
         # Il branch nasce dalla base, quindi al primo `--chiedi-impl` di ogni giro
         # HEAD **è** la base: se lì l'ultimo commit fosse di soli test, il
