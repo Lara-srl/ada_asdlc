@@ -1609,23 +1609,34 @@ def cartella_delle_collezioni() -> Path | None:
     return Path(detto) if detto else None
 
 
-def collezione_al_commit(sha: str) -> dict[str, str]:
+def collezione_al_commit(sha: str,
+                         memoria: dict[str, dict[str, str]] | None = None) -> dict[str, str]:
     """La collezione del commit `sha`, nel suo albero usa e getta.
 
     Dentro un giro si tiene nella cartella di `cartella_delle_collezioni()`, e
     non si ricalcola: la base vale per tutto il giro, e un commit non cambia
     (PBI-396, decisione 5). Fuori da un giro si calcola e non si scrive: non
     c'è un `chiudi_la_fase()` che la tolga.
+
+    In `memoria`, se c'è, la collezione resta per sha anche fuori da un giro:
+    il gate del rosso ne passa una per tutta la sua passata, e il genitore di
+    un commit è il commit prima, o la base. Così ogni albero si raccoglie una
+    volta sola, e non tre per commit (PBI-396, decisione 9).
     """
+    if memoria is not None and sha in memoria:
+        return memoria[sha]
     cartella = cartella_delle_collezioni()
     file = cartella / f"{sha}.json" if cartella is not None else None
     if file is not None and file.is_file():
-        return json.loads(file.read_text(encoding="utf-8"))
-    with worktree_usa_e_getta(sha) as albero:
-        collezione = collezione_dellalbero(albero)
-    if file is not None:
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(json.dumps(collezione), encoding="utf-8")
+        collezione = json.loads(file.read_text(encoding="utf-8"))
+    else:
+        with worktree_usa_e_getta(sha) as albero:
+            collezione = collezione_dellalbero(albero)
+        if file is not None:
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(json.dumps(collezione), encoding="utf-8")
+    if memoria is not None:
+        memoria[sha] = collezione
     return collezione
 
 
@@ -1677,10 +1688,14 @@ def base_del_commit(base: str, sha: str) -> str | None:
 
 def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
                           base: str | None = None,
-                          spostati: list[str] | None = None) -> list[TestNuovo]:
+                          spostati: list[str] | None = None,
+                          collezioni: dict[str, dict[str, str]] | None = None
+                          ) -> list[TestNuovo]:
     """I test che **nascono** in questo commit del ramo che parte da `base`, il
     ramo di `asdlc.toml` se non è detto. In `spostati`, se c'è, si aggiungono i
-    test Python che il commit ha spostato di file (`spostamenti_python`).
+    test Python che il commit ha spostato di file (`spostamenti_python`). In
+    `collezioni`, se c'è, si tengono le collezioni già lette, per sha, da una
+    chiamata all'altra (`collezione_al_commit`, PBI-396, decisione 9).
 
     Per i test Python la nascita si legge dalla collezione di pytest
     (`nascite_python`, PBI-396): un nome che c'era nel genitore o alla base non
@@ -1709,12 +1724,12 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     if any(tocca_un_test_python(v) for v in voci):
         genitore = genitore_del_commit(sha)
         alla_base = base_del_commit(base if base is not None else BASE, sha)
-        collezioni = (collezione_al_commit(sha),
-                      collezione_al_commit(genitore) if genitore else {},
-                      collezione_al_commit(alla_base) if alla_base else {})
-        nuovi += nascite_python(*collezioni)
+        tre = (collezione_al_commit(sha, collezioni),
+               collezione_al_commit(genitore, collezioni) if genitore else {},
+               collezione_al_commit(alla_base, collezioni) if alla_base else {})
+        nuovi += nascite_python(*tre)
         if spostati is not None:
-            spostati += spostamenti_python(*collezioni)
+            spostati += spostamenti_python(*tre)
     return nuovi
 
 
@@ -2939,13 +2954,17 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     base = base if base is not None else BASE
     visti = visti if visti is not None else set()
     mancati: list[dict[str, str]] = []
+    # Le collezioni di pytest lette in questa passata, per sha: il genitore di un
+    # commit è il commit prima, o la base, e si raccoglie una volta (PBI-396,
+    # decisione 9).
+    collezioni: dict[str, dict[str, str]] = {}
     with ExitStack() as pila:
         punta = Punta(ref, pila)
         for sha in commit_da_esaminare(base, ref, visti):
             visti.add(sha)
             file = file_del_commit(sha)
             suoi: list[str] = []
-            nuovi = test_nuovi_del_commit(sha, file, base, suoi)
+            nuovi = test_nuovi_del_commit(sha, file, base, suoi, collezioni)
             if suoi and spostati is not None:
                 spostati.append({"commit": sha[:7], "spostati": str(len(suoi)),
                                  "titolo": git("show", "--no-patch", "--format=%s", sha)})
