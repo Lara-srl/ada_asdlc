@@ -4384,8 +4384,10 @@ def apri_la_fase(base: str = "") -> None:
     porta l'ora dell'apertura, come i file del giro accanto.
 
     Una collezione che non si legge non ferma l'apertura: il giro non è ancora
-    nel suo `try`, e un'eccezione qui lascerebbe la fase aperta. Chi ne ha
-    bisogno la ricalcola, e il guasto esce lì, dove il giro lo gestisce.
+    nel suo `try`, e un'eccezione qui lascerebbe la fase aperta. Non solo un
+    `GuastoDelGate`: un worktree che non si crea, una raccolta oltre il tetto,
+    un JSON senza `nodi` alzano altro. Chi ne ha bisogno la ricalcola, e il
+    guasto esce lì, dove il giro lo gestisce.
 
     L'hook di Claude Code non si installa qui: la guardia di fase del Builder la
     scrive `impostazioni_della_sessione()` a ogni sessione, e gli arriva con
@@ -4405,7 +4407,7 @@ def apri_la_fase(base: str = "") -> None:
             f"{collezioni}\n", encoding="utf-8")
         try:
             collezione_al_commit(base)
-        except GuastoDelGate as guasto:
+        except Exception as guasto:  # noqa: BLE001 — qualunque guasto, vedi sopra
             print(f"    ⚠️  collezione della base non scritta: {str(guasto)[:300]}")
 
 
