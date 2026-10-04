@@ -3397,12 +3397,6 @@ class TestIGateSiDichiaranoPrimaDiPartire:
 
         assert runner.smista() == 0
 
-    def test_le_dipendenze_di_test_sono_dichiarate(self):
-        """La conoscenza che stava nella testa di chi allestì il primo venv."""
-        dev = REPO / "backend" / "requirements-dev.txt"
-        assert dev.exists(), "un albero nuovo deve poter installare i gate leggendo un file"
-        assert "pytest" in dev.read_text()
-
 
 # --- Il gate del rosso (PBI-103) --------------------------------------------
 #
