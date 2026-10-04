@@ -3900,7 +3900,7 @@ class TestNascitaECancellazioneRestanoQuelleDiPrima:
 class TestLaCollezioneSiLeggeDalPlugin:
     """PBI-396, decisione 3: la collezione di pytest si legge da un dato.
 
-    Il plugin `asdlc.collezione` scrive in un JSON i nodeid che pytest ha
+    Il plugin `asdlc_collezione` scrive in un JSON i nodeid che pytest ha
     raccolto. L'output di `-q` non si legge: un id con uno spazio o con un `::`
     dentro la parametrizzazione, letto dallo schermo, si spezzerebbe nel punto
     sbagliato.
