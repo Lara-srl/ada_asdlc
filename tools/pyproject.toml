@@ -25,9 +25,12 @@ asdlc-esito = "asdlc.esito:main"
 asdlc-chiudi-giro = "asdlc.chiudi_giro:main"
 
 # Il solo pacchetto `asdlc`: in `tools/` stanno anche gli script di aDa, che non
-# sono del runner e non si installano.
+# sono del runner e non si installano. Accanto, come modulo a sé, il plugin di
+# pytest della collezione (PBI-396, decisione 3): sotto il nome `asdlc` metterebbe
+# in ombra il pacchetto `asdlc` dell'albero che raccoglie.
 [tool.setuptools]
 packages = ["asdlc"]
+py-modules = ["asdlc_collezione"]
 
 # I prompt dei cinque ruoli sono dati del pacchetto (PBI-386): senza questa riga
 # la build li lascia fuori, e il runner installato non li trova.

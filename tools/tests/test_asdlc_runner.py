@@ -3498,37 +3498,6 @@ class TestITestNuoviSiLeggonoDalDiff:
     """Quali test **nascono** in questo commit: né quelli che c'erano, né quelli
     che il commit sposta da un file all'altro."""
 
-    def test_una_funzione_aggiunta_e_un_test_nuovo(self, monkeypatch):
-        git_del_commit(
-            monkeypatch,
-            "M\tbackend/tests/test_somma.py",
-            {"backend/tests/test_somma.py":
-             "@@ -1,0 +2,2 @@\n+def test_somma_due_numeri():\n+    assert somma(1, 1) == 2\n"},
-        )
-
-        nuovi = runner.test_nuovi_del_commit("abc1234")
-
-        assert [(t.file, t.nome, t.linguaggio) for t in nuovi] == [
-            ("backend/tests/test_somma.py", "test_somma_due_numeri", "python")
-        ]
-
-    def test_un_test_spostato_non_e_un_test_nuovo(self, monkeypatch):
-        """Lo stesso nome cancellato e riaggiunto è un trasloco, non una nascita.
-
-        È il caso che il Protocollo di rifinitura chiama *«un file di test
-        riscritto per intero»*: senza questo, un riordino farebbe girare tutta la
-        suite di quel commit e la fermerebbe come nata verde.
-        """
-        git_del_commit(
-            monkeypatch,
-            "M\tbackend/tests/test_somma.py",
-            {"backend/tests/test_somma.py":
-             "@@ -3,3 +3,4 @@\n-def test_vecchio():\n-    assert True\n"
-             "+def test_vecchio():\n+    assert True\n+def test_davvero_nuovo():\n+    assert False\n"},
-        )
-
-        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_davvero_nuovo"]
-
     def test_riconosce_i_test_del_frontend(self, monkeypatch):
         git_del_commit(
             monkeypatch,
@@ -3597,18 +3566,6 @@ class TestITestNuoviSiLeggonoDalDiff:
 
         assert runner.test_nuovi_del_commit("abc1234") == []
 
-    def test_le_righe_di_intestazione_del_diff_non_sono_codice(self, monkeypatch):
-        """`+++ b/…` comincia per `+` e non è una riga aggiunta."""
-        git_del_commit(
-            monkeypatch,
-            "M\tbackend/tests/test_somma.py",
-            {"backend/tests/test_somma.py":
-             "--- a/backend/tests/test_somma.py\n+++ b/backend/tests/test_somma.py\n"
-             "@@ -1,0 +2,1 @@\n+def test_uno():\n"},
-        )
-
-        assert [t.nome for t in runner.test_nuovi_del_commit("abc1234")] == ["test_uno"]
-
 
 class RepoDiProva:
     """Un repository vero e minuscolo, con la forma di questo: `backend/app` e
@@ -3672,6 +3629,10 @@ class RepoDiProva:
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(contenuto, encoding="utf-8")
         self._git("add", percorso)
+
+    def sposta_la_base(self, sha: str) -> None:
+        """`origin/main` su `sha`: ciò che c'è fino a lì sta alla base del ramo."""
+        self._git("update-ref", "refs/remotes/origin/main", sha)
 
 
 @pytest.fixture
@@ -3893,8 +3854,9 @@ class TestNascitaECancellazioneRestanoQuelleDiPrima:
 
     Un file di test davvero nuovo fa nascere i suoi test; uno cancellato non ne
     fa nascere nessuno e non alza. Nascono verdi — è il comportamento di sempre —
-    e presidiano il ciclo delle nascite, `nomi_dei_test` compresa, che questo
-    branch ha riscritto tutt'attorno senza doverlo cambiare.
+    e presidiano il ciclo delle nascite, che questo branch ha riscritto
+    tutt'attorno senza doverlo cambiare. Da PBI-396 i file sono Python, e le
+    nascite si leggono dalla collezione di pytest e non da `nomi_dei_test`.
 
     Quanto mordono, però, va detto per quel che è, e al giro 3 il Critic ha
     trovato che qui c'era scritto di più: nessuno dei quattro casi contiene un
@@ -3933,6 +3895,343 @@ class TestNascitaECancellazioneRestanoQuelleDiPrima:
         repo_di_prova.cancella("backend/tests/test_tre.py")
 
         assert runner.test_nuovi_dellalbero() == []
+
+
+class TestLaCollezioneSiLeggeDalPlugin:
+    """PBI-396, decisione 3: la collezione di pytest si legge da un dato.
+
+    Il plugin `asdlc_collezione` scrive in un JSON i nodeid che pytest ha
+    raccolto. L'output di `-q` non si legge: un id con uno spazio o con un `::`
+    dentro la parametrizzazione, letto dallo schermo, si spezzerebbe nel punto
+    sbagliato.
+    """
+
+    def test_un_id_con_uno_spazio_o_un_doppio_due_punti_arriva_intero(self, tmp_path):
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_p.py").write_text(
+            "import pytest\n\n\n"
+            "@pytest.mark.parametrize('x', [1, 2], ids=['con uno spazio', 'a::b'])\n"
+            "def test_p(x):\n    assert x\n", encoding="utf-8")
+
+        raccolta = runner.raccolta_di_pytest(tmp_path, ["pytest", "-q"])
+
+        assert raccolta.nodi == ["tests/test_p.py::test_p[con uno spazio]",
+                                 "tests/test_p.py::test_p[a::b]"]
+
+    def test_un_test_raccolto_importa_lasdlc_dellalbero_e_non_quello_del_runner(
+            self, repo_di_prova):
+        """Decisione 3, difetto 84 di PBI-102: il plugin non sta sotto il nome
+        `asdlc`. Caricato come `asdlc.collezione`, metteva in `sys.modules` il
+        pacchetto del runner prima della raccolta, e un test dell'albero che
+        importa il suo `asdlc` riceveva quello.
+
+        Il test esiste solo se l'import vede l'`asdlc` dell'albero, e sta dentro
+        un `if`, dove l'AST della decisione 4 non lo legge: con l'`asdlc` del
+        runner il file non si raccoglie, e il nome non compare."""
+        sha = repo_di_prova.commit("test: l'asdlc dell'albero (RED)", {
+            "backend/conftest.py": "",
+            "backend/asdlc/__init__.py": "DI_CHI = 'dellalbero'\n",
+            "backend/tests/test_asdlc.py": (
+                "import asdlc\n\n"
+                "if asdlc.DI_CHI == 'dellalbero':\n"
+                "    def test_vede_lasdlc_dellalbero():\n"
+                "        assert True\n")})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
+            ("backend/tests/test_asdlc.py", "test_vede_lasdlc_dellalbero")]
+
+
+class TestUnTestSpostatoFraDueFileNonNasce:
+    """PBI-396, decisione 1; difetto 81 di PBI-102.
+
+    Il commit `6406151` del giro 1 di PBI-394 ha tolto un test da un file e lo ha
+    scritto in un altro, senza `git mv`. Letto dal diff, `+def test_…` in un file e
+    `-def test_…` nell'altro non si incontravano, e il gate l'ha fermato come un
+    test nato verde. Letto dalla collezione di pytest, quel nome c'era già.
+    """
+
+    def _base_con_due_test(self, repo_di_prova) -> None:
+        base = repo_di_prova.commit("test: due casi", {
+            "backend/tests/test_a.py": ("def test_resta():\n    assert True\n\n\n"
+                                        "def test_x():\n    assert True\n")})
+        repo_di_prova.sposta_la_base(base)
+
+    def test_un_test_spostato_da_un_file_a_un_altro_non_nasce(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        sha = repo_di_prova.commit("refactor: test_x in test_b", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_un_test_nuovo_accanto_a_uno_spostato_nasce_lui_solo(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        sha = repo_di_prova.commit("test: test_x in test_b, e un caso nuovo (RED)", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": ("def test_x():\n    assert True\n\n\n"
+                                        "def test_nuovo():\n    assert False\n")})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
+            ("backend/tests/test_b.py", "test_nuovo")]
+
+    def test_un_nome_che_ce_alla_base_non_nasce_anche_se_il_genitore_non_lo_ha(
+            self, repo_di_prova):
+        """Decisione 1: un nome che c'è alla base non nasce mai nel ramo, in
+        qualunque file finisca. Qui il ramo lo toglie in un commit e lo rimette in
+        un altro file nel commit dopo: il genitore non lo ha, la base sì."""
+        self._base_con_due_test(repo_di_prova)
+        repo_di_prova.commit("refactor: test_x esce da test_a", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n"})
+        sha = repo_di_prova.commit("refactor: test_x torna, in test_b", {
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert runner.test_nuovi_del_commit(sha) == []
+
+    def test_un_test_nato_nel_ramo_e_spostato_dopo_nasce_una_volta_sola(self, repo_di_prova):
+        """Decisione 1, criterio 3: test_x nasce nel commit che lo scrive, e il
+        commit che poi lo sposta in un altro file non lo fa rinascere, perché il
+        genitore lo ha già."""
+        nato = repo_di_prova.commit("test: due casi (RED)", {
+            "backend/tests/test_a.py": ("def test_resta():\n    assert True\n\n\n"
+                                        "def test_x():\n    assert True\n")})
+        spostato = repo_di_prova.commit("refactor: test_x in test_b", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(nato)] == ["test_resta", "test_x"]
+        assert runner.test_nuovi_del_commit(spostato) == []
+
+    def test_il_gate_lanciato_a_mano_scrive_quanti_test_il_commit_ha_spostato(
+            self, repo_di_prova, capsys):
+        """Decisione 7: uno spostamento non compare fra i mancati, e il conteggio
+        si scrive nella riga del commit, così chi legge vede che la regola ha
+        agito."""
+        self._base_con_due_test(repo_di_prova)
+        sha = repo_di_prova.commit("refactor: test_x in test_b", {
+            "backend/tests/test_a.py": "def test_resta():\n    assert True\n",
+            "backend/tests/test_b.py": "def test_x():\n    assert True\n"})
+
+        assert runner.stampa_il_gate_del_rosso("HEAD") == 0
+
+        uscita = capsys.readouterr().out
+        assert f"  {sha[:7]}  refactor: test_x in test_b\n    spostati: 1\n" in uscita
+
+
+class TestIlNomeDiUnTestPythonPortaLaSuaClasse:
+    """PBI-396, decisione 2, criterio 4: il nome è il nodeid senza il file e senza
+    il suffisso `[…]`. Il solo nome della funzione non basta: un omonimo in
+    un'altra classe della base nasconderebbe una nascita vera."""
+
+    def test_un_omonimo_in_unaltra_classe_della_base_non_nasconde_la_nascita(
+            self, repo_di_prova):
+        base = repo_di_prova.commit("test: TestA", {
+            "backend/tests/test_a.py": "class TestA:\n    def test_x(self):\n        assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        sha = repo_di_prova.commit("test: TestB, annidati e parametrizzati (RED)", {
+            "backend/tests/test_b.py": (
+                "import pytest\n\n\n"
+                "class TestB:\n    def test_x(self):\n        assert False\n\n\n"
+                "class TestEsterna:\n    class TestInterna:\n"
+                "        def test_y(self):\n            assert False\n\n\n"
+                "@pytest.mark.parametrize('n', [1, 2, 3])\n"
+                "def test_p(n):\n    assert False\n")})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(sha)] == [
+            ("backend/tests/test_b.py", "TestB::test_x"),
+            ("backend/tests/test_b.py", "TestEsterna::TestInterna::test_y"),
+            ("backend/tests/test_b.py", "test_p"),
+        ]
+
+
+class TestUnRedCheNonSiRaccoglieSiLeggeDallAst:
+    """PBI-396, decisione 4, criterio 5: il RED più comune in Python importa ciò
+    che non c'è ancora, e a quel commit pytest non raccoglie il file. I suoi nomi
+    si leggono dall'AST del sorgente, così i test nascono nel RED, e non nel
+    commit dopo, quando il file si raccoglie e nella collezione compaiono."""
+
+    RED = ("from app.m import f\n\n\n"
+           "def test_f():\n    assert f() == 1\n\n\n"
+           "class TestF:\n    def test_g(self):\n        assert f() == 1\n\n"
+           "    class TestDentro:\n        def test_h(self):\n            assert f() == 1\n\n"
+           "    def aiuto(self):\n        pass\n\n\n"
+           "def aiuto():\n    pass\n")
+
+    def test_i_test_di_un_red_che_non_si_raccoglie_nascono_nel_red(self, repo_di_prova):
+        red = repo_di_prova.commit("test: f torna uno (RED)",
+                                   {"backend/tests/test_m.py": self.RED})
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_del_commit(red)] == [
+            ("backend/tests/test_m.py", "test_f"),
+            ("backend/tests/test_m.py", "TestF::test_g"),
+            ("backend/tests/test_m.py", "TestF::TestDentro::test_h"),
+        ]
+
+    def test_il_commit_che_rende_il_file_raccoglibile_non_li_fa_rinascere(
+            self, repo_di_prova):
+        """Il commit dopo il RED porta f e tocca anche un file di test, perché la
+        sua collezione si calcoli (decisione 6): i nomi che compaiono lì c'erano
+        già nel genitore, letti dall'AST."""
+        repo_di_prova.commit("test: f torna uno (RED)", {"backend/tests/test_m.py": self.RED})
+        dopo = repo_di_prova.commit("feat: f, e il conftest della cartella", {
+            "backend/app/m.py": "def f():\n    return 1\n",
+            "backend/tests/conftest.py": "",
+        })
+
+        assert runner.test_nuovi_del_commit(dopo) == []
+
+
+class TestIlLucchettoLeggeLaNascitaDallaCollezione:
+    """PBI-396, decisione 1, criterio 7: il lucchetto *ex ante* usa la stessa
+    regola del gate. Il commit è l'albero di lavoro, il genitore è `HEAD`."""
+
+    def _base_con_due_test(self, repo_di_prova) -> None:
+        base = repo_di_prova.commit("test: due casi", {
+            "backend/tests/test_a.py": ("def test_resta():\n    assert True\n\n\n"
+                                        "def test_x():\n    assert True\n")})
+        repo_di_prova.sposta_la_base(base)
+
+    def _sposta_test_x(self, repo_di_prova, test_b: str) -> None:
+        (repo_di_prova.radice / "backend/tests/test_a.py").write_text(
+            "def test_resta():\n    assert True\n", encoding="utf-8")
+        (repo_di_prova.radice / "backend/tests/test_b.py").write_text(test_b, encoding="utf-8")
+
+    def test_un_test_spostato_nellalbero_non_chiede_un_rosso(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        self._sposta_test_x(repo_di_prova, "def test_x():\n    assert True\n")
+
+        assert runner.test_nuovi_dellalbero() == []
+
+    def test_un_test_nuovo_nellalbero_chiede_un_rosso(self, repo_di_prova):
+        self._base_con_due_test(repo_di_prova)
+        self._sposta_test_x(repo_di_prova, ("def test_x():\n    assert True\n\n\n"
+                                            "def test_nuovo():\n    assert False\n"))
+
+        assert [(t.file, t.nome) for t in runner.test_nuovi_dellalbero()] == [
+            ("backend/tests/test_b.py", "test_nuovo")]
+
+
+class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
+    """PBI-396, decisione 5, criteri 8 e 10: `apri_la_fase()` calcola la
+    collezione della base e la scrive in una cartella della `LOG_DIR` del giro;
+    le collezioni dei commit del ramo si tengono lì, una per sha.
+    `chiudi_la_fase()` le toglie con la fase.
+
+    Si contano i worktree usa e getta estratti per sha: la collezione di un
+    commit si legge lì dentro, e un albero non estratto è un pytest non lanciato.
+    """
+
+    def test_due_chiamate_del_lucchetto_non_raccolgono_la_base(self, repo_di_prova,
+                                                               monkeypatch):
+        base = repo_di_prova.commit("test: due casi", {
+            "backend/tests/test_a.py": "def test_x():\n    assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        testa = repo_di_prova.commit("test: un caso del ramo (RED)", {
+            "backend/tests/test_c.py": "def test_c():\n    assert False\n"})
+        runner.apri_la_fase(base)
+        (repo_di_prova.radice / "backend/tests/test_b.py").write_text(
+            "def test_nuovo():\n    assert False\n", encoding="utf-8")
+        estratti: list[str] = []
+        vero = runner.worktree_usa_e_getta
+
+        def conta(sha: str):
+            estratti.append(sha)
+            return vero(sha)
+
+        monkeypatch.setattr(runner, "worktree_usa_e_getta", conta)
+
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == ["test_nuovo"]
+        assert [t.nome for t in runner.test_nuovi_dellalbero()] == ["test_nuovo"]
+
+        assert estratti.count(base) == 0, "la base la raccoglie apri_la_fase(), una volta"
+        assert estratti.count(testa) == 1, "la collezione di un commit non si ricalcola"
+        cartella = next(runner.LOG_DIR.glob(f"**/{base}.json")).parent
+        assert sorted(p.name for p in cartella.iterdir()) == sorted(
+            [f"{base}.json", f"{testa}.json"])
+
+        runner.chiudi_la_fase()
+
+        assert not cartella.exists()
+
+    def test_le_collezioni_stanno_nella_log_dir_del_giro_e_non_nel_git_dir(
+            self, repo_di_prova):
+        """Decisione 5, criterio 10: al giro 1 le collezioni stavano accanto alla
+        fase, in `.git/worktrees/<nome>/`, e ne sono rimaste dieci accanto alla
+        fase di `ada-run`. Ora stanno in una cartella sua della `LOG_DIR` del
+        giro, e `chiudi_la_fase()` la toglie."""
+        base = repo_di_prova.commit("test: un caso", {
+            "backend/tests/test_a.py": "def test_x():\n    assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        git_dir = Path(repo_di_prova._git("rev-parse", "--absolute-git-dir"))
+
+        runner.apri_la_fase(base)
+
+        assert list(git_dir.glob("**/*.json")) == []
+        [collezione] = runner.LOG_DIR.glob(f"**/{base}.json")
+        cartella = collezione.parent
+        assert cartella != runner.LOG_DIR, "una cartella sua, dentro la LOG_DIR"
+
+        runner.chiudi_la_fase()
+
+        assert not cartella.exists()
+
+    @pytest.mark.parametrize("guasto", [
+        RuntimeError("git worktree add: fallito"),
+        subprocess.TimeoutExpired(["pytest", "--collect-only"], 1800),
+        KeyError("nodi"),
+    ], ids=["worktree-che-non-si-crea", "raccolta-oltre-il-tetto", "json-senza-nodi"])
+    def test_una_collezione_della_base_che_non_si_legge_non_ferma_lapertura(
+            self, repo_di_prova, monkeypatch, guasto):
+        """Rilievo 1 del Critic, giro 3: `apri_la_fase()` sta fuori dal `try` del
+        giro, e un'eccezione della collezione della base lascerebbe la fase
+        aperta senza `chiudi()`. Non tutte sono un `GuastoDelGate`: il worktree
+        che non si crea alza `RuntimeError`, la raccolta oltre il tetto
+        `TimeoutExpired`, un JSON senza `nodi` `KeyError`."""
+        base = repo_di_prova._git("rev-parse", "HEAD")
+
+        def alza(*_a, **_k):
+            raise guasto
+
+        monkeypatch.setattr(runner, "collezione_al_commit", alza)
+
+        runner.apri_la_fase(base)
+
+        assert runner.fase_corrente(repo_di_prova.radice) == runner.FASE_TEST_ONLY
+        runner.chiudi_la_fase()
+
+    def test_su_tre_commit_il_gate_raccoglie_ogni_albero_una_volta_sola(
+            self, repo_di_prova, monkeypatch):
+        """Decisione 9, criterio 11: una collezione per commit, non tre. Al giro 1
+        ogni commit raccoglieva sé, il genitore e la base, e la suite di
+        `tools/tests` è passata da circa 70 s a circa 200 s. Il genitore di un
+        commit è il commit prima, o la base: su tre commit gli alberi da
+        raccogliere sono quattro, base compresa, per ogni gate di pytest."""
+        raccolte: list[str] = []
+        vera = runner.raccolta_di_pytest
+
+        def conta(cartella, comando):
+            raccolte.append(Path(cartella).name)
+            return vera(cartella, comando)
+
+        monkeypatch.setattr(runner, "raccolta_di_pytest", conta)
+        for nome in ("a", "b", "c"):
+            repo_di_prova.commit(f"test: il caso {nome} (RED)", {
+                f"backend/tests/test_{nome}.py": f"def test_{nome}():\n    assert False\n"})
+
+        assert runner.gate_del_rosso() == []
+
+        assert raccolte.count("backend") == 4
+        assert all(raccolte.count(c) <= 4 for c in set(raccolte))
+
+    def test_fuori_da_un_giro_la_collezione_non_si_scrive(self, repo_di_prova):
+        """Decisione 5: fuori da un giro — `--gate-rosso` a mano — le collezioni si
+        calcolano e non si scrivono, né nella `LOG_DIR` né nel git dir."""
+        sha = repo_di_prova.commit("test: un caso (RED)", {
+            "backend/tests/test_c.py": "def test_c():\n    assert False\n"})
+        git_dir = Path(repo_di_prova._git("rev-parse", "--absolute-git-dir"))
+
+        assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_c"]
+        assert list(runner.LOG_DIR.glob("**/*.json")) == []
+        assert list(git_dir.glob("**/*.json")) == []
 
 
 class TestIlGateDelRossoCamminaICommit:
@@ -4007,12 +4306,13 @@ class TestIlGateDelRossoCamminaICommit:
         Chi copia dal `fermato` si prende un «not found» e conclude che il gate ha
         sbagliato: il difetto che `e64555f` chiude, lasciato aperto proprio lì.
 
-        L'AST si legge dal blob (`git show sha:percorso`): niente worktree, quindi
-        «ferma **senza** girare i test» resta intatto.
+        L'AST si legge dal blob (`git show sha:percorso`), e nessun test si esegue:
+        «ferma **senza** girare i test» resta intatto. Il commit si estrae solo per
+        leggerne la collezione, che dice quali test nascono (PBI-396, decisione 3).
         """
         monkeypatch.setattr(
-            runner, "worktree_usa_e_getta",
-            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+            runner, "esiti_del_comando",
+            lambda c: pytest.fail("il diff bastava: nessun test va eseguito"),
         )
         repo_di_prova.commit("feat: la somma, con il suo test", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
@@ -4086,10 +4386,11 @@ class TestIlGateDelRossoCamminaICommit:
         self, repo_di_prova, monkeypatch
     ):
         """Un test generato, o dentro un `if`: il gate non indovina, e non scrive un
-        `::` che promette a chi legge un comando che non esiste."""
+        `::` che promette a chi legge un comando che non esiste. Il commit si
+        estrae per leggerne la collezione (PBI-396), e nessun test si esegue."""
         monkeypatch.setattr(
-            runner, "worktree_usa_e_getta",
-            lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
+            runner, "esiti_del_comando",
+            lambda c: pytest.fail("il diff bastava: nessun test va eseguito"),
         )
         repo_di_prova.commit("feat: la somma, con i suoi test generati", {
             "backend/app/somma.py": "def somma(a, b):\n    return a + b\n",
@@ -5578,12 +5879,13 @@ class TestUnNomeDiTestAmbiguoNonSiIndovina:
     un `if`, e questo è lo stesso dubbio.
     """
 
-    # `def ` sta fuori dalla stringa apposta: `nomi_dei_test` legge i nomi dal
-    # **testo del diff**, quindi un `def test_…` dentro un letterale conterebbe
-    # come test nato in questo commit. Il gate del rosso di questa stessa PR ci è
+    # `def ` sta fuori dalla stringa apposta: `nomi_dei_test` leggeva i nomi dal
+    # **testo del diff**, quindi un `def test_…` dentro un letterale contava come
+    # test nato in questo commit. Il gate del rosso di questa stessa PR ci è
     # cascato: ha eseguito un omonimo vero, l'ha trovato verde, e ha fermato il
-    # branch per un test che qui non esiste. Il difetto è suo e resta scritto in
-    # PBI-104; questa riga evita di darglielo in pasto.
+    # branch per un test che qui non esiste. Il difetto resta scritto in PBI-104;
+    # da PBI-396 la nascita di un test Python si legge dalla collezione di
+    # pytest, dove un letterale non è un test.
     DEF = "def "
     SORGENTE = f"""
 class TestVecchia:
@@ -6679,23 +6981,34 @@ class TestIlMorsoSiGiudicaAncheAllaPunta:
         assert riga.startswith(f"→ nato verde, non morde al suo commit, morde alla punta "
                                f"`{punta[:7]}`: backend/app/m.py:2")
 
-    def test_la_punta_si_estrae_una_volta_sola_per_tutte_le_guardie(self, repo_di_prova):
+    def test_la_punta_si_estrae_una_volta_sola_per_tutte_le_guardie(
+            self, repo_di_prova, monkeypatch):
         """Decisione 1: il worktree della punta si crea alla prima guardia che ne ha
-        bisogno e vale per tutte. Due guardie, due commit estratti, una punta."""
+        bisogno e vale per tutte. Due guardie, una punta. Si contano i worktree
+        della punta e non tutti: anche la collezione di pytest si legge in un
+        worktree usa e getta (PBI-396, decisione 3)."""
         self._base_e_doppio(repo_di_prova)
         repo_di_prova.commit("test: fissa il prompt", {"backend/tests/test_prompt.py": self.GOLDEN})
         repo_di_prova.commit("test: fissa il prompt, di nuovo", {
             "backend/tests/test_prompt_bis.py":
                 self.GOLDEN.replace("test_il_prompt_resta_quello", "test_il_prompt_bis"),
         })
-        repo_di_prova.commit("refactor: il prompt da carica()", {"backend/app/m.py": self.DOPO})
-        prima = runner.USA_E_GETTA["montati"]
+        punta = repo_di_prova.commit("refactor: il prompt da carica()",
+                                     {"backend/app/m.py": self.DOPO})
+        estratti: list[str] = []
+        vero = runner.worktree_usa_e_getta
+
+        def conta(sha: str):
+            estratti.append(sha)
+            return vero(sha)
+
+        monkeypatch.setattr(runner, "worktree_usa_e_getta", conta)
         morsi: list[dict] = []
 
         assert runner.gate_del_rosso(morsi=morsi) == []
 
         assert [m["dove"] for m in morsi] == ["punta", "punta"]
-        assert runner.USA_E_GETTA["montati"] - prima == 3
+        assert estratti.count(punta) == 1
 
     def test_su_un_tag_annotato_la_punta_e_lo_sha_del_commit(self, repo_di_prova):
         """Decisione 1: la punta è il ref chiesto con `--gate-rosso`, e i rami

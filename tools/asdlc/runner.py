@@ -1197,7 +1197,6 @@ def gira_gate(attivi: set[str], base: str | None = None) -> list[tuple[str, str]
 # contarla come produzione fermerebbe ogni commit di soli test con la sua spec.
 ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh"}
 
-RE_TEST_PY = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
 # `it('…')`, `test("…")`, e le loro varianti `.each` / `.skip`: il nome è ciò che
 # vitest filtra con `-t`. Un apice **scappato** non chiude la stringa —
 # `(?:\\.|[^\\])+?` mangia il `\'` invece di fermarcisi — o di `it('l\'officina…')`
@@ -1241,7 +1240,7 @@ class TestNuovo:
     """Un test che **nasce** in un commit: dove sta, come si chiama, chi lo esegue."""
 
     file: str       # dalla radice del repository
-    nome: str       # la funzione (python) o il titolo (vitest)
+    nome: str       # `Classe::funzione` dalla collezione (python), o il titolo (vitest)
     linguaggio: str  # python | vitest
 
 
@@ -1306,6 +1305,13 @@ FILE_DELLA_FASE = "asdlc-fase"
 # Accanto alla fase, e per la stessa strada, lo sha di base del giro: è da lì che
 # `--chiedi-impl` conta i commit del ramo (PBI-380, decisione 3).
 FILE_DELLA_BASE = "asdlc-base"
+# E nello stesso posto il percorso della cartella delle collezioni di pytest del
+# giro, un JSON per sha. La cartella sta nella `LOG_DIR`, non qui: al giro 1 di
+# PBI-396 ne sono rimaste dieci in `.git/worktrees/ada-run/`, accanto a una fase
+# che il runner installato non conosceva. Quella della base la scrive
+# `apri_la_fase()`, quelle dei commit del ramo chi le legge per primo (PBI-396,
+# decisione 5).
+CARTELLA_DELLE_COLLEZIONI = "asdlc-collezioni"
 FASE_TEST_ONLY = "TEST_ONLY"
 FASE_IMPL = "IMPL"
 
@@ -1313,7 +1319,8 @@ FASE_IMPL = "IMPL"
 def percorso_della_fase(cartella: Path, nome: str = FILE_DELLA_FASE) -> Path | None:
     """Dove sta la fase per l'albero che contiene `cartella`, o `None` se non c'è
     un repository sotto — e allora non si scrive da nessuna parte. Con `nome`
-    un altro file dello stesso posto: la base del giro."""
+    un altro file dello stesso posto: la base del giro, o dove stanno le sue
+    collezioni."""
     try:
         detto = git("-C", str(cartella), "rev-parse", "--git-path", nome)
     except RuntimeError:
@@ -1454,6 +1461,10 @@ def lati_del_diff(voce: VoceDiCommit) -> list[str]:
     Una funzione sola per il commit e per l'albero di lavoro, come
     `voci_del_name_status`: due copie di questa regola divergerebbero alla prima
     correzione, e il lucchetto fermerebbe ciò che il gate lascia passare.
+
+    Da PBI-396 serve alla sola lettura di vitest. Per Python la nascita si legge
+    dalla collezione di pytest: i test di un `note.txt` diventato file di test
+    nascono perché il genitore non li ha, senza guardare il diff.
     """
     if (voce.vecchio and e_file_di_test(voce.vecchio)
             and linguaggio_del_test(voce.vecchio) is not None):
@@ -1461,19 +1472,18 @@ def lati_del_diff(voce: VoceDiCommit) -> list[str]:
     return [voce.percorso]
 
 
-def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
-    """I nomi di test aggiunti e quelli cancellati, dalle righe del diff."""
-    regola = RE_TEST_PY if linguaggio == "python" else RE_TEST_JS
+def nomi_dei_test(diff: str) -> tuple[list[str], set[str]]:
+    """I titoli dei test vitest aggiunti e quelli cancellati, dalle righe del
+    diff. Per Python la nascita si legge dalla collezione (PBI-396)."""
     aggiunti: list[str] = []
     tolti: set[str] = set()
     for riga in diff.splitlines():
         if riga.startswith(("+++", "---")) or riga[:1] not in ("+", "-"):
             continue
-        trovato = regola.match(riga[1:])
+        trovato = RE_TEST_JS.match(riga[1:])
         if trovato is None:
             continue
-        nome = (trovato.group(1) if linguaggio == "python"
-                else decodifica_escape(trovato.group(2)))
+        nome = decodifica_escape(trovato.group(2))
         if riga[0] == "+":
             aggiunti.append(nome)
         else:
@@ -1481,30 +1491,255 @@ def nomi_dei_test(diff: str, linguaggio: str) -> tuple[list[str], set[str]]:
     return aggiunti, tolti
 
 
-def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None) -> list[TestNuovo]:
-    """I test che **nascono** in questo commit.
+# --- La collezione di pytest: quali test esistono in un albero (PBI-396) --------
 
-    Uno stesso nome cancellato e riaggiunto è un trasloco, non una nascita: è il
-    caso del file di test riscritto per intero, e senza questa sottrazione il gate
-    farebbe girare tutta la suite di quel commit per poi fermarla come nata verde.
 
-    Il diff di un rename si chiede nominando **tutti e due** i lati. Con il solo
-    nome nuovo git non applica il rename detection — per riconoscere una copia
-    deve vedere da dove arriva — e il file risulta interamente aggiunto: da lì il
-    gate leggeva una nascita per ogni test dentro un file semplicemente spostato.
+class Raccolta(NamedTuple):
+    """Ciò che il plugin `asdlc_collezione` ha scritto: i nodeid raccolti e i
+    file che non si raccolgono, relativi al `--rootdir` del comando."""
+
+    nodi: list[str]
+    non_raccolti: list[str]
+
+
+@contextmanager
+def plugin_della_collezione():
+    """Il `PYTHONPATH` da cui pytest importa il plugin `asdlc_collezione`.
+
+    I gate girano col venv del progetto, dove il pacchetto del runner non è
+    installato. Si mette sul percorso una cartella con dentro il solo modulo del
+    plugin, con un link, e non la cartella che lo contiene: nel venv del runner
+    quella è `site-packages`, e porterebbe nei test del progetto ogni altra
+    libreria del runner. Il plugin sta accanto al pacchetto `asdlc`, nel
+    sorgente come installato (`py-modules`), e non dentro: il pacchetto del
+    runner sul percorso metterebbe in ombra l'`asdlc` dell'albero esaminato
+    (PBI-396, decisione 3; difetto 84 di PBI-102).
     """
+    plugin = Path(__file__).resolve().parent.parent / "asdlc_collezione.py"
+    with tempfile.TemporaryDirectory(prefix="asdlc-plugin-") as cartella:
+        (Path(cartella) / plugin.name).symlink_to(plugin)
+        yield os.pathsep.join(filter(None, [cartella, os.environ.get("PYTHONPATH")]))
+
+
+def raccolta_di_pytest(cartella: Path, comando: list[str]) -> Raccolta:
+    """La collezione del `comando` di pytest lanciato da `cartella`, con
+    `--collect-only` e il plugin (PBI-396, decisione 3). Il `--rootdir` è la
+    cartella di lancio, come per i test che il gate esegue (PBI-391)."""
+    with tempfile.TemporaryDirectory(prefix="asdlc-collezione-") as tmp, \
+            plugin_della_collezione() as percorso:
+        dato = Path(tmp) / "collezione.json"
+        argv = [*comando, "--collect-only", "-p", "asdlc_collezione",
+                f"--asdlc-collezione={dato}", f"--rootdir={Path(cartella).resolve()}"]
+        codice, uscita = esegui(argv, cartella, timeout=TETTO_DEI_TEST,
+                                ambiente={"PYTHONPATH": percorso})
+        try:
+            letto = json.loads(dato.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise GuastoDelGate(f"`{' '.join(argv)}` in {cartella} → uscita {codice}, "
+                                f"collezione non scritta in {dato}\n"
+                                f"{uscita.strip()[-1000:]}") from exc
+    return Raccolta(list(letto["nodi"]), list(letto["non_raccolti"]))
+
+
+def nome_del_nodo(nodo: str) -> tuple[str, str]:
+    """`(file, nome)` di un nodeid di pytest (PBI-396, decisione 2): il file
+    relativo al `--rootdir`, e il resto senza il suffisso `[…]` della
+    parametrizzazione, che può contenere a sua volta un `::` — `Classe::funzione`,
+    `Esterna::Interna::funzione`, o `funzione` fuori da una classe."""
+    percorso, _, resto = nodo.partition("::")
+    return percorso, resto.partition("[")[0]
+
+
+def nomi_dallast(sorgente: str) -> list[str]:
+    """I nomi dei test di un file che pytest non raccoglie, letti col parser
+    (PBI-396, decisione 4): le funzioni `test*` a livello di modulo e quelle
+    dentro le classi `Test*`, annidate comprese, nella forma di `nome_del_nodo`.
+
+    Valgono i predefiniti di pytest: `python_functions`, `python_classes` e
+    `python_files` di una configurazione non si leggono qui (PBI-396, §Fuori
+    scope). Un sorgente che non si analizza non ha nomi.
+    """
+    try:
+        modulo = ast.parse(sorgente)
+    except (SyntaxError, ValueError):
+        return []
+
+    def dentro(corpo: list[ast.stmt], classi: list[str]) -> list[str]:
+        nomi: list[str] = []
+        for nodo in corpo:
+            if (isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and nodo.name.startswith("test")):
+                nomi.append("::".join([*classi, nodo.name]))
+            elif isinstance(nodo, ast.ClassDef) and nodo.name.startswith("Test"):
+                nomi += dentro(nodo.body, [*classi, nodo.name])
+        return nomi
+
+    return dentro(modulo.body, [])
+
+
+def collezione_dellalbero(albero: Path) -> dict[str, str]:
+    """I test Python che esistono in `albero`, per nome, ognuno col suo file
+    dalla radice del repository: la collezione dei gate di pytest di
+    `asdlc.toml`, ognuno lanciato dal suo `cwd` (PBI-396, decisione 3). I casi
+    di un test parametrizzato fanno un nome solo. I file che pytest non
+    raccoglie hanno i nomi letti dall'AST, in quell'albero (decisione 4)."""
+    nomi: dict[str, str] = {}
+    for g in GATE:
+        if "pytest" not in g.comando:
+            continue
+        raccolta = raccolta_di_pytest(albero / g.cwd, list(g.comando))
+        for nodo in raccolta.nodi:
+            percorso, nome = nome_del_nodo(nodo)
+            nomi.setdefault(nome, (Path(g.cwd) / percorso).as_posix())
+        for percorso in raccolta.non_raccolti:
+            sorgente = leggi_sorgente(albero / g.cwd / percorso)
+            for nome in nomi_dallast(sorgente or ""):
+                nomi.setdefault(nome, (Path(g.cwd) / percorso).as_posix())
+    return nomi
+
+
+def cartella_delle_collezioni() -> Path | None:
+    """La cartella della `LOG_DIR` in cui il giro tiene le sue collezioni, letta
+    dal file che `apri_la_fase()` lascia accanto alla fase. `None` fuori da un
+    giro (PBI-396, decisione 5)."""
+    file = percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI)
+    if file is None or not file.is_file():
+        return None
+    detto = file.read_text(encoding="utf-8").strip()
+    return Path(detto) if detto else None
+
+
+def collezione_al_commit(sha: str,
+                         memoria: dict[str, dict[str, str]] | None = None) -> dict[str, str]:
+    """La collezione del commit `sha`, nel suo albero usa e getta.
+
+    Dentro un giro si tiene nella cartella di `cartella_delle_collezioni()`, e
+    non si ricalcola: la base vale per tutto il giro, e un commit non cambia
+    (PBI-396, decisione 5). Fuori da un giro si calcola e non si scrive: non
+    c'è un `chiudi_la_fase()` che la tolga.
+
+    In `memoria`, se c'è, la collezione resta per sha anche fuori da un giro:
+    il gate del rosso ne passa una per tutta la sua passata, e il genitore di
+    un commit è il commit prima, o la base. Così ogni albero si raccoglie una
+    volta sola, e non tre per commit (PBI-396, decisione 9).
+    """
+    if memoria is not None and sha in memoria:
+        return memoria[sha]
+    cartella = cartella_delle_collezioni()
+    file = cartella / f"{sha}.json" if cartella is not None else None
+    if file is not None and file.is_file():
+        collezione = json.loads(file.read_text(encoding="utf-8"))
+    else:
+        with worktree_usa_e_getta(sha) as albero:
+            collezione = collezione_dellalbero(albero)
+        if file is not None:
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(json.dumps(collezione), encoding="utf-8")
+    if memoria is not None:
+        memoria[sha] = collezione
+    return collezione
+
+
+def nascite_python(collezione: dict[str, str], genitore: dict[str, str],
+                   base: dict[str, str]) -> list[TestNuovo]:
+    """La regola della nascita di un test Python, una per il gate e per il
+    lucchetto (PBI-396, decisione 1): nasce ciò che c'è nella `collezione` e non
+    in quella del `genitore` né in quella della `base`. Un test tolto da un file
+    e scritto in un altro ha lo stesso nome dall'una e dall'altra parte, e non
+    nasce; un nome che c'è alla base non nasce mai nel ramo, anche se un commit
+    del ramo lo aveva tolto."""
+    return [TestNuovo(file, nome, "python") for nome, file in collezione.items()
+            if nome not in genitore and nome not in base]
+
+
+def spostamenti_python(collezione: dict[str, str], genitore: dict[str, str],
+                       base: dict[str, str]) -> list[str]:
+    """I test che non nascono e cambiano file: c'erano nel `genitore`, o alla
+    `base`, in un file diverso da quello dove stanno nella `collezione`. È ciò che
+    `nascite_python` lascia fuori, contato perché il gate lo scriva (PBI-396,
+    decisione 7)."""
+    return [nome for nome, file in collezione.items()
+            if genitore.get(nome, base.get(nome, file)) != file]
+
+
+def tocca_un_test_python(voce: VoceDiCommit) -> bool:
+    """Se la voce tocca un file di test Python, su uno dei suoi due lati: solo un
+    commit così chiede la collezione (PBI-396, decisione 6)."""
+    return any(p is not None and e_file_di_test(p) and linguaggio_del_test(p) == "python"
+               for p in (voce.percorso, voce.vecchio))
+
+
+def genitore_del_commit(sha: str) -> str | None:
+    """Il primo genitore di `sha`, o `None` per il primo commit della storia."""
+    try:
+        return git("rev-parse", "--verify", "--quiet", f"{sha}^") or None
+    except RuntimeError:
+        return None
+
+
+def base_del_commit(base: str, sha: str) -> str | None:
+    """Il commit da cui il ramo di `sha` si è staccato da `base`: la base contro
+    cui si decide una nascita. `None` se le due storie non si incontrano."""
+    try:
+        return git("merge-base", base, sha) or None
+    except RuntimeError:
+        return None
+
+
+def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
+                          base: str | None = None,
+                          spostati: list[str] | None = None,
+                          collezioni: dict[str, dict[str, str]] | None = None
+                          ) -> list[TestNuovo]:
+    """I test che **nascono** in questo commit del ramo che parte da `base`, il
+    ramo di `asdlc.toml` se non è detto. In `spostati`, se c'è, si aggiungono i
+    test Python che il commit ha spostato di file (`spostamenti_python`). In
+    `collezioni`, se c'è, si tengono le collezioni già lette, per sha, da una
+    chiamata all'altra (`collezione_al_commit`, PBI-396, decisione 9).
+
+    Per i test Python la nascita si legge dalla collezione di pytest
+    (`nascite_python`, PBI-396): un nome che c'era nel genitore o alla base non
+    nasce, in qualunque file finisca. Il diff, file per file, non vedeva un test tolto da
+    un file e scritto in un altro senza `git mv` (difetto 81 di PBI-102).
+
+    Per vitest la nascita si legge ancora dal diff. Uno stesso nome cancellato e
+    riaggiunto è un trasloco, non una nascita: è il caso del file di test
+    riscritto per intero, e senza questa sottrazione il gate farebbe girare tutta
+    la suite di quel commit per poi fermarla come nata verde. Il diff di un rename
+    si chiede nominando **tutti e due** i lati. Con il solo nome nuovo git non
+    applica il rename detection — per riconoscere una copia deve vedere da dove
+    arriva — e il file risulta interamente aggiunto: da lì il gate leggeva una
+    nascita per ogni test dentro un file semplicemente spostato.
+    """
+    voci = file if file is not None else file_del_commit(sha)
     nuovi: list[TestNuovo] = []
-    for voce in (file if file is not None else file_del_commit(sha)):
+    for voce in voci:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio is None:
+        if linguaggio != "vitest":
             continue
         aggiunti, tolti = nomi_dei_test(
-            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)),
-            linguaggio,
-        )
+            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    if any(tocca_un_test_python(v) for v in voci):
+        genitore = genitore_del_commit(sha)
+        alla_base = base_del_commit(base if base is not None else BASE, sha)
+        tre = (collezione_al_commit(sha, collezioni),
+               collezione_al_commit(genitore, collezioni) if genitore else {},
+               collezione_al_commit(alla_base, collezioni) if alla_base else {})
+        nuovi += nascite_python(*tre)
+        if spostati is not None:
+            spostati += spostamenti_python(*tre)
     return nuovi
+
+
+def base_del_lucchetto() -> str:
+    """La base da cui il lucchetto conta: lo sha che `apri_la_fase()` lascia
+    accanto alla fase, e fuori da un giro il ramo di `asdlc.toml` (PBI-380,
+    decisione 3)."""
+    file = percorso_della_fase(REPO, FILE_DELLA_BASE)
+    return (file.read_text(encoding="utf-8").strip()
+            if file is not None and file.is_file() else "") or BASE
 
 
 def test_nuovi_dellalbero() -> list[TestNuovo]:
@@ -1513,6 +1748,10 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     Il gate del rosso legge un commit; il lucchetto deve leggere ciò che non è
     ancora committato, perché il permesso di implementare si chiede **prima** del
     commit — è tutto il punto della differenza fra impedire e accertare.
+
+    Per Python la regola è quella del gate, `nascite_python` (PBI-396, decisione
+    1): il commit è l'albero di lavoro, il genitore è `HEAD`, e la base è quella
+    del giro. Per vitest si legge il diff.
 
     I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
     appena creato, e il primo test di un modulo nuovo è il caso più comune di
@@ -1529,15 +1768,20 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     for voce in tracciati + non_tracciati:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio is None:
+        if linguaggio != "vitest":
             continue
         if voce in non_tracciati:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
             diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
-        aggiunti, tolti = nomi_dei_test(diff, linguaggio)
+        aggiunti, tolti = nomi_dei_test(diff)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
+    if any(tocca_un_test_python(v) for v in tracciati + non_tracciati):
+        testa = git("rev-parse", "HEAD")
+        alla_base = base_del_commit(base_del_lucchetto(), testa)
+        nuovi += nascite_python(collezione_dellalbero(REPO), collezione_al_commit(testa),
+                                collezione_al_commit(alla_base) if alla_base else {})
     return nuovi
 
 
@@ -1602,7 +1846,11 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
 
     Prende la sorgente e non un percorso, perché il file a quel commit si legge in
     due modi: dal worktree quando c'è, e da `git show sha:percorso` quando il gate
-    ferma dal solo diff e non deve estrarre niente.
+    ferma dal solo diff e non esegue niente.
+
+    Il `nome` di un test Python nato viene dalla collezione e porta già le sue
+    classi, `Classe::funzione` (PBI-396, decisione 2): si cerca quel cammino. Un
+    nome senza `::` si cerca a livello di modulo e dentro le classi.
 
     E non `-k`, che seleziona per sottostringa: `test_somma` prenderebbe anche
     `test_somma_negativa`, e il rosso di un test vicino coprirebbe quello nato
@@ -1614,6 +1862,18 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
     except (SyntaxError, ValueError):
         return None
     definizioni = (ast.FunctionDef, ast.AsyncFunctionDef)
+    if "::" in nome:
+        # Il nome della collezione porta già le sue classi (PBI-396, decisione 2):
+        # si segue quel cammino, e non si cerca altrove.
+        *classi, funzione = nome.split("::")
+        corpo = modulo.body
+        for classe in classi:
+            dentro = [n for n in corpo if isinstance(n, ast.ClassDef) and n.name == classe]
+            if len(dentro) != 1:
+                return None
+            corpo = dentro[0].body
+        uniche = [n for n in corpo if isinstance(n, definizioni) and n.name == funzione]
+        return f"{relativo}::{nome}" if len(uniche) == 1 else None
     trovati: list[str] = []
     for nodo in modulo.body:
         if isinstance(nodo, definizioni) and nodo.name == nome:
@@ -1622,8 +1882,8 @@ def id_pytest(sorgente: str, nome: str, relativo: str) -> str | None:
             for figlio in nodo.body:
                 if isinstance(figlio, definizioni) and figlio.name == nome:
                     trovati.append(f"{relativo}::{nodo.name}::{nome}")
-    # Due classi che definiscono un test omonimo sono normali, e il diff dice solo
-    # che *un* `def` con quel nome è nato: quale delle due, non lo dice. Prendere il
+    # Due classi che definiscono un test omonimo sono normali, e un nome senza le
+    # classi dice solo che *un* `def` con quel nome è nato: quale, non lo dice. Prendere il
     # primo è la scelta che sembra innocua e non lo è — il gate esegue il test
     # vecchio, lo trova verde, e stampa «nato verde» su un test che era rosso.
     return trovati[0] if len(trovati) == 1 else None
@@ -2672,7 +2932,8 @@ def lettura_dei_due_alberi(prove: list[dict[str, str]], perimetro: list[str], pu
 
 def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
                    visti: set[str] | None = None,
-                   morsi: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+                   morsi: list[dict[str, str]] | None = None,
+                   spostati: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
     """I commit del branch in cui un test è nato senza essere mai stato rosso.
 
     `base` è il ramo di `asdlc.toml` se non è detto: un default scritto nella
@@ -2682,7 +2943,9 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     **riempito**: il gate sta dentro un ciclo che può ripetersi cinque volte, e
     rigirare ogni volta la storia intera moltiplicherebbe il tempo macchina per le
     revisioni. `morsi` si riempie allo stesso modo, con i test nati verdi che hanno
-    ucciso un mutante: passano, e il rapporto deve dire perché.
+    ucciso un mutante: passano, e il rapporto deve dire perché. E `spostati`, coi
+    commit che spostano test Python di file: non nascono, e chi legge deve vedere
+    che la regola ha agito (PBI-396, decisione 7).
 
     Non si ferma al primo mancato: chi legge deve avere l'elenco intero — commit,
     test, esito — perché la lettura la fa una persona, e una persona decide meglio
@@ -2691,12 +2954,20 @@ def gate_del_rosso(base: str | None = None, ref: str = "HEAD",
     base = base if base is not None else BASE
     visti = visti if visti is not None else set()
     mancati: list[dict[str, str]] = []
+    # Le collezioni di pytest lette in questa passata, per sha: il genitore di un
+    # commit è il commit prima, o la base, e si raccoglie una volta (PBI-396,
+    # decisione 9).
+    collezioni: dict[str, dict[str, str]] = {}
     with ExitStack() as pila:
         punta = Punta(ref, pila)
         for sha in commit_da_esaminare(base, ref, visti):
             visti.add(sha)
             file = file_del_commit(sha)
-            nuovi = test_nuovi_del_commit(sha, file)
+            suoi: list[str] = []
+            nuovi = test_nuovi_del_commit(sha, file, base, suoi, collezioni)
+            if suoi and spostati is not None:
+                spostati.append({"commit": sha[:7], "spostati": str(len(suoi)),
+                                 "titolo": git("show", "--no-patch", "--format=%s", sha)})
             if not nuovi:
                 continue  # un refactor non porta test nuovi, e la regola morde su quelli
             titolo = git("show", "--no-patch", "--format=%s", sha)
@@ -3948,9 +4219,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     nuovi = test_nuovi_dellalbero()
     if nuovi:
         return nuovi
-    file = percorso_della_fase(REPO, FILE_DELLA_BASE)
-    base = (file.read_text(encoding="utf-8").strip()
-            if file is not None and file.is_file() else "") or BASE
+    base = base_del_lucchetto()
     if git("rev-list", "--count", f"{base}..HEAD") == "0":
         # Il branch nasce dalla base, quindi al primo `--chiedi-impl` di ogni giro
         # HEAD **è** la base: se lì l'ultimo commit fosse di soli test, il
@@ -3959,7 +4228,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     file = file_del_commit("HEAD")
     if any(e_file_di_produzione(v.percorso) for v in file):
         return []  # un commit misto non è un RED: il rosso non può essere esistito lì dentro
-    return test_nuovi_del_commit("HEAD", file)
+    return test_nuovi_del_commit("HEAD", file, base)
 
 
 def chiedi_impl() -> int:
@@ -4109,7 +4378,16 @@ def installa_il_ritorno_in_test_only() -> bool:
 
 def apri_la_fase(base: str = "") -> None:
     """Accende il lucchetto per questo giro: i due hook di git, e `TEST_ONLY`.
-    Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`.
+    Accanto alla fase lascia lo sha di base del giro, per `--chiedi-impl`, e il
+    percorso della cartella della `LOG_DIR` dove sta la collezione di pytest
+    della base, che vale per tutto il giro (PBI-396, decisione 5). La cartella
+    porta l'ora dell'apertura, come i file del giro accanto.
+
+    Una collezione che non si legge non ferma l'apertura: il giro non è ancora
+    nel suo `try`, e un'eccezione qui lascerebbe la fase aperta. Non solo un
+    `GuastoDelGate`: un worktree che non si crea, una raccolta oltre il tetto,
+    un JSON senza `nodi` alzano altro. Chi ne ha bisogno la ricalcola, e il
+    guasto esce lì, dove il giro lo gestisce.
 
     L'hook di Claude Code non si installa qui: la guardia di fase del Builder la
     scrive `impostazioni_della_sessione()` a ogni sessione, e gli arriva con
@@ -4123,13 +4401,26 @@ def apri_la_fase(base: str = "") -> None:
     percorso_della_fase(REPO).write_text(f"{FASE_TEST_ONLY}\n", encoding="utf-8")
     if base:
         percorso_della_fase(REPO, FILE_DELLA_BASE).write_text(f"{base}\n", encoding="utf-8")
+        aperta = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        collezioni = (LOG_DIR / f"{aperta}_collezioni").resolve()
+        percorso_della_fase(REPO, CARTELLA_DELLE_COLLEZIONI).write_text(
+            f"{collezioni}\n", encoding="utf-8")
+        try:
+            collezione_al_commit(base)
+        except Exception as guasto:  # noqa: BLE001 — qualunque guasto, vedi sopra
+            print(f"    ⚠️  collezione della base non scritta: {str(guasto)[:300]}")
 
 
 def chiudi_la_fase() -> None:
     """Spegne il lucchetto. Un worktree lasciato in fase è un worktree in cui la
     sessione dopo non può scrivere, e la diagnosi costerebbe più del giro. Con
-    la fase se ne va la base del giro: fuori da un giro si conta da `BASE`."""
-    for nome in (FILE_DELLA_FASE, FILE_DELLA_BASE):
+    la fase se ne va la base del giro: fuori da un giro si conta da `BASE`. E se
+    ne va la cartella delle collezioni del giro, nella `LOG_DIR` (PBI-396,
+    decisione 5)."""
+    collezioni = cartella_delle_collezioni()
+    if collezioni is not None:
+        shutil.rmtree(collezioni, ignore_errors=True)
+    for nome in (FILE_DELLA_FASE, FILE_DELLA_BASE, CARTELLA_DELLE_COLLEZIONI):
         file = percorso_della_fase(REPO, nome)
         if file is not None:
             file.unlink(missing_ok=True)
@@ -4174,13 +4465,19 @@ def stampa_il_gate_del_rosso(ref: str) -> int:
     if not separatore:
         base, solo_ref = BASE, ref
     morsi: list[dict[str, str]] = []
+    spostati: list[dict[str, str]] = []
     try:
-        mancati = gate_del_rosso(base=base, ref=solo_ref, morsi=morsi)
+        mancati = gate_del_rosso(base=base, ref=solo_ref, morsi=morsi, spostati=spostati)
     except GuastoDelGate as guasto:
         # `2` e non `1`: chi lancia il gate a mano deve distinguere «il rosso non
         # c'è stato» da «il gate non ha potuto guardare».
         print(f"Il gate non ha potuto guardare {base}..{solo_ref}: {guasto}")
         return 2
+    if spostati:
+        print(f"{len(spostati)} commit che spostano test Python di file, in "
+              f"{base}..{solo_ref}: non nascono, e non chiedono un rosso.\n")
+        for s in spostati:
+            print(f"  {s['commit']}  {s['titolo']}\n    spostati: {s['spostati']}\n")
     if morsi:
         print(f"{len(morsi)} test nati verdi che mordono, in {base}..{solo_ref}:\n")
         for m in morsi:
