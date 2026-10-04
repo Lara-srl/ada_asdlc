@@ -4174,6 +4174,30 @@ class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
 
         assert not cartella.exists()
 
+    @pytest.mark.parametrize("guasto", [
+        RuntimeError("git worktree add: fallito"),
+        subprocess.TimeoutExpired(["pytest", "--collect-only"], 1800),
+        KeyError("nodi"),
+    ], ids=["worktree-che-non-si-crea", "raccolta-oltre-il-tetto", "json-senza-nodi"])
+    def test_una_collezione_della_base_che_non_si_legge_non_ferma_lapertura(
+            self, repo_di_prova, monkeypatch, guasto):
+        """Rilievo 1 del Critic, giro 3: `apri_la_fase()` sta fuori dal `try` del
+        giro, e un'eccezione della collezione della base lascerebbe la fase
+        aperta senza `chiudi()`. Non tutte sono un `GuastoDelGate`: il worktree
+        che non si crea alza `RuntimeError`, la raccolta oltre il tetto
+        `TimeoutExpired`, un JSON senza `nodi` `KeyError`."""
+        base = repo_di_prova._git("rev-parse", "HEAD")
+
+        def alza(*_a, **_k):
+            raise guasto
+
+        monkeypatch.setattr(runner, "collezione_al_commit", alza)
+
+        runner.apri_la_fase(base)
+
+        assert runner.fase_corrente(repo_di_prova.radice) == runner.FASE_TEST_ONLY
+        runner.chiudi_la_fase()
+
     def test_su_tre_commit_il_gate_raccoglie_ogni_albero_una_volta_sola(
             self, repo_di_prova, monkeypatch):
         """Decisione 9, criterio 11: una collezione per commit, non tre. Al giro 1
