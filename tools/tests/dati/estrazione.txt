@@ -11,6 +11,7 @@
 # da una cartella che prende.
 
 tools/asdlc/
+tools/asdlc_collezione.py
 tools/pyproject.toml
 tools/plancia/
 tools/tests/conftest.py
