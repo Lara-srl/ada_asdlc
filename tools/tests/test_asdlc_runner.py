@@ -3634,10 +3634,20 @@ class RepoDiProva:
 
 @pytest.fixture
 def repo_di_prova(tmp_path, monkeypatch):
+    """Un albero git in `tmp_path`, con i test in `backend/`, e il suo gate.
+
+    L'albero porta il gate pytest da `backend` che i suoi test chiedono, invece di
+    ereditare quello del progetto di prova (`tools/tests` da `.`, PBI-394): da
+    PBI-396 i test nuovi si leggono dai gate pytest di `GATE`, ognuno dal suo `cwd`,
+    e un gate che non vede `backend/tests/` non ne troverebbe nessuno.
+    """
     radice = tmp_path / "repo"
     radice.mkdir()
     repo = RepoDiProva(radice)
     monkeypatch.setattr(runner, "REPO", radice)
+    monkeypatch.setattr(runner, "GATE", [
+        runner.Gate("pytest", ("python3", "-m", "pytest", "-q"), "backend"),
+    ])
     return repo
 
 
