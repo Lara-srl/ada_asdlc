@@ -67,6 +67,8 @@ tempi = "ore.csv"
 [ambiente]
 venv = ".venv"
 prestiti = []
+# Il pacchetto lo dice il file locale; da dove si reinstalla, solo questo (PBI-395).
+installa = "./tools"
 
 [worktree]
 percorso = "../prova-run"

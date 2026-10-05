@@ -64,6 +64,7 @@ tempi = "ore.csv"
 venv = ".venv"
 prestiti = ["dati"]
 pacchetto = ".venv-asdlc"
+installa = "./tools"
 
 [worktree]
 percorso = "../prova-run"
@@ -382,12 +383,22 @@ def test_un_percorso_di_macchina_in_asdlc_toml_e_un_errore_che_nomina_la_chiave(
 def test_installa_si_legge_da_ambiente(tmp_path):
     """PBI-395, decisione 1: da dove il tick reinstalla il pacchetto è una chiave
     di `asdlc.toml`, `[ambiente].installa`, e in aDa vale `"./tools"`."""
-    testo = TOML_DI_PROVA.replace('pacchetto = ".venv-asdlc"\n',
-                                  'pacchetto = ".venv-asdlc"\ninstalla = "./tools"\n')
-
-    cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path))
 
     assert cfg.ambiente.installa == "./tools"
+
+
+def test_pacchetto_senza_installa_e_un_errore_che_nomina_la_chiave(tmp_path):
+    """PBI-395, decisione 2: un pacchetto senza sapere da dove reinstallarlo è un
+    errore di caricamento, non un `"./tools"` implicito (causa
+    `default-implicito`)."""
+    testo = TOML_DI_PROVA.replace('installa = "./tools"\n', "")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert "[ambiente].installa" in str(fermata.value)
+    assert "[ambiente].pacchetto" in str(fermata.value), "dice perché serve"
 
 
 def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
