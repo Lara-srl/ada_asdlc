@@ -1,0 +1,51 @@
+# Il progetto di prova dei test del runner (PBI-394, decisione 1).
+#
+# I test di `tools/tests/` leggono questo, e non l'`asdlc.toml` del progetto che li
+# ospita: traslocano nel repository `asdlc`, dove l'`asdlc.toml` di aDa non ci sarà,
+# e una suite che legge il progetto ospite diventerebbe rossa il giorno
+# dell'estrazione. Il minimo che `config.carica()` chiede, e nessun percorso di
+# macchina.
+
+[git]
+base = "origin/main"
+prefisso_ramo = "pbi/pbi-"
+
+[backlog]
+cartella = "backlog"
+coda = "backlog/CODA.md"
+id = "PBI-{n}"
+file = "PBI-{n}-{slug}.md"
+
+[registro]
+cartella = "runs"
+tempi = "tempi.csv"
+
+[ambiente]
+# Un venv che non c'è: `git` e `pytest` si cercano sul `PATH`, come nel repository
+# `asdlc`, che un venv suo non lo dichiara (decisione 6).
+venv = ".venv"
+pacchetto = ".venv-asdlc"
+eseguibili = ["git", "pytest"]
+prestiti = []
+
+[worktree]
+percorso = "../progetto-run"
+
+[soglie]
+tentativi = 3
+igiene = 3
+revisioni = 4
+minuti_builder = 90
+minuti_critic = 25
+
+[prompt]
+aggiunte = "asdlc-aggiunte"
+
+[gate_del_rosso]
+attivo = true
+
+# Un gate solo, la suite del runner: nessun gate di frontend.
+[[gate]]
+nome = "asdlc"
+comando = ["python3", "-m", "pytest", "-q", "tools/tests"]
+cwd = "."

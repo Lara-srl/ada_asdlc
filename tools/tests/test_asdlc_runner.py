@@ -39,15 +39,18 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
+# Il progetto di prova (PBI-394, decisione 1): la radice e la configurazione del
+# runner sotto test, al posto del progetto che ospita questi test.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 # `conftest.py` mette `tools/` sul `sys.path`: il runner è `asdlc.runner` (PBI-383).
 runner = importlib.import_module("asdlc.runner")
 # L'import non legge `asdlc.toml` (PBI-382): la radice e la configurazione le
-# prende `main()` dalla cwd. Qui il repository è quello di questo file, come per
-# trovare il codice, e i test chiamano `smista()`, cioè `main()` senza quel
-# passo: ricaricare la configurazione rimetterebbe i nomi che sostituiscono.
-runner.REPO = REPO
-runner.configura(runner.asdlc_config.carica(REPO))
+# prende `main()` dalla cwd. Qui sono quelle del progetto di prova, e i test
+# chiamano `smista()`, cioè `main()` senza quel passo: ricaricare la
+# configurazione rimetterebbe i nomi che sostituiscono.
+runner.REPO = PROGETTO
+runner.configura(runner.asdlc_config.carica(PROGETTO))
 
 
 # --- Niente infrastruttura sotto uno strumento da riga di comando ------------
@@ -91,7 +94,7 @@ def ambiente_vero(monkeypatch):
 def elenco_backlog() -> str:
     """Cosa risponde `git ls-tree origin/main backlog/`: il runner cerca lì il file
     del PBI (difetto 7), quindi ogni finto `git` deve saperlo dire."""
-    return "\n".join(f"backlog/{f.name}" for f in sorted((REPO / "backlog").glob("*.md")))
+    return "\n".join(f"backlog/{f.name}" for f in sorted((PROGETTO / "backlog").glob("*.md")))
 
 # Lo sha a cui il finto `git` risolve il ramo di base: il giro lo prende una volta
 # (PBI-374), e da lì in poi ogni lettura deve nominare questo e non `origin/main`.
@@ -1872,7 +1875,7 @@ class TestIlRunnerSiNominaDalPacchetto:
         `<pacchetto>/bin/asdlc-runner --chiedi-impl`, per percorso assoluto, e
         non al sorgente dell'albero che sta cambiando (`ADR-0026`, decisione 3)."""
         prompt = runner.PROMPT_BUILDER.format(pbi_path="backlog/PBI-333-il-foglio.md")
-        installato = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc" / "bin" / "asdlc-runner"
+        installato = runner.asdlc_config.radice_comune(PROGETTO) / ".venv-asdlc" / "bin" / "asdlc-runner"
         assert f"`{installato} --chiedi-impl`" in prompt
         assert "tools/asdlc/runner.py --chiedi-impl" not in prompt
 
@@ -1892,7 +1895,7 @@ class TestIlRunnerSiNominaDalPacchetto:
             return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
 
         monkeypatch.setattr(runner, "esegui", senza_pr_aperte(finto_esegui))
-        pbi_path = REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
+        pbi_path = PROGETTO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
         esito = runner.Esito("PBI-102", "fatto", critic_saltato=True)
 
         runner.apri_pr("PBI-102", pbi_path, "pbi/pbi-102", esito)
@@ -2010,7 +2013,7 @@ class TestSiPuoSaltareIlCritic:
             return 0, "https://github.com/Lara-srl/ada_controller/pull/1"
 
         monkeypatch.setattr(runner, "esegui", senza_pr_aperte(finto_esegui))
-        pbi_path = REPO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
+        pbi_path = PROGETTO / "backlog" / "PBI-102-soglia-di-revisione-del-runner.md"
         esito = runner.Esito("PBI-102", "fatto", critic_saltato=True)
 
         runner.apri_pr("PBI-102", pbi_path, "pbi/pbi-102", esito)
@@ -2459,7 +2462,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
                             comandi.append(cmd) or (0, "https://x/pull/237\n"))
         esito = runner.Esito("PBI-358", "fatto")
 
-        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+        pr = runner.apri_pr("PBI-358", PROGETTO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
 
         assert pr == ""
         assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
@@ -2485,7 +2488,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
                             comandi.append(cmd) or (0, "https://x/pull/237\n"))
         esito = runner.Esito("PBI-358", "fatto")
 
-        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+        pr = runner.apri_pr("PBI-358", PROGETTO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
 
         assert pr == ""
         assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
@@ -2514,7 +2517,7 @@ class TestSuOriginFinisceCioCheIGateHannoMisurato:
                             comandi.append(cmd) or (0, "https://x/pull/237\n"))
         esito = runner.Esito("PBI-358", "fatto")
 
-        pr = runner.apri_pr("PBI-358", REPO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
+        pr = runner.apri_pr("PBI-358", PROGETTO / "backlog" / "PBI-358-x.md", "pbi/pbi-358", esito)
 
         assert pr == ""
         assert not any(c[:3] == ["gh", "pr", "create"] for c in comandi)
@@ -2831,14 +2834,14 @@ class TestIlVenvSeLoTrovaDaSolo:
     """
 
     def test_il_venv_del_worktree_entra_nel_path(self, tmp_path, monkeypatch):
-        (tmp_path / "backend" / ".venv" / "bin").mkdir(parents=True)
+        (tmp_path / runner.VENV / "bin").mkdir(parents=True)
         monkeypatch.setattr(runner, "REPO", tmp_path)
         monkeypatch.setenv("PATH", "/usr/bin")
 
         aggiunto = runner.venv_sul_path()
 
         import os
-        assert aggiunto == str(tmp_path / "backend" / ".venv" / "bin")
+        assert aggiunto == str(tmp_path / runner.VENV / "bin")
         assert os.environ["PATH"].startswith(aggiunto), (
             "il venv del worktree deve venire prima del python di sistema"
         )
@@ -2853,7 +2856,7 @@ class TestIlVenvSeLoTrovaDaSolo:
         assert os.environ["PATH"] == "/usr/bin"
 
     def test_non_lo_aggiunge_due_volte(self, tmp_path, monkeypatch):
-        bin_venv = tmp_path / "backend" / ".venv" / "bin"
+        bin_venv = tmp_path / runner.VENV / "bin"
         bin_venv.mkdir(parents=True)
         monkeypatch.setattr(runner, "REPO", tmp_path)
         monkeypatch.setenv("PATH", f"{bin_venv}:/usr/bin")
@@ -2934,7 +2937,7 @@ class TestLaPrSiCercaPrimaDiCrearla:
 
         monkeypatch.setattr(runner, "esegui", _esegui)
         esito = runner.Esito("PBI-381", "fatto")
-        pr = runner.apri_pr("PBI-381", REPO / "backlog" / "PBI-381-x.md", "pbi/pbi-381", esito)
+        pr = runner.apri_pr("PBI-381", PROGETTO / "backlog" / "PBI-381-x.md", "pbi/pbi-381", esito)
         return pr, esito, comandi, commentate
 
     @staticmethod
@@ -3352,8 +3355,8 @@ class TestIGateSiDichiaranoPrimaDiPartire:
     """
 
     def test_dice_quali_comandi_mancano(self, monkeypatch):
-        monkeypatch.setattr(runner.shutil, "which", lambda c: None if c == "pytest" else "/usr/bin/npm")
-        assert runner.gate_mancanti(attivi=set()) == ["pytest"]
+        monkeypatch.setattr(runner.shutil, "which", lambda c: None if c == "python3" else "/usr/bin/npm")
+        assert runner.gate_mancanti(attivi=set()) == ["asdlc"]
 
     def test_con_tutto_a_posto_non_dice_niente(self, monkeypatch):
         monkeypatch.setattr(runner.shutil, "which", lambda c: f"/usr/bin/{c}")
@@ -3393,12 +3396,6 @@ class TestIGateSiDichiaranoPrimaDiPartire:
         )
 
         assert runner.smista() == 0
-
-    def test_le_dipendenze_di_test_sono_dichiarate(self):
-        """La conoscenza che stava nella testa di chi allestì il primo venv."""
-        dev = REPO / "backend" / "requirements-dev.txt"
-        assert dev.exists(), "un albero nuovo deve poter installare i gate leggendo un file"
-        assert "pytest" in dev.read_text()
 
 
 # --- Il gate del rosso (PBI-103) --------------------------------------------
@@ -3637,10 +3634,20 @@ class RepoDiProva:
 
 @pytest.fixture
 def repo_di_prova(tmp_path, monkeypatch):
+    """Un albero git in `tmp_path`, con i test in `backend/`, e il suo gate.
+
+    L'albero porta il gate pytest da `backend` che i suoi test chiedono, invece di
+    ereditare quello del progetto di prova (`tools/tests` da `.`, PBI-394): da
+    PBI-396 i test nuovi si leggono dai gate pytest di `GATE`, ognuno dal suo `cwd`,
+    e un gate che non vede `backend/tests/` non ne troverebbe nessuno.
+    """
     radice = tmp_path / "repo"
     radice.mkdir()
     repo = RepoDiProva(radice)
     monkeypatch.setattr(runner, "REPO", radice)
+    monkeypatch.setattr(runner, "GATE", [
+        runner.Gate("pytest", ("python3", "-m", "pytest", "-q"), "backend"),
+    ])
     return repo
 
 
@@ -3710,10 +3717,19 @@ class TestUnTestTraslocatoNonNasce:
 
         assert runner.test_nuovi_dellalbero() == []
 
-    def test_un_rename_con_modifiche_fa_nascere_i_soli_test_aggiunti(self, repo_di_prova):
+    def test_un_rename_con_modifiche_fa_nascere_i_soli_test_aggiunti(
+            self, repo_di_prova, monkeypatch):
         """Il file spostato **e** ritoccato non vuole un ramo suo: con tutti e due
         i lati nel comando il diff porta le sole righe cambiate, e nasce quello
-        che quelle righe introducono davvero — uno, non quattro."""
+        che quelle righe introducono davvero — uno, non quattro.
+
+        L'albero ha test in `backend/tests/` e in `tools/tests/`, e dichiara i due
+        gate che li vedono: quello della fixture da `backend` non raccoglie
+        `tools/tests/`."""
+        monkeypatch.setattr(runner, "GATE", [
+            runner.Gate("pytest", ("python3", "-m", "pytest", "-q"), "backend"),
+            runner.Gate("asdlc", ("python3", "-m", "pytest", "-q", "tools/tests"), "."),
+        ])
         repo_di_prova.commit("test: i tre casi (RED)",
                              {"backend/tests/test_tre.py": TRE_TEST})
         repo_di_prova.sposta("backend/tests/test_tre.py", "tools/tests/test_tre.py")
@@ -5505,6 +5521,7 @@ class TestLHookChiedeAlRunnerSeSiPuoScrivere:
         assert "guardia" in capsys.readouterr().err
 
 
+@pytest.mark.progetto_ospite
 class TestLHookERegistratoEFerma:
     """Lo script e la sua registrazione, provati sul file vero.
 
@@ -6114,7 +6131,7 @@ class TestIComandiPortanoIlServerDellEsito:
         cmd = next(c for c in agente.comandi if ruolo_ed_esito(c)[0] == "builder")
         config = json.loads(Path(self.valori(cmd, "--mcp-config")[0]).read_text(encoding="utf-8"))
         server = config["mcpServers"]["asdlc"]
-        pacchetto = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc"
+        pacchetto = runner.asdlc_config.radice_comune(PROGETTO) / ".venv-asdlc"
         assert server["command"] == str(pacchetto / "bin" / "asdlc-esito")
         assert server["args"] == []
 
@@ -6143,7 +6160,7 @@ class TestIComandiPortanoIlServerDellEsito:
         assert "--settings" in cmd
         impostazioni = json.loads(
             Path(cmd[cmd.index("--settings") + 1]).read_text(encoding="utf-8"))
-        pacchetto = runner.asdlc_config.radice_comune(REPO) / ".venv-asdlc"
+        pacchetto = runner.asdlc_config.radice_comune(PROGETTO) / ".venv-asdlc"
         assert impostazioni["hooks"]["PreToolUse"] == [{
             "matcher": "Edit|Write",
             "hooks": [{"type": "command",
@@ -7862,13 +7879,13 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
 
 
 def toml_versionato(config):
-    """Il solo `asdlc.toml` del repository, **senza** `asdlc.local.toml`.
+    """Il solo `asdlc.toml` del progetto di prova, **senza** `asdlc.local.toml`.
 
     Il caricamento in cima a questo file applica anche il file locale, che sulla macchina di chi
     lo scrive cambia `[ambiente]` e `[worktree]` di proposito: un test che
     guardasse lì il «valore di ieri» sarebbe rosso su codice giusto, e verde
     solo dove il file non c'è — in CI, e nel worktree del runner."""
-    return config.interpreta(config.leggi_toml(REPO / config.NOME_FILE), config.NOME_FILE)
+    return config.interpreta(config.leggi_toml(PROGETTO / config.NOME_FILE), config.NOME_FILE)
 
 
 @pytest.fixture
@@ -7890,14 +7907,11 @@ def configura(tmp_path):
 
 
 class TestIGateVengonoDaAsdlcToml:
-    def test_i_quattro_gate_di_oggi_nome_per_nome_e_cwd_per_cwd(self):
-        """Nessun numero cambia in questo giro (decisione 5): il TOML del
-        repository dichiara i gate di prima, alla lettera."""
+    def test_il_gate_del_progetto_di_prova_nome_comando_e_cwd(self):
+        """Il TOML del progetto di prova dichiara un gate solo, la suite del
+        runner (PBI-394, decisione 1): i gate del runner sono quelli, alla
+        lettera."""
         assert [(g.nome, list(g.comando), g.cwd) for g in runner.GATE] == [
-            ("pytest", ["pytest", "-q"], "backend"),
-            ("tsc", ["npm", "run", "build"], "frontend"),
-            ("eslint", ["npm", "run", "lint"], "frontend"),
-            ("vitest", ["npm", "test"], "frontend"),
             ("asdlc", ["python3", "-m", "pytest", "-q", "tools/tests"], "."),
         ]
         assert [g.nome for g in runner.GATE] == [g.nome for g in runner.CFG.gate], (
@@ -7935,7 +7949,7 @@ class TestLeSoglieEIPercorsiVengonoDaAsdlcToml:
     def test_i_prestiti_e_il_registro_seguono_il_toml(self, configura):
         """Il valore di ieri si legge dalla configurazione e non dal percorso:
         dentro un test `CSV_TEMPI` sta in una cartella temporanea (PBI-370)."""
-        assert runner.PRESTITI == ("data", "frontend/node_modules")
+        assert runner.PRESTITI == ()
         assert (runner.CFG.registro.cartella, runner.CFG.registro.tempi) == ("runs", "tempi.csv")
 
         configura(toml_di_prova(prestiti=("dati",), registro="giri", tempi="ore.csv"))
@@ -8181,7 +8195,7 @@ class TestUnGateConSoloSeToccaSiAccendeSeIlDiffToccaQueiPercorsi:
         )
 
     def test_i_gate_di_oggi_non_hanno_il_campo_e_sono_sempre_accesi(self):
-        assert [list(g.solo_se_tocca) for g in runner.GATE] == [[], [], [], [], []]
+        assert [list(g.solo_se_tocca) for g in runner.GATE] == [[]]
 
     def test_un_file_spostato_fuori_dal_percorso_accende_il_gate(self, repo_di_prova):
         """PBI-387, decisione 5: `--name-only` dà di un rename il solo percorso
@@ -8205,10 +8219,11 @@ class TestITestNonScrivonoNellaCartellaVeraDeiGiri:
     `esegui` sostituito scrivevano prompt, esiti e config MCP nella `runs/` del
     checkout — 124 file a ogni giro di `pytest tools/tests`, mescolati alle chiamate
     vere del runner. La fixture di `tools/tests/conftest.py` sposta l'intera
-    `LOG_DIR` in una cartella temporanea del test."""
+    `LOG_DIR` in una cartella temporanea del test. La `runs/` guardata è quella
+    del progetto di prova, su cui il runner dei test è configurato (PBI-394)."""
 
     def test_un_giro_di_una_classe_che_scrive_non_lascia_file_in_runs(self):
-        cartella = REPO / "runs"
+        cartella = PROGETTO / "runs"
         prima = set(os.listdir(cartella)) if cartella.exists() else set()
 
         fatto = subprocess.run(
@@ -8219,7 +8234,7 @@ class TestITestNonScrivonoNellaCartellaVeraDeiGiri:
         assert fatto.returncode == 0, (fatto.stdout + fatto.stderr)[-3000:]
 
         dopo = set(os.listdir(cartella)) if cartella.exists() else set()
-        assert sorted(dopo - prima) == [], "i test hanno scritto nella runs/ del repository"
+        assert sorted(dopo - prima) == [], "i test hanno scritto nella runs/ del progetto di prova"
 
 
 class TestDentroUnTestNessunPercorsoDelRunnerPuntaSottoRuns:
@@ -8231,7 +8246,7 @@ class TestDentroUnTestNessunPercorsoDelRunnerPuntaSottoRuns:
 
     @staticmethod
     def _percorsi_sotto_runs() -> list[str]:
-        vera = REPO / "runs"
+        vera = PROGETTO / "runs"
         return sorted(nome for nome, valore in vars(runner).items()
                       if isinstance(valore, Path) and valore.is_relative_to(vera))
 
@@ -8620,7 +8635,7 @@ class TestIlRapportoDelCriticArrivaIntero:
         monkeypatch.setattr(runner, "esegui", con_la_pr_creata(_esegui, self.URL))
         if prima_dei_commenti is not None:
             prima_dei_commenti(esito)
-        pr = runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
+        pr = runner.apri_pr("PBI-371", PROGETTO / "backlog" / "PBI-371-x.md", "pbi/pbi-371", esito)
         assert pr == self.URL
         assert comandi[0][0][:3] == ["gh", "pr", "create"], "prima si apre la PR"
         return esito, file, comandi[1:]
@@ -8785,7 +8800,7 @@ class TestIlRapportoDelCriticArrivaIntero:
         monkeypatch.setattr(runner, "git", lambda *a: "")
         monkeypatch.setattr(runner, "pubblica", lambda branch, e=None: True)
         monkeypatch.setattr(runner, "esegui", senza_pr_aperte(_esegui))
-        runner.apri_pr("PBI-371", REPO / "backlog" / "PBI-371-x.md", "pbi/pbi-371",
+        runner.apri_pr("PBI-371", PROGETTO / "backlog" / "PBI-371-x.md", "pbi/pbi-371",
                        runner.Esito("PBI-371", "fatto"))
 
         cmd = catturato["cmd"]
@@ -8977,7 +8992,7 @@ class TestUnaBasePerGiro:
             "https://github.com/x/y/pull/374"))
         esito = runner.Esito("PBI-374", "fatto")
 
-        pr = runner.apri_pr("PBI-374", REPO / "backlog" / "PBI-374-x.md", "pbi/pbi-374", esito)
+        pr = runner.apri_pr("PBI-374", PROGETTO / "backlog" / "PBI-374-x.md", "pbi/pbi-374", esito)
 
         assert pr, "HEAD è su origin: la PR si apre"
         assert ("push", "--force-with-lease", "-u", "origin",
@@ -9733,6 +9748,7 @@ RUNNER_FINTO = ("import sys\nfrom pathlib import Path\n\n"
                 "sys.exit(1)\n")
 
 
+@pytest.mark.progetto_ospite
 class TestLeGuardieTrovanoIlRunnerSpostato:
     """PBI-388: le due guardie del lucchetto lanciano il runner per percorso, e
     `PBI-383` quel percorso lo sposta in `tools/asdlc/runner.py`.

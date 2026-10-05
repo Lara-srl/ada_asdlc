@@ -1,0 +1,3 @@
+# Il registro del progetto di prova: i test del tick ci prendono il lucchetto
+# `runs/.tick.lock`, come nel progetto che li ospitava, dove `runs/` è ignorata.
+runs/
