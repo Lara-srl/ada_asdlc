@@ -115,6 +115,10 @@ class Ambiente:
     eseguibili: tuple[str, ...] = ()
     # La versione principale minima di un eseguibile, `{ node = 20 }`.
     minimi: dict[str, int] = field(default_factory=dict)
+    # Da dove si reinstalla il pacchetto, come lo legge `pip install`: una
+    # cartella della radice del progetto o un URL git pinnato a un tag
+    # (PBI-395). `None` se il progetto non lo dichiara.
+    installa: str | None = None
 
 
 @dataclass(frozen=True)
@@ -324,7 +328,8 @@ def interpreta(dati: dict, file: str) -> Config:
         ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti"),
                           pacchetto=_percorso(ambiente.testo("pacchetto", default=None)),
                           eseguibili=ambiente.testi("eseguibili", default=()),
-                          minimi=ambiente.interi_per_nome("minimi", default={})),
+                          minimi=ambiente.interi_per_nome("minimi", default={}),
+                          installa=ambiente.testo("installa", default=None)),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
