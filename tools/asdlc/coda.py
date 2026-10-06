@@ -539,12 +539,14 @@ FIRMA = ".installato-da"
 
 
 def firme(repo: Path) -> tuple[str, str | None]:
-    """`(attesa, scritta)`: la firma del pin a `HEAD` del checkout, `"<pin>
-    <albero>"` con l'albero della cartella, e quella in
+    """`(attesa, scritta)`: la firma del pin a `HEAD` del checkout — il solo pin
+    per un URL, `"<pin> <albero>"` con l'albero per una cartella — e quella in
     `<pacchetto>/.installato-da`, `None` se il file non c'è."""
-    _, albero = esegui(["git", "rev-parse", f"HEAD:{Path(INSTALLA).as_posix()}"], repo)
     firma = PACCHETTO / FIRMA
     scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
+    if asdlc_config.e_un_url(INSTALLA):
+        return INSTALLA, scritta
+    _, albero = esegui(["git", "rev-parse", f"HEAD:{Path(INSTALLA).as_posix()}"], repo)
     return f"{INSTALLA} {albero.strip()}", scritta
 
 

@@ -347,6 +347,12 @@ def interpreta(dati: dict, file: str) -> Config:
     )
 
 
+def e_un_url(installa: str) -> bool:
+    """`[ambiente].installa` è un URL git e non una cartella del progetto: la
+    firma allora è il solo pin, senza albero (PBI-395, decisione 4)."""
+    return installa.startswith("git+")
+
+
 def _percorso(testo: str | None) -> Path | None:
     return None if testo is None else Path(testo).expanduser()
 
