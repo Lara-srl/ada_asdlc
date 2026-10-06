@@ -26,6 +26,10 @@ NOME_FILE_LOCALE = "asdlc.local.toml"
 # ramo sono del progetto, e una macchina che li cambiasse da un file gitignored
 # girerebbe un altro metodo con lo stesso nome, senza che una PR lo mostri.
 SEZIONI_LOCALI = ("ambiente", "worktree")
+# Le chiavi di quelle sezioni che restano del progetto lo stesso: il pin da cui
+# si installa il pacchetto è versionato, e una macchina con un pin suo
+# registrerebbe giri di una versione che nessun altro ha (PBI-395, decisione 3).
+CHIAVI_DEL_PROGETTO = (("ambiente", "installa"),)
 
 
 class ErroreDiConfigurazione(ValueError):
@@ -277,7 +281,8 @@ def risolvi(comune: Path, percorso: Path) -> Path:
 def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
     """`dati` con sopra le sezioni di `locali`, chiave per chiave: una sezione
     locale che dice solo il venv non cancella i prestiti. Una sezione fuori da
-    `SEZIONI_LOCALI` si ferma, e dice quali sono le due ammesse."""
+    `SEZIONI_LOCALI`, o una chiave di `CHIAVI_DEL_PROGETTO`, si ferma e dice
+    dove va."""
     uniti = dict(dati)
     for sezione, valori in locali.items():
         if sezione not in SEZIONI_LOCALI:
@@ -285,6 +290,11 @@ def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
             raise ErroreDiConfigurazione(
                 f"{file}: `[{sezione}]` non si sovrascrive da qui — il file locale "
                 f"porta solo {ammesse}; il resto è del progetto e sta in {NOME_FILE}")
+        for propria, chiave in CHIAVI_DEL_PROGETTO:
+            if propria == sezione and chiave in valori:
+                raise ErroreDiConfigurazione(
+                    f"{file}: `[{sezione}].{chiave}` non si sovrascrive da qui — è del "
+                    f"progetto, e va in {NOME_FILE}")
         uniti[sezione] = {**dati.get(sezione, {}), **valori}
     return uniti
 
