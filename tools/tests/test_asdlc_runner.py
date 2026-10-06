@@ -9922,6 +9922,24 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert not dell_albero.exists(), "il sorgente dell'albero non si lancia"
         assert esito.returncode == 2
 
+    def test_fase_tdd_senza_nessun_runner_nomina_il_percorso_del_pacchetto_cercato(
+        self, tmp_path
+    ):
+        """PBI-395, decisione 9: senza runner installato né sorgente nell'albero
+        la guardia esce con 1 come prima, e il messaggio dice anche dove ha
+        cercato l'installato — è il primo posto in cui guardare."""
+        script = self._albero_con_lo_script(tmp_path)
+        self._installato(tmp_path)
+        cercato = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+        cercato.unlink()
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path, env=fuori_da_un_giro())
+
+        assert esito.returncode == 1
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert str(cercato) in esito.stderr, esito.stderr
+
     def test_guardia_fase_tdd_col_runner_in_tools_decide_come_prima(self, repo_di_prova):
         """PBI-388, quinto criterio: con `tools/asdlc_runner.py` al suo posto,
         che è l'albero vero, `fase-tdd.sh` blocca la produzione in `TEST_ONLY`
