@@ -1877,6 +1877,38 @@ def test_con_pip_che_fallisce_la_firma_resta_e_il_tick_non_lancia(
     assert chiamati == []
 
 
+def test_con_la_cartella_del_pin_assente_a_head_il_tick_non_reinstalla_e_non_lancia(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 5, difetto 79 di PBI-102. Con `installa = "./tools"`
+    e un merge che toglie `tools/`, `git rev-parse HEAD:tools` esce 128: la sua
+    uscita non è una firma. Il tick non chiama `pip`, scrive
+    `reinstallazione fallita:` con la cartella e l'uscita di git, lascia la
+    firma com'era, ed esce con 0 senza decidere né lanciare."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    semina = tmp_path / "semina"
+    git_in(semina, "rm", "-q", "-r", "tools")
+    git_in(semina, "commit", "-q", "-m", "tools/ se ne va")
+    git_in(semina, "push", "-q", "origin", "main")
+    firma_di_prima = (pacchetto / ".installato-da").read_text(encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == []
+    assert chiamati == []
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8") == firma_di_prima
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    riga = righe[-1].split("  ", 1)[1]
+    assert riga.startswith(
+        "reinstallazione fallita: la cartella tools non c'è a HEAD — "), righe
+    assert "fatal:" in riga, "con l'uscita di git"
+
+
 def test_il_dry_run_dice_che_il_checkout_e_indietro_e_non_lo_sposta(
     checkout_vero, tmp_path, monkeypatch
 ):
