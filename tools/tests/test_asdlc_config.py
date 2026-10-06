@@ -401,6 +401,29 @@ def test_pacchetto_senza_installa_e_un_errore_che_nomina_la_chiave(tmp_path):
     assert "[ambiente].pacchetto" in str(fermata.value), "dice perché serve"
 
 
+@pytest.mark.parametrize("installa", [
+    "git+ssh://git@github.com/Lara-srl/asdlc.git#subdirectory=tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@main#subdirectory=tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1#subdirectory=tools",
+    "/opt/asdlc/tools",
+    "~/asdlc/tools",
+], ids=["url-senza-tag", "url-su-un-ramo", "url-tag-a-due-numeri", "assoluto", "tilde"])
+def test_un_installa_fuori_dalle_due_forme_e_un_errore_che_nomina_la_chiave(
+    tmp_path, installa
+):
+    """PBI-395, decisione 1: `[ambiente].installa` è una cartella relativa alla
+    radice del progetto, o un URL git pinnato a un tag `@v<maggiore>.<minore>.
+    <patch>`. Un URL senza tag o su un ramo si ferma (`ADR-0026` pinna a un tag),
+    e un percorso assoluto o con `~` si ferma come gli altri percorsi del file."""
+    testo = TOML_DI_PROVA.replace('installa = "./tools"\n', f'installa = "{installa}"\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert "[ambiente].installa" in str(fermata.value)
+    assert installa in str(fermata.value), "dice il valore che rifiuta"
+
+
 def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
     """`[ambiente].eseguibili`: ciò che i gate lanciano per nome, e che il runner
     e il tick verificano prima di partire (PBI-384, decisione 7)."""
