@@ -669,7 +669,7 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
         comando = runner_installato()
         if not (comando.is_file() and os.access(comando, os.X_OK)):
             mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile — "
-                            "`pip install ./tools` nel venv del pacchetto")
+                            f"`pip install {INSTALLA}` nel venv del pacchetto")
     ambiente = CFG.ambiente
     mancanze += asdlc_runner.eseguibili_mancanti(ambiente.eseguibili, ambiente.venv, worktree)
     mancanze += asdlc_runner.versioni_sotto_il_minimo(ambiente.minimi, ambiente.venv, worktree)
