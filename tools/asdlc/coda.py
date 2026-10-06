@@ -541,12 +541,19 @@ FIRMA = ".installato-da"
 def firme(repo: Path) -> tuple[str, str | None]:
     """`(attesa, scritta)`: la firma del pin a `HEAD` del checkout — il solo pin
     per un URL, `"<pin> <albero>"` con l'albero per una cartella — e quella in
-    `<pacchetto>/.installato-da`, `None` se il file non c'è."""
+    `<pacchetto>/.installato-da`, `None` se il file non c'è.
+
+    Un `git rev-parse` che fallisce non è una firma (difetto 79 di PBI-102): la
+    cartella non c'è a `HEAD`, e si alza `Guasto` con l'uscita di git (PBI-395,
+    decisione 5)."""
     firma = PACCHETTO / FIRMA
     scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
     if asdlc_config.e_un_url(INSTALLA):
         return INSTALLA, scritta
-    _, albero = esegui(["git", "rev-parse", f"HEAD:{Path(INSTALLA).as_posix()}"], repo)
+    cartella = Path(INSTALLA).as_posix()
+    codice, albero = esegui(["git", "rev-parse", f"HEAD:{cartella}"], repo)
+    if codice != 0:
+        raise Guasto(f"la cartella {cartella} non c'è a HEAD — {in_una_riga(albero)}")
     return f"{INSTALLA} {albero.strip()}", scritta
 
 
@@ -571,7 +578,11 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
         # Senza pacchetto non c'è niente da reinstallare: lo dice la verifica
         # dell'ambiente, prima del lancio.
         return None
-    attesa, scritta = firme(repo)
+    try:
+        attesa, scritta = firme(repo)
+    except Guasto as guasto:
+        # Come per `pip` fallito: la firma resta, e intanto non si lancia.
+        return f"reinstallazione fallita: {guasto}"
     if scritta == attesa:
         return None
     lucchetto_del_runner = worktree / LUCCHETTO
