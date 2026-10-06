@@ -623,8 +623,8 @@ def gli_hook_trovano_il_runner() -> list[str]:
     comando = comando_del_pacchetto("asdlc-runner")
     if not (comando.is_file() and os.access(comando, os.X_OK)):
         mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile, e gli "
-                        "hook del giro non trovano il runner — `pip install ./tools` nel venv "
-                        "del pacchetto")
+                        "hook del giro non trovano il runner — "
+                        f"`pip install {CFG.ambiente.installa}` nel venv del pacchetto")
     cartella = cartella_degli_hook()
     hook = cartella / "pre-commit" if cartella is not None else None
     if hook is None or not hook.is_file():

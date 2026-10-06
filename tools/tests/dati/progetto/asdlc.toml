@@ -25,6 +25,7 @@ tempi = "tempi.csv"
 # `asdlc`, che un venv suo non lo dichiara (decisione 6).
 venv = ".venv"
 pacchetto = ".venv-asdlc"
+installa = "./tools"
 eseguibili = ["git", "pytest"]
 prestiti = []
 

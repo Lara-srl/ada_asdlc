@@ -72,6 +72,9 @@ PREFISSO_RAMO: str             # `[git].prefisso_ramo`
 # Il venv in cui è installato il runner, assoluto: il tick lancia
 # `<pacchetto>/bin/asdlc-runner`, mai la copia di lavoro dell'albero (PBI-384).
 PACCHETTO: Path | None         # `[ambiente].pacchetto`
+# Da dove il tick reinstalla il pacchetto, com'è scritto in `asdlc.toml`: è ciò
+# che si passa a `pip install` e la prima metà della firma (PBI-395).
+INSTALLA: str | None           # `[ambiente].installa`
 
 
 @dataclass(frozen=True)
@@ -211,7 +214,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
     global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI, PACCHETTO
-    global LUCCHETTO_DEL_TICK
+    global LUCCHETTO_DEL_TICK, INSTALLA
     CFG = cfg
     WORKTREE_DEL_RUNNER = cfg.worktree.percorso
     LOG = Path(cfg.registro.cartella) / "coda.log"
@@ -222,6 +225,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     BASE, REMOTO = cfg.git.base, cfg.git.remoto
     PREFISSO_RAMO = cfg.git.prefisso_ramo
     PACCHETTO = cfg.ambiente.pacchetto
+    INSTALLA = cfg.ambiente.installa
     id_pbi = asdlc_config.regex_del_modello(cfg.backlog.id).pattern
     ramo = re.escape(PREFISSO_RAMO) + r"(\d+)"
     RE_PBI = re.compile(rf"^-\s+({id_pbi})\s*$")
@@ -514,7 +518,7 @@ def indietro(repo: Path) -> str | None:
 
     Il `--dry-run` non allinea e non reinstalla: fa solo il `fetch`, che non
     sposta il checkout, conta i commit di `origin/main` che il `HEAD` non ha, e
-    confronta la firma del pacchetto con l'albero di `tools/` a `HEAD`.
+    confronta la firma del pacchetto con quella del pin a `HEAD` (`firme()`).
     """
     esegui(["git", "fetch", REMOTO], repo)
     _, quanti = esegui(["git", "rev-list", "--count", f"HEAD..{BASE}"], repo)
@@ -522,34 +526,53 @@ def indietro(repo: Path) -> str | None:
     if quanti.strip() not in ("", "0"):
         da_fare.append(f"il checkout è indietro di {quanti.strip()} commit rispetto a "
                        f"{BASE}, e un tick lo allineerebbe prima di decidere")
-    if PACCHETTO is not None and (firma := firme(repo))[0] != firma[1]:
-        da_fare.append(f"la firma del pacchetto è {firma[1]}, non l'albero di tools/ a "
-                       f"HEAD {firma[0]}, e un tick reinstallerebbe")
+    if PACCHETTO is not None:
+        try:
+            attesa, scritta = firme(repo)
+        except Guasto as guasto:
+            da_fare.append(f"un tick scriverebbe reinstallazione fallita: {guasto}")
+        else:
+            if attesa != scritta:
+                da_fare.append(f"la firma del pacchetto è {scritta}, non quella del pin "
+                               f"{attesa}, e un tick reinstallerebbe")
     return "dry-run: " + "; ".join(da_fare) if da_fare else None
 
 
-# Il file del pacchetto in cui sta la firma dell'installazione: l'albero di
-# `tools/` da cui è stato installato. È quello che scriveva `~/asdlc-tick.sh`.
+# Il file del pacchetto in cui sta la firma dell'installazione: il pin di
+# `[ambiente].installa` da cui è stato installato, e l'albero della cartella
+# (PBI-395, decisione 4).
 FIRMA = ".installato-da"
 
 
 def firme(repo: Path) -> tuple[str, str | None]:
-    """`(albero, scritta)`: l'albero di `tools/` a `HEAD` del checkout, e la
-    firma in `<pacchetto>/.installato-da`, `None` se il file non c'è."""
-    _, albero = esegui(["git", "rev-parse", "HEAD:tools"], repo)
+    """`(attesa, scritta)`: la firma del pin a `HEAD` del checkout — il solo pin
+    per un URL, `"<pin> <albero>"` con l'albero per una cartella — e quella in
+    `<pacchetto>/.installato-da`, `None` se il file non c'è.
+
+    Un `git rev-parse` che fallisce non è una firma (difetto 79 di PBI-102): la
+    cartella non c'è a `HEAD`, e si alza `Guasto` con l'uscita di git (PBI-395,
+    decisione 5)."""
     firma = PACCHETTO / FIRMA
     scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
-    return albero.strip(), scritta
+    if asdlc_config.e_un_url(INSTALLA):
+        return INSTALLA, scritta
+    cartella = Path(INSTALLA).as_posix()
+    codice, albero = esegui(["git", "rev-parse", f"HEAD:{cartella}"], repo)
+    if codice != 0:
+        raise Guasto(f"la cartella {cartella} non c'è a HEAD — {in_una_riga(albero)}")
+    return f"{INSTALLA} {albero.strip()}", scritta
 
 
 def reinstalla(repo: Path, worktree: Path) -> str | None:
-    """Reinstalla il pacchetto se la firma non è quella di `tools/` a `HEAD`, e
+    """Reinstalla il pacchetto se la firma non è quella del pin a `HEAD`, e
     torna la riga da scrivere; `None` se la firma è già quella (PBI-392,
-    decisioni 8 e 10).
+    decisioni 8 e 10; PBI-395, decisioni 4 e 6).
 
-    La firma è `git rev-parse HEAD:tools`, scritta in `<pacchetto>/.installato-da`.
-    L'installazione è `<pacchetto>/bin/pip install ./tools` dal checkout, non
-    editabile. Dopo il tick non decide: il processo che gira è ancora la
+    La firma è quella di `firme()`, scritta in `<pacchetto>/.installato-da`.
+    L'installazione è `<pacchetto>/bin/pip install --no-deps --force-reinstall
+    <installa>` dal checkout, non editabile: forzata perché due tag possono
+    portare la stessa `version`, e senza dipendenze perché una che compare
+    passa da un PBI. Dopo il tick non decide: il processo che gira è ancora la
     versione di prima, caricata in memoria, e decide il tick dopo.
 
     Solo col lucchetto del runner libero, preso senza aspettare e tenuto per
@@ -561,8 +584,12 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
         # Senza pacchetto non c'è niente da reinstallare: lo dice la verifica
         # dell'ambiente, prima del lancio.
         return None
-    albero, scritta = firme(repo)
-    if scritta == albero:
+    try:
+        attesa, scritta = firme(repo)
+    except Guasto as guasto:
+        # Come per `pip` fallito: la firma resta, e intanto non si lancia.
+        return f"reinstallazione fallita: {guasto}"
+    if scritta == attesa:
         return None
     lucchetto_del_runner = worktree / LUCCHETTO
     lucchetto_del_runner.parent.mkdir(parents=True, exist_ok=True)
@@ -571,13 +598,14 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return None
-        codice, uscita = esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
+        codice, uscita = esegui([str(PACCHETTO / "bin" / "pip"), "install", "--no-deps",
+                                 "--force-reinstall", INSTALLA], repo)
         # Con `pip` fallito il pacchetto è ancora quello di prima: la firma
         # resta, il tick dopo ci riprova, e intanto non si lancia (decisione 11).
         if codice != 0:
             return f"reinstallazione fallita: {in_una_riga(uscita)}"
-        (PACCHETTO / FIRMA).write_text(albero + "\n", encoding="utf-8")
-    return f"reinstallato: tools/ a {albero}"
+        (PACCHETTO / FIRMA).write_text(attesa + "\n", encoding="utf-8")
+    return f"reinstallato: {attesa}"
 
 
 def in_una_riga(uscita: str) -> str:
@@ -631,7 +659,8 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
     runner stesso verificherebbe all'avvio: gli `[ambiente].eseguibili` nel venv
     del worktree o sul `PATH`, alla versione di `[ambiente].minimi`. Il runner li
     guarda anche lui, ma dopo il distacco, e lì la ragione finisce in un log che
-    il tick non legge.
+    il tick non legge. E i `[ambiente].prestiti` nella radice del worktree: uno
+    assente l'albero usa-e-getta lo salterebbe in silenzio (PBI-395, decisione 11).
     """
     mancanze: list[str] = []
     if PACCHETTO is None:
@@ -641,10 +670,12 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
         comando = runner_installato()
         if not (comando.is_file() and os.access(comando, os.X_OK)):
             mancanze.append(f"ambiente mancante: `{comando}` non c'è o non è eseguibile — "
-                            "`pip install ./tools` nel venv del pacchetto")
+                            f"`pip install {INSTALLA}` nel venv del pacchetto")
     ambiente = CFG.ambiente
     mancanze += asdlc_runner.eseguibili_mancanti(ambiente.eseguibili, ambiente.venv, worktree)
     mancanze += asdlc_runner.versioni_sotto_il_minimo(ambiente.minimi, ambiente.venv, worktree)
+    mancanze += [f"ambiente mancante: il prestito {voce} non c'è in {worktree}"
+                 for voce in ambiente.prestiti if not (worktree / voce).exists()]
     return mancanze
 
 

@@ -26,6 +26,10 @@ NOME_FILE_LOCALE = "asdlc.local.toml"
 # ramo sono del progetto, e una macchina che li cambiasse da un file gitignored
 # girerebbe un altro metodo con lo stesso nome, senza che una PR lo mostri.
 SEZIONI_LOCALI = ("ambiente", "worktree")
+# Le chiavi di quelle sezioni che restano del progetto lo stesso: il pin da cui
+# si installa il pacchetto è versionato, e una macchina con un pin suo
+# registrerebbe giri di una versione che nessun altro ha (PBI-395, decisione 3).
+CHIAVI_DEL_PROGETTO = (("ambiente", "installa"),)
 
 
 class ErroreDiConfigurazione(ValueError):
@@ -115,6 +119,10 @@ class Ambiente:
     eseguibili: tuple[str, ...] = ()
     # La versione principale minima di un eseguibile, `{ node = 20 }`.
     minimi: dict[str, int] = field(default_factory=dict)
+    # Da dove si reinstalla il pacchetto, come lo legge `pip install`: una
+    # cartella della radice del progetto o un URL git pinnato a un tag
+    # (PBI-395). Obbligatoria con `pacchetto`; `None` senza.
+    installa: str | None = None
 
 
 @dataclass(frozen=True)
@@ -273,7 +281,8 @@ def risolvi(comune: Path, percorso: Path) -> Path:
 def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
     """`dati` con sopra le sezioni di `locali`, chiave per chiave: una sezione
     locale che dice solo il venv non cancella i prestiti. Una sezione fuori da
-    `SEZIONI_LOCALI` si ferma, e dice quali sono le due ammesse."""
+    `SEZIONI_LOCALI`, o una chiave di `CHIAVI_DEL_PROGETTO`, si ferma e dice
+    dove va."""
     uniti = dict(dati)
     for sezione, valori in locali.items():
         if sezione not in SEZIONI_LOCALI:
@@ -281,6 +290,11 @@ def sovrascrivi(dati: dict, locali: dict, file: str) -> dict:
             raise ErroreDiConfigurazione(
                 f"{file}: `[{sezione}]` non si sovrascrive da qui — il file locale "
                 f"porta solo {ammesse}; il resto è del progetto e sta in {NOME_FILE}")
+        for propria, chiave in CHIAVI_DEL_PROGETTO:
+            if propria == sezione and chiave in valori:
+                raise ErroreDiConfigurazione(
+                    f"{file}: `[{sezione}].{chiave}` non si sovrascrive da qui — è del "
+                    f"progetto, e va in {NOME_FILE}")
         uniti[sezione] = {**dati.get(sezione, {}), **valori}
     return uniti
 
@@ -316,6 +330,15 @@ def interpreta(dati: dict, file: str) -> Config:
     prompt = sezione.dentro("prompt", default={})
     prompt.solo("aggiunte", perche="i prompt del pacchetto si estendono con le "
                 "aggiunte, e non si sostituiscono")
+    # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
+    # implicito è la causa `default-implicito` (PBI-395, decisione 2).
+    if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
+        raise ErroreDiConfigurazione(
+            f"{file}: manca `[ambiente].installa` — con `[ambiente].pacchetto` il tick "
+            "deve sapere da dove reinstallare il pacchetto")
+    installa = ambiente.testo("installa", default=None)
+    if installa is not None:
+        controlla_installa(installa, file)
     return Config(
         git=Git(base=git.testo("base"), prefisso_ramo=git.testo("prefisso_ramo")),
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
@@ -324,7 +347,8 @@ def interpreta(dati: dict, file: str) -> Config:
         ambiente=Ambiente(venv=ambiente.testo("venv"), prestiti=ambiente.testi("prestiti"),
                           pacchetto=_percorso(ambiente.testo("pacchetto", default=None)),
                           eseguibili=ambiente.testi("eseguibili", default=()),
-                          minimi=ambiente.interi_per_nome("minimi", default={})),
+                          minimi=ambiente.interi_per_nome("minimi", default={}),
+                          installa=installa),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
@@ -334,6 +358,34 @@ def interpreta(dati: dict, file: str) -> Config:
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
         prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
     )
+
+
+# L'URL git di `[ambiente].installa`, pinnato a un tag e mai a un ramo
+# (`ADR-0026`): `git+<schema>://…@v<maggiore>.<minore>.<patch>[#subdirectory=…]`.
+RE_PIN_URL = re.compile(r"git\+[a-z]+://[^@#\s]*(@[^@#\s]*)?@v\d+\.\d+\.\d+"
+                        r"(#subdirectory=[^#\s]+)?")
+
+
+def controlla_installa(installa: str, file: str) -> None:
+    """`[ambiente].installa` è in una delle due forme che `pip install` capisce:
+    una cartella relativa alla radice del progetto, o un URL git pinnato a un tag
+    (PBI-395, decisione 1). Fuori da queste si ferma, nominando chiave e valore."""
+    if e_un_url(installa):
+        if not RE_PIN_URL.fullmatch(installa):
+            raise ErroreDiConfigurazione(
+                f"{file}: `[ambiente].installa` è {installa!r}, un URL git non pinnato a "
+                "un tag — la forma è `git+…@v<maggiore>.<minore>.<patch>"
+                "[#subdirectory=…]`, mai un ramo (`ADR-0026`)")
+    elif installa.startswith("~") or Path(installa).is_absolute():
+        raise ErroreDiConfigurazione(
+            f"{file}: `[ambiente].installa` è un percorso di macchina, {installa!r} — "
+            "una cartella si scrive relativa alla radice del progetto, `./tools`")
+
+
+def e_un_url(installa: str) -> bool:
+    """`[ambiente].installa` è un URL git e non una cartella del progetto: la
+    firma allora è il solo pin, senza albero (PBI-395, decisione 4)."""
+    return installa.startswith("git+")
 
 
 def _percorso(testo: str | None) -> Path | None:

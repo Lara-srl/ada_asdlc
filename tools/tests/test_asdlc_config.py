@@ -64,6 +64,7 @@ tempi = "ore.csv"
 venv = ".venv"
 prestiti = ["dati"]
 pacchetto = ".venv-asdlc"
+installa = "./tools"
 
 [worktree]
 percorso = "../prova-run"
@@ -379,6 +380,86 @@ def test_un_percorso_di_macchina_in_asdlc_toml_e_un_errore_che_nomina_la_chiave(
     assert "asdlc.local.toml" in str(fermata.value), "dice dove va un percorso di macchina"
 
 
+def test_installa_si_legge_da_ambiente(tmp_path):
+    """PBI-395, decisione 1: da dove il tick reinstalla il pacchetto è una chiave
+    di `asdlc.toml`, `[ambiente].installa`, e in aDa vale `"./tools"`."""
+    cfg = asdlc_config.carica(scrivi_toml(tmp_path))
+
+    assert cfg.ambiente.installa == "./tools"
+
+
+def test_pacchetto_senza_installa_e_un_errore_che_nomina_la_chiave(tmp_path):
+    """PBI-395, decisione 2: un pacchetto senza sapere da dove reinstallarlo è un
+    errore di caricamento, non un `"./tools"` implicito (causa
+    `default-implicito`)."""
+    testo = TOML_DI_PROVA.replace('installa = "./tools"\n', "")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert "[ambiente].installa" in str(fermata.value)
+    assert "[ambiente].pacchetto" in str(fermata.value), "dice perché serve"
+
+
+@pytest.mark.parametrize("installa", [
+    "git+ssh://git@github.com/Lara-srl/asdlc.git#subdirectory=tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@main#subdirectory=tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1#subdirectory=tools",
+    "/opt/asdlc/tools",
+    "~/asdlc/tools",
+], ids=["url-senza-tag", "url-su-un-ramo", "url-tag-a-due-numeri", "assoluto", "tilde"])
+def test_un_installa_fuori_dalle_due_forme_e_un_errore_che_nomina_la_chiave(
+    tmp_path, installa
+):
+    """PBI-395, decisione 1: `[ambiente].installa` è una cartella relativa alla
+    radice del progetto, o un URL git pinnato a un tag `@v<maggiore>.<minore>.
+    <patch>`. Un URL senza tag o su un ramo si ferma (`ADR-0026` pinna a un tag),
+    e un percorso assoluto o con `~` si ferma come gli altri percorsi del file."""
+    testo = TOML_DI_PROVA.replace('installa = "./tools"\n', f'installa = "{installa}"\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(scrivi_toml(tmp_path, testo))
+
+    assert "[ambiente].installa" in str(fermata.value)
+    assert installa in str(fermata.value), "dice il valore che rifiuta"
+
+
+@pytest.mark.parametrize("installa", [
+    "./tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@v12.3.40",
+], ids=["cartella", "url-con-sottocartella", "url-senza-sottocartella"])
+def test_guardia_le_due_forme_di_installa_si_caricano(tmp_path, installa):
+    """PBI-395, decisione 1, l'altra metà: le due forme ammesse passano com'è
+    scritte, e il `#subdirectory=` è facoltativo. Un rifiuto è un fallimento del
+    test e non un'eccezione, perché il gate del rosso conti il mutante che lo
+    alza come un morso (difetto 93 di PBI-102)."""
+    testo = TOML_DI_PROVA.replace('installa = "./tools"\n', f'installa = "{installa}"\n')
+
+    try:
+        cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+    except asdlc_config.ErroreDiConfigurazione as errore:
+        pytest.fail(f"la forma ammessa {installa!r} è stata rifiutata: {errore}")
+
+    assert cfg.ambiente.installa == installa
+
+
+def test_installa_in_asdlc_local_toml_e_rifiutata_e_dice_di_metterla_in_asdlc_toml(tmp_path):
+    """PBI-395, decisione 3: il pin è del progetto, versionato. Una macchina con un
+    pin suo registrerebbe giri di una versione che nessun altro ha, quindi
+    `installa` non si sovrascrive da `asdlc.local.toml`, anche se sta in
+    `[ambiente]`, e il messaggio dice dove va."""
+    scrivi_toml(tmp_path)
+    scrivi_toml(tmp_path, '[ambiente]\ninstalla = "./altro"\n', nome="asdlc.local.toml")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(tmp_path)
+
+    messaggio = str(fermata.value)
+    assert "asdlc.local.toml" in messaggio and "[ambiente].installa" in messaggio, messaggio
+    assert "va in asdlc.toml" in messaggio, messaggio
+
+
 def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
     """`[ambiente].eseguibili`: ciò che i gate lanciano per nome, e che il runner
     e il tick verificano prima di partire (PBI-384, decisione 7)."""
@@ -459,3 +540,44 @@ def test_l_asdlc_toml_del_repository_dichiara_le_aggiunte_in_asdlc_aggiunte():
     cfg = asdlc_config.carica(PROGETTO)
 
     assert cfg.prompt.aggiunte == (PROGETTO / "asdlc-aggiunte").resolve()
+
+
+# --- L'`asdlc.toml` vero del progetto ospite (PBI-395, decisione 10) ----------
+
+
+def prestito_fuori_posto(radice: Path, voce: str) -> str | None:
+    """Perché un prestito di `[ambiente].prestiti` non va, o `None`. Relativo, dentro
+    l'albero e ignorato da git; **non** che esista: in CI i prestiti non ci sono, e
+    l'esistenza la verifica `mancanze_dell_ambiente()` all'avvio. Una cartella che
+    non c'è non corrisponde a un pattern `data/`, quindi si chiede anche `voce/`."""
+    if voce.startswith("~") or Path(voce).is_absolute():
+        return f"{voce!r} è un percorso assoluto"
+    if not (radice / voce).resolve().is_relative_to(radice.resolve()):
+        return f"{voce!r} esce dall'albero"
+    for forma in (voce, voce.rstrip("/") + "/"):
+        if subprocess.run(["git", "check-ignore", "-q", forma], cwd=radice).returncode == 0:
+            return None
+    return f"{voce!r} non è ignorato da git"
+
+
+@pytest.mark.progetto_ospite
+def test_guardia_l_asdlc_toml_del_progetto_ospite_regge():
+    """PBI-395, decisione 10. Con PBI-394 i test di config leggono il progetto di
+    prova, e nessuno controllava più il file che il tick leggerà davvero. Qui si
+    asserisce solo ciò che vale per **ogni** ospite — aDa, la sonda di 394, il
+    repository `asdlc` —: il file si carica, c'è il gate `asdlc`, il `cwd` di ogni
+    gate esiste, ogni prestito è relativo, dentro l'albero e ignorato da git, e
+    `installa` è in una delle due forme. I gate propri di aDa non si nominano."""
+    radice = asdlc_config.radice(Path(__file__).resolve().parent)
+
+    cfg = asdlc_config.carica(radice)
+
+    assert "asdlc" in [gate.nome for gate in cfg.gate]
+    assert [g.cwd for g in cfg.gate if not (radice / g.cwd).is_dir()] == []
+    assert [m for v in cfg.ambiente.prestiti if (m := prestito_fuori_posto(radice, v))] == []
+    installa = cfg.ambiente.installa
+    if cfg.ambiente.pacchetto is not None:
+        assert installa is not None
+    if installa is not None:
+        assert (asdlc_config.RE_PIN_URL.fullmatch(installa) if asdlc_config.e_un_url(installa)
+                else not (installa.startswith("~") or Path(installa).is_absolute())), installa

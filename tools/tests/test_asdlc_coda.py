@@ -1132,7 +1132,8 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
         f'[git]\nbase = "{base}"\nprefisso_ramo = "{prefisso_ramo}"\n\n'
         f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda_md}"\nid = "{id}"\nfile = "{file}"\n\n'
         f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
-        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\npacchetto = ".venv-asdlc"\n\n'
+        '[ambiente]\nvenv = "backend/.venv"\nprestiti = ["data"]\npacchetto = ".venv-asdlc"\n'
+        'installa = "./tools"\n\n'
         f'[worktree]\npercorso = "{worktree}"\n\n'
         '[soglie]\ntentativi = 3\nigiene = 3\nrevisioni = 4\n\n'
         '[gate_del_rosso]\nattivo = true\n\n'
@@ -1363,6 +1364,51 @@ def test_il_tick_con_l_ambiente_mancante_scrive_la_riga_e_non_lancia(
     assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti), "il runner non parte"
     assert not any(c in cmd for cmd in visti for c in ("fetch", "switch", "checkout")), (
         "e nemmeno il pre-flight")
+
+
+def test_senza_runner_installato_la_mancanza_dice_di_installare_il_pin(
+    ambiente_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 7: la riga `ambiente mancante:` per il runner che non
+    c'è suggerisce `pip install <pin>` di `[ambiente].installa`, non `./tools`."""
+    pin = "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools"
+    monkeypatch.setattr(coda, "PACCHETTO", tmp_path / "pacchetto")
+    monkeypatch.setattr(coda, "INSTALLA", pin)
+
+    mancanze = coda.mancanze_dell_ambiente(tmp_path)
+
+    assert any(f"`pip install {pin}`" in m for m in mancanze), mancanze
+
+
+def test_il_tick_con_un_prestito_assente_nel_worktree_lo_nomina_e_non_lancia(
+    configura, ambiente_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 11. Un prestito di `[ambiente].prestiti` che non c'è
+    nella radice del worktree si saltava in silenzio in `worktree_usa_e_getta()`,
+    e i test che ne hanno bisogno cadevano nell'albero usa-e-getta per una
+    ragione che nessuno leggeva. Ora è una riga `ambiente mancante: il prestito
+    <voce> non c'è in <worktree>`, e il tick non lancia, come per un eseguibile
+    che manca. Il prestito che c'è non si nomina."""
+    configura(toml_di_prova().replace('prestiti = ["data"]',
+                                      'prestiti = ["data", "frontend/node_modules"]'))
+    installato = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+    installato.parent.mkdir(parents=True)
+    installato.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    installato.chmod(0o755)
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    (albero / "frontend" / "node_modules").mkdir(parents=True)
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    mancante = [r.split("  ", 1)[1] for r in righe if "  ambiente mancante: " in r]
+    assert mancante == [f"ambiente mancante: il prestito data non c'è in {albero}"], righe
+    assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti), "il runner non parte"
 
 
 # --- La pausa del tick (PBI-385) ---------------------------------------------
@@ -1606,8 +1652,9 @@ def git_in(cartella: Path, *args: str) -> str:
 def un_checkout_indietro(tmp_path, monkeypatch, *, tocca="README.md"):
     """Un `origin` nudo, il checkout del tick clonato su `main`, e un merge
     arrivato su `origin` dopo il clone, che cambia il file `tocca`. Il pacchetto
-    è una cartella temporanea con la firma dell'albero di `tools/` del checkout,
-    com'era all'ultima installazione. Torna `(origin, checkout, pacchetto)`."""
+    è una cartella temporanea con la firma del pin `./tools` e dell'albero di
+    `tools/` del checkout, com'era all'ultima installazione (PBI-395, decisione
+    4). Torna `(origin, checkout, pacchetto)`."""
     origin, semina, checkout = tmp_path / "origin.git", tmp_path / "semina", tmp_path / "checkout"
     git_in(tmp_path, "init", "-q", "--bare", str(origin))
     git_in(tmp_path, "clone", "-q", str(origin), str(semina))
@@ -1624,7 +1671,7 @@ def un_checkout_indietro(tmp_path, monkeypatch, *, tocca="README.md"):
     pacchetto = tmp_path / "pacchetto"
     (pacchetto / "bin").mkdir(parents=True)
     (pacchetto / ".installato-da").write_text(
-        git_in(checkout, "rev-parse", "HEAD:tools") + "\n", encoding="utf-8")
+        "./tools " + git_in(checkout, "rev-parse", "HEAD:tools") + "\n", encoding="utf-8")
     monkeypatch.setattr(coda, "PACCHETTO", pacchetto)
     return origin, checkout, pacchetto
 
@@ -1733,15 +1780,17 @@ def pip_finto(monkeypatch, pacchetto: Path, codice=0):
     return visti
 
 
-def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
+def test_con_installa_cartella_il_tick_reinstalla_forzato_e_firma_pin_e_albero(
     checkout_vero, tmp_path, monkeypatch
 ):
-    """PBI-392, decisioni 8 e 10. La firma è l'albero di `tools/` a `HEAD`,
-    scritta in `<pacchetto>/.installato-da` all'ultima installazione. Dopo un
-    merge che tocca `tools/` non è più quella: il tick, col lucchetto del runner
-    libero, chiama `<pacchetto>/bin/pip install ./tools` nel checkout, scrive la
-    firma nuova e la riga `reinstallato:`, ed esce senza decidere — il processo
-    che gira è ancora la versione di prima, e decide il tick dopo."""
+    """PBI-392, decisioni 8 e 10, e PBI-395, decisioni 4 e 6. Con `installa =
+    "./tools"` la firma è il pin e l'albero di `tools/` a `HEAD`, scritta in
+    `<pacchetto>/.installato-da` all'ultima installazione. Dopo un merge che
+    tocca `tools/` non è più quella: il tick, col lucchetto del runner libero,
+    chiama `<pacchetto>/bin/pip install --no-deps --force-reinstall ./tools` nel
+    checkout, scrive la firma `"./tools <albero>"` e la riga `reinstallato:`, ed
+    esce senza decidere — il processo che gira è ancora la versione di prima, e
+    decide il tick dopo."""
     _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
                                                   tocca="tools/modulo.py")
     albero = tmp_path / "albero"
@@ -1753,11 +1802,68 @@ def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
 
     albero_di_tools = git_in(checkout, "rev-parse", "HEAD:tools")
     assert uscita == 0
-    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "./tools"], checkout)]
-    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == albero_di_tools
+    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "--no-deps",
+                     "--force-reinstall", "./tools"], checkout)]
+    firma = f"./tools {albero_di_tools}"
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == firma
     righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
-    assert righe[-1].split("  ", 1)[1] == f"reinstallato: tools/ a {albero_di_tools}", righe
+    assert righe[-1].split("  ", 1)[1] == f"reinstallato: {firma}", righe
     assert chiamati == []
+
+
+PIN_DI_PROVA = "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools"
+
+
+def test_con_un_pin_url_diverso_dalla_firma_il_tick_installa_il_pin_senza_rev_parse(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 4. Con `installa` un URL git pinnato a un tag la firma
+    è il pin e basta: nel checkout non c'è una cartella di cui chiedere
+    l'albero. Con la firma scritta diversa dal pin, il tick chiama `pip` col
+    pin, scrive il pin come firma, e non chiama mai `git rev-parse`."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    monkeypatch.setattr(coda, "INSTALLA", PIN_DI_PROVA)
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+    con_pip, git_visti = coda.esegui, []
+    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (
+        git_visti.append(cmd) if cmd[0] == "git" else None) or con_pip(cmd, cwd))
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "--no-deps",
+                     "--force-reinstall", PIN_DI_PROVA], checkout)]
+    assert not [c for c in git_visti if "rev-parse" in c], git_visti
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == PIN_DI_PROVA
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert righe[-1].split("  ", 1)[1] == f"reinstallato: {PIN_DI_PROVA}", righe
+    assert chiamati == []
+
+
+def test_guardia_con_la_firma_uguale_al_pin_il_tick_non_chiama_pip_e_decide(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 4: la firma scritta è già quella del pin, e il
+    pacchetto installato è quello giusto. Il tick non chiama `pip`, non
+    riscrive la firma, e decide nello stesso passaggio."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    monkeypatch.setattr(coda, "INSTALLA", PIN_DI_PROVA)
+    (pacchetto / ".installato-da").write_text(PIN_DI_PROVA + "\n", encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == []
+    assert chiamati == ["decidi", "lancia"]
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert not [r for r in righe if "reinstall" in r], righe
 
 
 def test_con_la_firma_cambiata_e_un_giro_in_corso_il_tick_non_reinstalla_e_non_lancia(
@@ -1816,6 +1922,38 @@ def test_con_pip_che_fallisce_la_firma_resta_e_il_tick_non_lancia(
     assert chiamati == []
 
 
+def test_con_la_cartella_del_pin_assente_a_head_il_tick_non_reinstalla_e_non_lancia(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 5, difetto 79 di PBI-102. Con `installa = "./tools"`
+    e un merge che toglie `tools/`, `git rev-parse HEAD:tools` esce 128: la sua
+    uscita non è una firma. Il tick non chiama `pip`, scrive
+    `reinstallazione fallita:` con la cartella e l'uscita di git, lascia la
+    firma com'era, ed esce con 0 senza decidere né lanciare."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    semina = tmp_path / "semina"
+    git_in(semina, "rm", "-q", "-r", "tools")
+    git_in(semina, "commit", "-q", "-m", "tools/ se ne va")
+    git_in(semina, "push", "-q", "origin", "main")
+    firma_di_prima = (pacchetto / ".installato-da").read_text(encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == []
+    assert chiamati == []
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8") == firma_di_prima
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    riga = righe[-1].split("  ", 1)[1]
+    assert riga.startswith(
+        "reinstallazione fallita: la cartella tools non c'è a HEAD — "), righe
+    assert "fatal:" in riga, "con l'uscita di git"
+
+
 def test_il_dry_run_dice_che_il_checkout_e_indietro_e_non_lo_sposta(
     checkout_vero, tmp_path, monkeypatch
 ):
@@ -1865,3 +2003,58 @@ def test_il_dry_run_dice_che_la_firma_non_e_quella_dell_albero_e_non_reinstalla(
              for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
     assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
     assert "firma" in righe[0] and git_in(checkout, "rev-parse", "HEAD:tools") in righe[0], righe
+
+
+def test_il_dry_run_con_un_pin_url_nomina_la_firma_scritta_e_quella_del_pin(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 7. Con la firma scritta diversa dal pin il `--dry-run`
+    non chiama `pip`, e la riga prima della decisione nomina le due firme: quella
+    in `.installato-da` e quella del pin. Non dice più «l'albero di tools/», che
+    con un URL non c'è."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    git_in(checkout, "pull", "-q", "--ff-only")
+    monkeypatch.setattr(coda, "INSTALLA", PIN_DI_PROVA)
+    scritta = (pacchetto / ".installato-da").read_text(encoding="utf-8").strip()
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert pip == []
+    righe = [r.split("  ", 1)[1]
+             for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
+    assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
+    assert (f"la firma del pacchetto è {scritta}, non quella del pin {PIN_DI_PROVA}"
+            in righe[0]), righe
+
+
+def test_il_dry_run_con_la_cartella_del_pin_assente_lo_scrive_e_decide(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisioni 5 e 7: il `--dry-run` dice ciò che un tick vero farebbe.
+    Con `tools/` tolta da `HEAD` il tick scriverebbe `reinstallazione fallita:`, e
+    il `--dry-run` lo scrive nella sua riga invece di fermarsi su un'eccezione."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    semina = tmp_path / "semina"
+    git_in(semina, "rm", "-q", "-r", "tools")
+    git_in(semina, "commit", "-q", "-m", "tools/ se ne va")
+    git_in(semina, "push", "-q", "origin", "main")
+    git_in(checkout, "pull", "-q", "--ff-only")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert pip == []
+    righe = [r.split("  ", 1)[1]
+             for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
+    assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
+    assert righe[0].startswith("dry-run: "), righe
+    assert "reinstallazione fallita: la cartella tools non c'è a HEAD — " in righe[0], righe

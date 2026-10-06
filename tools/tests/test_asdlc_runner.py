@@ -3316,6 +3316,20 @@ class TestGliHookTrovanoIlRunnerPrimaDiPartire:
 
         assert f"`{giro_nel_repo}` non c'è o non è eseguibile" in uscita, uscita
 
+    def test_senza_asdlc_runner_il_messaggio_dice_di_installare_il_pin(
+        self, giro_nel_repo, tmp_path, capsys, monkeypatch
+    ):
+        """PBI-395, decisione 7: la riparazione che il messaggio suggerisce è
+        `pip install <pin>` di `[ambiente].installa`, non `./tools` scritto qui:
+        dopo il pin di un tag in aDa `tools/asdlc/` non c'è più."""
+        pin = "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools"
+        monkeypatch.setattr(runner, "CFG", dataclasses.replace(
+            runner.CFG, ambiente=dataclasses.replace(runner.CFG.ambiente, installa=pin)))
+
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"`pip install {pin}`" in uscita, uscita
+
     def test_un_pre_commit_altrui_ferma_il_giro(
         self, giro_nel_repo, repo_di_prova, tmp_path, capsys
     ):
@@ -7902,7 +7916,7 @@ def toml_di_prova(base="origin/main", prefisso_ramo="pbi/pbi-",
         f'[backlog]\ncartella = "{cartella}"\ncoda = "{coda}"\nid = "{id}"\nfile = "{file}"\n\n'
         f'[registro]\ncartella = "{registro}"\ntempi = "{tempi}"\n\n'
         f'[ambiente]\nvenv = "{venv}"\nprestiti = {elenco(prestiti)}\n'
-        'pacchetto = ".venv-asdlc"\n\n'
+        'pacchetto = ".venv-asdlc"\ninstalla = "./tools"\n\n'
         f'[worktree]\npercorso = "../ada-run"\n\n'
         f'[soglie]\ntentativi = {tentativi}\nigiene = {igiene}\nrevisioni = {revisioni}\n\n'
         f'[gate_del_rosso]\nattivo = {"true" if gate_del_rosso else "false"}\n'
@@ -9849,6 +9863,82 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert "guardia del lucchetto: runner non trovato" in esito.stderr
         assert "tools/asdlc/runner.py" in esito.stderr
         assert "tools/asdlc_runner.py" in esito.stderr
+
+    @staticmethod
+    def _installato(radice: Path, pacchetto: str = ".venv-asdlc") -> Path:
+        """Un albero git in `radice` con `[ambiente].pacchetto` in `asdlc.toml`, e un
+        `asdlc-runner` finto nel `bin` di quel pacchetto: scrive i suoi argomenti
+        accanto a sé ed esce con 2, come la guardia che ferma una scrittura di
+        produzione in `TEST_ONLY`. Torna il segno."""
+        subprocess.run(["git", "init", "-q", str(radice)], check=True)
+        (radice / "asdlc.toml").write_text(
+            f'[ambiente]\nvenv = ".venv"\nprestiti = []\npacchetto = "{pacchetto}"\n'
+            'installa = "./tools"\n', encoding="utf-8")
+        comando = radice / pacchetto / "bin" / "asdlc-runner"
+        comando.parent.mkdir(parents=True)
+        comando.write_text('#!/bin/sh\ncat > /dev/null\n'
+                           'printf %s "$*" > "$(dirname "$0")/lanciato"\nexit 2\n',
+                           encoding="utf-8")
+        comando.chmod(0o755)
+        return comando.with_name("lanciato")
+
+    @staticmethod
+    def _scrittura_di_produzione(radice: Path) -> str:
+        return json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                           "cwd": str(radice),
+                           "tool_input": {"file_path": str(radice / "backend/app/foglio.py")}})
+
+    def test_fase_tdd_senza_tools_asdlc_lancia_il_runner_installato(self, tmp_path):
+        """PBI-395, decisione 9: dopo il pin di un tag `tools/asdlc/` non c'è più
+        nell'albero, e la guardia cerca prima il runner installato,
+        `<radice comune>/<pacchetto>/bin/asdlc-runner`, con `pacchetto` letto da
+        `asdlc.toml`. Lo lancia con `--guardia-fase`, e il suo 2 arriva intatto a
+        Claude Code: la scrittura di produzione in `TEST_ONLY` è bloccata."""
+        script = self._albero_con_lo_script(tmp_path)
+        segno = self._installato(tmp_path)
+
+        esito = subprocess.run([str(script)], input=self._scrittura_di_produzione(tmp_path),
+                               capture_output=True, text=True, cwd=tmp_path,
+                               env=fuori_da_un_giro())
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-fase"
+        assert esito.returncode == 2, esito.stderr
+
+    def test_guardia_fase_tdd_con_installato_e_albero_lancia_l_installato(self, tmp_path):
+        """PBI-395, decisione 9: con il runner installato **e** il sorgente in
+        `tools/asdlc/runner.py`, la guardia lancia l'installato. Il sorgente
+        dell'albero è la copia di lavoro, e resta il ripiego."""
+        script = self._albero_con_lo_script(tmp_path)
+        installato = self._installato(tmp_path)
+        dell_albero = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
+
+        esito = subprocess.run([str(script)], input=self._scrittura_di_produzione(tmp_path),
+                               capture_output=True, text=True, cwd=tmp_path,
+                               env=fuori_da_un_giro())
+
+        assert installato.is_file(), esito.stderr
+        assert installato.read_text() == "--guardia-fase", esito.stderr
+        assert not dell_albero.exists(), "il sorgente dell'albero non si lancia"
+        assert esito.returncode == 2
+
+    def test_fase_tdd_senza_nessun_runner_nomina_il_percorso_del_pacchetto_cercato(
+        self, tmp_path
+    ):
+        """PBI-395, decisione 9: senza runner installato né sorgente nell'albero
+        la guardia esce con 1 come prima, e il messaggio dice anche dove ha
+        cercato l'installato — è il primo posto in cui guardare."""
+        script = self._albero_con_lo_script(tmp_path)
+        self._installato(tmp_path)
+        cercato = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+        cercato.unlink()
+
+        esito = subprocess.run([str(script)], input="{}", capture_output=True, text=True,
+                               cwd=tmp_path, env=fuori_da_un_giro())
+
+        assert esito.returncode == 1
+        assert "guardia del lucchetto: runner non trovato" in esito.stderr
+        assert str(cercato) in esito.stderr, esito.stderr
 
     def test_guardia_fase_tdd_col_runner_in_tools_decide_come_prima(self, repo_di_prova):
         """PBI-388, quinto criterio: con `tools/asdlc_runner.py` al suo posto,
