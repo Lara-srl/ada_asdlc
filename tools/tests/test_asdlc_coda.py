@@ -1766,6 +1766,38 @@ def test_con_installa_cartella_il_tick_reinstalla_forzato_e_firma_pin_e_albero(
     assert chiamati == []
 
 
+PIN_DI_PROVA = "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools"
+
+
+def test_con_un_pin_url_diverso_dalla_firma_il_tick_installa_il_pin_senza_rev_parse(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 4. Con `installa` un URL git pinnato a un tag la firma
+    è il pin e basta: nel checkout non c'è una cartella di cui chiedere
+    l'albero. Con la firma scritta diversa dal pin, il tick chiama `pip` col
+    pin, scrive il pin come firma, e non chiama mai `git rev-parse`."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    monkeypatch.setattr(coda, "INSTALLA", PIN_DI_PROVA)
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+    con_pip, git_visti = coda.esegui, []
+    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (
+        git_visti.append(cmd) if cmd[0] == "git" else None) or con_pip(cmd, cwd))
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "--no-deps",
+                     "--force-reinstall", PIN_DI_PROVA], checkout)]
+    assert not [c for c in git_visti if "rev-parse" in c], git_visti
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == PIN_DI_PROVA
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert righe[-1].split("  ", 1)[1] == f"reinstallato: {PIN_DI_PROVA}", righe
+    assert chiamati == []
+
+
 def test_con_la_firma_cambiata_e_un_giro_in_corso_il_tick_non_reinstalla_e_non_lancia(
     checkout_vero, tmp_path, monkeypatch
 ):
