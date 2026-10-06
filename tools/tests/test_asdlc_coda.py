@@ -1958,3 +1958,58 @@ def test_il_dry_run_dice_che_la_firma_non_e_quella_dell_albero_e_non_reinstalla(
              for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
     assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
     assert "firma" in righe[0] and git_in(checkout, "rev-parse", "HEAD:tools") in righe[0], righe
+
+
+def test_il_dry_run_con_un_pin_url_nomina_la_firma_scritta_e_quella_del_pin(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 7. Con la firma scritta diversa dal pin il `--dry-run`
+    non chiama `pip`, e la riga prima della decisione nomina le due firme: quella
+    in `.installato-da` e quella del pin. Non dice più «l'albero di tools/», che
+    con un URL non c'è."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    git_in(checkout, "pull", "-q", "--ff-only")
+    monkeypatch.setattr(coda, "INSTALLA", PIN_DI_PROVA)
+    scritta = (pacchetto / ".installato-da").read_text(encoding="utf-8").strip()
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert pip == []
+    righe = [r.split("  ", 1)[1]
+             for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
+    assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
+    assert (f"la firma del pacchetto è {scritta}, non quella del pin {PIN_DI_PROVA}"
+            in righe[0]), righe
+
+
+def test_il_dry_run_con_la_cartella_del_pin_assente_lo_scrive_e_decide(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisioni 5 e 7: il `--dry-run` dice ciò che un tick vero farebbe.
+    Con `tools/` tolta da `HEAD` il tick scriverebbe `reinstallazione fallita:`, e
+    il `--dry-run` lo scrive nella sua riga invece di fermarsi su un'eccezione."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    semina = tmp_path / "semina"
+    git_in(semina, "rm", "-q", "-r", "tools")
+    git_in(semina, "commit", "-q", "-m", "tools/ se ne va")
+    git_in(semina, "push", "-q", "origin", "main")
+    git_in(checkout, "pull", "-q", "--ff-only")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero), "--dry-run"])
+
+    assert uscita == 0
+    assert pip == []
+    righe = [r.split("  ", 1)[1]
+             for r in (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()]
+    assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
+    assert righe[0].startswith("dry-run: "), righe
+    assert "reinstallazione fallita: la cartella tools non c'è a HEAD — " in righe[0], righe
