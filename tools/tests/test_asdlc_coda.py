@@ -1798,6 +1798,29 @@ def test_con_un_pin_url_diverso_dalla_firma_il_tick_installa_il_pin_senza_rev_pa
     assert chiamati == []
 
 
+def test_guardia_con_la_firma_uguale_al_pin_il_tick_non_chiama_pip_e_decide(
+    checkout_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 4: la firma scritta è già quella del pin, e il
+    pacchetto installato è quello giusto. Il tick non chiama `pip`, non
+    riscrive la firma, e decide nello stesso passaggio."""
+    _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch)
+    monkeypatch.setattr(coda, "INSTALLA", PIN_DI_PROVA)
+    (pacchetto / ".installato-da").write_text(PIN_DI_PROVA + "\n", encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    chiamati = smista_senza_decidere(monkeypatch)
+    pip = pip_finto(monkeypatch, pacchetto)
+
+    uscita = coda.smista(["--repo", str(checkout), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert pip == []
+    assert chiamati == ["decidi", "lancia"]
+    righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert not [r for r in righe if "reinstall" in r], righe
+
+
 def test_con_la_firma_cambiata_e_un_giro_in_corso_il_tick_non_reinstalla_e_non_lancia(
     checkout_vero, tmp_path, monkeypatch
 ):
