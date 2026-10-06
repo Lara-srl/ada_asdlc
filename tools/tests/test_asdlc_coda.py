@@ -1366,6 +1366,20 @@ def test_il_tick_con_l_ambiente_mancante_scrive_la_riga_e_non_lancia(
         "e nemmeno il pre-flight")
 
 
+def test_senza_runner_installato_la_mancanza_dice_di_installare_il_pin(
+    ambiente_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 7: la riga `ambiente mancante:` per il runner che non
+    c'è suggerisce `pip install <pin>` di `[ambiente].installa`, non `./tools`."""
+    pin = "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools"
+    monkeypatch.setattr(coda, "PACCHETTO", tmp_path / "pacchetto")
+    monkeypatch.setattr(coda, "INSTALLA", pin)
+
+    mancanze = coda.mancanze_dell_ambiente(tmp_path)
+
+    assert any(f"`pip install {pin}`" in m for m in mancanze), mancanze
+
+
 # --- La pausa del tick (PBI-385) ---------------------------------------------
 
 

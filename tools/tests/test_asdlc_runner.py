@@ -3316,6 +3316,20 @@ class TestGliHookTrovanoIlRunnerPrimaDiPartire:
 
         assert f"`{giro_nel_repo}` non c'è o non è eseguibile" in uscita, uscita
 
+    def test_senza_asdlc_runner_il_messaggio_dice_di_installare_il_pin(
+        self, giro_nel_repo, tmp_path, capsys, monkeypatch
+    ):
+        """PBI-395, decisione 7: la riparazione che il messaggio suggerisce è
+        `pip install <pin>` di `[ambiente].installa`, non `./tools` scritto qui:
+        dopo il pin di un tag in aDa `tools/asdlc/` non c'è più."""
+        pin = "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools"
+        monkeypatch.setattr(runner, "CFG", dataclasses.replace(
+            runner.CFG, ambiente=dataclasses.replace(runner.CFG.ambiente, installa=pin)))
+
+        uscita = self._fermato(tmp_path, capsys)
+
+        assert f"`pip install {pin}`" in uscita, uscita
+
     def test_un_pre_commit_altrui_ferma_il_giro(
         self, giro_nel_repo, repo_di_prova, tmp_path, capsys
     ):
