@@ -72,6 +72,9 @@ PREFISSO_RAMO: str             # `[git].prefisso_ramo`
 # Il venv in cui è installato il runner, assoluto: il tick lancia
 # `<pacchetto>/bin/asdlc-runner`, mai la copia di lavoro dell'albero (PBI-384).
 PACCHETTO: Path | None         # `[ambiente].pacchetto`
+# Da dove il tick reinstalla il pacchetto, com'è scritto in `asdlc.toml`: è ciò
+# che si passa a `pip install` e la prima metà della firma (PBI-395).
+INSTALLA: str | None           # `[ambiente].installa`
 
 
 @dataclass(frozen=True)
@@ -211,7 +214,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     la stessa ragione del runner — è ciò che i test sostituiscono."""
     global CFG, WORKTREE_DEL_RUNNER, LOG, LUCCHETTO, BACKLOG, CODA, BASE, REMOTO
     global PREFISSO_RAMO, RE_PBI, RE_TITOLO_PR, RE_RAMO_PR, RE_RAMO_PBI, PACCHETTO
-    global LUCCHETTO_DEL_TICK
+    global LUCCHETTO_DEL_TICK, INSTALLA
     CFG = cfg
     WORKTREE_DEL_RUNNER = cfg.worktree.percorso
     LOG = Path(cfg.registro.cartella) / "coda.log"
@@ -222,6 +225,7 @@ def configura(cfg: asdlc_config.Config) -> None:
     BASE, REMOTO = cfg.git.base, cfg.git.remoto
     PREFISSO_RAMO = cfg.git.prefisso_ramo
     PACCHETTO = cfg.ambiente.pacchetto
+    INSTALLA = cfg.ambiente.installa
     id_pbi = asdlc_config.regex_del_modello(cfg.backlog.id).pattern
     ramo = re.escape(PREFISSO_RAMO) + r"(\d+)"
     RE_PBI = re.compile(rf"^-\s+({id_pbi})\s*$")
@@ -514,7 +518,7 @@ def indietro(repo: Path) -> str | None:
 
     Il `--dry-run` non allinea e non reinstalla: fa solo il `fetch`, che non
     sposta il checkout, conta i commit di `origin/main` che il `HEAD` non ha, e
-    confronta la firma del pacchetto con l'albero di `tools/` a `HEAD`.
+    confronta la firma del pacchetto con quella del pin a `HEAD` (`firme()`).
     """
     esegui(["git", "fetch", REMOTO], repo)
     _, quanti = esegui(["git", "rev-list", "--count", f"HEAD..{BASE}"], repo)
@@ -528,28 +532,32 @@ def indietro(repo: Path) -> str | None:
     return "dry-run: " + "; ".join(da_fare) if da_fare else None
 
 
-# Il file del pacchetto in cui sta la firma dell'installazione: l'albero di
-# `tools/` da cui è stato installato. È quello che scriveva `~/asdlc-tick.sh`.
+# Il file del pacchetto in cui sta la firma dell'installazione: il pin di
+# `[ambiente].installa` da cui è stato installato, e l'albero della cartella
+# (PBI-395, decisione 4).
 FIRMA = ".installato-da"
 
 
 def firme(repo: Path) -> tuple[str, str | None]:
-    """`(albero, scritta)`: l'albero di `tools/` a `HEAD` del checkout, e la
-    firma in `<pacchetto>/.installato-da`, `None` se il file non c'è."""
-    _, albero = esegui(["git", "rev-parse", "HEAD:tools"], repo)
+    """`(attesa, scritta)`: la firma del pin a `HEAD` del checkout, `"<pin>
+    <albero>"` con l'albero della cartella, e quella in
+    `<pacchetto>/.installato-da`, `None` se il file non c'è."""
+    _, albero = esegui(["git", "rev-parse", f"HEAD:{Path(INSTALLA).as_posix()}"], repo)
     firma = PACCHETTO / FIRMA
     scritta = firma.read_text(encoding="utf-8").strip() if firma.is_file() else None
-    return albero.strip(), scritta
+    return f"{INSTALLA} {albero.strip()}", scritta
 
 
 def reinstalla(repo: Path, worktree: Path) -> str | None:
-    """Reinstalla il pacchetto se la firma non è quella di `tools/` a `HEAD`, e
+    """Reinstalla il pacchetto se la firma non è quella del pin a `HEAD`, e
     torna la riga da scrivere; `None` se la firma è già quella (PBI-392,
-    decisioni 8 e 10).
+    decisioni 8 e 10; PBI-395, decisioni 4 e 6).
 
-    La firma è `git rev-parse HEAD:tools`, scritta in `<pacchetto>/.installato-da`.
-    L'installazione è `<pacchetto>/bin/pip install ./tools` dal checkout, non
-    editabile. Dopo il tick non decide: il processo che gira è ancora la
+    La firma è quella di `firme()`, scritta in `<pacchetto>/.installato-da`.
+    L'installazione è `<pacchetto>/bin/pip install --no-deps --force-reinstall
+    <installa>` dal checkout, non editabile: forzata perché due tag possono
+    portare la stessa `version`, e senza dipendenze perché una che compare
+    passa da un PBI. Dopo il tick non decide: il processo che gira è ancora la
     versione di prima, caricata in memoria, e decide il tick dopo.
 
     Solo col lucchetto del runner libero, preso senza aspettare e tenuto per
@@ -561,8 +569,8 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
         # Senza pacchetto non c'è niente da reinstallare: lo dice la verifica
         # dell'ambiente, prima del lancio.
         return None
-    albero, scritta = firme(repo)
-    if scritta == albero:
+    attesa, scritta = firme(repo)
+    if scritta == attesa:
         return None
     lucchetto_del_runner = worktree / LUCCHETTO
     lucchetto_del_runner.parent.mkdir(parents=True, exist_ok=True)
@@ -571,13 +579,14 @@ def reinstalla(repo: Path, worktree: Path) -> str | None:
             fcntl.flock(aperto, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return None
-        codice, uscita = esegui([str(PACCHETTO / "bin" / "pip"), "install", "./tools"], repo)
+        codice, uscita = esegui([str(PACCHETTO / "bin" / "pip"), "install", "--no-deps",
+                                 "--force-reinstall", INSTALLA], repo)
         # Con `pip` fallito il pacchetto è ancora quello di prima: la firma
         # resta, il tick dopo ci riprova, e intanto non si lancia (decisione 11).
         if codice != 0:
             return f"reinstallazione fallita: {in_una_riga(uscita)}"
-        (PACCHETTO / FIRMA).write_text(albero + "\n", encoding="utf-8")
-    return f"reinstallato: tools/ a {albero}"
+        (PACCHETTO / FIRMA).write_text(attesa + "\n", encoding="utf-8")
+    return f"reinstallato: {attesa}"
 
 
 def in_una_riga(uscita: str) -> str:
