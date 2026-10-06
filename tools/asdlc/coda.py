@@ -659,7 +659,8 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
     runner stesso verificherebbe all'avvio: gli `[ambiente].eseguibili` nel venv
     del worktree o sul `PATH`, alla versione di `[ambiente].minimi`. Il runner li
     guarda anche lui, ma dopo il distacco, e lì la ragione finisce in un log che
-    il tick non legge.
+    il tick non legge. E i `[ambiente].prestiti` nella radice del worktree: uno
+    assente l'albero usa-e-getta lo salterebbe in silenzio (PBI-395, decisione 11).
     """
     mancanze: list[str] = []
     if PACCHETTO is None:
@@ -673,6 +674,8 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
     ambiente = CFG.ambiente
     mancanze += asdlc_runner.eseguibili_mancanti(ambiente.eseguibili, ambiente.venv, worktree)
     mancanze += asdlc_runner.versioni_sotto_il_minimo(ambiente.minimi, ambiente.venv, worktree)
+    mancanze += [f"ambiente mancante: il prestito {voce} non c'è in {worktree}"
+                 for voce in ambiente.prestiti if not (worktree / voce).exists()]
     return mancanze
 
 
