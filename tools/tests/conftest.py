@@ -32,8 +32,8 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "progetto_ospite: il test legge apposta un file del progetto che ospita la "
-        "suite — la coda vera, l'hook di fase, la KB — e non il progetto di prova "
-        "(PBI-394, decisione 2)")
+        "suite — la coda vera, l'hook di fase, la KB, il suo asdlc.toml — e non il "
+        "progetto di prova (PBI-394, decisione 2; PBI-395, decisione 10)")
 
 
 def pytest_sessionstart(session):

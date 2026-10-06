@@ -533,3 +533,44 @@ def test_l_asdlc_toml_del_repository_dichiara_le_aggiunte_in_asdlc_aggiunte():
     cfg = asdlc_config.carica(PROGETTO)
 
     assert cfg.prompt.aggiunte == (PROGETTO / "asdlc-aggiunte").resolve()
+
+
+# --- L'`asdlc.toml` vero del progetto ospite (PBI-395, decisione 10) ----------
+
+
+def prestito_fuori_posto(radice: Path, voce: str) -> str | None:
+    """Perché un prestito di `[ambiente].prestiti` non va, o `None`. Relativo, dentro
+    l'albero e ignorato da git; **non** che esista: in CI i prestiti non ci sono, e
+    l'esistenza la verifica `mancanze_dell_ambiente()` all'avvio. Una cartella che
+    non c'è non corrisponde a un pattern `data/`, quindi si chiede anche `voce/`."""
+    if voce.startswith("~") or Path(voce).is_absolute():
+        return f"{voce!r} è un percorso assoluto"
+    if not (radice / voce).resolve().is_relative_to(radice.resolve()):
+        return f"{voce!r} esce dall'albero"
+    for forma in (voce, voce.rstrip("/") + "/"):
+        if subprocess.run(["git", "check-ignore", "-q", forma], cwd=radice).returncode == 0:
+            return None
+    return f"{voce!r} non è ignorato da git"
+
+
+@pytest.mark.progetto_ospite
+def test_guardia_l_asdlc_toml_del_progetto_ospite_regge():
+    """PBI-395, decisione 10. Con PBI-394 i test di config leggono il progetto di
+    prova, e nessuno controllava più il file che il tick leggerà davvero. Qui si
+    asserisce solo ciò che vale per **ogni** ospite — aDa, la sonda di 394, il
+    repository `asdlc` —: il file si carica, c'è il gate `asdlc`, il `cwd` di ogni
+    gate esiste, ogni prestito è relativo, dentro l'albero e ignorato da git, e
+    `installa` è in una delle due forme. I gate propri di aDa non si nominano."""
+    radice = asdlc_config.radice(Path(__file__).resolve().parent)
+
+    cfg = asdlc_config.carica(radice)
+
+    assert "asdlc" in [gate.nome for gate in cfg.gate]
+    assert [g.cwd for g in cfg.gate if not (radice / g.cwd).is_dir()] == []
+    assert [m for v in cfg.ambiente.prestiti if (m := prestito_fuori_posto(radice, v))] == []
+    installa = cfg.ambiente.installa
+    if cfg.ambiente.pacchetto is not None:
+        assert installa is not None
+    if installa is not None:
+        assert (asdlc_config.RE_PIN_URL.fullmatch(installa) if asdlc_config.e_un_url(installa)
+                else not (installa.startswith("~") or Path(installa).is_absolute())), installa
