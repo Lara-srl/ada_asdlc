@@ -437,6 +437,22 @@ def test_guardia_le_due_forme_di_installa_si_caricano(tmp_path, installa):
     assert asdlc_config.carica(scrivi_toml(tmp_path, testo)).ambiente.installa == installa
 
 
+def test_installa_in_asdlc_local_toml_e_rifiutata_e_dice_di_metterla_in_asdlc_toml(tmp_path):
+    """PBI-395, decisione 3: il pin è del progetto, versionato. Una macchina con un
+    pin suo registrerebbe giri di una versione che nessun altro ha, quindi
+    `installa` non si sovrascrive da `asdlc.local.toml`, anche se sta in
+    `[ambiente]`, e il messaggio dice dove va."""
+    scrivi_toml(tmp_path)
+    scrivi_toml(tmp_path, '[ambiente]\ninstalla = "./altro"\n', nome="asdlc.local.toml")
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione) as fermata:
+        asdlc_config.carica(tmp_path)
+
+    messaggio = str(fermata.value)
+    assert "asdlc.local.toml" in messaggio and "[ambiente].installa" in messaggio, messaggio
+    assert "va in asdlc.toml" in messaggio, messaggio
+
+
 def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
     """`[ambiente].eseguibili`: ciò che i gate lanciano per nome, e che il runner
     e il tick verificano prima di partire (PBI-384, decisione 7)."""
