@@ -526,9 +526,15 @@ def indietro(repo: Path) -> str | None:
     if quanti.strip() not in ("", "0"):
         da_fare.append(f"il checkout è indietro di {quanti.strip()} commit rispetto a "
                        f"{BASE}, e un tick lo allineerebbe prima di decidere")
-    if PACCHETTO is not None and (firma := firme(repo))[0] != firma[1]:
-        da_fare.append(f"la firma del pacchetto è {firma[1]}, non l'albero di tools/ a "
-                       f"HEAD {firma[0]}, e un tick reinstallerebbe")
+    if PACCHETTO is not None:
+        try:
+            attesa, scritta = firme(repo)
+        except Guasto as guasto:
+            da_fare.append(f"un tick scriverebbe reinstallazione fallita: {guasto}")
+        else:
+            if attesa != scritta:
+                da_fare.append(f"la firma del pacchetto è {scritta}, non quella del pin "
+                               f"{attesa}, e un tick reinstallerebbe")
     return "dry-run: " + "; ".join(da_fare) if da_fare else None
 
 
