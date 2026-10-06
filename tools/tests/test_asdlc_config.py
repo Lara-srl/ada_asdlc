@@ -424,6 +424,19 @@ def test_un_installa_fuori_dalle_due_forme_e_un_errore_che_nomina_la_chiave(
     assert installa in str(fermata.value), "dice il valore che rifiuta"
 
 
+@pytest.mark.parametrize("installa", [
+    "./tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@v0.1.0#subdirectory=tools",
+    "git+ssh://git@github.com/Lara-srl/asdlc.git@v12.3.40",
+], ids=["cartella", "url-con-sottocartella", "url-senza-sottocartella"])
+def test_guardia_le_due_forme_di_installa_si_caricano(tmp_path, installa):
+    """PBI-395, decisione 1, l'altra metà: le due forme ammesse passano com'è
+    scritte, e il `#subdirectory=` è facoltativo."""
+    testo = TOML_DI_PROVA.replace('installa = "./tools"\n', f'installa = "{installa}"\n')
+
+    assert asdlc_config.carica(scrivi_toml(tmp_path, testo)).ambiente.installa == installa
+
+
 def test_gli_eseguibili_dell_ambiente_si_leggono_da_ambiente(tmp_path):
     """`[ambiente].eseguibili`: ciò che i gate lanciano per nome, e che il runner
     e il tick verificano prima di partire (PBI-384, decisione 7)."""
