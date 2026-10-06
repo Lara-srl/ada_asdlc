@@ -326,6 +326,9 @@ def interpreta(dati: dict, file: str) -> Config:
         raise ErroreDiConfigurazione(
             f"{file}: manca `[ambiente].installa` — con `[ambiente].pacchetto` il tick "
             "deve sapere da dove reinstallare il pacchetto")
+    installa = ambiente.testo("installa", default=None)
+    if installa is not None:
+        controlla_installa(installa, file)
     return Config(
         git=Git(base=git.testo("base"), prefisso_ramo=git.testo("prefisso_ramo")),
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
@@ -335,7 +338,7 @@ def interpreta(dati: dict, file: str) -> Config:
                           pacchetto=_percorso(ambiente.testo("pacchetto", default=None)),
                           eseguibili=ambiente.testi("eseguibili", default=()),
                           minimi=ambiente.interi_per_nome("minimi", default={}),
-                          installa=ambiente.testo("installa", default=None)),
+                          installa=installa),
         worktree=Worktree(percorso=Path(worktree.testo("percorso")).expanduser()),
         soglie=Soglie(tentativi=soglie.intero("tentativi"), igiene=soglie.intero("igiene"),
                       revisioni=soglie.intero("revisioni"),
@@ -345,6 +348,28 @@ def interpreta(dati: dict, file: str) -> Config:
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
         prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
     )
+
+
+# L'URL git di `[ambiente].installa`, pinnato a un tag e mai a un ramo
+# (`ADR-0026`): `git+<schema>://…@v<maggiore>.<minore>.<patch>[#subdirectory=…]`.
+RE_PIN_URL = re.compile(r"git\+[a-z]+://[^@#\s]*(@[^@#\s]*)?@v\d+\.\d+\.\d+"
+                        r"(#subdirectory=[^#\s]+)?")
+
+
+def controlla_installa(installa: str, file: str) -> None:
+    """`[ambiente].installa` è in una delle due forme che `pip install` capisce:
+    una cartella relativa alla radice del progetto, o un URL git pinnato a un tag
+    (PBI-395, decisione 1). Fuori da queste si ferma, nominando chiave e valore."""
+    if e_un_url(installa):
+        if not RE_PIN_URL.fullmatch(installa):
+            raise ErroreDiConfigurazione(
+                f"{file}: `[ambiente].installa` è {installa!r}, un URL git non pinnato a "
+                "un tag — la forma è `git+…@v<maggiore>.<minore>.<patch>"
+                "[#subdirectory=…]`, mai un ramo (`ADR-0026`)")
+    elif installa.startswith("~") or Path(installa).is_absolute():
+        raise ErroreDiConfigurazione(
+            f"{file}: `[ambiente].installa` è un percorso di macchina, {installa!r} — "
+            "una cartella si scrive relativa alla radice del progetto, `./tools`")
 
 
 def e_un_url(installa: str) -> bool:
