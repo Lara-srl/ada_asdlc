@@ -117,7 +117,7 @@ class Ambiente:
     minimi: dict[str, int] = field(default_factory=dict)
     # Da dove si reinstalla il pacchetto, come lo legge `pip install`: una
     # cartella della radice del progetto o un URL git pinnato a un tag
-    # (PBI-395). `None` se il progetto non lo dichiara.
+    # (PBI-395). Obbligatoria con `pacchetto`; `None` senza.
     installa: str | None = None
 
 
@@ -320,6 +320,12 @@ def interpreta(dati: dict, file: str) -> Config:
     prompt = sezione.dentro("prompt", default={})
     prompt.solo("aggiunte", perche="i prompt del pacchetto si estendono con le "
                 "aggiunte, e non si sostituiscono")
+    # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
+    # implicito è la causa `default-implicito` (PBI-395, decisione 2).
+    if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
+        raise ErroreDiConfigurazione(
+            f"{file}: manca `[ambiente].installa` — con `[ambiente].pacchetto` il tick "
+            "deve sapere da dove reinstallare il pacchetto")
     return Config(
         git=Git(base=git.testo("base"), prefisso_ramo=git.testo("prefisso_ramo")),
         backlog=Backlog(cartella=backlog.testo("cartella"), coda=backlog.testo("coda"),
