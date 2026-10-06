@@ -1607,8 +1607,9 @@ def git_in(cartella: Path, *args: str) -> str:
 def un_checkout_indietro(tmp_path, monkeypatch, *, tocca="README.md"):
     """Un `origin` nudo, il checkout del tick clonato su `main`, e un merge
     arrivato su `origin` dopo il clone, che cambia il file `tocca`. Il pacchetto
-    è una cartella temporanea con la firma dell'albero di `tools/` del checkout,
-    com'era all'ultima installazione. Torna `(origin, checkout, pacchetto)`."""
+    è una cartella temporanea con la firma del pin `./tools` e dell'albero di
+    `tools/` del checkout, com'era all'ultima installazione (PBI-395, decisione
+    4). Torna `(origin, checkout, pacchetto)`."""
     origin, semina, checkout = tmp_path / "origin.git", tmp_path / "semina", tmp_path / "checkout"
     git_in(tmp_path, "init", "-q", "--bare", str(origin))
     git_in(tmp_path, "clone", "-q", str(origin), str(semina))
@@ -1625,7 +1626,7 @@ def un_checkout_indietro(tmp_path, monkeypatch, *, tocca="README.md"):
     pacchetto = tmp_path / "pacchetto"
     (pacchetto / "bin").mkdir(parents=True)
     (pacchetto / ".installato-da").write_text(
-        git_in(checkout, "rev-parse", "HEAD:tools") + "\n", encoding="utf-8")
+        "./tools " + git_in(checkout, "rev-parse", "HEAD:tools") + "\n", encoding="utf-8")
     monkeypatch.setattr(coda, "PACCHETTO", pacchetto)
     return origin, checkout, pacchetto
 
@@ -1737,12 +1738,14 @@ def pip_finto(monkeypatch, pacchetto: Path, codice=0):
 def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
     checkout_vero, tmp_path, monkeypatch
 ):
-    """PBI-392, decisioni 8 e 10. La firma è l'albero di `tools/` a `HEAD`,
-    scritta in `<pacchetto>/.installato-da` all'ultima installazione. Dopo un
-    merge che tocca `tools/` non è più quella: il tick, col lucchetto del runner
-    libero, chiama `<pacchetto>/bin/pip install ./tools` nel checkout, scrive la
-    firma nuova e la riga `reinstallato:`, ed esce senza decidere — il processo
-    che gira è ancora la versione di prima, e decide il tick dopo."""
+    """PBI-392, decisioni 8 e 10, e PBI-395, decisioni 4 e 6. Con `installa =
+    "./tools"` la firma è il pin e l'albero di `tools/` a `HEAD`, scritta in
+    `<pacchetto>/.installato-da` all'ultima installazione. Dopo un merge che
+    tocca `tools/` non è più quella: il tick, col lucchetto del runner libero,
+    chiama `<pacchetto>/bin/pip install --no-deps --force-reinstall ./tools` nel
+    checkout, scrive la firma `"./tools <albero>"` e la riga `reinstallato:`, ed
+    esce senza decidere — il processo che gira è ancora la versione di prima, e
+    decide il tick dopo."""
     _, checkout, pacchetto = un_checkout_indietro(tmp_path, monkeypatch,
                                                   tocca="tools/modulo.py")
     albero = tmp_path / "albero"
@@ -1754,10 +1757,12 @@ def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
 
     albero_di_tools = git_in(checkout, "rev-parse", "HEAD:tools")
     assert uscita == 0
-    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "./tools"], checkout)]
-    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == albero_di_tools
+    assert pip == [([str(pacchetto / "bin" / "pip"), "install", "--no-deps",
+                     "--force-reinstall", "./tools"], checkout)]
+    firma = f"./tools {albero_di_tools}"
+    assert (pacchetto / ".installato-da").read_text(encoding="utf-8").strip() == firma
     righe = (checkout / coda.LOG).read_text(encoding="utf-8").splitlines()
-    assert righe[-1].split("  ", 1)[1] == f"reinstallato: tools/ a {albero_di_tools}", righe
+    assert righe[-1].split("  ", 1)[1] == f"reinstallato: {firma}", righe
     assert chiamati == []
 
 
