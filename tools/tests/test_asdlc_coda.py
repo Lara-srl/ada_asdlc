@@ -1735,7 +1735,7 @@ def pip_finto(monkeypatch, pacchetto: Path, codice=0):
     return visti
 
 
-def test_con_la_firma_cambiata_il_tick_reinstalla_e_non_decide(
+def test_con_installa_cartella_il_tick_reinstalla_forzato_e_firma_pin_e_albero(
     checkout_vero, tmp_path, monkeypatch
 ):
     """PBI-392, decisioni 8 e 10, e PBI-395, decisioni 4 e 6. Con `installa =
