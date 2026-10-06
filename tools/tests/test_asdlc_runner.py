@@ -3597,7 +3597,10 @@ class RepoDiProva:
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(contenuto, encoding="utf-8")
         self._git("add", "-A")
-        self._git("commit", "-q", "-m", messaggio)
+        # I commit di preparazione saltano il pre-commit che `apri_la_fase()`
+        # installa: lancerebbe il runner di `.venv-asdlc`, che nel repo di prova
+        # esce con 1 (difetto 92 di PBI-102). Il post-commit gira ancora.
+        self._git("commit", "-q", "--no-verify", "-m", messaggio)
         return self._git("rev-parse", "HEAD")
 
     def configura(self, chiave: str, valore: str) -> None:
@@ -4248,6 +4251,39 @@ class TestLaCollezioneDellaBaseSiCalcolaUnaVoltaPerGiro:
         assert [t.nome for t in runner.test_nuovi_del_commit(sha)] == ["test_c"]
         assert list(runner.LOG_DIR.glob("**/*.json")) == []
         assert list(git_dir.glob("**/*.json")) == []
+
+
+class TestLaChiaveDellaCollezioneEUnoShaRisolto:
+    """PBI-397, difetto 91 di PBI-102: `collezione_al_commit()` usava l'argomento
+    com'era come chiave della cache. `test_nuovi_da_aprire()` la chiama con
+    `"HEAD"`: il primo `--chiedi-impl` del giro scriveva `HEAD.json`, il secondo
+    lo rileggeva dopo un commit RED nuovo, e il RED veniva rifiutato con
+    «nessun test nuovo». Lo stesso con la `memoria` fuori da un giro."""
+
+    @pytest.mark.parametrize("cache", ["file", "memoria"])
+    def test_head_spostato_fra_due_chiamate_legge_la_collezione_nuova(
+            self, repo_di_prova, cache):
+        base = repo_di_prova.commit("test: un caso", {
+            "backend/tests/test_a.py": "def test_x():\n    assert True\n"})
+        repo_di_prova.sposta_la_base(base)
+        memoria: dict[str, dict[str, str]] | None = None
+        if cache == "file":
+            runner.apri_la_fase(base)
+        else:
+            memoria = {}
+
+        try:
+            prima = runner.collezione_al_commit("HEAD", memoria)
+            repo_di_prova.commit("test: un caso nuovo (RED)", {
+                "backend/tests/test_b.py": "def test_nuovo():\n    assert False\n"})
+            dopo = runner.collezione_al_commit("HEAD", memoria)
+        finally:
+            if cache == "file":
+                runner.chiudi_la_fase()
+
+        assert "test_nuovo" not in prima
+        assert dopo != prima
+        assert dopo.get("test_nuovo") == "backend/tests/test_b.py"
 
 
 class TestIlGateDelRossoCamminaICommit:
