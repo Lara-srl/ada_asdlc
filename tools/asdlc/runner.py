@@ -1622,7 +1622,14 @@ def collezione_al_commit(sha: str,
     il gate del rosso ne passa una per tutta la sua passata, e il genitore di
     un commit è il commit prima, o la base. Così ogni albero si raccoglie una
     volta sola, e non tre per commit (PBI-396, decisione 9).
+
+    Una chiave di cache del runner è uno sha risolto, mai un riferimento
+    (PBI-397): `HEAD`, un ramo, `origin/main` si risolvono con `git rev-parse`
+    prima di diventare il nome del file o la voce della `memoria`. Con `"HEAD"`
+    come chiave, un secondo `--chiedi-impl` rileggeva la collezione di un `HEAD`
+    di prima. Un riferimento che non si risolve alza, e non si ripiega sul nome.
     """
+    sha = git("rev-parse", "--verify", f"{sha}^{{commit}}")
     if memoria is not None and sha in memoria:
         return memoria[sha]
     cartella = cartella_delle_collezioni()
