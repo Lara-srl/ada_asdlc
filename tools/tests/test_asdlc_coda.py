@@ -1380,6 +1380,37 @@ def test_senza_runner_installato_la_mancanza_dice_di_installare_il_pin(
     assert any(f"`pip install {pin}`" in m for m in mancanze), mancanze
 
 
+def test_il_tick_con_un_prestito_assente_nel_worktree_lo_nomina_e_non_lancia(
+    configura, ambiente_vero, tmp_path, monkeypatch
+):
+    """PBI-395, decisione 11. Un prestito di `[ambiente].prestiti` che non c'è
+    nella radice del worktree si saltava in silenzio in `worktree_usa_e_getta()`,
+    e i test che ne hanno bisogno cadevano nell'albero usa-e-getta per una
+    ragione che nessuno leggeva. Ora è una riga `ambiente mancante: il prestito
+    <voce> non c'è in <worktree>`, e il tick non lancia, come per un eseguibile
+    che manca. Il prestito che c'è non si nomina."""
+    configura(toml_di_prova().replace('prestiti = ["data"]',
+                                      'prestiti = ["data", "frontend/node_modules"]'))
+    installato = tmp_path.resolve() / ".venv-asdlc" / "bin" / "asdlc-runner"
+    installato.parent.mkdir(parents=True)
+    installato.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    installato.chmod(0o755)
+    repo = scrivi_coda(tmp_path, "- PBI-337\n")
+    albero = tmp_path / "albero"
+    (albero / "frontend" / "node_modules").mkdir(parents=True)
+    visti, esegui = mondo_registrato()
+    monkeypatch.setattr(coda, "esegui", esegui)
+    monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 1
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    mancante = [r.split("  ", 1)[1] for r in righe if "  ambiente mancante: " in r]
+    assert mancante == [f"ambiente mancante: il prestito data non c'è in {albero}"], righe
+    assert not any("asdlc-runner" in " ".join(cmd) for cmd in visti), "il runner non parte"
+
+
 # --- La pausa del tick (PBI-385) ---------------------------------------------
 
 
