@@ -1,0 +1,108 @@
+# asdlc.toml — la configurazione del runner ASDLC (tools/asdlc/runner.py) e del
+# tick della coda (tools/asdlc/coda.py). La legge tools/asdlc/config.py.
+#
+# Porta i **valori**; le ragioni restano nel sorgente, accanto alla costante che
+# nasce da qui. Nessun percorso di macchina: un percorso assoluto o con `~` qui è
+# un errore di configurazione, perché il file è versionato e deve valere su ogni PC.
+# I percorsi relativi hanno due ancore, e ogni chiave dice la sua:
+#
+# - la **radice del progetto**, cioè l'albero in cui si lavora: `[ambiente].venv`,
+#   `[ambiente].prestiti`, le cartelle del backlog e del registro, i `cwd` dei gate.
+#   Ogni worktree ha i suoi.
+# - la **radice comune** del repository, la cartella madre di
+#   `git rev-parse --git-common-dir`: il checkout principale, lo stesso da ogni
+#   worktree. `[ambiente].pacchetto` e `[worktree].percorso` (PBI-384).
+#
+# Le sezioni [ambiente] e [worktree] — e solo quelle — si possono sovrascrivere da
+# un asdlc.local.toml accanto a questo, gitignored: è lì che vanno i percorsi di
+# macchina. Le altre sezioni sono del progetto, e si cambiano qui.
+
+[git]
+# Il ramo da cui nasce ogni branch e contro cui misurano i gate.
+base = "origin/main"
+# Il prefisso dei rami dei PBI: `pbi/pbi-358`, e `pbi/pbi-358-giro2` se è occupato.
+prefisso_ramo = "pbi/pbi-"
+
+[backlog]
+cartella = "backlog"
+coda = "backlog/CODA.md"
+# Modelli, non regex: `{n}` è il numero, `{slug}` il resto del nome. Le regex e i
+# glob li deriva il lettore, e sono gli stessi per il runner e per il tick.
+id = "PBI-{n}"
+file = "PBI-{n}-{slug}.md"
+
+[registro]
+# I rapporti dei giri, i log, i prompt e il lucchetto; `tempi` è il registro
+# versionato su cui si fattura.
+cartella = "runs"
+tempi = "tempi.csv"
+
+[ambiente]
+# Il venv da mettere sul PATH prima dei gate: `pytest` non è nel runtime.
+venv = ".venv"
+# Il venv in cui è installato il runner, da `installa` qui sotto: i comandi che il
+# runner lancia e fa lanciare — il tick, gli hook, il server dell'esito — sono
+# `<pacchetto>/bin/asdlc-*`, per percorso assoluto. Relativo alla radice comune.
+pacchetto = ".venv-asdlc"
+# Da dove il tick reinstalla il pacchetto quando la firma in
+# `<pacchetto>/.installato-da` non è più questa: `<pacchetto>/bin/pip install
+# --no-deps --force-reinstall <installa>`, dalla radice del progetto (PBI-395).
+# Due forme sole: una cartella relativa alla radice del progetto, o un URL git
+# pinnato a un tag, `git+ssh://…@v<maggiore>.<minore>.<patch>#subdirectory=tools`
+# — mai un ramo (`ADR-0026`). Obbligatoria con `pacchetto`, e solo qui: non si
+# sovrascrive da asdlc.local.toml, perché il pin è del progetto. Salire di tag è
+# una PR che cambia questa riga.
+# Il repository `asdlc` si installa la propria versione rilasciata, mai la copia
+# di lavoro (`ADR-0026`, vincolo 2; D10 del runbook della Fase 5 di aDa).
+installa = "git+ssh://git@github.com/Lara-srl/ada_asdlc@v0.1.0#subdirectory=tools"
+# Ciò che i gate e il runner lanciano per nome, e che deve esserci prima di
+# partire: il runner e il tick lo cercano sul PATH che vedranno i gate, cioè con
+# `venv` davanti, e senza non lanciano. Senza la chiave non si verifica niente.
+eseguibili = ["git", "gh", "pytest"]
+# Ciò che il worktree usa-e-getta del gate del rosso prende in prestito dall'albero
+# del giro, con un link: qui niente, i test del runner non hanno file gitignored.
+prestiti = []
+
+[worktree]
+# L'albero in cui il runner lavora, e in cui il tick lo lancia. Relativo alla
+# radice comune: accanto al checkout principale.
+percorso = "../asdlc-run"
+
+[soglie]
+# Gate rossi per revisione, giri spesi a chiedere un commit, revisioni del Critic.
+tentativi = 3
+igiene = 3
+revisioni = 4
+# Il tetto di una chiamata a un agente, in minuti, uno per ruolo: scaduto, il giro
+# chiude `senza esito` (PBI-369). La chiamata sana più lunga del Builder ne è
+# durata al massimo 40 (PBI-337, 07/09), quella del Critic 8,4 (PBI-343, 05/09).
+# Il Builder ha poco più del doppio, perché 40 è già un limite superiore e non una
+# misura; il Critic il triplo, perché costa poco e un suo falso timeout
+# butterebbe tutto il giro del Builder. Uno solo per i due o lascerebbe al Critic
+# un'ora e mezza, o toglierebbe al Builder la chiamata da 40 minuti. Da rileggere
+# con le durate per chiamata che `runs/<run>.json` salva da PBI-369.
+minuti_builder = 90
+minuti_critic = 25
+
+[prompt]
+# La cartella delle aggiunte ai prompt del pacchetto, relativa alla radice del
+# progetto: un file `<ruolo>.md` per ruolo, accodato al prompt di quel ruolo. Si
+# estende e non si sostituisce, e un'altra chiave qui è un errore. Vedi
+# `asdlc-aggiunte/README.md`.
+aggiunte = "asdlc-aggiunte"
+
+[gate_del_rosso]
+# `false` spegne la seconda domanda del Quality Gate — «quei test sono mai stati
+# rossi?» — e il giro lo dichiara nel rapporto. Serve a un progetto il cui runner
+# di test il gate non sa leggere: sa leggere pytest e vitest.
+attivo = true
+
+# I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.
+# Un gate con `solo_se_tocca` si accende solo se il diff del branch tocca uno di
+# quei percorsi; senza il campo è sempre acceso.
+#
+# Il solo gate: i test del runner e della coda, sempre acceso.
+[[gate]]
+nome = "asdlc"
+comando = ["python3", "-m", "pytest", "-q", "tools/tests"]
+cwd = "."

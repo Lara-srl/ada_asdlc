@@ -1,0 +1,30 @@
+# --- Dipendenze e build -----------------------------------------------------
+__pycache__/
+*.pyc
+build/
+dist/
+.venv/
+venv/
+
+# --- ASDLC ------------------------------------------------------------------
+# I file del runner ASDLC in runs/ sono effimeri, tranne uno: runs/tempi.csv è il
+# registro dei tempi su cui si fattura, e va versionato. Quindi si ignora tutto e si
+# fa un'eccezione, invece di elencare un'estensione alla volta.
+#
+# Fino al 25/09 era un elenco: *.json, *.log, *_prompt.txt, *.stdout, *.stderr,
+# *.chiamate.jsonl, .runner.lock. Ogni file nuovo del runner ha sporcato l'albero del
+# giro che lo scriveva prima di finire nell'elenco: il log del giro (difetto 22), i
+# flussi di un'invocazione (difetto 44) e i rapporti del Critic di PBI-371 (difetto
+# 49). Alla terza occorrenza di `scrittura-non-ignorata` la cura è rovesciare la
+# regola: un file nuovo in runs/ nasce ignorato.
+runs/*
+!runs/tempi.csv
+# Il venv in cui è installato il runner, `[ambiente].pacchetto` di asdlc.toml, e ciò
+# che `pip install ./tools` lascia accanto al sorgente: `build/` è già sopra,
+# `asdlc.egg-info/` no (PBI-384).
+.venv-asdlc/
+*.egg-info/
+# I percorsi di macchina del runner — venv, prestiti, worktree — che
+# sovrascrivono le sole sezioni [ambiente] e [worktree] di asdlc.toml, il file
+# versionato che porta tutto il resto (tools/asdlc_config.py, PBI-358).
+asdlc.local.toml
