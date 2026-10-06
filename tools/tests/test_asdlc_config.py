@@ -431,10 +431,17 @@ def test_un_installa_fuori_dalle_due_forme_e_un_errore_che_nomina_la_chiave(
 ], ids=["cartella", "url-con-sottocartella", "url-senza-sottocartella"])
 def test_guardia_le_due_forme_di_installa_si_caricano(tmp_path, installa):
     """PBI-395, decisione 1, l'altra metà: le due forme ammesse passano com'è
-    scritte, e il `#subdirectory=` è facoltativo."""
+    scritte, e il `#subdirectory=` è facoltativo. Un rifiuto è un fallimento del
+    test e non un'eccezione, perché il gate del rosso conti il mutante che lo
+    alza come un morso (difetto 93 di PBI-102)."""
     testo = TOML_DI_PROVA.replace('installa = "./tools"\n', f'installa = "{installa}"\n')
 
-    assert asdlc_config.carica(scrivi_toml(tmp_path, testo)).ambiente.installa == installa
+    try:
+        cfg = asdlc_config.carica(scrivi_toml(tmp_path, testo))
+    except asdlc_config.ErroreDiConfigurazione as errore:
+        pytest.fail(f"la forma ammessa {installa!r} è stata rifiutata: {errore}")
+
+    assert cfg.ambiente.installa == installa
 
 
 def test_installa_in_asdlc_local_toml_e_rifiutata_e_dice_di_metterla_in_asdlc_toml(tmp_path):
