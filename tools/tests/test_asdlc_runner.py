@@ -9864,6 +9864,64 @@ class TestLeGuardieTrovanoIlRunnerSpostato:
         assert "tools/asdlc/runner.py" in esito.stderr
         assert "tools/asdlc_runner.py" in esito.stderr
 
+    @staticmethod
+    def _installato(radice: Path, pacchetto: str = ".venv-asdlc") -> Path:
+        """Un albero git in `radice` con `[ambiente].pacchetto` in `asdlc.toml`, e un
+        `asdlc-runner` finto nel `bin` di quel pacchetto: scrive i suoi argomenti
+        accanto a sé ed esce con 2, come la guardia che ferma una scrittura di
+        produzione in `TEST_ONLY`. Torna il segno."""
+        subprocess.run(["git", "init", "-q", str(radice)], check=True)
+        (radice / "asdlc.toml").write_text(
+            f'[ambiente]\nvenv = ".venv"\nprestiti = []\npacchetto = "{pacchetto}"\n'
+            'installa = "./tools"\n', encoding="utf-8")
+        comando = radice / pacchetto / "bin" / "asdlc-runner"
+        comando.parent.mkdir(parents=True)
+        comando.write_text('#!/bin/sh\ncat > /dev/null\n'
+                           'printf %s "$*" > "$(dirname "$0")/lanciato"\nexit 2\n',
+                           encoding="utf-8")
+        comando.chmod(0o755)
+        return comando.with_name("lanciato")
+
+    @staticmethod
+    def _scrittura_di_produzione(radice: Path) -> str:
+        return json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                           "cwd": str(radice),
+                           "tool_input": {"file_path": str(radice / "backend/app/foglio.py")}})
+
+    def test_fase_tdd_senza_tools_asdlc_lancia_il_runner_installato(self, tmp_path):
+        """PBI-395, decisione 9: dopo il pin di un tag `tools/asdlc/` non c'è più
+        nell'albero, e la guardia cerca prima il runner installato,
+        `<radice comune>/<pacchetto>/bin/asdlc-runner`, con `pacchetto` letto da
+        `asdlc.toml`. Lo lancia con `--guardia-fase`, e il suo 2 arriva intatto a
+        Claude Code: la scrittura di produzione in `TEST_ONLY` è bloccata."""
+        script = self._albero_con_lo_script(tmp_path)
+        segno = self._installato(tmp_path)
+
+        esito = subprocess.run([str(script)], input=self._scrittura_di_produzione(tmp_path),
+                               capture_output=True, text=True, cwd=tmp_path,
+                               env=fuori_da_un_giro())
+
+        assert segno.is_file(), esito.stderr
+        assert segno.read_text() == "--guardia-fase"
+        assert esito.returncode == 2, esito.stderr
+
+    def test_guardia_fase_tdd_con_installato_e_albero_lancia_l_installato(self, tmp_path):
+        """PBI-395, decisione 9: con il runner installato **e** il sorgente in
+        `tools/asdlc/runner.py`, la guardia lancia l'installato. Il sorgente
+        dell'albero è la copia di lavoro, e resta il ripiego."""
+        script = self._albero_con_lo_script(tmp_path)
+        installato = self._installato(tmp_path)
+        dell_albero = self._runner_finto(tmp_path, "tools/asdlc/runner.py")
+
+        esito = subprocess.run([str(script)], input=self._scrittura_di_produzione(tmp_path),
+                               capture_output=True, text=True, cwd=tmp_path,
+                               env=fuori_da_un_giro())
+
+        assert installato.is_file(), esito.stderr
+        assert installato.read_text() == "--guardia-fase", esito.stderr
+        assert not dell_albero.exists(), "il sorgente dell'albero non si lancia"
+        assert esito.returncode == 2
+
     def test_guardia_fase_tdd_col_runner_in_tools_decide_come_prima(self, repo_di_prova):
         """PBI-388, quinto criterio: con `tools/asdlc_runner.py` al suo posto,
         che è l'albero vero, `fase-tdd.sh` blocca la produzione in `TEST_ONLY`
