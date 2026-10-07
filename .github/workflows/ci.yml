@@ -1,0 +1,27 @@
+name: ci
+
+# Il gate di `main`: una PR entra solo con questo job verde (passo 2.4 del runbook
+# della Fase 5 di aDa). Gira su ogni PR e su ogni push in `main`.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Una corsa per ramo: un push nuovo sullo stesso ramo annulla quella vecchia.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # `pip install pytest` e NIENT'ALTRO, di proposito, com'era il job `asdlc` di
+      # aDa: se il job è verde senza altre dipendenze, «il runner basta a se stesso»
+      # (ADR-0017) è dimostrato a ogni PR invece che asserito.
+      - run: pip install pytest
+      - run: pytest -q tools/tests
