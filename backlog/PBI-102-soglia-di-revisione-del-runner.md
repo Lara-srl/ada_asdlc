@@ -1882,6 +1882,43 @@ del difetto 23 sul lancio di PBI-335, che qui sta scritta accanto alla sua spunt
 
     **Causa:** `regola-non-scritta`
 
+95. **La pausa del tick è una per utente, e ferma tutti i progetti della macchina.**
+    `file_di_pausa()` (`coda.py`) è `Path.home() / "asdlc-tick.pausa"`: nessuna chiave di
+    `asdlc.toml` la nomina, e ogni progetto che installa il pacchetto legge lo stesso file.
+    Finché il runner viveva in aDa c'era un progetto solo, e la differenza non si vedeva.
+
+    Misurato il 07/10 al passo 2.7 della Fase 5: con la pausa messa per aDa dal passo 1,
+    `.venv-asdlc/bin/asdlc-coda --dry-run` lanciato da `/home/laisdev/ada_asdlc` risponde
+    `in pausa:`, e il controllo del 2.7 («in coda non c'è niente») si è potuto fare solo con
+    una `HOME` temporanea. Dal passo 4.2 i due cron girano sulla stessa macchina: mettere in
+    pausa aDa per chiudere un giro fermato spegne anche `asdlc`, e viceversa, senza che il
+    `coda.log` dell'altro dica di chi era la pausa.
+
+    La cura da decidere: il file di pausa per progetto (nella radice comune, o una chiave di
+    `[ambiente]`), con un file per la macchina intera solo se serve davvero. Fino ad allora
+    la regola 1 del runbook della Fase 5 (pausa dal passo 1 al 4) vale per tutti e due.
+
+    **Causa:** `ambiente-non-dichiarato`
+
+96. **Il messaggio della guardia di fase nomina un comando che non c'è più.** In
+    `TEST_ONLY`, la guardia che blocca una scrittura di produzione dice al Builder di
+    lanciare `tools/asdlc/runner.py --chiedi-impl` (`runner.py`, righe 1358 e 1364), il
+    sorgente come stava in aDa prima del `PBI-384`. Il comando vero è
+    `<pacchetto>/bin/asdlc-runner --chiedi-impl`, ed è `comando_del_pacchetto()` a
+    costruirlo per l'hook e per la config della sessione: il testo del messaggio è una
+    seconda copia dello stesso comando, scritta a mano, ed è rimasta indietro.
+
+    Misurato il 07/10 al passo 3.4 della Fase 5, in aDa col runner `0.1.0` installato: una
+    `Write` su `backend/app/status.py` in un worktree con la fase `TEST_ONLY` esce con 2,
+    come deve, e lo stderr dice «poi `tools/asdlc/runner.py --chiedi-impl`». In aDa
+    `tools/asdlc/` non esiste più. Un Builder che segue il messaggio alla lettera lancia un
+    file che non c'è; il prompt del Builder ha il comando giusto, e oggi è lui a salvarlo.
+
+    La cura: il messaggio prende il comando da `comando_del_pacchetto("asdlc-runner")`, e un
+    test controlla che la stringa della guardia nomini quello e non un percorso.
+
+    **Causa:** `due-fonti`
+
 ## ⛔ `ada-notte.sh` deve sparire (Francesco, 26/08/2026)
 
 > *«Non voglio più vedere ada-notte.sh: eliminato, e usiamo solo asdlc_runner.»*
