@@ -66,7 +66,7 @@ prestiti = []
 [worktree]
 # L'albero in cui il runner lavora, e in cui il tick lo lancia. Relativo alla
 # radice comune: accanto al checkout principale.
-percorso = "../asdlc-run"
+percorso = "../ada_asdlc-run"
 
 [soglie]
 # Gate rossi per revisione, giri spesi a chiedere un commit, revisioni del Critic.
