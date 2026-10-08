@@ -51,6 +51,29 @@ def test_il_modello_dei_pbi_ha_le_sezioni_del_formato_nell_ordine():
     assert any(riga.startswith("**Non regressione:**") for riga in verifica)
 
 
+@pytest.mark.progetto_ospite
+def test_il_modello_degli_adr_porta_la_firma_vuota_e_le_quattro_domande():
+    percorso = template() / "decisions" / "TEMPLATE.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    titolo, *sezioni = intestazioni(testo)
+
+    assert titolo.startswith("# ADR-NNNN: ")
+    assert "**Ratificata da** … **il** …" in testo.split("\n## ", 1)[0]
+    assert sezioni == [
+        "## Contesto",
+        "## Decisione",
+        "## Conseguenze",
+        "## Alternative considerate",
+    ]
+    decisione = testo.split("## Decisione", 1)[1].split("\n## ", 1)[0]
+    voci = re.findall(r"^\d+\. (.*)$", decisione, re.MULTILINE)
+    domande = ["cosa si controlla", "quando", "cosa conta come prova", "cosa succede se manca"]
+    assert len(voci) == len(domande), voci
+    assert [v.startswith(f"**{d}**") for v, d in zip(voci, domande)] == [True] * 4, voci
+
+
 VIETATI = ("/home/", "/Users/", "~/", "aDa", "Barbara", "Oltre3D", "Carrozzeria")
 
 
