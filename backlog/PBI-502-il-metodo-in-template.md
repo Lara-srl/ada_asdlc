@@ -107,7 +107,7 @@ nessun file dello Scope.
 - [x] **La coda del template è vuota e ne porta la grammatica.** `coda.leggi_voci()` sul testo
       di `template/backlog/CODA.md` torna una lista vuota; il file ha la sezione `## La coda`,
       e nella prosa sopra nomina le due forme di riga, `- PBI-` e `- ‖`.
-- [ ] **La riga di cron del template lancia il tick del pacchetto del template.** In
+- [x] **La riga di cron del template lancia il tick del pacchetto del template.** In
       `template/backlog/AUTOMAZIONE.md` c'è una riga sola che comincia con `*/10 `, ed è quella
       della decisione 9 col `pacchetto` di `template/asdlc.toml`.
 
