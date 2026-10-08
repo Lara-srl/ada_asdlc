@@ -104,7 +104,7 @@ runner installato. `template/.claude/` non la legge nessuno, qui.
       cartella nata `git check-ignore` riconosce `asdlc.local.toml`, `runs/giro.log`,
       `runs/giro.json` e `.venv-asdlc/bin/asdlc-coda`, e non riconosce `runs/tempi.csv`. È un
       criterio solo con cinque esempi: un test parametrico, un id per percorso.
-- [ ] **La CI del template gira i gate del template.** In
+- [x] **La CI del template gira i gate del template.** In
       `template/.github/workflows/ci.yml`, ogni comando dei gate di `template/asdlc.toml`
       compare in una riga `run:`, e il file nomina `pull_request` e `push`.
 - [ ] **La guardia di fase del template è quella di questo repository.**
