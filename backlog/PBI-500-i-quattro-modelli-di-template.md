@@ -20,6 +20,9 @@ in `backlog/README.md`, quello degli ADR in `decisions/README.md`, quello della 
   `template/specs/TEMPLATE.md`, `template/.github/PULL_REQUEST_TEMPLATE.md` — nuovi.
 - `tools/tests/test_asdlc_template.py` — nuovo: i test dei criteri e la guardia.
 - `backlog/PBI-500-i-quattro-modelli-di-template.md` — questo file, per la spunta.
+- `tools/tests/test_asdlc_fuori_da_backend.py` — **la sonda si ritira** (giro 1, qui sotto):
+  esce `test_i_test_di_tools_tests_non_aprono_connessioni_a_un_database` con ciò che serve
+  solo a lei.
 - **Fuori scope:** `apri_pr()` che legge il modello della PR invece del suo testo cablato
   (è comportamento del runner: un PBI suo, dopo); i `README.md` delle cartelle, `AGENTS.md`
   e il resto del metodo (`PBI-502`); la configurazione d'esempio (`PBI-501`); `ZERO.md`
@@ -57,6 +60,43 @@ Durante il giro il runner non lancia nessun file dello Scope.
    01/10/2026 (`PBI-391` e `PBI-385` di aDa hanno quella forma).
 7. **Lo scope dei commit è `template`** (`ADR-0028`): `test(template): …` per il RED,
    `docs(template): …` per il GREEN.
+
+## Il giro 1, e cosa si riprende (08/10/2026)
+
+Il giro 1 è partito alle 22:05 col runner `0.1.0` installato e si è fermato alle 22:11 con
+`domanda-del-builder`, dopo 8 commit: i quattro criteri, una coppia RED→GREEN per ognuno, con
+la *Verifica* spuntata. Il lavoro è giusto. **La non regressione no**: `tools/tests` dava 855
+passati e 1 fallito, `test_asdlc_fuori_da_backend.py::test_i_test_di_tools_tests_non_aprono_connessioni_a_un_database`.
+Quel test, la **sonda**, rigira `tools/tests` in una copia ridotta del repository, costruita
+da `estrazione.txt` più `DELL_OSPITE` e `DEL_PROGETTO_DI_PROVA`. Nella copia `template/` non
+c'è, e i test nuovi cadono su `assert percorso.is_file()`. La domanda del Builder era giusta,
+e lui non ha scelto da solo. Il PBI non aveva visto la sonda.
+
+**Decisioni (Francesco, 08/10/2026):**
+
+1. **La sonda si ritira.** Era il collaudo del trasloco fatto prima del trasloco (`PBI-394`,
+   passi 0.2 e 2.5 del runbook della Fase 5 di aDa, tutti e due chiusi dal 07/10). A trasloco
+   fatto non prova più niente. Contava le connessioni SQLite perché in aDa il `conftest.py`
+   di `backend/` ne apriva una per test, e qui in `tools/` niente apre SQLite o SQLAlchemy.
+   Ogni test che legge un file del repository la farebbe cadere di nuovo: 501 col pin, 502 con
+   `AGENTS.md`, `backlog/README.md` e `decisions/`. Non c'è una ragione scritta per tenerla
+   come guardia («i test del runner non dipendono da file fuori da `estrazione.txt`»), e
+   quindi non la si trasforma in una.
+2. **Cosa esce** da `tools/tests/test_asdlc_fuori_da_backend.py`: il test della sonda, la
+   costante `SONDA`, `DELL_OSPITE`, `DEL_PROGETTO_DI_PROVA`, `forma_del_repository_asdlc()`, il
+   commento che li introduce, gli import che restano senza uso, e il punto «Nessuna
+   connessione a un database» della docstring del modulo. **Cosa resta**:
+   `test_l_estrazione_porta_il_pacchetto_e_i_nomi_di_prima_e_lascia_aggiorna_kb`,
+   `test_gira_gate_esegue_la_suite_asdlc_del_progetto_di_prova` e ciò che usano.
+3. **Il ritiro è il primo commit del giro**, prima dei commit ripresi: `test(template):
+   ritira la sonda della forma del repository asdlc`. Nel corpo dichiara la deroga allo Scope
+   (`ADR-0015`): cosa esce, perché (decisione 1), e che nessun altro test cambia. Tocca solo un
+   file di test, quindi si fa in `TEST_ONLY`.
+4. **Poi si riprendono gli 8 commit del tag `giro-fermato/pbi-500-giro1-20261008`**, in
+   quest'ordine, con `git cherry-pick`: `8f098df`, `66f3411`, `c8105b2`, `e55199f`,
+   `a2bc0af`, `6687f20`, `32b8059`, `95e8f5c`. Si riprendono tutti, e niente si lascia.
+5. **Il giro resta in `TEST_ONLY` e non chiama `--chiedi-impl`**, come dice la *Direttiva*.
+   `python3 -m pytest -q tools/tests` si gira prima di dichiarare `fatto`.
 
 ## Dipendenze
 - Bloccato da: nessuno. È il primo PBI del repository dopo la `v0.1.0`.
@@ -109,7 +149,8 @@ Durante il giro il runner non lancia nessun file dello Scope.
   per i PBI dopo questo, che la ereditano. **Ne restano fuori i file `template/decisions/ADR-*.md`**,
   per nome: sono le copie identiche degli ADR di metodo (`PBI-502`), e dieci su dodici
   nominano aDa, perché è lì che la regola è nata.
-- `python3 -m pytest -q tools/tests` resta verde: nessun test che c'è cambia.
+- `python3 -m pytest -q tools/tests` resta verde: nessun test che c'è cambia, **tranne la
+  sonda, che si ritira** (decisione 1 del giro 1).
 
 ## Protocollo di rifinitura
 Un modello è vivo: se una sezione resta vuota tre volte di fila nei documenti veri, si toglie
