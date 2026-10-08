@@ -39,3 +39,59 @@ per PBI e **gate eseguiti dallo script**; il tick (`asdlc-coda`) li lancia nell'
 [CODA.md](CODA.md). Girano sempre **installati dal tag** di `[ambiente].installa` in
 `asdlc.toml`, mai dalla copia di lavoro (`ADR-0026`). Come si lancia la catena, e quanta
 autonomia dare a un PBI, sta in [AUTOMAZIONE.md](AUTOMAZIONE.md).
+
+## I difetti e le loro cause
+
+Vale per il registro dei difetti del progetto, e per ogni elenco di difetti che verrà.
+
+**Ogni difetto porta una riga `**Causa:** <slug>`**, subito sotto il testo, con uno slug
+preso dalla tabella qui sotto. Il vocabolario è **chiuso**: se una causa non c'è, si aggiunge
+una riga alla tabella nello stesso commit che la usa per la prima volta, e lo si dichiara nel
+messaggio.
+
+**Alla terza occorrenza della stessa causa si apre un PBI di approccio**, non un'altra
+correzione locale. Tre difetti con la stessa causa sono un modo di lavorare, non tre
+incidenti. Il PBI di approccio si scrive nella colonna della tabella, e da lì in poi i difetti
+di quella causa vanno a lui. Il conto lo fa a mano chi scrive il difetto.
+
+**Al merge, le note del Critic diventano difetti** quando nominano un presupposto o un ramo
+senza test. Il rapporto del Critic chiude con `## Note per chi mergia`, e lì finiscono anche
+le cose che oggi reggono per un'ipotesi che nessun test fissa: «funziona perché non c'è un
+file X», «dipende dall'ordine delle due chiamate», «quel ramo non ha un test». Chi mergia le
+registra nel registro dei difetti, con la loro `**Causa:**`, prima del merge o nella PR di
+documentazione che lo segue. Così entrano nei conteggi della tabella, e la terza occorrenza
+di una causa la vede qualcuno.
+
+Non diventano difetti le note che descrivono una scelta dichiarata dal PBI (una sua
+decisione), né quelle di forma, come un soggetto di commit impreciso o un commento. Resta un
+giudizio di chi mergia, perché il runner non ricava una decisione dal testo del Critic
+(`ADR-0027`).
+
+| Slug | Cosa vuol dire | PBI di approccio |
+|---|---|---|
+| `esito-da-testo-libero` | il codice ricava un esito o una decisione dal testo libero di un modello | |
+| `strumento-letto-come-testo` | l'output di un programma, esterno o nostro, letto come testo dove esiste o si può fare un formato strutturato: `gh`, vitest, pytest, la CLI, e anche lo stdout del runner letto da un suo test invece del valore che la funzione restituisce. La correzione è il formato, non la validazione | |
+| `codice-letto-come-testo` | il gate ricava qualcosa di un programma (un test, una riga, un titolo) leggendone il sorgente come righe di testo, invece che col suo parser o col suo runner | |
+| `ingresso-non-validato` | un dato che arriva da fuori al server dell'esito (dal modello, dall'ambiente) si usa senza controllarne la forma, e un valore inatteso fa cadere il processo o produce una diagnosi falsa | |
+| `due-fonti` | il giro legge una cosa da una fonte e agisce su un'altra (l'albero e `origin`, il ref e `HEAD`, il remoto e il locale), e le due divergono | |
+| `diagnosi-confusa` | due situazioni diverse finiscono nello stesso stato o nella stessa nota, e chi legge non le distingue | |
+| `chiusura-saltata` | una strada d'uscita del giro non passa dalla chiusura: il ramo non si pubblica, i commit non si contano, l'uscita si perde | |
+| `residuo-di-un-giro` | un giro trova ciò che un giro precedente ha lasciato (un ramo, un albero, un file) e non lo prevede, o lo lascia lui in silenzio | |
+| `processo-per-euristica` | un processo si riconosce da dove sta e da come si chiama (`/proc/<pid>/cwd`, `pgrep -f`) invece che da un segnale che tiene solo lui, come un `flock` | |
+| `concorrenza-non-esclusa` | due processi o due giri scrivono la stessa cosa e niente lo impedisce | |
+| `test-senza-isolamento` | un test scrive o legge fuori dalla sua cartella temporanea, nello stato vero del repository o della macchina | |
+| `scrittura-non-ignorata` | il runner scrive nell'albero un file che `.gitignore` non conosce, e rende sporco il giro che lo sta scrivendo | |
+| `ambiente-non-dichiarato` | il comportamento dipende da qualcosa dell'ambiente di lancio (la sessione, il `PATH`, i pacchetti) che nessun file dichiara | |
+| `percorso-di-macchina` | un file versionato porta un percorso che vale su una macchina sola, assoluto o con `~`, invece di un percorso con un'ancora nel repository | |
+| `regola-non-scritta` | una regola del processo vive nell'abitudine di chi scrive o di chi lavora, e nessun documento che l'agente legge la dice | |
+| `default-implicito` | una chiamata cambia e il suo valore di default prende il posto di quello che il codice di prima dava senza dirlo: permessi, codifica, fuso, ordinamento | |
+| `traccia-persa` | il giro conosce il perché di un esito, ma non lo scrive dove qualcuno lo legge | |
+| `modifica-senza-righe` | un cambiamento che non lascia righe nel diff (un rename, l'attraversamento di un confine, i permessi) e che i controlli fatti sulle righe non vedono | |
+| `decisione-senza-verifica` | una decisione del PBI che nessun caso della Verifica esercita | |
+| `soglia-non-misurata` | un tetto o una soglia fissati su un'ipotesi invece che su una misura | |
+| `caso-scoperto` | una regola del gate vale per i casi che il PBI nomina, e un caso vicino che nessuno ha nominato le sfugge, anche se la rete che la regola si è data potrebbe coprirlo | |
+
+**La colonna «PBI di approccio» c'è per ogni causa**, anche vuota: da segnalare è una causa
+con tre occorrenze o più **e la colonna vuota**, non ogni causa arrivata a tre. Alla nascita
+del progetto la colonna è vuota in ogni riga: i PBI di approccio sono del progetto che li
+apre.

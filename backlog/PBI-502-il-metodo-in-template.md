@@ -100,7 +100,7 @@ nessun file dello Scope.
       dodici numeri della decisione 4, `template/decisions/` ha un file con lo stesso nome di
       quello di `decisions/` e lo stesso contenuto; `template/decisions/README.md` ha un link
       a ognuno, e dice che il prossimo ADR è lo `0028`.
-- [ ] **Il vocabolario delle cause del template è quello di qui.** Gli slug della tabella di
+- [x] **Il vocabolario delle cause del template è quello di qui.** Gli slug della tabella di
       §I difetti e le loro cause in `template/backlog/README.md` sono gli stessi, nello stesso
       ordine, di quelli in `backlog/README.md`; e la colonna dei PBI di approccio è vuota in
       ogni riga.
