@@ -124,7 +124,7 @@ scrittura da shell, e ha fatto bene. È il difetto 97 di `PBI-102`.
   `template/asdlc.toml` lo dice.
 
 ## Verifica
-- [ ] **Un progetto nato da `template/` carica la sua configurazione.** Sulla cartella nata,
+- [x] **Un progetto nato da `template/` carica la sua configurazione.** Sulla cartella nata,
       `asdlc_config.carica()` non alza; la configurazione ha almeno un gate, ogni `cwd` dei
       gate esiste nella cartella nata, `pacchetto` è `.venv-asdlc` sotto la radice comune, e
       `[ambiente].installa` è uguale a quello di `asdlc.toml` di questo repository.
