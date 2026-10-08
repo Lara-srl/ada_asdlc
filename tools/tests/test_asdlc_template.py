@@ -79,6 +79,32 @@ def test_ogni_cartella_del_metodo_spiega_le_sue_regole_e_rimanda_al_suo_modello(
     assert (percorso.parent / "TEMPLATE.md").is_file()
 
 
+# I dodici ADR di metodo (PBI-502, decisione 4). Una costante e non un glob su
+# `decisions/`: è una decisione, e non si ricava dai file — `ADR-0028` di questo
+# repository è di dominio e non si copia.
+ADR_DI_METODO = ("0008", "0009", "0011", "0012", "0015", "0017",
+                 "0020", "0021", "0022", "0024", "0026", "0027")
+
+
+@pytest.mark.progetto_ospite
+def test_gli_adr_di_metodo_sono_nel_template_identici_e_numerati_come_qui():
+    readme = template() / "decisions" / "README.md"
+    assert readme.is_file(), readme
+
+    testo = readme.read_text(encoding="utf-8")
+    originali = []
+    for numero in ADR_DI_METODO:
+        originale, = (radice() / "decisions").glob(f"ADR-{numero}-*.md")
+        originali.append(originale)
+    copie = [template() / "decisions" / o.name for o in originali]
+
+    assert [c.name for c in copie if not c.is_file()] == []
+    assert [c.name for c, o in zip(copie, originali)
+            if c.read_bytes() != o.read_bytes()] == []
+    assert [o.name for o in originali if f"]({o.name})" not in testo] == []
+    assert re.search(r"prossimo ADR[^\n]*\b0028\b", testo), testo
+
+
 @pytest.mark.progetto_ospite
 def test_il_modello_dei_pbi_ha_le_sezioni_del_formato_nell_ordine():
     percorso = template() / "backlog" / "TEMPLATE.md"
