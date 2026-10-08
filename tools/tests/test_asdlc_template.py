@@ -1,19 +1,28 @@
-"""I modelli di `template/` (`backlog/PBI-500`).
+"""I modelli di `template/` (`backlog/PBI-500`) e la configurazione d'esempio
+(`backlog/PBI-501`).
 
 `template/` è la cartella che un progetto nuovo copia alla nascita. Questi test
 leggono quella del repository che li ospita, non il progetto di prova: per questo
 portano il marcatore `progetto_ospite`. Delle intestazioni conta l'ordine, e si
 confrontano come lista; il testo sotto è libero, salvo dove un criterio lo dice.
+
+I file che il pacchetto o `git` leggono si provano in una cartella **nata** dalla
+copia di `template/` (`nasci()`), non qui: qui `.gitignore` e `asdlc.toml` sono
+quelli di questo repository.
 """
 
+import csv
 import importlib
 import itertools
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 asdlc_config = importlib.import_module("asdlc.config")
+runner = importlib.import_module("asdlc.runner")
 
 RE_INTESTAZIONE = re.compile(r"^#+ .*$", re.MULTILINE)
 
@@ -131,3 +140,83 @@ def test_guardia_template_non_porta_percorsi_di_macchina_ne_nomi_di_ada():
     trovati = [(str(p.relative_to(radice)), v) for p in file
                for v in VIETATI if v in p.read_text(encoding="utf-8")]
     assert trovati == []
+
+
+def nasci(tmp_path: Path) -> Path:
+    """Un progetto nato da `template/`: la copia in `tmp_path`, `git init` e un
+    commit iniziale (PBI-501, decisione 1). Una funzione e non una fixture: il
+    test asserisce prima che il file del suo criterio c'è, e un'asserzione in
+    una fixture sarebbe un errore di setup, non un fallimento. `--no-verify`
+    per il difetto 92: un `core.hooksPath` globale non entra nella nascita."""
+    nata = tmp_path / "progetto"
+    shutil.copytree(template(), nata, symlinks=True)
+    for comando in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.name=nascita", "-c", "user.email=nascita@esempio.invalid",
+                     "commit", "-q", "--no-verify", "-m", "nascita"]):
+        subprocess.run(["git", "-C", str(nata), *comando], check=True,
+                       capture_output=True, text=True)
+    return nata
+
+
+@pytest.mark.progetto_ospite
+def test_un_progetto_nato_dal_template_carica_la_sua_configurazione(tmp_path):
+    assert (template() / "asdlc.toml").is_file()
+    nata = nasci(tmp_path)
+
+    cfg = asdlc_config.carica(nata)
+
+    assert cfg.gate
+    assert [g.cwd for g in cfg.gate if not (nata / g.cwd).is_dir()] == []
+    assert cfg.ambiente.pacchetto == asdlc_config.radice_comune(nata) / ".venv-asdlc"
+    qui = asdlc_config.carica(asdlc_config.radice(Path(__file__).resolve().parent))
+    assert cfg.ambiente.installa == qui.ambiente.installa
+
+
+@pytest.mark.progetto_ospite
+def test_il_registro_dei_tempi_del_template_ha_le_colonne_del_runner_e_nessuna_riga():
+    percorso = template() / "runs" / "tempi.csv"
+    assert percorso.is_file(), percorso
+
+    righe = list(csv.reader(percorso.read_text(encoding="utf-8").splitlines()))
+
+    assert righe == [runner.COLONNE_CSV]
+
+
+@pytest.mark.progetto_ospite
+@pytest.mark.parametrize("percorso, ignorato", [
+    pytest.param(percorso, ignorato, id=percorso) for percorso, ignorato in (
+        ("asdlc.local.toml", True),
+        ("runs/giro.log", True),
+        ("runs/giro.json", True),
+        (".venv-asdlc/bin/asdlc-coda", True),
+        ("runs/tempi.csv", False),
+    )])
+def test_un_progetto_nato_dal_template_ignora_gli_effimeri_e_versiona_il_registro(
+        tmp_path, percorso, ignorato):
+    assert (template() / ".gitignore").is_file()
+    nata = nasci(tmp_path)
+
+    detto = subprocess.run(["git", "-C", str(nata), "check-ignore", "-q", "--no-index",
+                            percorso], capture_output=True, text=True)
+
+    assert detto.returncode in (0, 1), detto.stderr
+    assert (detto.returncode == 0) is ignorato
+
+
+@pytest.mark.progetto_ospite
+def test_la_ci_del_template_gira_i_comandi_dei_gate_del_template():
+    """Letta come testo, senza una libreria YAML: la CI installa solo `pytest`
+    (PBI-501, decisione 6)."""
+    percorso = template() / ".github" / "workflows" / "ci.yml"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    eseguiti = [riga.split("run:", 1)[1].strip() for riga in testo.splitlines()
+                if riga.strip().removeprefix("- ").startswith("run:")]
+    gate = asdlc_config.leggi_toml(template() / "asdlc.toml")["gate"]
+
+    assert gate
+    assert [g["comando"] for g in gate
+            if not any(" ".join(g["comando"]) in riga for riga in eseguiti)] == []
+    assert "pull_request" in testo
+    assert "push" in testo

@@ -124,17 +124,17 @@ scrittura da shell, e ha fatto bene. È il difetto 97 di `PBI-102`.
   `template/asdlc.toml` lo dice.
 
 ## Verifica
-- [ ] **Un progetto nato da `template/` carica la sua configurazione.** Sulla cartella nata,
+- [x] **Un progetto nato da `template/` carica la sua configurazione.** Sulla cartella nata,
       `asdlc_config.carica()` non alza; la configurazione ha almeno un gate, ogni `cwd` dei
       gate esiste nella cartella nata, `pacchetto` è `.venv-asdlc` sotto la radice comune, e
       `[ambiente].installa` è uguale a quello di `asdlc.toml` di questo repository.
-- [ ] **Il registro dei tempi del template ha le colonne del runner, e nessuna riga.**
+- [x] **Il registro dei tempi del template ha le colonne del runner, e nessuna riga.**
       `template/runs/tempi.csv` è una riga sola, e i suoi campi sono `COLONNE_CSV`.
-- [ ] **Un progetto nato da `template/` ignora i file effimeri e versiona il registro.** Nella
+- [x] **Un progetto nato da `template/` ignora i file effimeri e versiona il registro.** Nella
       cartella nata `git check-ignore` riconosce `asdlc.local.toml`, `runs/giro.log`,
       `runs/giro.json` e `.venv-asdlc/bin/asdlc-coda`, e non riconosce `runs/tempi.csv`. È un
       criterio solo con cinque esempi: un test parametrico, un id per percorso.
-- [ ] **La CI del template gira i gate del template.** In
+- [x] **La CI del template gira i gate del template.** In
       `template/.github/workflows/ci.yml`, ogni comando dei gate di `template/asdlc.toml`
       compare in una riga `run:`, e il file nomina `pull_request` e `push`.
 - ~~**La guardia di fase del template è quella di questo repository.**
