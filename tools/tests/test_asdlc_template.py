@@ -68,6 +68,18 @@ def test_la_costituzione_del_template_ha_il_metodo_di_qui_e_un_dominio_da_scrive
 
 
 @pytest.mark.progetto_ospite
+@pytest.mark.parametrize("cartella", ["backlog", "decisions", "specs"])
+def test_ogni_cartella_del_metodo_spiega_le_sue_regole_e_rimanda_al_suo_modello(cartella):
+    percorso = template() / cartella / "README.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+
+    assert "](TEMPLATE.md)" in testo
+    assert (percorso.parent / "TEMPLATE.md").is_file()
+
+
+@pytest.mark.progetto_ospite
 def test_il_modello_dei_pbi_ha_le_sezioni_del_formato_nell_ordine():
     percorso = template() / "backlog" / "TEMPLATE.md"
     assert percorso.is_file(), percorso
