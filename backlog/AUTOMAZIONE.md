@@ -392,11 +392,26 @@ principale al posto di `<checkout>`:
 */10 * * * * cd <checkout> && <checkout>/.venv-asdlc/bin/asdlc-coda >> runs/cron.log 2>&1
 ```
 
-Su questo PC il cron lancia ancora `~/asdlc-tick.sh`, che dal 28/09 passa da solo al
-comando del venv e reinstalla (`CODA.md`). Dopo `PBI-392` fa solo cose che fa già il tick, e
-il gesto a mano che resta è uno: **sostituire la riga di cron con quella qui sopra e
-togliere `~/asdlc-tick.sh`**. Finché c'è non fa danni: la firma che scrive è la stessa, e
-chi la trova già scritta non reinstalla.
+Su questo PC la riga di questo repository è quella qui sopra, **sfalsata di cinque minuti**
+(`5-59/10`) per non partire insieme a quella di aDa, accesa l'08/10/2026 al passo 4.2 del
+runbook della Fase 5 di aDa. Il paragrafo che c'era qui parlava di `~/asdlc-tick.sh`, che è
+dello script di aDa e non riguarda questo repository.
+
+**Il worktree del runner si prepara a mano, una volta per macchina.** Il tick lancia il
+runner dentro `[worktree].percorso` (`../ada_asdlc-run`), e i gate ci girano col venv di
+`[ambiente].venv` (`.venv`, relativo a quell'albero): sotto cron `pytest` non è sul `PATH`, e
+senza quel venv il giro non parte. Né il tick né il runner creano l'albero o il venv. L'08/10
+non c'erano, e li ha creati una persona prima del primo tick:
+
+```bash
+cd <checkout> && git worktree add --detach ../ada_asdlc-run origin/main
+cd ../ada_asdlc-run && python3 -m venv .venv && .venv/bin/pip install pytest
+```
+
+*Controllo:* `.venv-asdlc/bin/asdlc-coda --dry-run` dal checkout, con il `PATH` del cron
+(`env -i HOME=$HOME PATH=/usr/bin:/bin …`), risponde `lancia: PBI-…` o «in coda non resta
+niente», e non `ambiente mancante`. Che il tick lo prepari da sé è un lavoro del pacchetto,
+non ancora un PBI.
 
 ## Spegnere il tick e chiudere un giro fermato
 
@@ -443,6 +458,20 @@ Un passo che fallisce ferma quelli dopo: il comando toglie la pausa, nomina il p
 i comandi che restano da fare a mano ed esce diverso da 0. Se all'avvio la pausa c'era già,
 il comando non la riscrive e non la toglie, e alla fine dice che il tick resta in pausa e da
 quando. Il PBI lo rilancia il tick, al primo passaggio dopo la pausa tolta.
+
+**La pausa messa per scrivere una ripresa si toglie solo con la PR della ripresa `MERGED`**,
+e lo si controlla, non lo si deduce da quello che dice chi ha mergiato:
+
+```bash
+[ "$(gh pr view <n> --json state -q .state)" = MERGED ] && rm ~/asdlc-tick.pausa
+```
+
+L'08/10 la pausa è stata tolta mentre la PR della ripresa di `PBI-500` era ancora aperta: il
+comando guardava solo che `gh` rispondesse. La pausa è stata rimessa prima del tick
+successivo, e non è partito niente. Ma un tick in quella finestra avrebbe rilanciato il PBI
+col testo di prima della ripresa, cioè lo stesso giro che si era appena fermato. E la pausa
+vale per tutti i progetti della macchina (difetto 95 di `PBI-102`): mentre c'è, è ferma anche
+la coda di aDa.
 
 **Il tick e il comando si escludono con un lucchetto del tick** (`PBI-392`): un `flock` su
 `runs/.tick.lock` del checkout, del processo e non del file, come quello del runner — il file
