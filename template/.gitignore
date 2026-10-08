@@ -1,0 +1,13 @@
+# --- ASDLC ------------------------------------------------------------------
+# I file del runner ASDLC in runs/ sono effimeri, tranne uno: runs/tempi.csv è il
+# registro versionato dei tempi dei giri. Quindi si ignora tutto e si fa
+# un'eccezione, invece di elencare un'estensione alla volta: un file nuovo del
+# runner in runs/ nasce ignorato, e non sporca l'albero del giro che lo scrive.
+runs/*
+!runs/tempi.csv
+# Il venv in cui è installato il runner, `[ambiente].pacchetto` di asdlc.toml.
+.venv-asdlc/
+# I percorsi di macchina del runner — venv, prestiti, worktree — che
+# sovrascrivono le sole sezioni [ambiente] e [worktree] di asdlc.toml, il file
+# versionato che porta tutto il resto.
+asdlc.local.toml
