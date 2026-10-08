@@ -136,7 +136,7 @@ e lui non ha scelto da solo. Il PBI non aveva visto la sonda.
       `### Vincoli`) e `## Contratto` (`### Definition of Done`, `### Guardie di regressione`,
       `### Scenari`, `### Domande aperte`), nell'ordine. Il testo non contiene `Fase:` né
       `e2e/contract.ts`.
-- [ ] **Il modello della PR chiede le tre cose dell'accettazione umana.** Contiene una riga
+- [x] **Il modello della PR chiede le tre cose dell'accettazione umana.** Contiene una riga
       `PBI:` e tre righe `- [ ]`: i criteri della *Verifica* del PBI spuntati, il diff fuori
       dallo Scope dichiarato nel commit che lo introduce (`ADR-0015`), la spec aggiornata nello
       stesso commit del comportamento che cambia. Il test cerca le tre parole chiave
