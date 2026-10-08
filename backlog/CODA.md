@@ -38,7 +38,6 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-500
 - PBI-501
 - PBI-502
-- ‖ `template/.claude/` copiata a mano, nella PR del criterio 5 di PBI-501: la riga la toglie quella PR
 - PBI-503
 
 **I quattro di `template/` sono il passo 4.2 del runbook della Fase 5 di aDa** (Francesco,
@@ -51,4 +50,5 @@ layout (difetto 90) e il tag `v0.2.0` sono il passo 4.3, dopo questi.
 **La barriera prima di 503** (Francesco, 08/10). Il giro 1 di `PBI-501` non ha potuto scrivere
 sotto `.claude/` (difetto 97 di `PBI-102`): il criterio 5 è uscito dal PBI, e i due file li
 copia una persona. `PBI-503` nomina `.claude/` in `ZERO.md`, e senza quella cartella il suo
-primo criterio cade. Per questo aspetta la PR che la copia.
+primo criterio cade. Per questo aspettava la PR che la copia, che ha tolto la barriera
+(`test/template-guardia-di-fase`, 08/10).
