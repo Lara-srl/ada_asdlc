@@ -131,7 +131,7 @@ e lui non ha scelto da solo. Il PBI non aveva visto la sonda.
       `## Alternative considerate`, nell'ordine; dentro `## Decisione` c'è un elenco
       numerato di quattro voci che cominciano con **cosa si controlla**, **quando**, **cosa
       conta come prova**, **cosa succede se manca**.
-- [ ] **Il modello delle spec ha le sezioni di quello di aDa, senza aDa.** Il titolo è
+- [x] **Il modello delle spec ha le sezioni di quello di aDa, senza aDa.** Il titolo è
       `# Feature: …`; le sezioni sono `## Blueprint` (`### Contesto`, `### Architettura`,
       `### Vincoli`) e `## Contratto` (`### Definition of Done`, `### Guardie di regressione`,
       `### Scenari`, `### Domande aperte`), nell'ordine. Il testo non contiene `Fase:` né
