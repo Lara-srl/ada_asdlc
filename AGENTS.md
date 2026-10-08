@@ -73,6 +73,7 @@ ruolo cablato qui.
   tag è la release (`ADR-0026`, decisioni 1 e 3).
 - **Toolchain:** `python3 -m pytest -q tools/tests` con un venv che ha `pytest` sul `PATH`;
   è l'unico gate di `asdlc.toml` e l'unico job della CI.
-- **Scope dei commit:** `runner` `coda` `config` `esito` `prompt` `hook` `plancia` `ci` `kb`.
+- **Scope dei commit:** `runner` `coda` `config` `esito` `prompt` `hook` `plancia` `ci` `kb`
+  `template` (`decisions/ADR-0028-lo-scope-template.md`).
 - **La KB** (`.claude/skills/asdlc/`) è una copia di villetakanen/asdlc-io (MIT) allo sha
   di `UPSTREAM`; il comando che la rigenera resta in aDa per la `v0.1.0` (D8).

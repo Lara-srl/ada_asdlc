@@ -2,7 +2,7 @@
 
 Gli ADR qui sotto vengono da aDa, **copiati senza rinumerare** al commit di estrazione
 (`ADR-0026`, decisione 5): i numeri che mancano sono decisioni di dominio di aDa. Il
-prossimo ADR di questo repository è lo **0028**.
+primo ADR nato qui è lo **0028**.
 
 Un ADR si scrive quando la scelta **vincola il lavoro futuro** e aveva alternative
 ragionevoli. Non si scrive per ciò che è già in una spec, per ciò che è reversibile con un
@@ -22,6 +22,7 @@ rename, o per ciò che non aveva alternative.
 | [0024](ADR-0024-anti-pattern-nel-prompt-del-builder.md) | Gli anti-pattern stanno nel prompt del Builder | Accettata |
 | [0026](ADR-0026-il-runner-e-un-pacchetto-installato-da-tag.md) | Il runner è un pacchetto installato da un tag git, non una fotocopia: prompt estesi e mai sostituiti, si lavora sempre con la versione installata, ogni giro registra la sua versione | Accettata |
 | [0027](ADR-0027-gli-esiti-passano-per-chiamate-a-strumento.md) | Tra codice e modello gli esiti passano per chiamate a strumento, mai dal testo libero (aggiunge un MAI ad `AGENTS.md`) | Accettata |
+| [0028](ADR-0028-lo-scope-template.md) | I commit su `template/` hanno lo scope `template` (aggiunge uno scope ad `AGENTS.md`) | Accettata |
 
 **Nuovo ADR:** prossimo numero libero, nome `ADR-NNNN-titolo-in-kebab.md`, sezioni
 Contesto · Decisione · Conseguenze (positive/negative/neutre) · Alternative considerate.
