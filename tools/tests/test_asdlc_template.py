@@ -11,6 +11,7 @@ copia di `template/` (`nasci()`), non qui: qui `.gitignore` e `asdlc.toml` sono
 quelli di questo repository.
 """
 
+import csv
 import importlib
 import itertools
 import re
@@ -21,6 +22,7 @@ from pathlib import Path
 import pytest
 
 asdlc_config = importlib.import_module("asdlc.config")
+runner = importlib.import_module("asdlc.runner")
 
 RE_INTESTAZIONE = re.compile(r"^#+ .*$", re.MULTILINE)
 
@@ -168,3 +170,13 @@ def test_un_progetto_nato_dal_template_carica_la_sua_configurazione(tmp_path):
     assert cfg.ambiente.pacchetto == asdlc_config.radice_comune(nata) / ".venv-asdlc"
     qui = asdlc_config.carica(asdlc_config.radice(Path(__file__).resolve().parent))
     assert cfg.ambiente.installa == qui.ambiente.installa
+
+
+@pytest.mark.progetto_ospite
+def test_il_registro_dei_tempi_del_template_ha_le_colonne_del_runner_e_nessuna_riga():
+    percorso = template() / "runs" / "tempi.csv"
+    assert percorso.is_file(), percorso
+
+    righe = list(csv.reader(percorso.read_text(encoding="utf-8").splitlines()))
+
+    assert righe == [runner.COLONNE_CSV]
