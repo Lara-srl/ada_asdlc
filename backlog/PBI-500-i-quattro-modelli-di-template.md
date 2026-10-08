@@ -119,7 +119,7 @@ e lui non ha scelto da solo. Il PBI non aveva visto la sonda.
   scenari di un livello hanno un test di quel livello».
 
 ## Verifica
-- [ ] **Il modello dei PBI ha le sezioni del formato, nell'ordine.** Il titolo è
+- [x] **Il modello dei PBI ha le sezioni del formato, nell'ordine.** Il titolo è
       `# PBI-XXX: …`; poi `## Direttiva`, `## ✅ Deciso`, `## Il giro N, e cosa si riprende`,
       `## Dipendenze`, `## Contesto`, `## Verifica`, `## Protocollo di rifinitura`. Sotto
       `## Direttiva` c'è una riga `**Scope**` il cui elenco nomina `backlog/PBI-XXX-…` (il
