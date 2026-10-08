@@ -96,7 +96,7 @@ nessun file dello Scope.
       `template/specs/README.md` esistono, e ognuno contiene un link `](TEMPLATE.md)` che porta
       a un file che c'è. Un criterio solo con tre esempi: un test parametrico, un id per
       cartella.
-- [ ] **Gli ADR di metodo sono nel template, identici e numerati come qui.** Per ognuno dei
+- [x] **Gli ADR di metodo sono nel template, identici e numerati come qui.** Per ognuno dei
       dodici numeri della decisione 4, `template/decisions/` ha un file con lo stesso nome di
       quello di `decisions/` e lo stesso contenuto; `template/decisions/README.md` ha un link
       a ognuno, e dice che il prossimo ADR è lo `0028`.
