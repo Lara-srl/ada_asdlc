@@ -104,7 +104,7 @@ nessun file dello Scope.
       §I difetti e le loro cause in `template/backlog/README.md` sono gli stessi, nello stesso
       ordine, di quelli in `backlog/README.md`; e la colonna dei PBI di approccio è vuota in
       ogni riga.
-- [ ] **La coda del template è vuota e ne porta la grammatica.** `coda.leggi_voci()` sul testo
+- [x] **La coda del template è vuota e ne porta la grammatica.** `coda.leggi_voci()` sul testo
       di `template/backlog/CODA.md` torna una lista vuota; il file ha la sezione `## La coda`,
       e nella prosa sopra nomina le due forme di riga, `- PBI-` e `- ‖`.
 - [ ] **La riga di cron del template lancia il tick del pacchetto del template.** In
