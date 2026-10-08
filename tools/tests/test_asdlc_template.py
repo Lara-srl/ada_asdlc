@@ -22,7 +22,15 @@ from pathlib import Path
 import pytest
 
 asdlc_config = importlib.import_module("asdlc.config")
+coda = importlib.import_module("asdlc.coda")
 runner = importlib.import_module("asdlc.runner")
+
+# Il progetto di prova (PBI-394, decisione 1). `coda` si configura qui, come in
+# `test_asdlc_coda.py`: `leggi_voci()` legge le voci col modello dell'id di
+# `configura()`, e la fixture `log_dir_temporanea` sposta il `LOG` del tick, che
+# senza una configurazione non esiste.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
+coda.configura(asdlc_config.carica(PROGETTO))
 
 RE_INTESTAZIONE = re.compile(r"^#+ .*$", re.MULTILINE)
 
@@ -129,6 +137,30 @@ def test_il_vocabolario_delle_cause_del_template_e_quello_di_qui():
     assert qui
     assert [riga[0] for riga in nel_template] == [riga[0] for riga in qui]
     assert [riga for riga in nel_template if len(riga) != 3 or riga[2] != ""] == []
+
+
+@pytest.mark.progetto_ospite
+def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
+    """Le voci si leggono con la configurazione del progetto nato dalla copia,
+    cioè col modello dell'id che il suo tick userebbe; dopo, la configurazione
+    di prima torna al suo posto, perché `configura()` scrive nomi di modulo."""
+    percorso = template() / "backlog" / "CODA.md"
+    assert percorso.is_file(), percorso
+    nata = nasci(tmp_path)
+
+    testo = percorso.read_text(encoding="utf-8")
+    di_prima = coda.CFG
+    coda.configura(asdlc_config.carica(nata))
+    try:
+        voci = coda.leggi_voci(testo)
+    finally:
+        coda.configura(di_prima)
+    prosa = testo.split("## La coda", 1)[0]
+
+    assert voci == []
+    assert "## La coda" in intestazioni(testo)
+    assert "- PBI-" in prosa
+    assert "- ‖" in prosa
 
 
 @pytest.mark.progetto_ospite
