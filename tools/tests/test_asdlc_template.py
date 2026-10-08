@@ -180,3 +180,24 @@ def test_il_registro_dei_tempi_del_template_ha_le_colonne_del_runner_e_nessuna_r
     righe = list(csv.reader(percorso.read_text(encoding="utf-8").splitlines()))
 
     assert righe == [runner.COLONNE_CSV]
+
+
+@pytest.mark.progetto_ospite
+@pytest.mark.parametrize("percorso, ignorato", [
+    pytest.param(percorso, ignorato, id=percorso) for percorso, ignorato in (
+        ("asdlc.local.toml", True),
+        ("runs/giro.log", True),
+        ("runs/giro.json", True),
+        (".venv-asdlc/bin/asdlc-coda", True),
+        ("runs/tempi.csv", False),
+    )])
+def test_un_progetto_nato_dal_template_ignora_gli_effimeri_e_versiona_il_registro(
+        tmp_path, percorso, ignorato):
+    assert (template() / ".gitignore").is_file()
+    nata = nasci(tmp_path)
+
+    detto = subprocess.run(["git", "-C", str(nata), "check-ignore", "-q", "--no-index",
+                            percorso], capture_output=True, text=True)
+
+    assert detto.returncode in (0, 1), detto.stderr
+    assert (detto.returncode == 0) is ignorato
