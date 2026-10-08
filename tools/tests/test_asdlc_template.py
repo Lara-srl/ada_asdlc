@@ -1,5 +1,5 @@
-"""I modelli di `template/` (`backlog/PBI-500`) e la configurazione d'esempio
-(`backlog/PBI-501`).
+"""I modelli di `template/` (`backlog/PBI-500`), la configurazione d'esempio
+(`backlog/PBI-501`) e il metodo (`backlog/PBI-502`).
 
 `template/` è la cartella che un progetto nuovo copia alla nascita. Questi test
 leggono quella del repository che li ospita, non il progetto di prova: per questo
@@ -22,17 +22,160 @@ from pathlib import Path
 import pytest
 
 asdlc_config = importlib.import_module("asdlc.config")
+coda = importlib.import_module("asdlc.coda")
 runner = importlib.import_module("asdlc.runner")
+
+# Il progetto di prova (PBI-394, decisione 1). `coda` si configura qui, come in
+# `test_asdlc_coda.py`: `leggi_voci()` legge le voci col modello dell'id di
+# `configura()`, e la fixture `log_dir_temporanea` sposta il `LOG` del tick, che
+# senza una configurazione non esiste.
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
+coda.configura(asdlc_config.carica(PROGETTO))
 
 RE_INTESTAZIONE = re.compile(r"^#+ .*$", re.MULTILINE)
 
 
+def radice() -> Path:
+    return asdlc_config.radice(Path(__file__).resolve().parent)
+
+
 def template() -> Path:
-    return asdlc_config.radice(Path(__file__).resolve().parent) / "template"
+    return radice() / "template"
 
 
 def intestazioni(testo: str) -> list[str]:
     return RE_INTESTAZIONE.findall(testo)
+
+
+def parte_metodo(testo: str) -> list[str]:
+    """Le righe di `AGENTS.md` dalla riga `## Metodo` esclusa alla riga
+    `## Dominio` esclusa (PBI-502, decisione 2)."""
+    righe = testo.splitlines()
+    return righe[righe.index("## Metodo") + 1:righe.index("## Dominio")]
+
+
+@pytest.mark.progetto_ospite
+def test_la_costituzione_del_template_ha_il_metodo_di_qui_e_un_dominio_da_scrivere():
+    percorso = template() / "AGENTS.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    qui = (radice() / "AGENTS.md").read_text(encoding="utf-8")
+    dominio = testo.split("\n## Dominio\n", 1)[1]
+    link = template() / "CLAUDE.md"
+
+    assert parte_metodo(testo) == parte_metodo(qui)
+    assert intestazioni(dominio) == [
+        "### Toolchain",
+        "### Confini di giudizio",
+        "### Sorgenti",
+        "### Scope dei commit",
+    ]
+    assert link.is_symlink(), link
+    assert link.readlink() == Path("AGENTS.md")
+
+
+@pytest.mark.progetto_ospite
+@pytest.mark.parametrize("cartella", ["backlog", "decisions", "specs"])
+def test_ogni_cartella_del_metodo_spiega_le_sue_regole_e_rimanda_al_suo_modello(cartella):
+    percorso = template() / cartella / "README.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+
+    assert "](TEMPLATE.md)" in testo
+    assert (percorso.parent / "TEMPLATE.md").is_file()
+
+
+# I dodici ADR di metodo (PBI-502, decisione 4). Una costante e non un glob su
+# `decisions/`: è una decisione, e non si ricava dai file — `ADR-0028` di questo
+# repository è di dominio e non si copia.
+ADR_DI_METODO = ("0008", "0009", "0011", "0012", "0015", "0017",
+                 "0020", "0021", "0022", "0024", "0026", "0027")
+
+
+@pytest.mark.progetto_ospite
+def test_gli_adr_di_metodo_sono_nel_template_identici_e_numerati_come_qui():
+    readme = template() / "decisions" / "README.md"
+    assert readme.is_file(), readme
+
+    testo = readme.read_text(encoding="utf-8")
+    originali = []
+    for numero in ADR_DI_METODO:
+        originale, = (radice() / "decisions").glob(f"ADR-{numero}-*.md")
+        originali.append(originale)
+    copie = [template() / "decisions" / o.name for o in originali]
+
+    assert [c.name for c in copie if not c.is_file()] == []
+    assert [c.name for c, o in zip(copie, originali)
+            if c.read_bytes() != o.read_bytes()] == []
+    assert [o.name for o in originali if f"]({o.name})" not in testo] == []
+    assert re.search(r"prossimo ADR[^\n]*\b0028\b", testo), testo
+
+
+CAUSE = "## I difetti e le loro cause"
+
+
+def tabella_delle_cause(testo: str) -> list[list[str]]:
+    """Le righe della tabella del vocabolario sotto `CAUSE`, una lista di celle
+    per riga, senza gli spazi ai bordi; lo slug è la prima cella."""
+    sezione = testo.split(f"\n{CAUSE}\n", 1)[1].split("\n## ", 1)[0]
+    return [[cella.strip() for cella in riga.strip().strip("|").split("|")]
+            for riga in sezione.splitlines() if riga.startswith("| `")]
+
+
+@pytest.mark.progetto_ospite
+def test_il_vocabolario_delle_cause_del_template_e_quello_di_qui():
+    percorso = template() / "backlog" / "README.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    assert CAUSE in intestazioni(testo)
+    qui = tabella_delle_cause((radice() / "backlog" / "README.md").read_text(encoding="utf-8"))
+    nel_template = tabella_delle_cause(testo)
+
+    assert qui
+    assert [riga[0] for riga in nel_template] == [riga[0] for riga in qui]
+    assert [riga for riga in nel_template if len(riga) != 3 or riga[2] != ""] == []
+
+
+@pytest.mark.progetto_ospite
+def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
+    """Le voci si leggono con la configurazione del progetto nato dalla copia,
+    cioè col modello dell'id che il suo tick userebbe; dopo, la configurazione
+    di prima torna al suo posto, perché `configura()` scrive nomi di modulo."""
+    percorso = template() / "backlog" / "CODA.md"
+    assert percorso.is_file(), percorso
+    nata = nasci(tmp_path)
+
+    testo = percorso.read_text(encoding="utf-8")
+    di_prima = coda.CFG
+    coda.configura(asdlc_config.carica(nata))
+    try:
+        voci = coda.leggi_voci(testo)
+    finally:
+        coda.configura(di_prima)
+    prosa = testo.split("## La coda", 1)[0]
+
+    assert voci == []
+    assert "## La coda" in intestazioni(testo)
+    assert "- PBI-" in prosa
+    assert "- ‖" in prosa
+
+
+@pytest.mark.progetto_ospite
+def test_la_riga_di_cron_del_template_lancia_il_tick_del_pacchetto_del_template():
+    """`<checkout>` resta un segnaposto: lo sostituisce chi installa. Il
+    `pacchetto` invece è quello di `template/asdlc.toml` (PBI-502, decisione 9)."""
+    percorso = template() / "backlog" / "AUTOMAZIONE.md"
+    assert percorso.is_file(), percorso
+
+    pacchetto = asdlc_config.leggi_toml(template() / "asdlc.toml")["ambiente"]["pacchetto"]
+    righe = [riga for riga in percorso.read_text(encoding="utf-8").splitlines()
+             if riga.startswith("*/10 ")]
+
+    assert righe == [f"*/10 * * * * cd <checkout> && <checkout>/{pacchetto}/bin/asdlc-coda"
+                     " >> runs/cron.log 2>&1"]
 
 
 @pytest.mark.progetto_ospite

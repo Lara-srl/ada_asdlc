@@ -87,27 +87,27 @@ nessun file dello Scope.
   revisioni vengono dopo.
 
 ## Verifica
-- [ ] **La costituzione del template ha il metodo di qui e un dominio da scrivere.** La parte
+- [x] **La costituzione del template ha il metodo di qui e un dominio da scrivere.** La parte
       `## Metodo` di `template/AGENTS.md` è uguale a quella di `AGENTS.md`; la parte
       `## Dominio` ha le quattro sottosezioni della decisione 3, nell'ordine;
       `template/CLAUDE.md` è un link simbolico che punta ad `AGENTS.md`.
-- [ ] **Ogni cartella del metodo spiega le sue regole e rimanda al suo modello.**
+- [x] **Ogni cartella del metodo spiega le sue regole e rimanda al suo modello.**
       `template/backlog/README.md`, `template/decisions/README.md` e
       `template/specs/README.md` esistono, e ognuno contiene un link `](TEMPLATE.md)` che porta
       a un file che c'è. Un criterio solo con tre esempi: un test parametrico, un id per
       cartella.
-- [ ] **Gli ADR di metodo sono nel template, identici e numerati come qui.** Per ognuno dei
+- [x] **Gli ADR di metodo sono nel template, identici e numerati come qui.** Per ognuno dei
       dodici numeri della decisione 4, `template/decisions/` ha un file con lo stesso nome di
       quello di `decisions/` e lo stesso contenuto; `template/decisions/README.md` ha un link
       a ognuno, e dice che il prossimo ADR è lo `0028`.
-- [ ] **Il vocabolario delle cause del template è quello di qui.** Gli slug della tabella di
+- [x] **Il vocabolario delle cause del template è quello di qui.** Gli slug della tabella di
       §I difetti e le loro cause in `template/backlog/README.md` sono gli stessi, nello stesso
       ordine, di quelli in `backlog/README.md`; e la colonna dei PBI di approccio è vuota in
       ogni riga.
-- [ ] **La coda del template è vuota e ne porta la grammatica.** `coda.leggi_voci()` sul testo
+- [x] **La coda del template è vuota e ne porta la grammatica.** `coda.leggi_voci()` sul testo
       di `template/backlog/CODA.md` torna una lista vuota; il file ha la sezione `## La coda`,
       e nella prosa sopra nomina le due forme di riga, `- PBI-` e `- ‖`.
-- [ ] **La riga di cron del template lancia il tick del pacchetto del template.** In
+- [x] **La riga di cron del template lancia il tick del pacchetto del template.** In
       `template/backlog/AUTOMAZIONE.md` c'è una riga sola che comincia con `*/10 `, ed è quella
       della decisione 9 col `pacchetto` di `template/asdlc.toml`.
 
