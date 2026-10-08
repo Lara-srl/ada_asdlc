@@ -119,24 +119,24 @@ e lui non ha scelto da solo. Il PBI non aveva visto la sonda.
   scenari di un livello hanno un test di quel livello».
 
 ## Verifica
-- [ ] **Il modello dei PBI ha le sezioni del formato, nell'ordine.** Il titolo è
+- [x] **Il modello dei PBI ha le sezioni del formato, nell'ordine.** Il titolo è
       `# PBI-XXX: …`; poi `## Direttiva`, `## ✅ Deciso`, `## Il giro N, e cosa si riprende`,
       `## Dipendenze`, `## Contesto`, `## Verifica`, `## Protocollo di rifinitura`. Sotto
       `## Direttiva` c'è una riga `**Scope**` il cui elenco nomina `backlog/PBI-XXX-…` (il
       PBI stesso); sotto `## Verifica` c'è almeno una riga `- [ ]` e una riga che comincia con
       `**Non regressione:**`.
-- [ ] **Il modello degli ADR porta la firma presente e vuota, e le quattro domande.** Il
+- [x] **Il modello degli ADR porta la firma presente e vuota, e le quattro domande.** Il
       titolo è `# ADR-NNNN: …`; la riga d'intestazione contiene `**Ratificata da** … **il** …`
       esattamente così; le sezioni sono `## Contesto`, `## Decisione`, `## Conseguenze`,
       `## Alternative considerate`, nell'ordine; dentro `## Decisione` c'è un elenco
       numerato di quattro voci che cominciano con **cosa si controlla**, **quando**, **cosa
       conta come prova**, **cosa succede se manca**.
-- [ ] **Il modello delle spec ha le sezioni di quello di aDa, senza aDa.** Il titolo è
+- [x] **Il modello delle spec ha le sezioni di quello di aDa, senza aDa.** Il titolo è
       `# Feature: …`; le sezioni sono `## Blueprint` (`### Contesto`, `### Architettura`,
       `### Vincoli`) e `## Contratto` (`### Definition of Done`, `### Guardie di regressione`,
       `### Scenari`, `### Domande aperte`), nell'ordine. Il testo non contiene `Fase:` né
       `e2e/contract.ts`.
-- [ ] **Il modello della PR chiede le tre cose dell'accettazione umana.** Contiene una riga
+- [x] **Il modello della PR chiede le tre cose dell'accettazione umana.** Contiene una riga
       `PBI:` e tre righe `- [ ]`: i criteri della *Verifica* del PBI spuntati, il diff fuori
       dallo Scope dichiarato nel commit che lo introduce (`ADR-0015`), la spec aggiornata nello
       stesso commit del comportamento che cambia. Il test cerca le tre parole chiave
