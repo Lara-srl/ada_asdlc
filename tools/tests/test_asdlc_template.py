@@ -466,3 +466,19 @@ def test_le_righe_che_a_zero_si_tolgono_da_agents_sono_in_agents_del_template():
 
     assert len(blocchi) == 2, blocchi
     assert [b for b in blocchi if b not in costituzione] == []
+
+
+@pytest.mark.progetto_ospite
+def test_per_salire_a_mvp_si_aggiunge_cio_che_a_zero_mancava_con_un_adr():
+    percorso = template() / "ZERO.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    titolo, *sezioni = intestazioni(testo)
+    assert sezioni == ["## Si copia", "## Non si copia", "## Per salire a mvp"]
+    salita = sezione(testo, "## Per salire a mvp")
+    non_si_copia = voci_di_zero(testo, "## Non si copia")
+
+    assert non_si_copia
+    assert [v for v in non_si_copia if f"`{v}`" not in salita] == []
+    assert "ADR" in salita
