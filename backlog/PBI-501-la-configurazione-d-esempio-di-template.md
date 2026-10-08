@@ -98,7 +98,7 @@ runner installato. `template/.claude/` non la legge nessuno, qui.
       `asdlc_config.carica()` non alza; la configurazione ha almeno un gate, ogni `cwd` dei
       gate esiste nella cartella nata, `pacchetto` è `.venv-asdlc` sotto la radice comune, e
       `[ambiente].installa` è uguale a quello di `asdlc.toml` di questo repository.
-- [ ] **Il registro dei tempi del template ha le colonne del runner, e nessuna riga.**
+- [x] **Il registro dei tempi del template ha le colonne del runner, e nessuna riga.**
       `template/runs/tempi.csv` è una riga sola, e i suoi campi sono `COLONNE_CSV`.
 - [ ] **Un progetto nato da `template/` ignora i file effimeri e versiona il registro.** Nella
       cartella nata `git check-ignore` riconosce `asdlc.local.toml`, `runs/giro.log`,
