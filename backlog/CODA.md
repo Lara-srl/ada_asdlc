@@ -34,3 +34,15 @@ stesso fa un agente che non dichiara niente, e il giro chiude `senza esito` (`AD
 
 Vuota alla nascita del repository. I primi PBI sono quelli di `template/` (D5 del runbook
 della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
+
+- PBI-500
+- PBI-501
+- PBI-502
+- PBI-503
+
+**I quattro di `template/` sono il passo 4.2 del runbook della Fase 5 di aDa** (Francesco,
+08/10). Vanno in fila perché scrivono tutti in `template/` e nello stesso file di test, e
+ognuno legge i file del precedente. I numeri partono da 500 (Francesco, 08/10): sono fuori
+dalla serie di aDa, e «PBI-500» non si confonde con un PBI dell'altro repository. Il primo
+giro deve chiudere `fatto` col runner `0.1.0` installato, e la PR aprirsi qui. Il PBI del
+layout (difetto 90) e il tag `v0.2.0` sono il passo 4.3, dopo questi.
