@@ -86,7 +86,7 @@ nessun file dello Scope.
 - [x] **Le righe che a zero si tolgono da `AGENTS.md` ci sono davvero.** `ZERO.md` ha due
       blocchi citati, e il testo di ognuno, tolto il `> `, è una sottostringa di
       `template/AGENTS.md`.
-- [ ] **Per salire a `mvp` si aggiunge ciò che a zero mancava, con un ADR.** La sezione
+- [x] **Per salire a `mvp` si aggiunge ciò che a zero mancava, con un ADR.** La sezione
       `## Per salire a mvp` nomina ogni percorso di `## Non si copia` e la parola `ADR`.
 
 **Non regressione:**

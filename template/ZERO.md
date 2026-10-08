@@ -66,3 +66,36 @@ la CI, e il merge resta un gesto umano: il metodo è lo stesso, cambia chi lanci
   installato da un tag.
 - `decisions/ADR-0027-gli-esiti-passano-per-chiamate-a-strumento.md` — gli esiti del
   runner.
+
+## Per salire a mvp
+
+Il passaggio da zero a `mvp` è **un ADR**, scritto col modello di `decisions/TEMPLATE.md` e
+ratificato dal proprietario col merge della sua PR (`ADR-0012`): da lì in poi i PBI li esegue
+il runner, e si sale soltanto. L'ADR dice il tag del pacchetto che si installa e perché
+adesso. Poi, nell'ordine:
+
+1. **Installare il pacchetto dal pin.** Si copia `asdlc.toml` e si scrive in
+   `[ambiente].installa` l'URL git del pacchetto `asdlc` pinnato al tag scelto, mai a un
+   ramo (`decisions/ADR-0026-il-runner-e-un-pacchetto-installato-da-tag.md`); il tick lo
+   installa in `[ambiente].pacchetto` al primo giro, e da lì il runner che lavora è quello
+   installato.
+2. **Copiare ciò che a zero non si era copiato.** Oltre ad `asdlc.toml`: `asdlc-aggiunte/`
+   (le aggiunte del progetto ai prompt dei ruoli), `.claude/` (l'hook di fase, che chiude
+   il lucchetto di `TEST_ONLY` e `IMPL`), `runs/` (il registro dei tempi, con la sola riga
+   delle colonne), `.gitignore` (gli effimeri di `runs/`, il venv del pacchetto,
+   `asdlc.local.toml`), `backlog/AUTOMAZIONE.md` (il giro del runner e la riga di cron), e
+   i sette ADR del runner, che la tabella di `decisions/README.md` già nomina:
+   `decisions/ADR-0017-il-runner-e-un-prodotto-a-se.md`,
+   `decisions/ADR-0020-il-registro-dei-tempi-esce-dai-branch.md`,
+   `decisions/ADR-0021-il-rosso-si-chiede-prima.md`,
+   `decisions/ADR-0022-il-verde-che-morde-passa.md`,
+   `decisions/ADR-0024-anti-pattern-nel-prompt-del-builder.md`,
+   `decisions/ADR-0026-il-runner-e-un-pacchetto-installato-da-tag.md`,
+   `decisions/ADR-0027-gli-esiti-passano-per-chiamate-a-strumento.md`.
+3. **Rimettere in `AGENTS.md` le righe tolte.** Le due citazioni di `## Si copia` tornano
+   al loro posto, uguali: con il runner il rosso si chiede prima e l'esito passa per una
+   chiamata a strumento. È un cambio di costituzione, e lo copre lo stesso ADR.
+4. **Accendere la riga di cron di `backlog/AUTOMAZIONE.md`.** È il tick: da quel momento la
+   coda di `backlog/CODA.md` la esegue `asdlc-coda`, e una persona la scrive soltanto.
+
+Gli altri gradini, `staged` e `prod`, sono profili di `asdlc.toml`, e ognuno è un ADR suo.
