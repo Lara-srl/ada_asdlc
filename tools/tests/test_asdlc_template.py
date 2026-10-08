@@ -442,3 +442,27 @@ def test_ogni_file_del_template_e_in_una_lista_sola_di_zero_ed_e_la_divisione_de
         (radice / v).is_dir() if v.endswith("/") else (radice / v).is_file())] == []
     assert file
     assert [f for f in file if sum(copre(v, f) for v in tutte) != 1] == []
+
+
+def blocchi_citati(testo: str) -> list[str]:
+    """I blocchi di righe consecutive che cominciano con `> `, ognuno col
+    prefisso tolto e le righe riunite con l'a capo."""
+    blocchi = []
+    for citata, righe in itertools.groupby(testo.splitlines(),
+                                           key=lambda r: r.startswith("> ")):
+        if citata:
+            blocchi.append("\n".join(r.removeprefix("> ") for r in righe))
+    return blocchi
+
+
+@pytest.mark.progetto_ospite
+def test_le_righe_che_a_zero_si_tolgono_da_agents_sono_in_agents_del_template():
+    percorso = template() / "ZERO.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    costituzione = (template() / "AGENTS.md").read_text(encoding="utf-8")
+    blocchi = blocchi_citati(testo)
+
+    assert len(blocchi) == 2, blocchi
+    assert [b for b in blocchi if b not in costituzione] == []
