@@ -1919,6 +1919,27 @@ del difetto 23 sul lancio di PBI-335, che qui sta scritta accanto alla sua spunt
 
     **Causa:** `due-fonti`
 
+97. **Il Builder non può scrivere sotto `.claude/`, nemmeno dentro un'altra cartella.**
+    Claude Code tratta ogni percorso con un segmento `.claude/` come file sensibile, e per
+    scriverci chiede un permesso. In un giro nessuno è davanti alla sessione per darlo, e
+    nessuna voce di `asdlc.toml` né la guardia che il runner passa con `--settings` lo
+    concede. Il comportamento dipende da una regola della sessione che nessun file del
+    progetto dichiara.
+
+    Misurato l'08/10 al giro 1 di `PBI-501` (tag `giro-fermato/pbi-501-giro1-20261008`,
+    `7a47fda`, rapporto `runs/20261008-230505.json` in `ada_asdlc-run`). `--chiedi-impl` ha
+    visto il rosso e ha aperto IMPL. Poi `mkdir -p template/.claude/hooks` e
+    `Write template/.claude/settings.json` sono stati negati: «…which is a sensitive file»,
+    «…you haven't granted it yet». Il Builder si è fermato senza aggirarlo da shell. La
+    risposta per quel PBI (Francesco, 08/10): il criterio esce, e la copia la fa una persona.
+
+    La cura da decidere: il runner concede alla sessione del Builder la scrittura sotto i
+    percorsi `.claude/` che lo Scope nomina, con `--settings` o con le regole dei permessi,
+    e un test lo prova su un PBI di prova. Diventa attiva al tag dopo quello che la porta
+    (`ADR-0026`).
+
+    **Causa:** `ambiente-non-dichiarato`
+
 ## ⛔ `ada-notte.sh` deve sparire (Francesco, 26/08/2026)
 
 > *«Non voglio più vedere ada-notte.sh: eliminato, e usiamo solo asdlc_runner.»*
