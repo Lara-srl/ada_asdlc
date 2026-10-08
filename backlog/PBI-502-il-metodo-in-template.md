@@ -91,7 +91,7 @@ nessun file dello Scope.
       `## Metodo` di `template/AGENTS.md` è uguale a quella di `AGENTS.md`; la parte
       `## Dominio` ha le quattro sottosezioni della decisione 3, nell'ordine;
       `template/CLAUDE.md` è un link simbolico che punta ad `AGENTS.md`.
-- [ ] **Ogni cartella del metodo spiega le sue regole e rimanda al suo modello.**
+- [x] **Ogni cartella del metodo spiega le sue regole e rimanda al suo modello.**
       `template/backlog/README.md`, `template/decisions/README.md` e
       `template/specs/README.md` esistono, e ognuno contiene un link `](TEMPLATE.md)` che porta
       a un file che c'è. Un criterio solo con tre esempi: un test parametrico, un id per
