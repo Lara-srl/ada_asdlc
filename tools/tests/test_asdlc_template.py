@@ -105,6 +105,32 @@ def test_gli_adr_di_metodo_sono_nel_template_identici_e_numerati_come_qui():
     assert re.search(r"prossimo ADR[^\n]*\b0028\b", testo), testo
 
 
+CAUSE = "## I difetti e le loro cause"
+
+
+def tabella_delle_cause(testo: str) -> list[list[str]]:
+    """Le righe della tabella del vocabolario sotto `CAUSE`, una lista di celle
+    per riga, senza gli spazi ai bordi; lo slug è la prima cella."""
+    sezione = testo.split(f"\n{CAUSE}\n", 1)[1].split("\n## ", 1)[0]
+    return [[cella.strip() for cella in riga.strip().strip("|").split("|")]
+            for riga in sezione.splitlines() if riga.startswith("| `")]
+
+
+@pytest.mark.progetto_ospite
+def test_il_vocabolario_delle_cause_del_template_e_quello_di_qui():
+    percorso = template() / "backlog" / "README.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    assert CAUSE in intestazioni(testo)
+    qui = tabella_delle_cause((radice() / "backlog" / "README.md").read_text(encoding="utf-8"))
+    nel_template = tabella_delle_cause(testo)
+
+    assert qui
+    assert [riga[0] for riga in nel_template] == [riga[0] for riga in qui]
+    assert [riga for riga in nel_template if len(riga) != 3 or riga[2] != ""] == []
+
+
 @pytest.mark.progetto_ospite
 def test_il_modello_dei_pbi_ha_le_sezioni_del_formato_nell_ordine():
     percorso = template() / "backlog" / "TEMPLATE.md"
