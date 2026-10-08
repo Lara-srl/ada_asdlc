@@ -1,14 +1,21 @@
-"""I modelli di `template/` (`backlog/PBI-500`).
+"""I modelli di `template/` (`backlog/PBI-500`) e la configurazione d'esempio
+(`backlog/PBI-501`).
 
 `template/` è la cartella che un progetto nuovo copia alla nascita. Questi test
 leggono quella del repository che li ospita, non il progetto di prova: per questo
 portano il marcatore `progetto_ospite`. Delle intestazioni conta l'ordine, e si
 confrontano come lista; il testo sotto è libero, salvo dove un criterio lo dice.
+
+I file che il pacchetto o `git` leggono si provano in una cartella **nata** dalla
+copia di `template/` (`nasci()`), non qui: qui `.gitignore` e `asdlc.toml` sono
+quelli di questo repository.
 """
 
 import importlib
 import itertools
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -131,3 +138,33 @@ def test_guardia_template_non_porta_percorsi_di_macchina_ne_nomi_di_ada():
     trovati = [(str(p.relative_to(radice)), v) for p in file
                for v in VIETATI if v in p.read_text(encoding="utf-8")]
     assert trovati == []
+
+
+def nasci(tmp_path: Path) -> Path:
+    """Un progetto nato da `template/`: la copia in `tmp_path`, `git init` e un
+    commit iniziale (PBI-501, decisione 1). Una funzione e non una fixture: il
+    test asserisce prima che il file del suo criterio c'è, e un'asserzione in
+    una fixture sarebbe un errore di setup, non un fallimento. `--no-verify`
+    per il difetto 92: un `core.hooksPath` globale non entra nella nascita."""
+    nata = tmp_path / "progetto"
+    shutil.copytree(template(), nata, symlinks=True)
+    for comando in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.name=nascita", "-c", "user.email=nascita@esempio.invalid",
+                     "commit", "-q", "--no-verify", "-m", "nascita"]):
+        subprocess.run(["git", "-C", str(nata), *comando], check=True,
+                       capture_output=True, text=True)
+    return nata
+
+
+@pytest.mark.progetto_ospite
+def test_un_progetto_nato_dal_template_carica_la_sua_configurazione(tmp_path):
+    assert (template() / "asdlc.toml").is_file()
+    nata = nasci(tmp_path)
+
+    cfg = asdlc_config.carica(nata)
+
+    assert cfg.gate
+    assert [g.cwd for g in cfg.gate if not (nata / g.cwd).is_dir()] == []
+    assert cfg.ambiente.pacchetto == asdlc_config.radice_comune(nata) / ".venv-asdlc"
+    qui = asdlc_config.carica(asdlc_config.radice(Path(__file__).resolve().parent))
+    assert cfg.ambiente.installa == qui.ambiente.installa
