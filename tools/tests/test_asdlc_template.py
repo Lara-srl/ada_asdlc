@@ -7,6 +7,7 @@ confrontano come lista; il testo sotto è libero, salvo dove un criterio lo dice
 """
 
 import importlib
+import itertools
 import re
 from pathlib import Path
 
@@ -96,6 +97,20 @@ def test_il_modello_delle_spec_ha_le_sezioni_di_quello_di_partenza_senza_le_fasi
     ]
     assert "Fase:" not in testo
     assert "e2e/contract.ts" not in testo
+
+
+@pytest.mark.progetto_ospite
+def test_il_modello_della_pr_chiede_le_tre_cose_dell_accettazione_umana():
+    percorso = template() / ".github" / "PULL_REQUEST_TEMPLATE.md"
+    assert percorso.is_file(), percorso
+
+    righe = percorso.read_text(encoding="utf-8").splitlines()
+    caselle = [riga for riga in righe if riga.startswith("- [ ]")]
+
+    assert any(riga.startswith("PBI:") for riga in righe)
+    assert len(caselle) == 3, caselle
+    assert any(all(chiave in riga for chiave, riga in zip(ordine, caselle))
+               for ordine in itertools.permutations(("Verifica", "Scope", "spec"))), caselle
 
 
 VIETATI = ("/home/", "/Users/", "~/", "aDa", "Barbara", "Oltre3D", "Carrozzeria")
