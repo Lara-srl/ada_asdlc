@@ -164,6 +164,21 @@ def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
 
 
 @pytest.mark.progetto_ospite
+def test_la_riga_di_cron_del_template_lancia_il_tick_del_pacchetto_del_template():
+    """`<checkout>` resta un segnaposto: lo sostituisce chi installa. Il
+    `pacchetto` invece è quello di `template/asdlc.toml` (PBI-502, decisione 9)."""
+    percorso = template() / "backlog" / "AUTOMAZIONE.md"
+    assert percorso.is_file(), percorso
+
+    pacchetto = asdlc_config.leggi_toml(template() / "asdlc.toml")["ambiente"]["pacchetto"]
+    righe = [riga for riga in percorso.read_text(encoding="utf-8").splitlines()
+             if riga.startswith("*/10 ")]
+
+    assert righe == [f"*/10 * * * * cd <checkout> && <checkout>/{pacchetto}/bin/asdlc-coda"
+                     " >> runs/cron.log 2>&1"]
+
+
+@pytest.mark.progetto_ospite
 def test_il_modello_dei_pbi_ha_le_sezioni_del_formato_nell_ordine():
     percorso = template() / "backlog" / "TEMPLATE.md"
     assert percorso.is_file(), percorso
