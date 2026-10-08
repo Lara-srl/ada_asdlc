@@ -1,5 +1,6 @@
 """I modelli di `template/` (`backlog/PBI-500`), la configurazione d'esempio
-(`backlog/PBI-501`) e il metodo (`backlog/PBI-502`).
+(`backlog/PBI-501`), il metodo (`backlog/PBI-502`) e il livello zero
+(`backlog/PBI-503`).
 
 `template/` è la cartella che un progetto nuovo copia alla nascita. Questi test
 leggono quella del repository che li ospita, non il progetto di prova: per questo
@@ -363,3 +364,81 @@ def test_la_ci_del_template_gira_i_comandi_dei_gate_del_template():
             if not any(" ".join(g["comando"]) in riga for riga in eseguiti)] == []
     assert "pull_request" in testo
     assert "push" in testo
+
+
+# Il livello zero (PBI-503, decisione 2): cosa un progetto copia da `template/`
+# senza il pacchetto, e cosa no. Due costanti e non un glob: è la divisione
+# decisa, e un file nuovo in `template/` la rende rossa finché non ci entra.
+ZERO_SI_COPIA = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    "backlog/README.md",
+    "backlog/TEMPLATE.md",
+    "backlog/CODA.md",
+    "decisions/README.md",
+    "decisions/TEMPLATE.md",
+    "specs/README.md",
+    "specs/TEMPLATE.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/ci.yml",
+    "decisions/ADR-0008-osserva-e-segnala.md",
+    "decisions/ADR-0009-e2e-playwright-nel-gate.md",
+    "decisions/ADR-0011-dati-reali-nel-repository.md",
+    "decisions/ADR-0012-ratifica-dei-cambi-di-costituzione.md",
+    "decisions/ADR-0015-la-deroga-allo-scope-si-dichiara.md",
+)
+ZERO_NON_SI_COPIA = (
+    "asdlc.toml",
+    "asdlc-aggiunte/",
+    ".claude/",
+    "runs/",
+    ".gitignore",
+    "backlog/AUTOMAZIONE.md",
+    "decisions/ADR-0017-il-runner-e-un-prodotto-a-se.md",
+    "decisions/ADR-0020-il-registro-dei-tempi-esce-dai-branch.md",
+    "decisions/ADR-0021-il-rosso-si-chiede-prima.md",
+    "decisions/ADR-0022-il-verde-che-morde-passa.md",
+    "decisions/ADR-0024-anti-pattern-nel-prompt-del-builder.md",
+    "decisions/ADR-0026-il-runner-e-un-pacchetto-installato-da-tag.md",
+    "decisions/ADR-0027-gli-esiti-passano-per-chiamate-a-strumento.md",
+)
+RE_VOCE_DI_ZERO = re.compile(r"^- `([^`]+)`", re.MULTILINE)
+
+
+def sezione(testo: str, titolo: str) -> str:
+    """Il testo sotto l'intestazione `titolo`, fino alla prossima `## `."""
+    return testo.split(f"\n{titolo}\n", 1)[1].split("\n## ", 1)[0]
+
+
+def voci_di_zero(testo: str, titolo: str) -> list[str]:
+    """I percorsi delle voci `- \\`percorso\\` — ragione` della sezione
+    (PBI-503, decisione 1)."""
+    return RE_VOCE_DI_ZERO.findall(sezione(testo, titolo))
+
+
+def copre(voce: str, percorso: str) -> bool:
+    """Una voce che finisce con `/` vale per tutta la cartella."""
+    return percorso == voce or (voce.endswith("/") and percorso.startswith(voce))
+
+
+@pytest.mark.progetto_ospite
+def test_ogni_file_del_template_e_in_una_lista_sola_di_zero_ed_e_la_divisione_decisa():
+    percorso = template() / "ZERO.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    titolo, *sezioni = intestazioni(testo)
+    si_copia = voci_di_zero(testo, "## Si copia")
+    non_si_copia = voci_di_zero(testo, "## Non si copia")
+    tutte = si_copia + non_si_copia
+    radice = template()
+    file = sorted(str(p.relative_to(radice)) for p in radice.rglob("*")
+                  if p.is_file() and p != percorso)
+
+    assert sezioni[:2] == ["## Si copia", "## Non si copia"]
+    assert sorted(si_copia) == sorted(ZERO_SI_COPIA)
+    assert sorted(non_si_copia) == sorted(ZERO_NON_SI_COPIA)
+    assert [v for v in tutte if not (
+        (radice / v).is_dir() if v.endswith("/") else (radice / v).is_file())] == []
+    assert file
+    assert [f for f in file if sum(copre(v, f) for v in tutte) != 1] == []
