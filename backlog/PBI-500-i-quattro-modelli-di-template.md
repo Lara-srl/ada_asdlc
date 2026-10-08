@@ -85,7 +85,7 @@ Durante il giro il runner non lancia nessun file dello Scope.
       `## Direttiva` c'è una riga `**Scope**` il cui elenco nomina `backlog/PBI-XXX-…` (il
       PBI stesso); sotto `## Verifica` c'è almeno una riga `- [ ]` e una riga che comincia con
       `**Non regressione:**`.
-- [ ] **Il modello degli ADR porta la firma presente e vuota, e le quattro domande.** Il
+- [x] **Il modello degli ADR porta la firma presente e vuota, e le quattro domande.** Il
       titolo è `# ADR-NNNN: …`; la riga d'intestazione contiene `**Ratificata da** … **il** …`
       esattamente così; le sezioni sono `## Contesto`, `## Decisione`, `## Conseguenze`,
       `## Alternative considerate`, nell'ordine; dentro `## Decisione` c'è un elenco
