@@ -83,7 +83,7 @@ nessun file dello Scope.
       e da una sola; ogni voce nomina un percorso che c'è; e le voci delle due liste sono
       quelle della decisione 2, né una di più né una di meno. Un criterio solo: la stessa
       scrittura delle due liste lo rende verde tutto.
-- [ ] **Le righe che a zero si tolgono da `AGENTS.md` ci sono davvero.** `ZERO.md` ha due
+- [x] **Le righe che a zero si tolgono da `AGENTS.md` ci sono davvero.** `ZERO.md` ha due
       blocchi citati, e il testo di ognuno, tolto il `> `, è una sottostringa di
       `template/AGENTS.md`.
 - [ ] **Per salire a `mvp` si aggiunge ciò che a zero mancava, con un ADR.** La sezione

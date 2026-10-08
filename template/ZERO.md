@@ -14,7 +14,17 @@ la CI, e il merge resta un gesto umano: il metodo è lo stesso, cambia chi lanci
 ## Si copia
 
 - `AGENTS.md` — la costituzione: il metodo, identico, e il dominio da scrivere. Due regole
-  del metodo esistono solo per il runner, e a zero si tolgono a mano: sono citate qui sotto.
+  del metodo esistono solo per il runner, e a zero si tolgono a mano, così come sono citate
+  qui sotto: la riga `MAI` sugli esiti dal testo libero (`ADR-0027`), e la frase di `SEMPRE`
+  sul rosso chiesto prima (`ADR-0021`). Il resto della voce resta.
+
+> - Un esito ricavato dal testo libero di un modello. Ciò che il codice decide da un agente
+>   passa per una chiamata a strumento o per un output strutturato validato, senza ripiegare
+>   sul testo (`decisions/ADR-0027-gli-esiti-passano-per-chiamate-a-strumento.md`).
+
+> Nel giro del runner il permesso di scrivere produzione lo dà il rosso osservato, non la
+>   parola di chi lo scrive (`decisions/ADR-0021-il-rosso-si-chiede-prima.md`).
+
 - `CLAUDE.md` — il symlink ad `AGENTS.md`, per chi legge quel nome.
 - `backlog/README.md` — le regole dei PBI, e il vocabolario dei difetti e delle cause.
 - `backlog/TEMPLATE.md` — il modello di un PBI.
