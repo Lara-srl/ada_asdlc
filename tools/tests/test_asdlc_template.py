@@ -74,6 +74,30 @@ def test_il_modello_degli_adr_porta_la_firma_vuota_e_le_quattro_domande():
     assert [v.startswith(f"**{d}**") for v, d in zip(voci, domande)] == [True] * 4, voci
 
 
+@pytest.mark.progetto_ospite
+def test_il_modello_delle_spec_ha_le_sezioni_di_quello_di_partenza_senza_le_fasi():
+    percorso = template() / "specs" / "TEMPLATE.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    titolo, *sezioni = intestazioni(testo)
+
+    assert titolo.startswith("# Feature: ")
+    assert sezioni == [
+        "## Blueprint",
+        "### Contesto",
+        "### Architettura",
+        "### Vincoli",
+        "## Contratto",
+        "### Definition of Done",
+        "### Guardie di regressione",
+        "### Scenari",
+        "### Domande aperte",
+    ]
+    assert "Fase:" not in testo
+    assert "e2e/contract.ts" not in testo
+
+
 VIETATI = ("/home/", "/Users/", "~/", "aDa", "Barbara", "Oltre3D", "Carrozzeria")
 
 
