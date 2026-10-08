@@ -201,3 +201,22 @@ def test_un_progetto_nato_dal_template_ignora_gli_effimeri_e_versiona_il_registr
 
     assert detto.returncode in (0, 1), detto.stderr
     assert (detto.returncode == 0) is ignorato
+
+
+@pytest.mark.progetto_ospite
+def test_la_ci_del_template_gira_i_comandi_dei_gate_del_template():
+    """Letta come testo, senza una libreria YAML: la CI installa solo `pytest`
+    (PBI-501, decisione 6)."""
+    percorso = template() / ".github" / "workflows" / "ci.yml"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    eseguiti = [riga.split("run:", 1)[1].strip() for riga in testo.splitlines()
+                if riga.strip().removeprefix("- ").startswith("run:")]
+    gate = asdlc_config.leggi_toml(template() / "asdlc.toml")["gate"]
+
+    assert gate
+    assert [g["comando"] for g in gate
+            if not any(" ".join(g["comando"]) in riga for riga in eseguiti)] == []
+    assert "pull_request" in testo
+    assert "push" in testo
