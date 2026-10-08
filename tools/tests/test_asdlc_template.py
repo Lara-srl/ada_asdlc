@@ -1,5 +1,5 @@
-"""I modelli di `template/` (`backlog/PBI-500`) e la configurazione d'esempio
-(`backlog/PBI-501`).
+"""I modelli di `template/` (`backlog/PBI-500`), la configurazione d'esempio
+(`backlog/PBI-501`) e il metodo (`backlog/PBI-502`).
 
 `template/` è la cartella che un progetto nuovo copia alla nascita. Questi test
 leggono quella del repository che li ospita, non il progetto di prova: per questo
@@ -27,12 +27,44 @@ runner = importlib.import_module("asdlc.runner")
 RE_INTESTAZIONE = re.compile(r"^#+ .*$", re.MULTILINE)
 
 
+def radice() -> Path:
+    return asdlc_config.radice(Path(__file__).resolve().parent)
+
+
 def template() -> Path:
-    return asdlc_config.radice(Path(__file__).resolve().parent) / "template"
+    return radice() / "template"
 
 
 def intestazioni(testo: str) -> list[str]:
     return RE_INTESTAZIONE.findall(testo)
+
+
+def parte_metodo(testo: str) -> list[str]:
+    """Le righe di `AGENTS.md` dalla riga `## Metodo` esclusa alla riga
+    `## Dominio` esclusa (PBI-502, decisione 2)."""
+    righe = testo.splitlines()
+    return righe[righe.index("## Metodo") + 1:righe.index("## Dominio")]
+
+
+@pytest.mark.progetto_ospite
+def test_la_costituzione_del_template_ha_il_metodo_di_qui_e_un_dominio_da_scrivere():
+    percorso = template() / "AGENTS.md"
+    assert percorso.is_file(), percorso
+
+    testo = percorso.read_text(encoding="utf-8")
+    qui = (radice() / "AGENTS.md").read_text(encoding="utf-8")
+    dominio = testo.split("\n## Dominio\n", 1)[1]
+    link = template() / "CLAUDE.md"
+
+    assert parte_metodo(testo) == parte_metodo(qui)
+    assert intestazioni(dominio) == [
+        "### Toolchain",
+        "### Confini di giudizio",
+        "### Sorgenti",
+        "### Scope dei commit",
+    ]
+    assert link.is_symlink(), link
+    assert link.readlink() == Path("AGENTS.md")
 
 
 @pytest.mark.progetto_ospite
