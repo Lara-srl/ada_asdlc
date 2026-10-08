@@ -1,0 +1,27 @@
+name: ci
+
+# Il gate di `main`: una PR entra solo con questo job verde. Gira su ogni PR e su
+# ogni push in `main`. Ogni passo `run:` dei test è il `comando` di un `[[gate]]`
+# di `asdlc.toml`, scritto uguale: il runner e la CI provano la stessa cosa.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Una corsa per ramo: un push nuovo sullo stesso ramo annulla quella vecchia.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Le dipendenze dei test: quelle del progetto, quando ne avrà.
+      - run: pip install pytest
+      # Il gate `test` di `asdlc.toml`.
+      - run: python3 -m pytest -q
