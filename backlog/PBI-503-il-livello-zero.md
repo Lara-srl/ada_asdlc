@@ -77,7 +77,7 @@ nessun file dello Scope.
 - `decisions/ADR-0012-…` — la ratifica col merge, per il passaggio a `mvp`.
 
 ## Verifica
-- [ ] **Ogni file di `template/` è in una lista sola di `ZERO.md`, ed è la divisione
+- [x] **Ogni file di `template/` è in una lista sola di `ZERO.md`, ed è la divisione
       decisa.** Ogni file sotto `template/`, tranne `ZERO.md`, è nominato da una voce di
       `## Si copia` o di `## Non si copia` (per percorso, o per una cartella che lo contiene),
       e da una sola; ogni voce nomina un percorso che c'è; e le voci delle due liste sono
