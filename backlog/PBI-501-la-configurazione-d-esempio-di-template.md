@@ -130,7 +130,7 @@ scrittura da shell, e ha fatto bene. È il difetto 97 di `PBI-102`.
       `[ambiente].installa` è uguale a quello di `asdlc.toml` di questo repository.
 - [x] **Il registro dei tempi del template ha le colonne del runner, e nessuna riga.**
       `template/runs/tempi.csv` è una riga sola, e i suoi campi sono `COLONNE_CSV`.
-- [ ] **Un progetto nato da `template/` ignora i file effimeri e versiona il registro.** Nella
+- [x] **Un progetto nato da `template/` ignora i file effimeri e versiona il registro.** Nella
       cartella nata `git check-ignore` riconosce `asdlc.local.toml`, `runs/giro.log`,
       `runs/giro.json` e `.venv-asdlc/bin/asdlc-coda`, e non riconosce `runs/tempi.csv`. È un
       criterio solo con cinque esempi: un test parametrico, un id per percorso.
