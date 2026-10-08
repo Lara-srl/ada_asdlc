@@ -14,6 +14,7 @@ quelli di questo repository.
 import csv
 import importlib
 import itertools
+import os
 import re
 import shutil
 import subprocess
@@ -220,3 +221,16 @@ def test_la_ci_del_template_gira_i_comandi_dei_gate_del_template():
             if not any(" ".join(g["comando"]) in riga for riga in eseguiti)] == []
     assert "pull_request" in testo
     assert "push" in testo
+
+
+@pytest.mark.progetto_ospite
+@pytest.mark.parametrize("relativo", [".claude/hooks/fase-tdd.sh", ".claude/settings.json"])
+def test_la_guardia_di_fase_del_template_e_quella_di_questo_repository(relativo):
+    """Una copia è una seconda fonte: il test la tiene uguale, e una correzione
+    all'hook di qui senza la copia diventa rossa (PBI-501, decisione 7)."""
+    copia = template() / relativo
+    assert copia.is_file(), copia
+
+    assert copia.read_bytes() == (template().parent / relativo).read_bytes()
+    if copia.suffix == ".sh":
+        assert os.access(copia, os.X_OK), copia
