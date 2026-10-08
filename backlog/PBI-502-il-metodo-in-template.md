@@ -87,7 +87,7 @@ nessun file dello Scope.
   revisioni vengono dopo.
 
 ## Verifica
-- [ ] **La costituzione del template ha il metodo di qui e un dominio da scrivere.** La parte
+- [x] **La costituzione del template ha il metodo di qui e un dominio da scrivere.** La parte
       `## Metodo` di `template/AGENTS.md` è uguale a quella di `AGENTS.md`; la parte
       `## Dominio` ha le quattro sottosezioni della decisione 3, nell'ordine;
       `template/CLAUDE.md` è un link simbolico che punta ad `AGENTS.md`.
