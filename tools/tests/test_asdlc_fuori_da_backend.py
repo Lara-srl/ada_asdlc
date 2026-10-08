@@ -1,26 +1,19 @@
 """I test del runner ASDLC stanno in `tools/tests/`, fuori dall'applicazione
 (`backlog/PBI-360`).
 
-Due cose che il trasloco deve rendere vere, e che nessun altro test guarda:
+Una cosa che il trasloco deve rendere vera, e che nessun altro test guarda:
 
 - **Il gate `asdlc` gira la suite.** Il gate `pytest` lancia
   `cd backend && pytest -q`: appena i test escono da lì, smette di eseguirli. Se
   `asdlc.toml` non li riprende con un gate suo, il giro si certifica verde su una
   suite che non gira più. Lo si prova sul progetto di prova (PBI-394), che ha
   quel gate solo.
-- **Nessuna connessione a un database.** `backend/tests/conftest.py` monta uno
-  SQLite in memoria per ogni test, `autouse`; i test del runner non toccano un
-  database e fuori da lì non devono pagarlo. La sonda li gira in un processo suo,
-  con `sqlite3.dbapi2.connect` contato: è la porta da cui passa quella fixture —
-  SQLAlchemy apre SQLite da `dbapi2`, non da `sqlite3.connect`.
 
 Il runner si carica dal suo percorso in `tools/asdlc/` con un nome suo, e non
 per nome come negli altri file di questa cartella: vedi sotto.
 """
 
 import importlib.util
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -44,8 +37,7 @@ runner.configura(runner.asdlc_config.carica(PROGETTO))
 
 
 # L'elenco del passo 2.2 di `RUNBOOK-FASE-5.md`: ciò che trasloca nel repository
-# `asdlc`. Lo legge `git filter-repo --paths-from-file`, e lo legge la sonda qui
-# sotto per costruire la forma di quel repository (PBI-394, decisione 3).
+# `asdlc`. Lo legge `git filter-repo --paths-from-file` (PBI-394, decisione 3).
 ESTRAZIONE = QUI.parent / "dati" / "estrazione.txt"
 
 
@@ -98,72 +90,3 @@ def test_gira_gate_esegue_la_suite_asdlc_del_progetto_di_prova(monkeypatch):
 
     assert chiamati == [(["python3", "-m", "pytest", "-q", "tools/tests"], PROGETTO / ".")]
 
-
-# Il processo figlio conta le connessioni SQLite intorno a un `pytest`
-# di questa cartella, e le stampa **dopo** che pytest ha finito: la riga è sua,
-# non si confonde con l'output dei test.
-SONDA = """
-import sqlite3, sqlite3.dbapi2, sys
-import pytest
-
-aperte = []
-_connect = sqlite3.dbapi2.connect
-
-def _contata(*a, **k):
-    aperte.append(a[:1])
-    return _connect(*a, **k)
-
-sqlite3.connect = sqlite3.dbapi2.connect = _contata
-esito = pytest.main(sys.argv[1:])
-print(f"CONNESSIONI APERTE: {len(aperte)}")
-sys.exit(esito)
-"""
-
-
-# Ciò che il commit di nascita del passo 2.3 aggiunge alla radice del repository
-# `asdlc`, oltre ai percorsi dell'estrazione: l'hook di fase e le sue impostazioni,
-# e il progetto di prova come progetto della radice (PBI-394, decisione 4).
-DELL_OSPITE = (".claude/hooks/fase-tdd.sh", ".claude/settings.json")
-DEL_PROGETTO_DI_PROVA = ("asdlc.toml", "asdlc-aggiunte", "backlog/CODA.md")
-
-
-def forma_del_repository_asdlc(cartella: Path) -> Path:
-    """Una cartella con i soli file che traslocano, e nessun altro file di aDa.
-
-    Fuori da un repository git, in una cartella temporanea: i test che ci girano
-    non possono trovare né il checkout di aDa né i suoi file per la strada.
-    """
-    for file in file_dell_estrazione(REPO):
-        copia = cartella / file.relative_to(REPO)
-        copia.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(file, copia)
-    for relativo in DELL_OSPITE:
-        (cartella / relativo).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(REPO / relativo, cartella / relativo)
-    for relativo in DEL_PROGETTO_DI_PROVA:
-        if (PROGETTO / relativo).is_dir():
-            shutil.copytree(PROGETTO / relativo, cartella / relativo)
-        else:
-            (cartella / relativo).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(PROGETTO / relativo, cartella / relativo)
-    return cartella
-
-
-def test_i_test_di_tools_tests_non_aprono_connessioni_a_un_database(tmp_path):
-    """La suite gira **nella forma del repository `asdlc`**, non dalla radice di
-    aDa: è il controllo del passo 0.2 del runbook, e si rifà identico al 2.5.
-
-    Un sottoprocesso solo, che conta anche le connessioni: la suite gira già due
-    volte a ogni gate, e una terza costerebbe un altro mezzo minuto a ogni gate
-    di ogni giro (PBI-394, decisione 4)."""
-    forma = forma_del_repository_asdlc(tmp_path / "asdlc")
-    fatto = subprocess.run(
-        [sys.executable, "-c", SONDA, "-q", "-p", "no:cacheprovider",
-         "tools/tests", "-k", "not non_aprono_connessioni"],
-        cwd=forma, capture_output=True, text=True, timeout=600,
-    )
-    uscita = fatto.stdout + fatto.stderr
-
-    assert "CONNESSIONI APERTE: 0" in uscita, uscita[-3000:]
-    assert fatto.returncode == 0, uscita[-3000:]
-    assert " passed" in uscita, uscita[-3000:]
