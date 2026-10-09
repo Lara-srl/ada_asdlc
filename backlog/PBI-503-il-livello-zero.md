@@ -77,16 +77,16 @@ nessun file dello Scope.
 - `decisions/ADR-0012-…` — la ratifica col merge, per il passaggio a `mvp`.
 
 ## Verifica
-- [ ] **Ogni file di `template/` è in una lista sola di `ZERO.md`, ed è la divisione
+- [x] **Ogni file di `template/` è in una lista sola di `ZERO.md`, ed è la divisione
       decisa.** Ogni file sotto `template/`, tranne `ZERO.md`, è nominato da una voce di
       `## Si copia` o di `## Non si copia` (per percorso, o per una cartella che lo contiene),
       e da una sola; ogni voce nomina un percorso che c'è; e le voci delle due liste sono
       quelle della decisione 2, né una di più né una di meno. Un criterio solo: la stessa
       scrittura delle due liste lo rende verde tutto.
-- [ ] **Le righe che a zero si tolgono da `AGENTS.md` ci sono davvero.** `ZERO.md` ha due
+- [x] **Le righe che a zero si tolgono da `AGENTS.md` ci sono davvero.** `ZERO.md` ha due
       blocchi citati, e il testo di ognuno, tolto il `> `, è una sottostringa di
       `template/AGENTS.md`.
-- [ ] **Per salire a `mvp` si aggiunge ciò che a zero mancava, con un ADR.** La sezione
+- [x] **Per salire a `mvp` si aggiunge ciò che a zero mancava, con un ADR.** La sezione
       `## Per salire a mvp` nomina ogni percorso di `## Non si copia` e la parola `ADR`.
 
 **Non regressione:**
