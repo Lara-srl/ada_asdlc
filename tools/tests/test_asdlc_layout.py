@@ -82,3 +82,14 @@ class TestBackendNonESpeciale:
         monkeypatch.setattr(runner, "GATE", gate_in("back"))
 
         assert runner.dove_gira("backend/tests/test_a.py") == (".", "backend/tests/test_a.py")
+
+
+class TestFraDueCartelleAnnidateVinceLaPiuLunga:
+    """Criterio 3: un test sotto `app/web/` gira da `app/web` anche se c'è un gate
+    in `app`, in qualunque ordine stiano i due gate in `GATE`."""
+
+    @pytest.mark.parametrize("cartelle", [("app", "app/web"), ("app/web", "app")])
+    def test_un_test_sotto_app_web_gira_da_app_web(self, monkeypatch, cartelle):
+        monkeypatch.setattr(runner, "GATE", gate_in(*cartelle))
+
+        assert runner.dove_gira("app/web/src/x.test.ts") == ("app/web", "src/x.test.ts")
