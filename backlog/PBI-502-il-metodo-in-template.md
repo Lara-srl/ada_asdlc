@@ -120,3 +120,19 @@ nessun file dello Scope.
 ## Protocollo di rifinitura
 Una regola di metodo vive in un posto solo qui, e il template ne è una copia tenuta uguale
 da un test. Se una regola cambia qui, la PR che la cambia cambia anche la copia, e lo dice.
+
+## Al merge: le note del Critic (09/10/2026)
+
+Dal rapporto `runs/20261009-000505-PBI-502-critic-0.md` in `ada_asdlc-run`, verdetto `pass`.
+Decise da Francesco il 09/10.
+
+- **In arretrato, senza PBI.** Nella tabella di `template/decisions/README.md` due titoli sono
+  riscritti rispetto a `decisions/README.md`: 0008 dice «Il prodotto osserva…» e non «aDa
+  osserva…», e 0012 dice «il proprietario» e non «Francesco». È la decisione 6, che toglie il
+  dominio, ma nessun test tiene quei titoli allineati: se un titolo cambia qui, la copia resta
+  com'è.
+- **Difetto 98 di `PBI-102`.** Il test della coda vuota passa perché gli esempi della prosa
+  di `template/backlog/CODA.md` stanno fra backtick.
+- **Non registrata.** `template/AGENTS.md` nomina «Francesco» nel CHIEDI sulla ratifica,
+  perché `## Metodo` è copiato carattere per carattere (decisione 2). Il rimedio cambia
+  `## Metodo` di qui, ed è un cambio di costituzione con la ratifica di `ADR-0012`.
