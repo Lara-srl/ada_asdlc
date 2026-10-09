@@ -1917,7 +1917,7 @@ def dove_gira(percorso: str) -> tuple[str, str]:
     scritto col prefisso `backend/` non si riesegue da `backend/`.
     """
     cartelle = [g.cwd for g in GATE if g.cwd != "."]
-    for radice in (*cartelle, "backend", "frontend"):
+    for radice in cartelle:
         if percorso.startswith(f"{radice}/"):
             return radice, percorso[len(radice) + 1:]
     return ".", percorso
