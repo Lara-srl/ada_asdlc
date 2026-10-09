@@ -79,19 +79,19 @@ radice si trova invece con `radice()` di `asdlc.config`, che risale fino ad `asd
 - `tools/asdlc/config.py`, `Gate` e `radice()`.
 
 ## Verifica
-- [ ] **Un test gira dalla cartella di un gate, e il comando isolato parte da lì.** Con un
+- [x] **Un test gira dalla cartella di un gate, e il comando isolato parte da lì.** Con un
       solo gate in `servizio`, `dove_gira("servizio/tests/test_a.py")` restituisce
       `("servizio", "tests/test_a.py")`. `comandi_dei_test()` su quel test, in un albero
       temporaneo che lo contiene, restituisce un comando con cartella `<albero>/servizio`,
       etichetta `tests/test_a.py::test_x` e nessun orfano. Su `main` dà la radice.
-- [ ] **`backend/` non è più speciale, e il confine è la cartella intera.** Con un solo gate
+- [x] **`backend/` non è più speciale, e il confine è la cartella intera.** Con un solo gate
       in `.`, `dove_gira("backend/tests/test_a.py")` restituisce
       `(".", "backend/tests/test_a.py")`. Con un solo gate in `back`, lo stesso percorso dà
       lo stesso risultato: `back` non prende `backend/`. Su `main` danno `backend`.
-- [ ] **Fra due cartelle annidate vince la più lunga.** Con gate in `app` e in `app/web`,
+- [x] **Fra due cartelle annidate vince la più lunga.** Con gate in `app` e in `app/web`,
       `dove_gira("app/web/src/x.test.ts")` restituisce `("app/web", "src/x.test.ts")`, in
       qualunque ordine stiano i due gate in `GATE`.
-- [ ] **Nessun test trova la radice contando le cartelle.** Nessun file `.py` di
+- [x] **Nessun test trova la radice contando le cartelle.** Nessun file `.py` di
       `tools/tests`, tranne `conftest.py`, ha `Path(__file__)` seguito da `.parents[`, con o
       senza `.resolve()`. Il test costruisce il modello in modo da non trovare sé stesso.
       Su `main` lo trova in otto file.
