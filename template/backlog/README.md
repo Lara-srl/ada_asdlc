@@ -90,6 +90,7 @@ giudizio di chi mergia, perché il runner non ricava una decisione dal testo del
 | `decisione-senza-verifica` | una decisione del PBI che nessun caso della Verifica esercita | |
 | `soglia-non-misurata` | un tetto o una soglia fissati su un'ipotesi invece che su una misura | |
 | `caso-scoperto` | una regola del gate vale per i casi che il PBI nomina, e un caso vicino che nessuno ha nominato le sfugge, anche se la rete che la regola si è data potrebbe coprirlo | |
+| `test-per-il-motivo-sbagliato` | un test è verde per una proprietà dei dati o della prosa che non è quella che il suo nome dichiara, e diventerebbe rosso, o resterebbe verde, per la ragione sbagliata | |
 
 **La colonna «PBI di approccio» c'è per ogni causa**, anche vuota: da segnalare è una causa
 con tre occorrenze o più **e la colonna vuota**, non ogni causa arrivata a tre. Alla nascita
