@@ -1912,11 +1912,12 @@ def caso_junit(chiave: str) -> tuple[str, str]:
 def dove_gira(percorso: str) -> tuple[str, str]:
     """La cartella da cui si lancia il test, e il suo percorso da lì.
 
-    Le cartelle sono i `cwd` dei gate di `GATE`, tolto `.` (PBI-504). Un test
-    isolato che girasse da un'altra parte non sarebbe più lo stesso test — e un id
-    scritto col prefisso `backend/` non si riesegue da `backend/`.
+    Le cartelle sono i `cwd` dei gate di `GATE`, tolto `.` (PBI-504), e fra due
+    annidate vince la più lunga. Un test isolato che girasse da un'altra parte non
+    sarebbe più lo stesso test — e un id scritto col prefisso `backend/` non si
+    riesegue da `backend/`.
     """
-    cartelle = [g.cwd for g in GATE if g.cwd != "."]
+    cartelle = sorted((g.cwd for g in GATE if g.cwd != "."), key=len, reverse=True)
     for radice in cartelle:
         if percorso.startswith(f"{radice}/"):
             return radice, percorso[len(radice) + 1:]
