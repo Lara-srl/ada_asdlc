@@ -10,6 +10,7 @@ altri test: la cwd e l'import sono proprio ciò che si prova, e cambiarli nel
 processo di pytest li cambierebbe a tutta la suite.
 """
 
+import importlib
 import json
 import os
 import shutil
@@ -17,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 # Il progetto di prova (PBI-394, decisione 1): il suo `asdlc.toml` e le sue
 # aggiunte, al posto di quelli del progetto che ospita questi test.
 PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"

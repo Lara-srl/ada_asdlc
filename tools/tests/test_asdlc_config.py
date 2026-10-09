@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 # Il progetto di prova (PBI-394, decisione 1): la configurazione del runner sotto
 # test, al posto del progetto che ospita questi test.
 PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"

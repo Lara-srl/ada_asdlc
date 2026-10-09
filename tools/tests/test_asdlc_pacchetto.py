@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 # Il progetto di prova (PBI-394, decisione 1): il suo `asdlc.toml` e le sue
 # aggiunte, al posto di quelli del progetto che ospita questi test.
 PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"

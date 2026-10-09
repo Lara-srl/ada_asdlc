@@ -17,7 +17,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 QUI = Path(__file__).resolve()
 # Il progetto di prova dei test del runner (PBI-394, decisione 1).
 PROGETTO = QUI.parent / "dati" / "progetto"

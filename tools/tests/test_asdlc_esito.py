@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 SORGENTE = REPO / "tools" / "asdlc" / "esito.py"
 
 # Una versione che il server non ha motivo di conoscere: deve rispondere con

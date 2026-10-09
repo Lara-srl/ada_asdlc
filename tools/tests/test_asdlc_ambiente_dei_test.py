@@ -6,13 +6,14 @@ Senza `pytest` sul `PATH` ognuno di loro moriva con un'uscita 127, e il difetto
 cerca in `pytest_sessionstart` e ferma la sessione con un messaggio solo.
 """
 
+import importlib
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 
 
 def test_senza_pytest_sul_path_dei_sottoprocessi_la_suite_si_ferma_all_avvio_con_un_messaggio(
