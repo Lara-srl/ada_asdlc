@@ -67,3 +67,18 @@ class TestUnTestGiraDallaCartellaDelSuoGate:
         assert comando.cartella == albero / "servizio"
         assert list(comando.etichette.values()) == ["tests/test_a.py::test_x"]
         assert orfani == []
+
+
+class TestBackendNonESpeciale:
+    """Criterio 2: una cartella vale se è il `cwd` di un gate, e la prende solo un
+    percorso che comincia con la cartella intera seguita da `/`."""
+
+    def test_senza_un_gate_in_backend_il_test_gira_dalla_radice(self, monkeypatch):
+        monkeypatch.setattr(runner, "GATE", gate_in("."))
+
+        assert runner.dove_gira("backend/tests/test_a.py") == (".", "backend/tests/test_a.py")
+
+    def test_un_gate_in_back_non_prende_backend(self, monkeypatch):
+        monkeypatch.setattr(runner, "GATE", gate_in("back"))
+
+        assert runner.dove_gira("backend/tests/test_a.py") == (".", "backend/tests/test_a.py")
