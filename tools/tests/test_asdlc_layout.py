@@ -7,10 +7,14 @@ la radice del repository contando le cartelle da `tools/tests/`: la radice è qu
 che `radice()` di `asdlc.config` trova risalendo fino ad `asdlc.toml`.
 """
 
+import importlib
 import re
 from pathlib import Path
 
 import pytest
+
+asdlc_config = importlib.import_module("asdlc.config")
+runner = importlib.import_module("asdlc.runner")
 
 TESTS = Path(__file__).resolve().parent
 
@@ -33,3 +37,33 @@ def test_nessun_test_trova_la_radice_contando_le_cartelle():
     assert contano == [], (
         "la radice si trova con `asdlc.config.radice()`, che risale fino ad "
         f"`asdlc.toml`, non contando le cartelle: {contano}")
+
+
+def gate_in(*cartelle: str) -> list:
+    """Un gate pytest per cartella: i test dichiarano `GATE` (decisione 5), e non
+    leggono l'`asdlc.toml` del progetto di prova, che ha un solo gate in `.`."""
+    return [asdlc_config.Gate(f"gate-{c}", ("python3", "-m", "pytest", "-q"), c)
+            for c in cartelle]
+
+
+class TestUnTestGiraDallaCartellaDelSuoGate:
+    """Criterio 1: le cartelle sono i `cwd` dei gate di `GATE`."""
+
+    def test_un_test_sotto_la_cartella_di_un_gate_gira_da_li(self, monkeypatch):
+        monkeypatch.setattr(runner, "GATE", gate_in("servizio"))
+
+        assert runner.dove_gira("servizio/tests/test_a.py") == ("servizio", "tests/test_a.py")
+
+    def test_il_comando_isolato_parte_dalla_cartella_del_gate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "GATE", gate_in("servizio"))
+        albero = tmp_path / "albero"
+        (albero / "servizio" / "tests").mkdir(parents=True)
+        (albero / "servizio" / "tests" / "test_a.py").write_text(
+            "def test_x():\n    assert True\n", encoding="utf-8")
+
+        [comando], orfani = runner.comandi_dei_test(
+            albero, [runner.TestNuovo("servizio/tests/test_a.py", "test_x", "python")])
+
+        assert comando.cartella == albero / "servizio"
+        assert list(comando.etichette.values()) == ["tests/test_a.py::test_x"]
+        assert orfani == []
