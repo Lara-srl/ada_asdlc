@@ -1772,6 +1772,10 @@ del difetto 23 sul lancio di PBI-335, che qui sta scritta accanto alla sua spunt
     `v0.2.0`**, perché la Fase 6 lo incontra per forza. Nello stesso PBI va il punto di D3
     (`SCAFFOLDING.md`), i test che trovano il repository con `Path(__file__).parents[2]`:
     è la stessa classe, il layout di un progetto scritto nel codice.
+    Chiuso da `PBI-504` (09/10/2026, #17): `dove_gira()` prende le cartelle dai `cwd` di
+    `GATE`, tolto `.`, e fra due annidate vince la più lunga. I test trovano la radice con
+    `radice()` di `asdlc.config`. `REPO / "tools" / "asdlc"` resta al PBI del trasloco a
+    `src/` (decisione 6 di `PBI-504`).
 
     **Causa:** `default-implicito`
 
