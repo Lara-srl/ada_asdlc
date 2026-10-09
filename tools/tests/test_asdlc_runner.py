@@ -4400,6 +4400,9 @@ class TestIlGateDelRossoCamminaICommit:
     ):
         """`file -t nome`, che è come vitest lo riesegue: `::` lì non vuol dire
         niente e manderebbe chi legge a cercare un node id che non esiste."""
+        monkeypatch.setattr(runner, "GATE", [
+            runner.Gate("vitest", ("npm", "test"), "frontend"),
+        ])
         monkeypatch.setattr(
             runner, "worktree_usa_e_getta",
             lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
@@ -4430,6 +4433,9 @@ class TestIlGateDelRossoCamminaICommit:
         nuovi, e il commit misto passava **in silenzio** — il caso che il Protocollo
         di rifinitura vieta: in caso di dubbio il gate ferma e lo dice, non indovina.
         """
+        monkeypatch.setattr(runner, "GATE", [
+            runner.Gate("vitest", ("npm", "test"), "frontend"),
+        ])
         monkeypatch.setattr(
             runner, "worktree_usa_e_getta",
             lambda sha: pytest.fail("il diff bastava: nessun commit va estratto"),
@@ -4660,12 +4666,15 @@ class TestLEsitoSiLeggePerTest:
             "tests/t.py::test_lo_scarto": "rosso"}
 
     def test_un_test_nato_verde_con_uno_spazio_nellid_resta_verde_accanto_a_un_rosso(
-            self, tmp_path):
+            self, tmp_path, monkeypatch):
         """PBI-390, criterio 1 — il difetto 65 di `PBI-102`. Il parametro con
         uno spazio non combaciava con la regex sulle righe di `-vv`, e il test
         prendeva l'esito dei totali del comando: `1 failed` del vicino rosso lo
         faceva rosso, e un nato verde passava per un rosso osservato. Qui gira
         un pytest vero, nello stesso comando dei due test."""
+        monkeypatch.setattr(runner, "GATE", [
+            runner.Gate("pytest", ("python3", "-m", "pytest", "-q"), "backend"),
+        ])
         albero = tmp_path / "albero"
         (albero / "backend" / "tests").mkdir(parents=True)
         (albero / "backend" / "tests" / "test_spazi.py").write_text(
@@ -4806,12 +4815,18 @@ class TestLeLettureDiPytestCheNonCambiano:
         esiti, _ = runner.esiti_del_comando(comando)
         return esiti
 
-    def test_guardia_un_test_rosso_resta_rosso(self, tmp_path):
+    def test_guardia_un_test_rosso_resta_rosso(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "GATE", [
+            runner.Gate("pytest", ("python3", "-m", "pytest", "-q"), "backend"),
+        ])
         esiti = self._esiti(tmp_path, "def test_rosso():\n    assert 1 == 2\n", "test_rosso")
 
         assert esiti == {"tests/test_guardia.py::test_rosso": "rosso"}
 
-    def test_guardia_un_xfail_resta_saltato(self, tmp_path):
+    def test_guardia_un_xfail_resta_saltato(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(runner, "GATE", [
+            runner.Gate("pytest", ("python3", "-m", "pytest", "-q"), "backend"),
+        ])
         esiti = self._esiti(tmp_path,
                             "import pytest\n\n\n"
                             "@pytest.mark.xfail\n"
