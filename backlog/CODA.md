@@ -39,6 +39,7 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-501
 - PBI-502
 - PBI-503
+- PBI-504
 
 **I quattro di `template/` sono il passo 4.2 del runbook della Fase 5 di aDa** (Francesco,
 08/10). Vanno in fila perché scrivono tutti in `template/` e nello stesso file di test, e
@@ -52,3 +53,6 @@ sotto `.claude/` (difetto 97 di `PBI-102`): il criterio 5 è uscito dal PBI, e i
 copia una persona. `PBI-503` nomina `.claude/` in `ZERO.md`, e senza quella cartella il suo
 primo criterio cade. Per questo aspettava la PR che la copia, che ha tolto la barriera
 (`test/template-guardia-di-fase`, 08/10).
+
+**`PBI-504`, il layout dai gate, è il passo 4.3** (Francesco, 09/10): il difetto 90 e la radice
+dei test di D3, prima del tag `v0.2.0`.
