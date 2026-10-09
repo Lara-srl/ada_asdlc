@@ -1940,6 +1940,24 @@ del difetto 23 sul lancio di PBI-335, che qui sta scritta accanto alla sua spunt
 
     **Causa:** `ambiente-non-dichiarato`
 
+98. **Il test della coda vuota del template passa perché gli esempi sono fra backtick.**
+    `test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica`
+    (`tools/tests/test_asdlc_template.py`) passa a `leggi_voci()` tutto `template/backlog/CODA.md`
+    e chiede `voci == []`. Ma la prosa sopra `## La coda` ha gli esempi della grammatica:
+    `- PBI-12` e `- ‖`. Il test è verde solo perché quegli esempi stanno fra backtick, e
+    `RE_PBI` e `RE_BARRIERA` vogliono il trattino a inizio riga. Se un esempio perdesse i
+    backtick il test diventerebbe rosso, eppure la coda sarebbe ancora vuota. In breve,
+    il test non guarda dove sta la voce. Chiede «nessuna riga del file è una voce», non
+    «la sezione `## La coda` è vuota», e il verde dipende dalla forma della prosa.
+
+    Nota del Critic sulla #12 (`PBI-502`, rapporto `runs/20261009-000505-PBI-502-critic-0.md`
+    in `ada_asdlc-run`, 09/10/2026), registrata al merge con la regola di
+    `backlog/README.md`, §I difetti e le loro cause. Registrata come difetto da Francesco
+    (09/10): un test che passa per il motivo sbagliato. La cura possibile è leggere le voci
+    dalla sola sezione `## La coda`, perché è lì che il tick le cerca. Ancora da decidere.
+
+    **Causa:** `test-per-il-motivo-sbagliato` (nuova, Francesco 09/10)
+
 ## ⛔ `ada-notte.sh` deve sparire (Francesco, 26/08/2026)
 
 > *«Non voglio più vedere ada-notte.sh: eliminato, e usiamo solo asdlc_runner.»*
