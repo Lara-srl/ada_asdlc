@@ -23,6 +23,7 @@ rename, o per ciò che non aveva alternative.
 | [0026](ADR-0026-il-runner-e-un-pacchetto-installato-da-tag.md) | Il runner è un pacchetto installato da un tag git, non una fotocopia: prompt estesi e mai sostituiti, si lavora sempre con la versione installata, ogni giro registra la sua versione | Accettata |
 | [0027](ADR-0027-gli-esiti-passano-per-chiamate-a-strumento.md) | Tra codice e modello gli esiti passano per chiamate a strumento, mai dal testo libero (aggiunge un MAI ad `AGENTS.md`) | Accettata |
 | [0028](ADR-0028-lo-scope-template.md) | I commit su `template/` hanno lo scope `template` (aggiunge uno scope ad `AGENTS.md`) | Accettata |
+| [0029](ADR-0029-la-ratifica-e-del-proprietario.md) | La ratifica dei cambi di costituzione è del proprietario del progetto, non di una persona (cambia `## Metodo` di `AGENTS.md`) | Accettata |
 
 **Nuovo ADR:** prossimo numero libero, nome `ADR-NNNN-titolo-in-kebab.md`, sezioni
 Contesto · Decisione · Conseguenze (positive/negative/neutre) · Alternative considerate.
