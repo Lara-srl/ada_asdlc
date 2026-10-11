@@ -26,7 +26,7 @@ Il gate CI è la verità.
 **CHIEDI**
 - Quando la spec è ambigua: si scrive la domanda nel PBI, non si sceglie in silenzio.
 - Prima di modificare **questo file**, o di scrivere un ADR che abroga un'istruzione del
-  proprietario: serve la ratifica di Francesco, scritta nell'intestazione dell'ADR — e la
+  proprietario: serve la ratifica del proprietario del progetto, scritta nell'intestazione dell'ADR — e la
   ratifica **è il merge** (`decisions/ADR-0012-ratifica-dei-cambi-di-costituzione.md`).
   Chi beneficia di una decisione non la firma.
 
