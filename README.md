@@ -18,19 +18,135 @@ Estratto da [aDa Controller](https://github.com/Lara-srl/ada_controller) al comm
 con `git filter-repo` e la storia dei nomi di prima dei traslochi: i messaggi dei commit
 sono la documentazione dei difetti, e `backlog/PBI-102-…` è il loro registro.
 
-## Come lo installa un progetto
+## Come si usa in un progetto nuovo
 
-Il progetto dichiara in `asdlc.toml` il venv e il pin, mai un ramo (`ADR-0026`):
+Il runner non si scarica: ogni progetto lo installa da un tag git (`ADR-0026`). Di questo
+repository un progetto nuovo prende solo `template/`.
+
+**Prerequisiti:** `git`, `gh` (autenticato), la CLI `claude`, e l'accesso SSH a questo
+repository, perché l'installazione usa `git+ssh`.
+
+1. **Crea il repo del progetto** su GitHub e clonalo.
+2. **Copia il template**, dotfile compresi (`.claude`, `.github`, `.gitignore`):
+   ```
+   cp -a /percorso/di/ada_asdlc/template/. /percorso/del/progetto/
+   ```
+   `template/ZERO.md` elenca cosa si copia e cosa no, per chi adotta il metodo senza runner.
+3. **Adatta due file.**
+   - `AGENTS.md`: scrivi `## Dominio` (cos'è il progetto, toolchain, scope dei commit);
+     `## Metodo` resta identica.
+   - `asdlc.toml`: il pin, il percorso del worktree e i gate.
+     ```toml
+     [ambiente]
+     venv = ".venv"               # i gate lanciano da qui pytest e simili
+     pacchetto = ".venv-asdlc"    # qui vive il runner
+     installa = "git+ssh://git@github.com/Lara-srl/ada_asdlc@v0.2.0#subdirectory=tools"
+
+     [worktree]
+     percorso = "../mio-progetto-run"   # accanto al checkout principale
+
+     [[gate]]
+     nome = "test"
+     comando = ["python3", "-m", "pytest", "-q"]
+     cwd = "."
+     ```
+   Il pin è sempre un tag, mai un ramo. Salire di versione è una PR che cambia quella riga,
+   e il tick reinstalla da solo quando la riga cambia.
+4. **Crea i due venv** nel checkout principale: `.venv` con gli strumenti dei gate (per
+   esempio `pytest`) e `.venv-asdlc` con il runner:
+   ```
+   python3 -m venv .venv && .venv/bin/pip install pytest
+   python3 -m venv .venv-asdlc
+   .venv-asdlc/bin/pip install --no-deps "git+ssh://git@github.com/Lara-srl/ada_asdlc@v0.2.0#subdirectory=tools"
+   ```
+5. **Scrivi un PBI.** Parti da `backlog/TEMPLATE.md`, salva in `backlog/PBI-001-<slug>.md`,
+   aggiungi la riga `- PBI-001` a `backlog/CODA.md` e mergia con una PR. Mettere un PBI in
+   coda è dichiarare che le sue domande sono chiuse: il tick non lo ricontrolla.
+6. **Accendi il tick** con una riga di cron, sfalsata di qualche minuto dagli altri
+   progetti (la riga di riferimento è in [`backlog/AUTOMAZIONE.md`](backlog/AUTOMAZIONE.md)):
+   ```
+   2-59/10 * * * * cd /percorso/del/progetto && .venv-asdlc/bin/asdlc-coda >> runs/cron.log 2>&1
+   ```
+
+### Cosa succede dopo
+
+1. Il tick legge `backlog/CODA.md` e lancia `asdlc-runner` sul primo PBI quando il
+   precedente è in `main`.
+2. Il **Builder** (sessione `claude -p` pulita) scrive a micro-commit, una coppia
+   RED→GREEN per criterio.
+3. Il **Quality Gate** esegue lo script, non l'agente: i gate di `asdlc.toml` e la verifica
+   che i test nuovi siano mai stati rossi.
+4. Il **Critic** (sessione separata, sola lettura) rilegge il lavoro.
+5. Si apre una PR. **Il merge è tuo**: è l'Acceptance Gate umano.
+6. La voce in coda si spegne quando una PR mergiata nomina il PBI e tocca file fuori da
+   `backlog/`.
+
+Se una domanda si apre a giro iniziato, il Builder chiama `fermati` e la coda si blocca da
+sé. Un giro fermato si chiude con `asdlc-chiudi-giro`, che mette il tag `giro-fermato/…` e
+toglie il ramo. Il rapporto e i log dei giri stanno in `runs/`.
+
+Un progetto che parte senza runner (il «livello zero») e sale a `mvp` con un ADR segue
+`template/ZERO.md`.
+
+## Linguaggi e stack
+
+Il runner non è legato a un linguaggio: esegue i comandi che il progetto dichiara in
+`[[gate]]` e guarda se escono verdi. Backend e frontend stanno nello stesso progetto come
+gate diversi, ciascuno col suo `cwd`, e `solo_se_tocca` accende un gate solo se il diff del
+branch tocca certi percorsi:
 
 ```toml
-[ambiente]
-pacchetto = ".venv-asdlc"
-installa = "git+ssh://git@github.com/Lara-srl/ada_asdlc@v0.1.0#subdirectory=tools"
+[[gate]]
+nome = "backend"
+comando = ["python3", "-m", "pytest", "-q"]
+cwd = "backend"
+solo_se_tocca = ["backend/"]
+
+[[gate]]
+nome = "tsc"
+comando = ["npx", "tsc", "--noEmit"]
+cwd = "frontend"
+solo_se_tocca = ["frontend/"]
+
+[[gate]]
+nome = "vitest"
+comando = ["npx", "vitest", "run"]
+cwd = "frontend"
+solo_se_tocca = ["frontend/"]
 ```
 
-Il tick reinstalla da solo quando il pin cambia: salire di tag è una PR che cambia quella
-riga. La riga di cron, dal checkout principale del progetto, è in
-[`backlog/AUTOMAZIONE.md`](backlog/AUTOMAZIONE.md).
+Lo stack con cui il runner è nato (aDa) è Python per il backend e TypeScript/React per il
+frontend, con `pytest`, `tsc`, `eslint` e `vitest`; il repo di prova `ada_test_asdlc` ha
+solo un backend Python. Quello che il runner **riconosce davvero** è questo:
+
+| Cosa | Riconosciuto |
+|---|---|
+| Gate | qualunque comando, in qualunque linguaggio |
+| Test per il gate del rosso | `pytest` (Python) e `vitest` (JS/TS) |
+| File di test | cartelle `tests/` e `__tests__/`, `test_*.py`, `*_test.py`, `*.test.*` e `*.spec.*` con estensione `ts` `tsx` `js` `jsx` |
+| File di produzione | estensioni `.py` `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.sql` `.sh` |
+| E2E | fuori dal runner: stanno nella CI (`ADR-0009`, l'esempio è Playwright) |
+
+Il gate del rosso e il lucchetto di fase (`TEST_ONLY` / `IMPL`) usano proprio queste regole.
+Un progetto in un altro linguaggio (Go, Java, Rust, PHP…) ha comunque i suoi gate
+deterministici, il Critic, la coda e la PR. Per quel progetto il gate del rosso non sa leggere i test:
+si spegne con `[gate_del_rosso].attivo = false`, e il giro lo dichiara nel rapporto. Non l'ho
+provato su uno stack diverso da Python e TypeScript, quindi va verificato sul primo PBI.
+
+### Le specifiche
+
+Le specifiche sono in Markdown e non dipendono dal linguaggio:
+
+- `specs/<dominio>/spec.md`, una cartella per dominio, dal modello `specs/TEMPLATE.md`. Ha
+  un **Blueprint** (contesto, architettura, vincoli) e un **Contratto** (Definition of
+  Done, guardie di regressione, scenari, domande aperte).
+- Gli scenari sono in Gherkin, marcati col livello che li verifica: `[unit]` `[api]`
+  `[e2e]`. Il Critic giudica il diff contro il Contratto.
+- I PBI (`backlog/PBI-XXX-*.md`, dal modello `backlog/TEMPLATE.md`) descrivono il
+  **delta**: Direttiva con Scope, decisioni, dipendenze, criteri di Verifica e protocollo
+  di rifinitura. Puntano alle spec e non le copiano.
+- Gli ADR (`decisions/ADR-XXXX-*.md`) fissano le scelte con le alternative scartate.
+- La spec si aggiorna nello **stesso commit** del codice che ne cambia il comportamento.
 
 ## Sviluppo
 
