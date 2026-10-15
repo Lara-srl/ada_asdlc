@@ -91,6 +91,7 @@ VENV: str                # `[ambiente].venv`
 # comando che il runner lancia o fa lanciare è `<pacchetto>/bin/<comando>`.
 PACCHETTO: Path | None
 ESEGUIBILI: tuple[str, ...]  # `[ambiente].eseguibili`
+JUNIT_COMANDO: tuple[str, ...] | None  # `[junit].comando`, con `{test}` (PBI-505)
 MINIMI: dict[str, int]       # `[ambiente].minimi`
 PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
@@ -243,8 +244,9 @@ def configura(cfg: asdlc_config.Config) -> None:
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO, GUARDIA_DEL_COMMIT
     global PROMPT_BUILDER, PROMPT_IGIENE, PROMPT_RIPROVA, MODELLO_CRITIC, MODELLO_RIMEDIO
-    global GATE_DEL_ROSSO_ATTIVO
+    global GATE_DEL_ROSSO_ATTIVO, JUNIT_COMANDO
     CFG = cfg
+    JUNIT_COMANDO = cfg.junit.comando
     GATE = list(cfg.gate)
     # `false` spegne la seconda domanda del Quality Gate — e il giro lo scrive.
     GATE_DEL_ROSSO_ATTIVO = cfg.gate_del_rosso.attivo
@@ -2014,7 +2016,7 @@ class ComandoDiProva:
     """Un comando che gira i test nuovi di un commit, e come se ne rilegge l'esito.
 
     `etichette` lega la **chiave** con cui l'esito torna indietro — il node id per
-    pytest, il titolo per vitest — all'id con cui quel test si riesegue a mano. Per
+    pytest, il titolo per vitest, `Classe#metodo` per JUnit — all'id con cui quel test si riesegue a mano. Per
     pytest sono la stessa cosa; per vitest no, perché `-t` filtra per nome dentro un
     file e l'id da riscrivere è `file -t nome`.
     """
@@ -2037,7 +2039,8 @@ def comandi_dei_test(albero: Path,
     e uno per file per vitest, perché `-t` è un filtro per nome e non un elenco. Un
     comando solo, però, non vuol dire un verdetto solo: l'esito si rilegge per test
     (`esiti_del_comando`), o dodici test in un `pytest` diventerebbero un
-    tutto-o-niente.
+    tutto-o-niente. Per JUnit un comando per cartella, quello di `[junit].comando`
+    con `{test}` sostituito (PBI-505): senza la sezione i test JUnit sono orfani.
 
     Le **etichette** sono ciò che finisce nell'elenco del gate, e vanno scritte come
     si eseguono — un `file::nome` senza la classe che lo contiene dà «not found» a
@@ -2045,6 +2048,7 @@ def comandi_dei_test(albero: Path,
     """
     per_pytest: dict[Path, list[str]] = {}
     per_vitest: dict[tuple[Path, str], list[str]] = {}
+    per_junit: dict[Path, list[str]] = {}
     orfani: list[str] = []
     origine: dict[str, TestNuovo] = {}
 
@@ -2059,6 +2063,13 @@ def comandi_dei_test(albero: Path,
                 continue
             per_pytest.setdefault(cartella, []).append(nodo)
             origine[nodo] = t
+        elif t.linguaggio == "junit":
+            # Senza `[junit]` il runner non indovina un comando (PBI-505, decisione 5).
+            if JUNIT_COMANDO is None:
+                orfani.append(t.nome)
+                continue
+            per_junit.setdefault(cartella, []).append(t.nome)
+            origine[t.nome] = t
         else:
             per_vitest.setdefault((cartella, relativo), []).append(t.nome)
             origine[t.nome] = t
@@ -2095,7 +2106,22 @@ def comandi_dei_test(albero: Path,
              "--reporter=json", f"--outputFile={rapporto}"],
             "vitest", {nome: f"{relativo} -t {nome}" for nome in nomi}, rapporto,
             origine={nome: origine[nome] for nome in nomi}))
+    for cartella, nomi in per_junit.items():
+        comandi.append(ComandoDiProva(
+            cartella, [a.replace("{test}", sintassi_del_test(nomi)) for a in JUNIT_COMANDO],
+            "junit", {nome: nome for nome in nomi},
+            origine={nome: origine[nome] for nome in nomi}))
     return comandi, orfani
+
+
+def sintassi_del_test(nomi: list[str]) -> str:
+    """`Classe#m1+m2,Altra#m3`: i `Classe#metodo` raggruppati per classe, nella
+    sintassi di `-Dtest=` di Maven (PBI-505, decisione 4)."""
+    per_classe: dict[str, list[str]] = {}
+    for nome in nomi:
+        classe, _, metodo = nome.partition("#")
+        per_classe.setdefault(classe, []).append(metodo)
+    return ",".join(f"{classe}#{'+'.join(metodi)}" for classe, metodi in per_classe.items())
 
 
 def radice_del_junit(rapporto: Path | None) -> ET.Element:

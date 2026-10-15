@@ -145,6 +145,15 @@ class GateDelRosso:
     attivo: bool
 
 
+@dataclass(frozen=True)
+class Junit:
+    # Il comando che lancia i test JUnit isolati: una lista di argomenti con
+    # l'elemento `{test}`, che il runner sostituisce con `Classe#m1+m2,Altra#m3`
+    # (PBI-505, decisione 4). `None` se il progetto non ha la sezione: il runner
+    # non conosce Maven e non indovina un comando.
+    comando: tuple[str, ...] | None = None
+
+
 # I ruoli che hanno un prompt: ognuno è `asdlc/prompt/<ruolo>.md` nel pacchetto, e
 # può avere un file di aggiunte `<ruolo>.md` nella cartella di `[prompt].aggiunte`.
 RUOLI_DEI_PROMPT = ("builder", "igiene", "riprova", "critic", "rimedio")
@@ -171,6 +180,7 @@ class Config:
     gate_del_rosso: GateDelRosso
     gate: tuple[Gate, ...]
     prompt: Prompt = Prompt()
+    junit: Junit = Junit()
 
 
 def radice(cwd: Path) -> Path:
@@ -330,6 +340,20 @@ def interpreta(dati: dict, file: str) -> Config:
     prompt = sezione.dentro("prompt", default={})
     prompt.solo("aggiunte", perche="i prompt del pacchetto si estendono con le "
                 "aggiunte, e non si sostituiscono")
+    # Facoltativa, con una chiave sola: la sezione dice come lanciare i test JUnit,
+    # e una chiave che non conosciamo o un comando senza `{test}` non si ignorano
+    # (PBI-505, decisione 4).
+    junit = Junit()
+    if "junit" in sezione.dati:
+        dichiarato = sezione.dentro("junit")
+        dichiarato.solo("comando", perche="la sezione dice solo il comando che lancia "
+                        "i test JUnit isolati")
+        comando = dichiarato.testi("comando")
+        if not any("{test}" in argomento for argomento in comando):
+            raise ErroreDiConfigurazione(
+                f"{file}: `[junit].comando` deve contenere un argomento con `{{test}}`, "
+                "dove il runner mette i test da lanciare")
+        junit = Junit(comando=comando)
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
@@ -357,6 +381,7 @@ def interpreta(dati: dict, file: str) -> Config:
         gate_del_rosso=GateDelRosso(attivo=gate_del_rosso.booleano("attivo")),
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
         prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
+        junit=junit,
     )
 
 
