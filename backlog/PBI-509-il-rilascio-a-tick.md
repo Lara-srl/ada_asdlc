@@ -35,13 +35,13 @@ I merge restano sempre di Francesco.
 - Il battito e il timer dei tick persi (`PBI-510`).
 - Il pin dei progetti che non dichiarano `attende:`.
 
-## ❓ Da chiudere prima di mettere in coda
+## ✅ Via libera di Francesco (16/10)
 
-Il PBI è grosso (due metà e una PR) e può essere diviso in due al primo giro: se il Critic lo
-giudica largo, la divisione è lecita e si dichiara (`ADR-0015`). Il formato di `rilascia:` e
-`attende:` qui sotto è una proposta, non una decisione di Francesco.
+Francesco ha accodato il PBI con il formato di `rilascia:` e `attende:` qui sotto così come
+proposto: valgono come decisioni. Il PBI è largo (due metà e una PR): se il Critic lo giudica
+tale, la divisione in due è lecita e si dichiara (`ADR-0015`).
 
-## Proposto
+## ✅ Deciso
 
 1. **`rilascia: patch|minor`** è una riga dell'intestazione del PBI, subito sotto il titolo,
    accanto a `Direttiva`. Senza, nessun tag (R8). Un PBI di documentazione non lo dichiara.
