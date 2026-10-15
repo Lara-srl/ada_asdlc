@@ -40,6 +40,7 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-502
 - PBI-503
 - PBI-504
+- PBI-505
 
 **I quattro di `template/` sono il passo 4.2 del runbook della Fase 5 di aDa** (Francesco,
 08/10). Vanno in fila perché scrivono tutti in `template/` e nello stesso file di test, e
@@ -56,3 +57,8 @@ primo criterio cade. Per questo aspettava la PR che la copia, che ha tolto la ba
 
 **`PBI-504`, il layout dai gate, è il passo 4.3** (Francesco, 09/10): il difetto 90 e la radice
 dei test di D3, prima del tag `v0.2.0`.
+
+**`PBI-505`, il lucchetto di fase che legge JUnit** (Francesco, 15/10): il difetto 3 di
+`ada_planning`, che ha fermato il PBI-002 al primo criterio. Dopo il merge servono il tag, il
+pin in `ada_planning` e la sezione `[junit]` del suo `asdlc.toml`: sono gesti umani e non
+stanno in coda.
