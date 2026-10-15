@@ -8,17 +8,18 @@ progetto di prova: i test li leggono apposta (`progetto_ospite`).
 
 import importlib
 import re
+from pathlib import Path
 
 import pytest
 
-asdlc_config = importlib.import_module("asdlc.config")
+REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().parent)
 
 SEZIONE_RUNNER = "Le cause `runner-*`"
 RIGA_SLUG = re.compile(r"^\|\s*`([^`]+)`\s*\|")
 
 
 def _readme():
-    return (asdlc_config.radice() / "backlog" / "README.md").read_text(encoding="utf-8")
+    return (REPO / "backlog" / "README.md").read_text(encoding="utf-8")
 
 
 def _slug_della_tabella(testo):
