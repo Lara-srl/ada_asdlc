@@ -1504,9 +1504,9 @@ RE_ANNOTAZIONE_JUNIT = re.compile(r"^\s*@(?:Test|ParameterizedTest|RepeatedTest)
 RE_METODO_JAVA = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(\w+)\s*\(")
 
 
-def nomi_dei_test_junit(diff: str) -> tuple[list[str], set[str]]:
-    """I nomi dei metodi di test JUnit aggiunti e quelli tolti, dalle righe del
-    diff (PBI-505, decisione 3): il metodo che segue un'annotazione `@Test`,
+def nomi_dei_test_junit(diff: str, classe: str) -> tuple[list[str], set[str]]:
+    """I nomi `Classe#metodo` dei test JUnit aggiunti e quelli tolti, dalle righe
+    del diff (PBI-505, decisione 3): il metodo che segue un'annotazione `@Test`,
     `@ParameterizedTest` o `@RepeatedTest`, anche con argomenti e con altre
     annotazioni in mezzo."""
     aggiunti: list[str] = []
@@ -1522,10 +1522,11 @@ def nomi_dei_test_junit(diff: str) -> tuple[list[str], set[str]]:
             trovato = RE_METODO_JAVA.match(testo)
             if trovato is not None:
                 attesa[segno] = False
+                nome = f"{classe}#{trovato.group(1)}"
                 if segno == "+":
-                    aggiunti.append(trovato.group(1))
+                    aggiunti.append(nome)
                 else:
-                    tolti.add(trovato.group(1))
+                    tolti.add(nome)
     return aggiunti, tolti
 
 
@@ -1747,8 +1748,8 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     nasce, in qualunque file finisca. Il diff, file per file, non vedeva un test tolto da
     un file e scritto in un altro senza `git mv` (difetto 81 di PBI-102).
 
-    Per vitest la nascita si legge ancora dal diff. Uno stesso nome cancellato e
-    riaggiunto è un trasloco, non una nascita: è il caso del file di test
+    Per vitest e JUnit (PBI-505) la nascita si legge ancora dal diff. Uno stesso
+    nome cancellato e riaggiunto è un trasloco, non una nascita: è il caso del file di test
     riscritto per intero, e senza questa sottrazione il gate farebbe girare tutta
     la suite di quel commit per poi fermarla come nata verde. Il diff di un rename
     si chiede nominando **tutti e due** i lati. Con il solo nome nuovo git non
@@ -1761,10 +1762,11 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     for voce in voci:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio != "vitest":
+        if linguaggio not in ("vitest", "junit"):
             continue
-        aggiunti, tolti = nomi_dei_test(
-            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)))
+        diff = diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce))
+        aggiunti, tolti = (nomi_dei_test_junit(diff, Path(percorso).stem)
+                           if linguaggio == "junit" else nomi_dei_test(diff))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in voci):
         genitore = genitore_del_commit(sha)
@@ -1820,13 +1822,8 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
             diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
-        if linguaggio == "junit":
-            aggiunti, tolti = nomi_dei_test_junit(diff)
-            classe = Path(percorso).stem
-            aggiunti = [f"{classe}#{n}" for n in aggiunti]
-            tolti = {f"{classe}#{n}" for n in tolti}
-        else:
-            aggiunti, tolti = nomi_dei_test(diff)
+        aggiunti, tolti = (nomi_dei_test_junit(diff, Path(percorso).stem)
+                           if linguaggio == "junit" else nomi_dei_test(diff))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in tracciati + non_tracciati):
         testa = git("rev-parse", "HEAD")
