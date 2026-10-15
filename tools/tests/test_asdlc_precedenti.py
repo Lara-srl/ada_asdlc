@@ -48,3 +48,16 @@ def test_la_tabella_runner_porta_solo_slug_runner_e_il_primo():
 
     assert "runner-non-legge-junit" in slug
     assert [s for s in slug if not s.startswith("runner-")] == []
+
+
+@pytest.mark.progetto_ospite
+def test_nessuno_slug_runner_e_anche_una_causa_di_progetto():
+    """Criterio 2. La tabella generale è tutto il README fuori dalla sezione `runner-*`."""
+    testo = _readme()
+    sezione = _sezione_runner(testo)
+    generali = _slug_della_tabella(testo.replace(sezione, ""))
+    runner = _slug_della_tabella(sezione)
+
+    assert generali, "la tabella generale delle cause non si trova: il confronto sarebbe vuoto"
+    assert runner
+    assert sorted(set(generali) & set(runner)) == []
