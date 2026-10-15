@@ -41,6 +41,17 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-503
 - PBI-504
 - PBI-505
+- PBI-506
+- PBI-507
+- PBI-508
+- PBI-510
+
+**`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). In coda ci sono
+506, 507, 508 e 510. **`PBI-509` non c'è**: ha una domanda aperta (il formato di `rilascia:` e
+`attende:`, e se dividerlo in due) e metterlo in coda sarebbe dichiararla chiusa. Si accoda,
+a mano, dopo la risposta di Francesco; prima del 508 non serve, perché la guardia senza la PR
+a monte segna R5-R7 `non eseguita`. Il 507 legge i file del 506 e il 508 i rapporti del 507:
+per questo vanno in fila.
 
 **I quattro di `template/` sono il passo 4.2 del runbook della Fase 5 di aDa** (Francesco,
 08/10). Vanno in fila perché scrivono tutti in `template/` e nello stesso file di test, e
