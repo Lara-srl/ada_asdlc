@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="it.x.SchemaIT" time="1.204" tests="5" errors="0" skipped="1" failures="2">
+  <testcase name="a" classname="it.x.SchemaIT" time="0.310">
+    <failure message="expected: &lt;1&gt; but was: &lt;2&gt;" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected: &lt;1&gt; but was: &lt;2&gt;
+	at it.x.SchemaIT.a(SchemaIT.java:12)
+</failure>
+  </testcase>
+  <testcase name="b" classname="it.x.SchemaIT" time="0.021"/>
+  <testcase name="c(String)[1]" classname="it.x.SchemaIT" time="0.015"/>
+  <testcase name="c(String)[2]" classname="it.x.SchemaIT" time="0.017">
+    <failure message="la tabella non c'è" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: la tabella non c'è
+	at it.x.SchemaIT.c(SchemaIT.java:25)
+</failure>
+  </testcase>
+  <testcase name="d" classname="it.x.SchemaIT" time="0.002">
+    <skipped/>
+  </testcase>
+</testsuite>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="it.x.FooTest" time="0.040" tests="2" errors="1" skipped="0" failures="0">
+  <testcase name="f" classname="it.x.FooTest" time="0.004"/>
+  <testcase name="g" classname="it.x.FooTest" time="0.003">
+    <error message="Cannot invoke &quot;String.length()&quot; because &quot;s&quot; is null" type="java.lang.NullPointerException">java.lang.NullPointerException
+	at it.x.FooTest.g(FooTest.java:9)
+</error>
+  </testcase>
+</testsuite>

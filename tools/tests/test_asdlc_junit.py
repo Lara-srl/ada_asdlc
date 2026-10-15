@@ -6,6 +6,7 @@ di `dati/`.
 """
 
 import importlib
+import shutil
 import tomllib
 from pathlib import Path
 
@@ -174,3 +175,70 @@ class TestIlComandoIsolaITestERispettaJunit:
     def test_una_sezione_sbagliata_e_un_errore_di_configurazione(self, sezione):
         with pytest.raises(config.ErroreDiConfigurazione):
             configurazione(sezione)
+
+
+DATI = Path(__file__).resolve().parent / "dati" / "junit"
+
+
+def scrive_i_rapporti(monkeypatch, *rapporti: tuple[str, str], codice: int = 0,
+                      uscita: str = ""):
+    """`esegui()` finto: non lancia niente, e lascia sotto la cartella di lancio i
+    `(destinazione, file di dati)` dati, come farebbe Maven."""
+    def finto(argv, cwd, **altri):
+        for destinazione, origine in rapporti:
+            file = Path(cwd) / destinazione
+            file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(DATI / origine, file)
+        return codice, uscita
+
+    monkeypatch.setattr(runner, "esegui", finto)
+
+
+def comando_per(cartella: Path, *nomi: str):
+    return runner.ComandoDiProva(cartella, ["./mvnw", "verify"], "junit",
+                                 {nome: nome for nome in nomi})
+
+
+class TestLEsitoSiLeggeDaiRapportiPerTest:
+    """Criterio 5: surefire e failsafe, un esito per test (decisione 6)."""
+
+    SCHEMA = "failsafe-reports/TEST-it.x.SchemaIT.xml"
+    FOO = "surefire-reports/TEST-it.x.FooTest.xml"
+
+    def esiti(self, monkeypatch, tmp_path, *nomi):
+        scrive_i_rapporti(monkeypatch,
+                          (f"target/{self.SCHEMA}", self.SCHEMA),
+                          (f"target/{self.FOO}", self.FOO))
+        esiti, _ = runner.esiti_del_comando(comando_per(tmp_path, *nomi))
+        return esiti
+
+    def test_un_caso_con_asserzione_mancata_e_rosso(self, monkeypatch, tmp_path):
+        assert self.esiti(monkeypatch, tmp_path, "SchemaIT#a") == {"SchemaIT#a": "rosso"}
+
+    def test_un_caso_passato_e_verde(self, monkeypatch, tmp_path):
+        assert self.esiti(monkeypatch, tmp_path, "SchemaIT#b") == {"SchemaIT#b": "verde"}
+
+    def test_un_caso_saltato_e_saltato(self, monkeypatch, tmp_path):
+        assert self.esiti(monkeypatch, tmp_path, "SchemaIT#d") == {"SchemaIT#d": "saltato"}
+
+    def test_un_test_senza_caso_e_nessuno(self, monkeypatch, tmp_path):
+        assert self.esiti(monkeypatch, tmp_path, "SchemaIT#e") == {"SchemaIT#e": "nessuno"}
+
+    def test_i_casi_di_un_parametrico_contano_per_il_metodo_e_vince_il_piu_forte(
+            self, monkeypatch, tmp_path):
+        assert self.esiti(monkeypatch, tmp_path, "SchemaIT#c") == {"SchemaIT#c": "rosso"}
+
+    def test_un_errore_di_un_rapporto_di_surefire_e_rosso(self, monkeypatch, tmp_path):
+        esiti = self.esiti(monkeypatch, tmp_path, "FooTest#f", "FooTest#g")
+
+        assert esiti == {"FooTest#f": "verde", "FooTest#g": "rosso"}
+
+    def test_i_rapporti_di_un_lancio_prima_non_si_leggono(self, monkeypatch, tmp_path):
+        vecchio = tmp_path / "target" / self.SCHEMA
+        vecchio.parent.mkdir(parents=True)
+        shutil.copy(DATI / self.SCHEMA, vecchio)
+        monkeypatch.setattr(runner, "esegui", lambda argv, cwd, **altri: (0, ""))
+
+        esiti, _ = runner.esiti_del_comando(comando_per(tmp_path, "SchemaIT#a"))
+
+        assert esiti == {"SchemaIT#a": "nessuno"}
