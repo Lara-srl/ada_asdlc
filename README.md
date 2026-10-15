@@ -123,15 +123,33 @@ solo un backend Python. Quello che il runner **riconosce davvero** è questo:
 |---|---|
 | Gate | qualunque comando, in qualunque linguaggio |
 | Test per il gate del rosso | `pytest` (Python) e `vitest` (JS/TS) |
-| File di test | cartelle `tests/` e `__tests__/`, `test_*.py`, `*_test.py`, `*.test.*` e `*.spec.*` con estensione `ts` `tsx` `js` `jsx` |
-| File di produzione | estensioni `.py` `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.sql` `.sh` |
+| Test per il lucchetto di fase | `pytest`, `vitest` e JUnit (Java, Maven): il comando che lancia JUnit lo dichiara il progetto in `[junit]` (vedi sotto) |
+| File di test | cartelle `tests/` e `__tests__/`, `test_*.py`, `*_test.py`, `*.test.*` e `*.spec.*` con estensione `ts` `tsx` `js` `jsx`, e la sequenza `src/test/` di Maven (`.java`) |
+| File di produzione | estensioni `.py` `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.sql` `.sh` `.java` |
 | E2E | fuori dal runner: stanno nella CI (`ADR-0009`, l'esempio è Playwright) |
 
 Il gate del rosso e il lucchetto di fase (`TEST_ONLY` / `IMPL`) usano proprio queste regole.
-Un progetto in un altro linguaggio (Go, Java, Rust, PHP…) ha comunque i suoi gate
+Un progetto in un altro linguaggio (Go, Rust, PHP…) ha comunque i suoi gate
 deterministici, il Critic, la coda e la PR. Per quel progetto il gate del rosso non sa leggere i test:
 si spegne con `[gate_del_rosso].attivo = false`, e il giro lo dichiara nel rapporto. Non l'ho
 provato su uno stack diverso da Python e TypeScript, quindi va verificato sul primo PBI.
+
+**Java (JUnit).** Il lucchetto di fase legge i test JUnit (`PBI-505`): un metodo con `@Test`,
+`@ParameterizedTest` o `@RepeatedTest` in un file sotto `src/test/` è un test, e si chiama
+`Classe#metodo`. Il runner non conosce Maven: il comando che lancia i test isolati lo
+dichiara il progetto, con `{test}` al posto dei test (`Classe#m1+m2,Altra#m3`, la sintassi
+di `-Dtest=`), e l'esito lo legge dai `TEST-*.xml` di `target/surefire-reports` e
+`target/failsafe-reports`:
+
+```toml
+[junit]
+comando = ["./mvnw", "-B", "verify", "-Dtest={test}", "-Dit.test={test}",
+           "-Dsurefire.failIfNoSpecifiedTests=false", "-Dfailsafe.failIfNoSpecifiedTests=false"]
+```
+
+Senza `[junit]` un test JUnit non si isola e `--chiedi-impl` non apre `IMPL`. Un errore di
+compilazione vale rosso. Il gate del rosso e i mutanti **non** leggono JUnit: un progetto
+Java li tiene spenti con `[gate_del_rosso].attivo = false`.
 
 ### Le specifiche
 

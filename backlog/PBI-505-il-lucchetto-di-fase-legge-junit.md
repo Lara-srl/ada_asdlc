@@ -120,34 +120,34 @@ tiene spenti con `[gate_del_rosso].attivo = false`, e riaccenderli è un altro P
 
 Su `main` il lucchetto non conosce JUnit, quindi ogni criterio è un **rosso atteso**.
 
-- [ ] **Un file in `src/test/` è un test JUnit, uno in `src/main/` è produzione.**
+- [x] **Un file in `src/test/` è un test JUnit, uno in `src/main/` è produzione.**
       `linguaggio_del_test("app/src/test/java/it/x/SchemaIT.java")` è `junit` ed
       `e_file_di_test` lo accetta; `e_file_di_produzione("app/src/main/java/it/x/Foo.java")`
       è vero; `e_file_di_produzione("app/src/main/java/it/x/test/Foo.java")` è vero
       (pytest).
-- [ ] **La nascita dei test JUnit si legge dall'albero.** Un file non tracciato con due
+- [x] **La nascita dei test JUnit si legge dall'albero.** Un file non tracciato con due
       `@Test`, un `@ParameterizedTest` e un metodo senza annotazione dà tre `TestNuovo`
       `SchemaIT#a`, `SchemaIT#b`, `SchemaIT#c`, linguaggio `junit` (pytest, repository
       temporaneo).
-- [ ] **Il commit RED di soli test si vede dal ripiego su `HEAD`.** Dopo il commit del file
+- [x] **Il commit RED di soli test si vede dal ripiego su `HEAD`.** Dopo il commit del file
       del criterio precedente, `test_nuovi_da_aprire()` restituisce quei tre test; se lo
       stesso commit tocca anche `app/src/main/java/…/Foo.java` restituisce una lista vuota
       (pytest, repository temporaneo con base e ramo).
-- [ ] **Il comando isola i test e rispetta `[junit]`.** Con `[junit].comando` configurato,
+- [x] **Il comando isola i test e rispetta `[junit]`.** Con `[junit].comando` configurato,
       `comandi_dei_test()` restituisce un comando per cartella, con `{test}` sostituito da
       `SchemaIT#a+b` e l'etichetta `SchemaIT#a`; senza la sezione i test sono *orfani* e
       nessun comando parte. La sezione con una chiave sconosciuta, o senza `{test}`, è un
       errore di configurazione (pytest, tre casi).
-- [ ] **L'esito si legge per test dai rapporti.** Con un `TEST-…SchemaIT.xml` di esempio:
+- [x] **L'esito si legge per test dai rapporti.** Con un `TEST-…SchemaIT.xml` di esempio:
       un caso con `AssertionFailedError` è `rosso`, uno passato `verde`, uno `<skipped>`
       `saltato`, un test senza caso `nessuno`, un parametrico `c(String)[2]` conta per `c`;
       se due casi dello stesso test dicono cose diverse vince il più forte (pytest,
       parametrico: un caso per lettura).
-- [ ] **Un errore di compilazione vale `rosso`.** Con `esegui()` finto che torna codice 1 e
+- [x] **Un errore di compilazione vale `rosso`.** Con `esegui()` finto che torna codice 1 e
       un'uscita con `COMPILATION ERROR`, senza rapporti, `esiti_del_comando()` dà `rosso`
       per tutti i test chiesti; con codice 1 e nessun'altra spiegazione solleva
       `GuastoDelGate` (pytest).
-- [ ] **`--chiedi-impl` apre `IMPL` su un RED JUnit.** In fase `TEST_ONLY`, con il commit RED
+- [x] **`--chiedi-impl` apre `IMPL` su un RED JUnit.** In fase `TEST_ONLY`, con il commit RED
       del criterio 3 e il rapporto finto rosso, `chiedi_impl()` torna 0 e scrive `IMPL`; con il
       rapporto verde torna 1 e la fase resta `TEST_ONLY` (pytest, due casi).
 

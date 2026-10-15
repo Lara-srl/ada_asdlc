@@ -44,6 +44,15 @@ dichiara** — a schermo, nel rapporto e nella nota di `runs/tempi.csv` — per 
 il cui runner di test il gate non sa leggere. In aDa resta `true`: un gate che si
 indebolisce in silenzio è la prima cosa che questa pagina vieta.
 
+**`[junit]`, per i progetti Java** (`PBI-505`). Sezione facoltativa con una chiave sola,
+`comando`: la lista di argomenti che lancia i test JUnit isolati, con almeno un argomento
+che contiene `{test}` (sostituito da `Classe#m1+m2,Altra#m3`, la sintassi di `-Dtest=`
+di Maven). Serve al **lucchetto di fase**: senza la sezione un test JUnit non si isola e
+`--chiedi-impl` non apre `IMPL`; una chiave sconosciuta o un comando senza `{test}` sono un
+errore di configurazione. L'esito si legge dai `TEST-*.xml` di surefire e failsafe, e un
+errore di compilazione vale rosso. Il gate del rosso e la quarta lettura (i mutanti) non
+leggono JUnit: un progetto Java li tiene spenti con `[gate_del_rosso].attivo = false`.
+
 **Il Quality Gate ha due domande, non una** (`PBI-103`). La prima è *i test passano?*;
 la seconda è *quei test sono mai stati rossi?*, e la sa una macchina come l'altra. Un test
 nato verde non prova niente: può essere verde perché il codice è giusto, o perché non
