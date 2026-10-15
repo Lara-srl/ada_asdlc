@@ -183,8 +183,13 @@ DATI = Path(__file__).resolve().parent / "dati" / "junit"
 def scrive_i_rapporti(monkeypatch, *rapporti: tuple[str, str], codice: int = 0,
                       uscita: str = ""):
     """`esegui()` finto: non lancia niente, e lascia sotto la cartella di lancio i
-    `(destinazione, file di dati)` dati, come farebbe Maven."""
+    `(destinazione, file di dati)` dati, come farebbe Maven. `git` passa al vero
+    `esegui()`: i test su un repository vero lo usano per leggere fase e commit."""
+    vero = runner.esegui
+
     def finto(argv, cwd, **altri):
+        if argv[0] == "git":
+            return vero(argv, cwd, **altri)
         for destinazione, origine in rapporti:
             file = Path(cwd) / destinazione
             file.parent.mkdir(parents=True, exist_ok=True)
@@ -267,3 +272,29 @@ class TestUnErroreDiCompilazioneValeRosso:
 
         with pytest.raises(runner.GuastoDelGate, match="Could not resolve dependencies"):
             runner.esiti_del_comando(comando_per(tmp_path, "SchemaIT#a"))
+
+
+class TestChiediImplApreImplSuUnRedJunit:
+    """Criterio 7: il giro di Java di `ada_planning`, fino in fondo. Il commit RED
+    c'è, `[junit]` dichiara il comando, e i rapporti dicono rosso o verde."""
+
+    def chiedi(self, repo, monkeypatch, esito):
+        repo.commit("test(schema): lo schema ha le tabelle (RED)", {TEST_JAVA: SCHEMA_IT})
+        runner.percorso_della_fase(repo.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(runner, "JUNIT_COMANDO", tuple(COMANDO_MAVEN))
+        scrive_i_rapporti(monkeypatch, ("target/failsafe-reports/TEST-it.x.SchemaIT.xml",
+                                        f"{esito}/failsafe-reports/TEST-it.x.SchemaIT.xml"),
+                          codice=1 if esito == "rosso" else 0)
+        return runner.chiedi_impl()
+
+    def fase(self, repo):
+        return runner.percorso_della_fase(repo.radice).read_text().strip()
+
+    def test_con_il_rapporto_rosso_apre_impl(self, repo_java, monkeypatch):
+        assert self.chiedi(repo_java, monkeypatch, "rosso") == 0
+        assert self.fase(repo_java) == runner.FASE_IMPL
+
+    def test_con_il_rapporto_verde_resta_in_test_only(self, repo_java, monkeypatch, capsys):
+        assert self.chiedi(repo_java, monkeypatch, "verde") == 1
+        assert self.fase(repo_java) == runner.FASE_TEST_ONLY
+        assert "nato verde" in capsys.readouterr().out

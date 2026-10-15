@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="it.x.SchemaIT" time="0.030" tests="3" errors="0" skipped="0" failures="3">
+  <testcase name="a" classname="it.x.SchemaIT" time="0.010">
+    <failure message="manca la tabella" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: manca la tabella
+</failure>
+  </testcase>
+  <testcase name="b" classname="it.x.SchemaIT" time="0.010">
+    <failure message="manca la tabella" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: manca la tabella
+</failure>
+  </testcase>
+  <testcase name="c" classname="it.x.SchemaIT" time="0.010">
+    <failure message="manca la tabella" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: manca la tabella
+</failure>
+  </testcase>
+</testsuite>
