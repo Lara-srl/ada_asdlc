@@ -62,3 +62,23 @@ def test_nessuno_slug_runner_e_anche_una_causa_di_progetto():
     assert generali, "la tabella generale delle cause non si trova: il confronto sarebbe vuoto"
     assert runner
     assert sorted(set(generali) & set(runner)) == []
+
+
+RIGA_REGISTRO = re.compile(
+    r"^- (\d{4}-\d{2}-\d{2}) · ([^·]+) · ([^·]+) · (\S[^·]*)$")
+
+
+def _righe_del_registro(testo):
+    return [r for r in testo.splitlines() if r.startswith("- ")]
+
+
+@pytest.mark.progetto_ospite
+def test_il_registro_esiste_e_ogni_riga_ha_il_formato():
+    """Criterio 3. `- AAAA-MM-GG · causa o ruolo · sentenza · riferimento`."""
+    registro = REPO / "backlog" / "PRECEDENTI.md"
+
+    assert registro.is_file(), "manca backlog/PRECEDENTI.md"
+    righe = _righe_del_registro(registro.read_text(encoding="utf-8"))
+    assert righe, "il registro non ha nessuna riga"
+    storte = [r for r in righe if not RIGA_REGISTRO.match(r)]
+    assert storte == [], f"righe fuori formato: {storte}"
