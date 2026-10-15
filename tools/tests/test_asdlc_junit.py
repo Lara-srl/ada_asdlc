@@ -259,3 +259,11 @@ class TestUnErroreDiCompilazioneValeRosso:
         esiti, _ = runner.esiti_del_comando(comando_per(tmp_path, "SchemaIT#a", "AltraIT#m3"))
 
         assert esiti == {"SchemaIT#a": "rosso", "AltraIT#m3": "rosso"}
+
+    def test_un_guasto_senza_rapporti_e_senza_compilazione_e_del_gate(
+            self, monkeypatch, tmp_path):
+        scrive_i_rapporti(monkeypatch, codice=1,
+                          uscita="[ERROR] Could not resolve dependencies\n[INFO] BUILD FAILURE\n")
+
+        with pytest.raises(runner.GuastoDelGate, match="Could not resolve dependencies"):
+            runner.esiti_del_comando(comando_per(tmp_path, "SchemaIT#a"))
