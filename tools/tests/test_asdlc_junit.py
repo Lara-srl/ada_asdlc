@@ -242,3 +242,20 @@ class TestLEsitoSiLeggeDaiRapportiPerTest:
         esiti, _ = runner.esiti_del_comando(comando_per(tmp_path, "SchemaIT#a"))
 
         assert esiti == {"SchemaIT#a": "nessuno"}
+
+
+class TestUnErroreDiCompilazioneValeRosso:
+    """Criterio 6: il test che nomina una classe che non esiste ancora è il rosso
+    più comune del test-first in Java, e Maven esce senza scrivere rapporti
+    (decisione 8)."""
+
+    USCITA = ("[ERROR] COMPILATION ERROR :\n"
+              "[ERROR] /app/src/test/java/it/x/SchemaIT.java:[9,9] cannot find symbol\n"
+              "[INFO] BUILD FAILURE\n")
+
+    def test_vale_rosso_per_tutti_i_test_chiesti(self, monkeypatch, tmp_path):
+        scrive_i_rapporti(monkeypatch, codice=1, uscita=self.USCITA)
+
+        esiti, _ = runner.esiti_del_comando(comando_per(tmp_path, "SchemaIT#a", "AltraIT#m3"))
+
+        assert esiti == {"SchemaIT#a": "rosso", "AltraIT#m3": "rosso"}
