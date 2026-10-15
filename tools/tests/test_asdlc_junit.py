@@ -42,6 +42,12 @@ class TestUnFileInSrcTestEUnTestJunit:
     def test_una_cartella_test_dentro_src_main_non_fa_un_test(self):
         assert runner.e_file_di_produzione("app/src/main/java/it/x/test/Foo.java")
 
+    def test_un_file_non_java_in_src_test_resta_produzione(self):
+        # Non regressione: senza `.java` nessuna differenza rispetto a prima.
+        for percorso in ("src/test/helpers.py", "web/src/test/setup.ts"):
+            assert not runner.e_file_di_test(percorso)
+            assert runner.e_file_di_produzione(percorso)
+
 
 @pytest.fixture
 def repo_java(tmp_path, monkeypatch):
