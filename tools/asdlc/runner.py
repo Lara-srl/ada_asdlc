@@ -1265,8 +1265,9 @@ def e_file_di_test(percorso: str) -> bool:
     if nome.endswith(SUFFISSI_VITEST):
         return True
     # JUnit: la sequenza `src/test/` di Maven, e non una cartella `test` qualunque
-    # (PBI-505, decisione 1): `src/main/java/.../test/Foo.java` è produzione.
-    if any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1)):
+    # (PBI-505, decisione 1): `src/main/java/.../test/Foo.java` è produzione. Solo
+    # i `.java`: un `src/test/setup.ts` o `helpers.py` resta com'era (non regressione).
+    if nome.endswith(".java") and any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1)):
         return True
     return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
