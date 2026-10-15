@@ -6,6 +6,8 @@ di `dati/`.
 """
 
 import importlib
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,12 @@ from test_asdlc_runner import RepoDiProva
 
 # `conftest.py` mette `tools/` sul `sys.path`: il runner è `asdlc.runner`.
 runner = importlib.import_module("asdlc.runner")
+config = importlib.import_module("asdlc.config")
+
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
+COMANDO_MAVEN = ["./mvnw", "-B", "verify", "-Dtest={test}", "-Dit.test={test}",
+                 "-Dsurefire.failIfNoSpecifiedTests=false",
+                 "-Dfailsafe.failIfNoSpecifiedTests=false"]
 
 
 class TestUnFileInSrcTestEUnTestJunit:
@@ -109,3 +117,60 @@ class TestIlCommitRedJunitSiVedeDalRipiegoSuHead:
             TEST_JAVA: SCHEMA_IT, FOO_JAVA: "package it.x;\n\nclass Foo {\n}\n"})
 
         assert runner.test_nuovi_da_aprire() == []
+
+
+def configurazione(sezione_junit: str):
+    """La configurazione del progetto di prova con sopra la sezione `[junit]` data."""
+    testo = (PROGETTO / "asdlc.toml").read_text(encoding="utf-8") + "\n" + sezione_junit
+    return config.interpreta(tomllib.loads(testo), "asdlc.toml")
+
+
+class TestIlComandoIsolaITestERispettaJunit:
+    """Criterio 4: il comando lo dichiara il progetto in `[junit]`; senza, il test
+    JUnit è un orfano e nessun comando parte (decisioni 4 e 5)."""
+
+    ALTRO_JAVA = "app/src/test/java/it/x/AltraIT.java"
+    NUOVI = [runner.TestNuovo(TEST_JAVA, "SchemaIT#a", "junit"),
+             runner.TestNuovo(TEST_JAVA, "SchemaIT#b", "junit"),
+             runner.TestNuovo(ALTRO_JAVA, "AltraIT#m3", "junit")]
+
+    @pytest.fixture(autouse=True)
+    def gate_in_app(self, monkeypatch):
+        monkeypatch.setattr(runner, "GATE", [runner.Gate("maven", ("./mvnw",), "app")])
+
+    def test_la_sezione_si_legge_dal_toml(self):
+        cfg = configurazione('[junit]\ncomando = ["./mvnw", "verify", "-Dtest={test}"]\n')
+
+        assert cfg.junit.comando == ("./mvnw", "verify", "-Dtest={test}")
+
+    def test_con_la_sezione_un_comando_per_cartella_con_i_test_sostituiti(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "JUNIT_COMANDO", tuple(COMANDO_MAVEN))
+
+        comandi, orfani = runner.comandi_dei_test(tmp_path, self.NUOVI)
+
+        [comando] = comandi
+        assert orfani == []
+        assert comando.cartella == tmp_path / "app"
+        assert comando.linguaggio == "junit"
+        assert comando.argv == [a.replace("{test}", "SchemaIT#a+b,AltraIT#m3")
+                                for a in COMANDO_MAVEN]
+        assert comando.etichette == {n.nome: n.nome for n in self.NUOVI}
+
+    def test_senza_la_sezione_i_test_sono_orfani_e_nessun_comando_parte(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "JUNIT_COMANDO", None)
+
+        comandi, orfani = runner.comandi_dei_test(tmp_path, self.NUOVI)
+
+        assert comandi == []
+        assert orfani == ["SchemaIT#a", "SchemaIT#b", "AltraIT#m3"]
+
+    @pytest.mark.parametrize("sezione", [
+        '[junit]\ncomando = ["./mvnw", "verify"]\n',
+        '[junit]\ncomando = ["./mvnw", "-Dtest={test}"]\nrapporti = "target"\n',
+        '[junit]\n',
+    ])
+    def test_una_sezione_sbagliata_e_un_errore_di_configurazione(self, sezione):
+        with pytest.raises(config.ErroreDiConfigurazione):
+            configurazione(sezione)
