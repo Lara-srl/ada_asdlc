@@ -91,6 +91,7 @@ VENV: str                # `[ambiente].venv`
 # comando che il runner lancia o fa lanciare è `<pacchetto>/bin/<comando>`.
 PACCHETTO: Path | None
 ESEGUIBILI: tuple[str, ...]  # `[ambiente].eseguibili`
+JUNIT_COMANDO: tuple[str, ...] | None  # `[junit].comando`, con `{test}` (PBI-505)
 MINIMI: dict[str, int]       # `[ambiente].minimi`
 PRESTITI: tuple[str, ...]  # `[ambiente].prestiti`
 # Il worktree è uno solo e non aveva un lucchetto: vedi `lucchetto()`. Qui c'è il
@@ -243,8 +244,9 @@ def configura(cfg: asdlc_config.Config) -> None:
     global MAX_TENTATIVI, MAX_IGIENE, MAX_REVISIONI, MINUTI_BUILDER, MINUTI_CRITIC
     global BASE, REMOTO, RAMO_PRINCIPALE, PROMPT_CRITIC, PROMPT_RIMEDIO, GUARDIA_DEL_COMMIT
     global PROMPT_BUILDER, PROMPT_IGIENE, PROMPT_RIPROVA, MODELLO_CRITIC, MODELLO_RIMEDIO
-    global GATE_DEL_ROSSO_ATTIVO
+    global GATE_DEL_ROSSO_ATTIVO, JUNIT_COMANDO
     CFG = cfg
+    JUNIT_COMANDO = cfg.junit.comando
     GATE = list(cfg.gate)
     # `false` spegne la seconda domanda del Quality Gate — e il giro lo scrive.
     GATE_DEL_ROSSO_ATTIVO = cfg.gate_del_rosso.attivo
@@ -1195,7 +1197,8 @@ def gira_gate(attivi: set[str], base: str | None = None) -> list[tuple[str, str]
 # I file che sono **codice**. Un `.md` non c'è dentro: la spec si aggiorna nello
 # stesso commit del codice che ne cambia il comportamento (`AGENTS.md`, SEMPRE), e
 # contarla come produzione fermerebbe ogni commit di soli test con la sua spec.
-ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh"}
+ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh",
+                     ".java"}
 
 # `it('…')`, `test("…")`, e le loro varianti `.each` / `.skip`: il nome è ciò che
 # vitest filtra con `-t`. Un apice **scappato** non chiude la stringa —
@@ -1241,7 +1244,7 @@ class TestNuovo:
 
     file: str       # dalla radice del repository
     nome: str       # `Classe::funzione` dalla collezione (python), o il titolo (vitest)
-    linguaggio: str  # python | vitest
+    linguaggio: str  # python | vitest | junit
 
 
 # I nomi che vitest esegue per default (`**/*.{test,spec}.?(c|m)[jt]s?(x)`). Una
@@ -1260,6 +1263,11 @@ def e_file_di_test(percorso: str) -> bool:
     if "tests" in parti or "__tests__" in parti:
         return True
     if nome.endswith(SUFFISSI_VITEST):
+        return True
+    # JUnit: la sequenza `src/test/` di Maven, e non una cartella `test` qualunque
+    # (PBI-505, decisione 1): `src/main/java/.../test/Foo.java` è produzione. Solo
+    # i `.java`: un `src/test/setup.ts` o `helpers.py` resta com'era (non regressione).
+    if nome.endswith(".java") and any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1)):
         return True
     return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
@@ -1390,6 +1398,8 @@ def linguaggio_del_test(percorso: str) -> str | None:
         return "python"
     if percorso.endswith(SUFFISSI_VITEST):
         return "vitest"
+    if percorso.endswith(".java"):
+        return "junit"
     return None
 
 
@@ -1488,6 +1498,51 @@ def nomi_dei_test(diff: str) -> tuple[list[str], set[str]]:
             aggiunti.append(nome)
         else:
             tolti.add(nome)
+    return aggiunti, tolti
+
+
+# Le annotazioni che fanno di un metodo un test JUnit (PBI-505, decisione 3), e la
+# dichiarazione di un metodo: modificatori e tipo di ritorno, poi il nome e `(`.
+RE_ANNOTAZIONE_JUNIT = re.compile(r"^\s*@(?:Test|ParameterizedTest|RepeatedTest)\b")
+RE_METODO_JAVA = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(\w+)\s*\(")
+# Un'annotazione in testa a una riga, con gli argomenti fra parentesi se ci sono.
+RE_ANNOTAZIONE_IN_TESTA = re.compile(r"^\s*@\w+(?:\([^)]*\))?")
+
+
+def nomi_dei_test_junit(diff: str, classe: str) -> tuple[list[str], set[str]]:
+    """I nomi `Classe#metodo` dei test JUnit aggiunti e quelli tolti, dalle righe
+    del diff (PBI-505, decisione 3): il metodo che segue un'annotazione `@Test`,
+    `@ParameterizedTest` o `@RepeatedTest`, anche con argomenti e con altre
+    annotazioni in mezzo, o sulla stessa riga del metodo."""
+    aggiunti: list[str] = []
+    tolti: set[str] = set()
+    attesa = {"+": False, "-": False}
+    for riga in diff.splitlines():
+        if riga.startswith(("+++", "---")) or riga[:1] not in attesa:
+            continue
+        segno, testo = riga[0], riga[1:]
+        if RE_ANNOTAZIONE_JUNIT.match(testo):
+            attesa[segno] = True
+            resto = testo
+            while (iniziale := RE_ANNOTAZIONE_IN_TESTA.match(resto)) is not None:
+                resto = resto[iniziale.end():]
+            trovato = RE_METODO_JAVA.match(resto)
+            if trovato is not None:
+                attesa[segno] = False
+                nome = f"{classe}#{trovato.group(1)}"
+                if segno == "+":
+                    aggiunti.append(nome)
+                else:
+                    tolti.add(nome)
+        elif attesa[segno] and not testo.lstrip().startswith("@"):
+            trovato = RE_METODO_JAVA.match(testo)
+            if trovato is not None:
+                attesa[segno] = False
+                nome = f"{classe}#{trovato.group(1)}"
+                if segno == "+":
+                    aggiunti.append(nome)
+                else:
+                    tolti.add(nome)
     return aggiunti, tolti
 
 
@@ -1709,8 +1764,8 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     nasce, in qualunque file finisca. Il diff, file per file, non vedeva un test tolto da
     un file e scritto in un altro senza `git mv` (difetto 81 di PBI-102).
 
-    Per vitest la nascita si legge ancora dal diff. Uno stesso nome cancellato e
-    riaggiunto è un trasloco, non una nascita: è il caso del file di test
+    Per vitest e JUnit (PBI-505) la nascita si legge ancora dal diff. Uno stesso
+    nome cancellato e riaggiunto è un trasloco, non una nascita: è il caso del file di test
     riscritto per intero, e senza questa sottrazione il gate farebbe girare tutta
     la suite di quel commit per poi fermarla come nata verde. Il diff di un rename
     si chiede nominando **tutti e due** i lati. Con il solo nome nuovo git non
@@ -1723,10 +1778,11 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
     for voce in voci:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio != "vitest":
+        if linguaggio not in ("vitest", "junit"):
             continue
-        aggiunti, tolti = nomi_dei_test(
-            diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce)))
+        diff = diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce))
+        aggiunti, tolti = (nomi_dei_test_junit(diff, Path(percorso).stem)
+                           if linguaggio == "junit" else nomi_dei_test(diff))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in voci):
         genitore = genitore_del_commit(sha)
@@ -1758,7 +1814,7 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
 
     Per Python la regola è quella del gate, `nascite_python` (PBI-396, decisione
     1): il commit è l'albero di lavoro, il genitore è `HEAD`, e la base è quella
-    del giro. Per vitest si legge il diff.
+    del giro. Per vitest e JUnit (PBI-505) si legge il diff.
 
     I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
     appena creato, e il primo test di un modulo nuovo è il caso più comune di
@@ -1775,14 +1831,15 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     for voce in tracciati + non_tracciati:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio != "vitest":
+        if linguaggio not in ("vitest", "junit"):
             continue
         if voce in non_tracciati:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
             diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
-        aggiunti, tolti = nomi_dei_test(diff)
+        aggiunti, tolti = (nomi_dei_test_junit(diff, Path(percorso).stem)
+                           if linguaggio == "junit" else nomi_dei_test(diff))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in tracciati + non_tracciati):
         testa = git("rev-parse", "HEAD")
@@ -1973,7 +2030,7 @@ class ComandoDiProva:
     """Un comando che gira i test nuovi di un commit, e come se ne rilegge l'esito.
 
     `etichette` lega la **chiave** con cui l'esito torna indietro — il node id per
-    pytest, il titolo per vitest — all'id con cui quel test si riesegue a mano. Per
+    pytest, il titolo per vitest, `Classe#metodo` per JUnit — all'id con cui quel test si riesegue a mano. Per
     pytest sono la stessa cosa; per vitest no, perché `-t` filtra per nome dentro un
     file e l'id da riscrivere è `file -t nome`.
     """
@@ -1996,7 +2053,8 @@ def comandi_dei_test(albero: Path,
     e uno per file per vitest, perché `-t` è un filtro per nome e non un elenco. Un
     comando solo, però, non vuol dire un verdetto solo: l'esito si rilegge per test
     (`esiti_del_comando`), o dodici test in un `pytest` diventerebbero un
-    tutto-o-niente.
+    tutto-o-niente. Per JUnit un comando per cartella, quello di `[junit].comando`
+    con `{test}` sostituito (PBI-505): senza la sezione i test JUnit sono orfani.
 
     Le **etichette** sono ciò che finisce nell'elenco del gate, e vanno scritte come
     si eseguono — un `file::nome` senza la classe che lo contiene dà «not found» a
@@ -2004,6 +2062,7 @@ def comandi_dei_test(albero: Path,
     """
     per_pytest: dict[Path, list[str]] = {}
     per_vitest: dict[tuple[Path, str], list[str]] = {}
+    per_junit: dict[Path, list[str]] = {}
     orfani: list[str] = []
     origine: dict[str, TestNuovo] = {}
 
@@ -2018,6 +2077,13 @@ def comandi_dei_test(albero: Path,
                 continue
             per_pytest.setdefault(cartella, []).append(nodo)
             origine[nodo] = t
+        elif t.linguaggio == "junit":
+            # Senza `[junit]` il runner non indovina un comando (PBI-505, decisione 5).
+            if JUNIT_COMANDO is None:
+                orfani.append(t.nome)
+                continue
+            per_junit.setdefault(cartella, []).append(t.nome)
+            origine[t.nome] = t
         else:
             per_vitest.setdefault((cartella, relativo), []).append(t.nome)
             origine[t.nome] = t
@@ -2054,7 +2120,22 @@ def comandi_dei_test(albero: Path,
              "--reporter=json", f"--outputFile={rapporto}"],
             "vitest", {nome: f"{relativo} -t {nome}" for nome in nomi}, rapporto,
             origine={nome: origine[nome] for nome in nomi}))
+    for cartella, nomi in per_junit.items():
+        comandi.append(ComandoDiProva(
+            cartella, [a.replace("{test}", sintassi_del_test(nomi)) for a in JUNIT_COMANDO],
+            "junit", {nome: nome for nome in nomi},
+            origine={nome: origine[nome] for nome in nomi}))
     return comandi, orfani
+
+
+def sintassi_del_test(nomi: list[str]) -> str:
+    """`Classe#m1+m2,Altra#m3`: i `Classe#metodo` raggruppati per classe, nella
+    sintassi di `-Dtest=` di Maven (PBI-505, decisione 4)."""
+    per_classe: dict[str, list[str]] = {}
+    for nome in nomi:
+        classe, _, metodo = nome.partition("#")
+        per_classe.setdefault(classe, []).append(metodo)
+    return ",".join(f"{classe}#{'+'.join(metodi)}" for classe, metodi in per_classe.items())
 
 
 def radice_del_junit(rapporto: Path | None) -> ET.Element:
@@ -2247,6 +2328,38 @@ def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
     return "nessuno"
 
 
+# Dove Maven scrive i `TEST-*.xml`: surefire per i test unitari, failsafe per
+# quelli di integrazione, sotto la cartella di lancio (PBI-505, decisione 6).
+CARTELLE_DEI_RAPPORTI_JUNIT = ("target/surefire-reports", "target/failsafe-reports")
+
+
+def rapporti_di_junit(cartella: Path) -> list[Path]:
+    return [file for rapporti in CARTELLE_DEI_RAPPORTI_JUNIT
+            for file in sorted((cartella / rapporti).glob("TEST-*.xml"))]
+
+
+def esiti_di_junit(cartella: Path, chiavi: Iterable[str]) -> dict[str, str]:
+    """Il verdetto **per test** dai rapporti di surefire e failsafe sotto `cartella`
+    (PBI-505, decisione 6). Un caso è di una chiave `Classe#metodo` se il suo
+    `classname` finisce con `.Classe` e il `name` è il metodo, o comincia con il
+    metodo seguito da `(` o `[` (i parametrici di JUnit 5). Un test vale il più
+    forte dei suoi casi; senza casi non ha una voce."""
+    attese = [(chiave, *chiave.partition("#")[::2]) for chiave in chiavi]
+    letti: dict[str, str] = {}
+    for file in rapporti_di_junit(cartella):
+        try:
+            radice = ET.parse(file).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        for caso in radice.iter("testcase"):
+            classe, nome = caso.get("classname", ""), caso.get("name", "")
+            for chiave, atteso, metodo in attese:
+                if ((classe == atteso or classe.endswith(f".{atteso}"))
+                        and (nome == metodo or nome.startswith((f"{metodo}(", f"{metodo}[")))):
+                    letti[chiave] = piu_forte(letti.get(chiave, "nessuno"), esito_del_caso(caso))
+    return letti
+
+
 # Il tetto di un comando di prova, in secondi.
 TETTO_DEI_TEST = 1800
 
@@ -2261,7 +2374,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     i totali di tutto il comando darebbero a `B` senza una voce sua l'esito di
     `A`. Resta il solo modulo che pytest non raccoglie (`leggi_esito`, PBI-390,
     decisione 5) e il solo file che vitest non carica (`esito_dei_file_di_vitest`,
-    PBI-376, decisione 2).
+    PBI-376, decisione 2). Per JUnit l'esito viene dai `TEST-*.xml` di Maven sotto
+    la cartella di lancio, tolti prima di lanciare (`esiti_di_junit`, PBI-505).
     """
     if c.rapporto is not None:
         # Il percorso del rapporto resta fra una misura e l'altra (in `apri` è
@@ -2270,6 +2384,11 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # file che si legge dopo è di questo comando, o manca (PBI-376,
         # decisione 3; PBI-390, decisione 1).
         c.rapporto.unlink(missing_ok=True)
+    if c.linguaggio == "junit":
+        # Maven scrive i suoi rapporti sotto la cartella di lancio e li lascia lì:
+        # quelli di un lancio prima sarebbero l'esito di un altro commit (decisione 6).
+        for vecchio in rapporti_di_junit(c.cartella):
+            vecchio.unlink()
     try:
         codice, uscita = esegui(c.argv, c.cartella, timeout=TETTO_DEI_TEST)
     except subprocess.TimeoutExpired as exc:
@@ -2284,6 +2403,17 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # e il rapporto che pytest non ha scritto non si cerca (PBI-390, §Fuori
         # scope).
         return {chiave: "nessuno" for chiave in c.etichette}, "i test non terminano a quel commit"
+    if c.linguaggio == "junit":
+        letti = esiti_di_junit(c.cartella, c.etichette)
+        # Maven che non compila esce senza rapporti: il rosso del test-first che
+        # nomina una classe non ancora scritta (PBI-505, decisione 8).
+        complessivo = "rosso" if "COMPILATION ERROR" in uscita else "nessuno"
+        # Un'uscita non zero senza rapporti e senza compilazione fallita non l'ha
+        # detta un test: il gate non ha guardato (decisione 8).
+        if complessivo == "nessuno" and codice != 0 and not rapporti_di_junit(c.cartella):
+            raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
+                                f"{uscita.strip()[-1000:]}")
+        return {chiave: letti.get(chiave, complessivo) for chiave in c.etichette}, uscita
     letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
              else esiti_di_vitest(c.rapporto))
     complessivo = (leggi_esito(c.rapporto) if c.linguaggio == "python"
