@@ -101,6 +101,31 @@ class TestLaNascitaDeiTestJunitSiLegge:
             runner.TestNuovo(TEST_JAVA, f"SchemaIT#{n}", "junit") for n in "abc"]
 
 
+class TestUnaAnnotazioneSulleStessaRigaDelMetodo:
+    """Criterio 2, rilievo del Critic: `@Test void a() { ... }` su una riga sola."""
+
+    UNA_RIGA = """package it.x;
+
+class SchemaIT {
+
+    @Test void a() { new Foo().run(); }
+
+    @Test @DisplayName("b") void b() { throw new IllegalStateException("x"); }
+
+    void aiutante() {
+    }
+}
+"""
+
+    def test_nasce_il_metodo_della_riga_e_nessun_nome_fantasma(self):
+        diff = "".join(f"+{riga}\n" for riga in self.UNA_RIGA.splitlines())
+
+        aggiunti, tolti = runner.nomi_dei_test_junit(diff, "SchemaIT")
+
+        assert aggiunti == ["SchemaIT#a", "SchemaIT#b"]
+        assert tolti == set()
+
+
 class TestIlCommitRedJunitSiVedeDalRipiegoSuHead:
     """Criterio 3: `test_nuovi_da_aprire()` legge l'ultimo commit se l'albero è
     pulito, ed è il percorso che sul giro del PBI-002 ha risposto «nessun test»."""
