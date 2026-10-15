@@ -1498,6 +1498,37 @@ def nomi_dei_test(diff: str) -> tuple[list[str], set[str]]:
     return aggiunti, tolti
 
 
+# Le annotazioni che fanno di un metodo un test JUnit (PBI-505, decisione 3), e la
+# dichiarazione di un metodo: modificatori e tipo di ritorno, poi il nome e `(`.
+RE_ANNOTAZIONE_JUNIT = re.compile(r"^\s*@(?:Test|ParameterizedTest|RepeatedTest)\b")
+RE_METODO_JAVA = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(\w+)\s*\(")
+
+
+def nomi_dei_test_junit(diff: str) -> tuple[list[str], set[str]]:
+    """I nomi dei metodi di test JUnit aggiunti e quelli tolti, dalle righe del
+    diff (PBI-505, decisione 3): il metodo che segue un'annotazione `@Test`,
+    `@ParameterizedTest` o `@RepeatedTest`, anche con argomenti e con altre
+    annotazioni in mezzo."""
+    aggiunti: list[str] = []
+    tolti: set[str] = set()
+    attesa = {"+": False, "-": False}
+    for riga in diff.splitlines():
+        if riga.startswith(("+++", "---")) or riga[:1] not in attesa:
+            continue
+        segno, testo = riga[0], riga[1:]
+        if RE_ANNOTAZIONE_JUNIT.match(testo):
+            attesa[segno] = True
+        elif attesa[segno] and not testo.lstrip().startswith("@"):
+            trovato = RE_METODO_JAVA.match(testo)
+            if trovato is not None:
+                attesa[segno] = False
+                if segno == "+":
+                    aggiunti.append(trovato.group(1))
+                else:
+                    tolti.add(trovato.group(1))
+    return aggiunti, tolti
+
+
 # --- La collezione di pytest: quali test esistono in un albero (PBI-396) --------
 
 
@@ -1765,7 +1796,7 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
 
     Per Python la regola è quella del gate, `nascite_python` (PBI-396, decisione
     1): il commit è l'albero di lavoro, il genitore è `HEAD`, e la base è quella
-    del giro. Per vitest si legge il diff.
+    del giro. Per vitest e JUnit (PBI-505) si legge il diff.
 
     I file non tracciati si cercano a parte: `git diff HEAD` non nomina un file
     appena creato, e il primo test di un modulo nuovo è il caso più comune di
@@ -1782,14 +1813,20 @@ def test_nuovi_dellalbero() -> list[TestNuovo]:
     for voce in tracciati + non_tracciati:
         percorso = voce.percorso
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
-        if linguaggio != "vitest":
+        if linguaggio not in ("vitest", "junit"):
             continue
         if voce in non_tracciati:
             sorgente = leggi_sorgente(REPO / percorso) or ""
             diff = "".join(f"+{riga}\n" for riga in sorgente.splitlines())
         else:
             diff = diff_del_file(voce, "diff", "HEAD", lati=lati_del_diff(voce))
-        aggiunti, tolti = nomi_dei_test(diff)
+        if linguaggio == "junit":
+            aggiunti, tolti = nomi_dei_test_junit(diff)
+            classe = Path(percorso).stem
+            aggiunti = [f"{classe}#{n}" for n in aggiunti]
+            tolti = {f"{classe}#{n}" for n in tolti}
+        else:
+            aggiunti, tolti = nomi_dei_test(diff)
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
     if any(tocca_un_test_python(v) for v in tracciati + non_tracciati):
         testa = git("rev-parse", "HEAD")
