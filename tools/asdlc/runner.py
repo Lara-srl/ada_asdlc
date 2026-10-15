@@ -2394,6 +2394,11 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # Maven che non compila esce senza rapporti: il rosso del test-first che
         # nomina una classe non ancora scritta (PBI-505, decisione 8).
         complessivo = "rosso" if "COMPILATION ERROR" in uscita else "nessuno"
+        # Un'uscita non zero senza rapporti e senza compilazione fallita non l'ha
+        # detta un test: il gate non ha guardato (decisione 8).
+        if complessivo == "nessuno" and codice != 0 and not rapporti_di_junit(c.cartella):
+            raise GuastoDelGate(f"`{' '.join(c.argv)}` in {c.cartella} → uscita {codice}\n"
+                                f"{uscita.strip()[-1000:]}")
         return {chiave: letti.get(chiave, complessivo) for chiave in c.etichette}, uscita
     letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
              else esiti_di_vitest(c.rapporto))
