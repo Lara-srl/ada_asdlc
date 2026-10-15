@@ -55,15 +55,15 @@ Il PBI è solo documentazione, più i test che ne fissano la forma. Non tocca il
 
 Su `main` i due elenchi non esistono: ogni criterio è un **rosso atteso**.
 
-- [ ] **La tabella `runner-*` esiste e porta almeno `runner-non-legge-junit`.** Il test legge
+- [x] **La tabella `runner-*` esiste e porta almeno `runner-non-legge-junit`.** Il test legge
       `backlog/README.md`, trova la sezione e verifica che ogni riga abbia uno slug che
       comincia per `runner-` e che `runner-non-legge-junit` ci sia.
-- [ ] **Nessuno slug della tabella `runner-*` è uguale a una causa di progetto.** Il test
+- [x] **Nessuno slug della tabella `runner-*` è uguale a una causa di progetto.** Il test
       confronta con gli slug della tabella generale: nessun doppione.
-- [ ] **Il registro esiste e ogni riga ha il formato.** Il test legge `backlog/PRECEDENTI.md`
+- [x] **Il registro esiste e ogni riga ha il formato.** Il test legge `backlog/PRECEDENTI.md`
       e verifica che ogni riga che comincia per `- ` abbia data ISO, tre separatori `·` e un
       riferimento non vuoto.
-- [ ] **Il registro è solo in aggiunta.** Il test confronta le righe con la versione su
+- [x] **Il registro è solo in aggiunta.** Il test confronta le righe con la versione su
       `origin/main`: nessuna riga non barrata è sparita (repository temporaneo, due commit).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde.
