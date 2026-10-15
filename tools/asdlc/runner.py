@@ -2391,7 +2391,10 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         return {chiave: "nessuno" for chiave in c.etichette}, "i test non terminano a quel commit"
     if c.linguaggio == "junit":
         letti = esiti_di_junit(c.cartella, c.etichette)
-        return {chiave: letti.get(chiave, "nessuno") for chiave in c.etichette}, uscita
+        # Maven che non compila esce senza rapporti: il rosso del test-first che
+        # nomina una classe non ancora scritta (PBI-505, decisione 8).
+        complessivo = "rosso" if "COMPILATION ERROR" in uscita else "nessuno"
+        return {chiave: letti.get(chiave, complessivo) for chiave in c.etichette}, uscita
     letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
              else esiti_di_vitest(c.rapporto))
     complessivo = (leggi_esito(c.rapporto) if c.linguaggio == "python"
