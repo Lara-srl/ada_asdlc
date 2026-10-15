@@ -2314,6 +2314,38 @@ def esito_dei_file_di_vitest(rapporto: Path | None) -> str:
     return "nessuno"
 
 
+# Dove Maven scrive i `TEST-*.xml`: surefire per i test unitari, failsafe per
+# quelli di integrazione, sotto la cartella di lancio (PBI-505, decisione 6).
+CARTELLE_DEI_RAPPORTI_JUNIT = ("target/surefire-reports", "target/failsafe-reports")
+
+
+def rapporti_di_junit(cartella: Path) -> list[Path]:
+    return [file for rapporti in CARTELLE_DEI_RAPPORTI_JUNIT
+            for file in sorted((cartella / rapporti).glob("TEST-*.xml"))]
+
+
+def esiti_di_junit(cartella: Path, chiavi: Iterable[str]) -> dict[str, str]:
+    """Il verdetto **per test** dai rapporti di surefire e failsafe sotto `cartella`
+    (PBI-505, decisione 6). Un caso è di una chiave `Classe#metodo` se il suo
+    `classname` finisce con `.Classe` e il `name` è il metodo, o comincia con il
+    metodo seguito da `(` o `[` (i parametrici di JUnit 5). Un test vale il più
+    forte dei suoi casi; senza casi non ha una voce."""
+    attese = [(chiave, *chiave.partition("#")[::2]) for chiave in chiavi]
+    letti: dict[str, str] = {}
+    for file in rapporti_di_junit(cartella):
+        try:
+            radice = ET.parse(file).getroot()
+        except (OSError, ET.ParseError):
+            continue
+        for caso in radice.iter("testcase"):
+            classe, nome = caso.get("classname", ""), caso.get("name", "")
+            for chiave, atteso, metodo in attese:
+                if ((classe == atteso or classe.endswith(f".{atteso}"))
+                        and (nome == metodo or nome.startswith((f"{metodo}(", f"{metodo}[")))):
+                    letti[chiave] = piu_forte(letti.get(chiave, "nessuno"), esito_del_caso(caso))
+    return letti
+
+
 # Il tetto di un comando di prova, in secondi.
 TETTO_DEI_TEST = 1800
 
@@ -2328,7 +2360,8 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
     i totali di tutto il comando darebbero a `B` senza una voce sua l'esito di
     `A`. Resta il solo modulo che pytest non raccoglie (`leggi_esito`, PBI-390,
     decisione 5) e il solo file che vitest non carica (`esito_dei_file_di_vitest`,
-    PBI-376, decisione 2).
+    PBI-376, decisione 2). Per JUnit l'esito viene dai `TEST-*.xml` di Maven sotto
+    la cartella di lancio, tolti prima di lanciare (`esiti_di_junit`, PBI-505).
     """
     if c.rapporto is not None:
         # Il percorso del rapporto resta fra una misura e l'altra (in `apri` è
@@ -2337,6 +2370,11 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # file che si legge dopo è di questo comando, o manca (PBI-376,
         # decisione 3; PBI-390, decisione 1).
         c.rapporto.unlink(missing_ok=True)
+    if c.linguaggio == "junit":
+        # Maven scrive i suoi rapporti sotto la cartella di lancio e li lascia lì:
+        # quelli di un lancio prima sarebbero l'esito di un altro commit (decisione 6).
+        for vecchio in rapporti_di_junit(c.cartella):
+            vecchio.unlink()
     try:
         codice, uscita = esegui(c.argv, c.cartella, timeout=TETTO_DEI_TEST)
     except subprocess.TimeoutExpired as exc:
@@ -2351,6 +2389,9 @@ def esiti_del_comando(c: ComandoDiProva) -> tuple[dict[str, str], str]:
         # e il rapporto che pytest non ha scritto non si cerca (PBI-390, §Fuori
         # scope).
         return {chiave: "nessuno" for chiave in c.etichette}, "i test non terminano a quel commit"
+    if c.linguaggio == "junit":
+        letti = esiti_di_junit(c.cartella, c.etichette)
+        return {chiave: letti.get(chiave, "nessuno") for chiave in c.etichette}, uscita
     letti = (esiti_di_pytest(c.rapporto, c.etichette) if c.linguaggio == "python"
              else esiti_di_vitest(c.rapporto))
     complessivo = (leggi_esito(c.rapporto) if c.linguaggio == "python"
