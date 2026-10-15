@@ -90,3 +90,16 @@ class TestLaNascitaDeiTestJunitSiLegge:
 
         assert sorted(nuovi, key=lambda t: t.nome) == [
             runner.TestNuovo(TEST_JAVA, f"SchemaIT#{n}", "junit") for n in "abc"]
+
+
+class TestIlCommitRedJunitSiVedeDalRipiegoSuHead:
+    """Criterio 3: `test_nuovi_da_aprire()` legge l'ultimo commit se l'albero è
+    pulito, ed è il percorso che sul giro del PBI-002 ha risposto «nessun test»."""
+
+    def test_un_commit_di_soli_test_restituisce_i_suoi_tre_test(self, repo_java):
+        repo_java.commit("test(schema): lo schema ha le tabelle (RED)", {TEST_JAVA: SCHEMA_IT})
+
+        nuovi = runner.test_nuovi_da_aprire()
+
+        assert sorted(nuovi, key=lambda t: t.nome) == [
+            runner.TestNuovo(TEST_JAVA, f"SchemaIT#{n}", "junit") for n in "abc"]
