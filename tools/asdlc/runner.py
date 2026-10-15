@@ -1195,7 +1195,8 @@ def gira_gate(attivi: set[str], base: str | None = None) -> list[tuple[str, str]
 # I file che sono **codice**. Un `.md` non c'è dentro: la spec si aggiorna nello
 # stesso commit del codice che ne cambia il comportamento (`AGENTS.md`, SEMPRE), e
 # contarla come produzione fermerebbe ogni commit di soli test con la sua spec.
-ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh"}
+ESTENSIONI_CODICE = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".sql", ".sh",
+                     ".java"}
 
 # `it('…')`, `test("…")`, e le loro varianti `.each` / `.skip`: il nome è ciò che
 # vitest filtra con `-t`. Un apice **scappato** non chiude la stringa —
@@ -1241,7 +1242,7 @@ class TestNuovo:
 
     file: str       # dalla radice del repository
     nome: str       # `Classe::funzione` dalla collezione (python), o il titolo (vitest)
-    linguaggio: str  # python | vitest
+    linguaggio: str  # python | vitest | junit
 
 
 # I nomi che vitest esegue per default (`**/*.{test,spec}.?(c|m)[jt]s?(x)`). Una
@@ -1260,6 +1261,10 @@ def e_file_di_test(percorso: str) -> bool:
     if "tests" in parti or "__tests__" in parti:
         return True
     if nome.endswith(SUFFISSI_VITEST):
+        return True
+    # JUnit: la sequenza `src/test/` di Maven, e non una cartella `test` qualunque
+    # (PBI-505, decisione 1): `src/main/java/.../test/Foo.java` è produzione.
+    if any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1)):
         return True
     return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
@@ -1390,6 +1395,8 @@ def linguaggio_del_test(percorso: str) -> str | None:
         return "python"
     if percorso.endswith(SUFFISSI_VITEST):
         return "vitest"
+    if percorso.endswith(".java"):
+        return "junit"
     return None
 
 
