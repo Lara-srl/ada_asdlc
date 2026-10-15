@@ -103,3 +103,9 @@ class TestIlCommitRedJunitSiVedeDalRipiegoSuHead:
 
         assert sorted(nuovi, key=lambda t: t.nome) == [
             runner.TestNuovo(TEST_JAVA, f"SchemaIT#{n}", "junit") for n in "abc"]
+
+    def test_un_commit_che_tocca_anche_produzione_non_e_un_rosso(self, repo_java):
+        repo_java.commit("feat(schema): lo schema e il suo test", {
+            TEST_JAVA: SCHEMA_IT, FOO_JAVA: "package it.x;\n\nclass Foo {\n}\n"})
+
+        assert runner.test_nuovi_da_aprire() == []
