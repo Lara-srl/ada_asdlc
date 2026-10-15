@@ -1504,13 +1504,15 @@ def nomi_dei_test(diff: str) -> tuple[list[str], set[str]]:
 # dichiarazione di un metodo: modificatori e tipo di ritorno, poi il nome e `(`.
 RE_ANNOTAZIONE_JUNIT = re.compile(r"^\s*@(?:Test|ParameterizedTest|RepeatedTest)\b")
 RE_METODO_JAVA = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(\w+)\s*\(")
+# Un'annotazione in testa a una riga, con gli argomenti fra parentesi se ci sono.
+RE_ANNOTAZIONE_IN_TESTA = re.compile(r"^\s*@\w+(?:\([^)]*\))?")
 
 
 def nomi_dei_test_junit(diff: str, classe: str) -> tuple[list[str], set[str]]:
     """I nomi `Classe#metodo` dei test JUnit aggiunti e quelli tolti, dalle righe
     del diff (PBI-505, decisione 3): il metodo che segue un'annotazione `@Test`,
     `@ParameterizedTest` o `@RepeatedTest`, anche con argomenti e con altre
-    annotazioni in mezzo."""
+    annotazioni in mezzo, o sulla stessa riga del metodo."""
     aggiunti: list[str] = []
     tolti: set[str] = set()
     attesa = {"+": False, "-": False}
@@ -1520,6 +1522,17 @@ def nomi_dei_test_junit(diff: str, classe: str) -> tuple[list[str], set[str]]:
         segno, testo = riga[0], riga[1:]
         if RE_ANNOTAZIONE_JUNIT.match(testo):
             attesa[segno] = True
+            resto = testo
+            while (iniziale := RE_ANNOTAZIONE_IN_TESTA.match(resto)) is not None:
+                resto = resto[iniziale.end():]
+            trovato = RE_METODO_JAVA.match(resto)
+            if trovato is not None:
+                attesa[segno] = False
+                nome = f"{classe}#{trovato.group(1)}"
+                if segno == "+":
+                    aggiunti.append(nome)
+                else:
+                    tolti.add(nome)
         elif attesa[segno] and not testo.lstrip().startswith("@"):
             trovato = RE_METODO_JAVA.match(testo)
             if trovato is not None:
