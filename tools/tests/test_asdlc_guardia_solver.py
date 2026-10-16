@@ -4,6 +4,7 @@ Che il Solver abbia rispettato le regole lo dice il codice, leggendo il rapporto
 mai un modello (`ADR-0027`). La guardia segnala e non blocca (`ADR-0008`).
 """
 
+import json
 import importlib
 
 from test_asdlc_solver import giro_fermato  # noqa: F401 — è una fixture
@@ -158,6 +159,28 @@ def test_r6_e_ok_se_nessun_altro_pbi_ne_pr_ha_la_causa(tmp_path, monkeypatch):
                                ' "headRefName": "pbi/x"}]')
 
     assert riga(guardia_di(a_monte), "R6") == "R6: ok"
+
+
+def test_r6_non_e_ok_se_gh_restituisce_tante_pr_quante_il_limite_chiesto(tmp_path, monkeypatch):
+    """`gh pr list` taglia in silenzio al limite (30 se non glielo si dà): una lista piena
+    non dice di aver visto tutte le PR aperte, e «ok» sarebbe un falso successo."""
+    a_monte = repo_a_monte(tmp_path)
+    vero = runner.esegui
+
+    def _esegui(cmd, cwd, *a, **k):
+        if cmd[0] != "gh":
+            return vero(cmd, cwd, *a, **k)
+        limite = int(cmd[cmd.index("--limit") + 1]) if "--limit" in cmd else 30
+        voci = [{"number": n, "title": f"PBI-{n}: altra-causa", "body": "",
+                 "headRefName": f"pbi/x{n}"} for n in range(1, limite + 1)]
+        return 0, json.dumps(voci)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+
+    r6 = riga(guardia_di(a_monte), "R6")
+
+    assert r6.startswith("R6: non eseguita")
+    assert "troncata" in r6
 
 
 def scrivi_il_pbi_a_monte(tmp_path, scope):
