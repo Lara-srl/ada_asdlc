@@ -383,3 +383,9 @@ def test_il_pin_gira_anche_con_il_tick_in_pausa_perche_e_lui_a_toglierla(tick):
     assert "pin" in tick.chiamati
     assert "rilascia" not in tick.chiamati, "il rilascio no: chi ha messo la pausa lavora a mano"
 
+
+
+def test_con_dry_run_il_tick_non_rilascia_e_non_apre_il_pin(tick):
+    tick("--dry-run")
+
+    assert "rilascia" not in tick.chiamati and "pin" not in tick.chiamati
