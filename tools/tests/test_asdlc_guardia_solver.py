@@ -204,6 +204,18 @@ def test_r7_e_violata_se_lo_scope_elenca_un_file_del_progetto(tmp_path, monkeypa
     assert "asdlc.toml" in r7
 
 
+def test_r5_e_violata_se_la_pr_sposta_agents_md(tmp_path):
+    a_monte = repo_a_monte(tmp_path)
+    (tmp_path / "doc").mkdir()
+    git_in(tmp_path, "mv", "AGENTS.md", "doc/AGENTS.md")
+    git_in(tmp_path, "commit", "-q", "-m", "sposta")
+
+    r5 = riga(guardia_di(a_monte), "R5")
+
+    assert r5.startswith("R5: violata")
+    assert "AGENTS.md" in r5
+
+
 def test_r7_e_ok_se_lo_scope_elenca_solo_il_runner(tmp_path, monkeypatch):
     """La riga di «Fuori scope» che nomina il file del progetto non è nello Scope."""
     a_monte = repo_a_monte(tmp_path)
