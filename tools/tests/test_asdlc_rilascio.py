@@ -282,3 +282,36 @@ def test_senza_pr_a_monte_mergiata_e_tag_che_la_contiene_non_si_apre_niente(prog
 
     assert m.rami_su_origin() == []
     assert m.comandi("gh", "pr", "create") == []
+
+
+@pytest.fixture
+def pausa_del_progetto(tmp_path, monkeypatch):
+    """`HOME` in una cartella temporanea con la pausa del tick già messa (PBI-385)."""
+    casa = tmp_path / "casa"
+    casa.mkdir()
+    monkeypatch.setenv("HOME", str(casa))
+    file = casa / "asdlc-tick.pausa"
+    file.write_text("2026-10-16 10:00 in attesa di Lara-srl/ada_asdlc#PBI-505\n")
+    return file
+
+
+def test_la_pausa_si_toglie_a_pr_del_pin_mergiata_verificata_con_gh_pr_view(
+        progetto, pausa_del_progetto):
+    m = progetto(pin="MERGED")
+
+    coda.pin(m.repo)
+
+    assert not pausa_del_progetto.exists()
+    assert m.comandi("gh", "pr", "view", "40"), "lo stato si chiede a gh pr view"
+    assert m.comandi("gh", "pr", "create") == [], "la PR del pin c'è già: non se ne apre un'altra"
+
+
+@pytest.mark.parametrize("stato", ["OPEN", "CLOSED"])
+def test_con_la_pr_del_pin_aperta_o_chiusa_senza_merge_la_pausa_resta(
+        progetto, pausa_del_progetto, stato):
+    m = progetto(pin=stato)
+
+    coda.pin(m.repo)
+
+    assert pausa_del_progetto.exists()
+    assert m.comandi("gh", "pr", "create") == []
