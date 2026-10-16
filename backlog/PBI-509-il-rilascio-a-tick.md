@@ -72,18 +72,18 @@ tale, la divisione in due è lecita e si dichiara (`ADR-0015`).
 Su `main` non c'è rilascio: ogni criterio è un **rosso atteso**. `gh` e `git remote` sono
 sostituiti da finti; nessun test usa la rete.
 
-- [ ] **Un PBI con `rilascia: patch` mergiato e CI verde produce il tag.** Da `v0.3.0` a
+- [x] **Un PBI con `rilascia: patch` mergiato e CI verde produce il tag.** Da `v0.3.0` a
       `v0.3.1`; con `minor`, `v0.4.0` (R8).
-- [ ] **Senza `rilascia:` non c'è tag.** Lo stesso scenario, nessun tag (R8).
-- [ ] **CI rossa o tag già esistente: nessun tag.** Due casi (R8).
-- [ ] **Il rilascio gira in un worktree separato e il checkout del tick resta pulito.** Il test
+- [x] **Senza `rilascia:` non c'è tag.** Lo stesso scenario, nessun tag (R8).
+- [x] **CI rossa o tag già esistente: nessun tag.** Due casi (R8).
+- [x] **Il rilascio gira in un worktree separato e il checkout del tick resta pulito.** Il test
       verifica lo stato del checkout prima e dopo, e che il worktree sia tolto (R9).
-- [ ] **Un PBI fermo con `attende:` e PR a monte `MERGED` con tag apre la PR del pin.** La PR
+- [x] **Un PBI fermo con `attende:` e PR a monte `MERGED` con tag apre la PR del pin.** La PR
       cambia solo `[ambiente].installa` (R10).
-- [ ] **La PR a monte non `MERGED` non apre niente.** Il progetto resta in attesa (R10).
-- [ ] **La pausa si toglie solo a PR del pin `MERGED`,** verificata con `gh pr view`; con la
+- [x] **La PR a monte non `MERGED` non apre niente.** Il progetto resta in attesa (R10).
+- [x] **La pausa si toglie solo a PR del pin `MERGED`,** verificata con `gh pr view`; con la
       PR aperta o chiusa senza merge la pausa resta (R11, due casi).
-- [ ] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
+- [x] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
       (R10-R11).
 
 **Non regressione:** il tick di un progetto senza `attende:` e senza `rilascia:` fa quello di
