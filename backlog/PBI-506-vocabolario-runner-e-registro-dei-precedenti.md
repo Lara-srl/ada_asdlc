@@ -61,15 +61,15 @@ il test nasce verde e il gate del rosso lo ferma (`rosso-mai-visto`, giro 1).
 
 Su `main` i due elenchi non esistono: ogni criterio è un **rosso atteso**.
 
-- [ ] **La tabella `runner-*` esiste e porta almeno `runner-non-legge-junit`.** Il test legge
+- [x] **La tabella `runner-*` esiste e porta almeno `runner-non-legge-junit`.** Il test legge
       `backlog/README.md`, trova la sezione e verifica che ogni riga abbia uno slug che
       comincia per `runner-` e che `runner-non-legge-junit` ci sia.
-- [ ] **Nessuno slug della tabella `runner-*` è uguale a una causa di progetto.** Il test
+- [x] **Nessuno slug della tabella `runner-*` è uguale a una causa di progetto.** Il test
       confronta con gli slug della tabella generale: nessun doppione.
-- [ ] **Il registro esiste e ogni riga ha il formato.** Il test legge `backlog/PRECEDENTI.md`
+- [x] **Il registro esiste e ogni riga ha il formato.** Il test legge `backlog/PRECEDENTI.md`
       e verifica che ogni riga che comincia per `- ` abbia data ISO, tre separatori `·` e un
       riferimento non vuoto.
-- [ ] **Il registro è solo in aggiunta.** `righe_perse(vecchio, nuovo)` restituisce le righe
+- [x] **Il registro è solo in aggiunta.** `righe_perse(vecchio, nuovo)` restituisce le righe
       non barrate di `vecchio` che in `nuovo` mancano. Rosso atteso: la funzione non esiste.
       I test la provano su testi in memoria (nessuna riga persa; una cancellata; una riscritta;
       una barrata che sparisce senza che conti) e su `backlog/PRECEDENTI.md` confrontato con la
