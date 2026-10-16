@@ -34,19 +34,17 @@ c'è e il rapporto dice cosa manca; non promette ciò che la sessione non contie
   ha ragionato bene. Resta del Critic.
 - Cambiare il modo in cui il runner legge l'esito degli agenti (`ADR-0027`).
 
-## ❓ Da decidere (Francesco) prima di accodarlo
+## ✅ Deciso (Francesco, 16/10)
 
-Le proposte sono quelle che scriverei; non sono decise.
-
-1. **Come si lega la sessione al giro.** Proposta: il runner passa a `claude -p`
-   `--session-id <uuid>` generato da lui, e salva l'uuid nel rapporto. Alternativa:
-   `--output-format stream-json`, che cambia ciò che il runner legge da `stdout` per tutti i
-   ruoli, e quindi tocca di più.
-2. **Dove sta la traccia.** Proposta: il runner **copia** il `.jsonl` della sessione in
-   `runs/` a fine invocazione, accanto agli altri file del giro (`runs/*` è ignorato da git),
-   perché la cartella di Claude Code è fuori dal repository e può essere ripulita.
-3. ✅ **Per chi: tutti e tre i ruoli, traccia completa** (Francesco, 16/10). Identificativo e
-   copia valgono per Builder, Critic e Solver; il controllo R4 usa la traccia del Solver.
+1. **La sessione si lega al giro con `--session-id`.** Il runner genera un uuid per ogni
+   invocazione, lo passa a `claude -p --session-id <uuid>` e lo salva nel rapporto del giro.
+   Vale per Builder, Critic e Solver. Niente `--output-format stream-json`: i log del giro
+   esistono già, e il legame con la sessione di Claude Code basta ad avere tutto il resto.
+2. **La traccia sta in `runs/`.** A fine invocazione il runner **copia** il `.jsonl` della
+   sessione in `runs/`, accanto agli altri file del giro (`runs/*` è ignorato da git), perché
+   la cartella di Claude Code è fuori dal repository e può essere ripulita.
+3. **Per chi: tutti e tre i ruoli, traccia completa.** Identificativo e copia valgono per
+   Builder, Critic e Solver; il controllo R4 usa la traccia del Solver.
 
 ## Dipendenze
 
