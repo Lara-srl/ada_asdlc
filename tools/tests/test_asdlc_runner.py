@@ -478,7 +478,7 @@ class TestNelSenzaEsitoRestaLUscitaGrezza:
         rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
 
         assert esito.stato == "senza esito"
-        ultima = rapporto["esiti"][0]["invocazioni"][-1]
+        ultima = rapporto["esiti"][0]["invocazioni"][0]
         assert ultima["ruolo"] == "builder"
         assert ultima["codice"] == 1, "il codice d'uscita di claude -p non si scarta"
         assert ultima["stdout"] != ultima["stderr"], "i due flussi stanno in due file"
@@ -583,7 +583,7 @@ class TestIlSenzaEsitoDiceLOraDelReset:
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-        registro = esito.invocazioni[-1]
+        registro = next(i for i in esito.invocazioni if i["ruolo"] == "builder")
         assert esito.stato == "senza esito"
         assert esito.nota == (
             "builder-senza-esito: il builder non ha fatto nessuna chiamata valida — "
