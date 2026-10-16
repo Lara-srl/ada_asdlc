@@ -761,6 +761,50 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
         log.write(f"{datetime.now().isoformat(timespec='seconds')}  {riga}\n")
 
 
+RE_RILASCIA = re.compile(r"^rilascia:\s*(patch|minor)\s*$", re.MULTILINE)
+
+
+def rilascia_del_pbi(testo: str) -> str | None:
+    """`patch` o `minor` se il PBI dichiara `rilascia:`, altrimenti `None` (R8)."""
+    trovato = RE_RILASCIA.search(testo)
+    return trovato.group(1) if trovato else None
+
+
+def prossimo_tag(tag: list[str], come: str) -> str:
+    """Il tag che segue l'ultimo `<prefisso>X.Y.Z` di `tag`: `patch` alza Z, `minor`
+    alza Y e azzera Z."""
+    prefisso = CFG.rilascio.prefisso_tag
+    versioni = [tuple(int(n) for n in t.removeprefix(prefisso).split("."))
+                for t in tag if re.fullmatch(rf"{re.escape(prefisso)}\d+\.\d+\.\d+", t)]
+    x, y, z = max(versioni, default=(0, 0, 0))
+    nuova = (x, y, z + 1) if come == "patch" else (x, y + 1, 0)
+    return prefisso + ".".join(str(n) for n in nuova)
+
+
+def rilascia(repo: Path) -> list[str]:
+    """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
+    `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive."""
+    codice, uscita = esegui(["gh", "pr", "list", "--state", "merged", "--limit", str(LIMITE_PR),
+                             "--json", "title,headRefName,mergeCommit"], repo)
+    if codice != 0:
+        return [f"rilascio: gh non risponde (uscita {codice})"]
+    righe = []
+    for pr in json.loads(uscita):
+        pbi = pbi_nominato(pr)
+        if pbi is None:
+            continue
+        for file in sorted((repo / BACKLOG).glob(f"{pbi}-*.md")):
+            come = rilascia_del_pbi(file.read_text(encoding="utf-8"))
+            if come is None:
+                continue
+            _, elenco = esegui(["git", "tag", "--list"], repo)
+            tag = prossimo_tag(elenco.split(), come)
+            esegui(["git", "tag", tag], repo)
+            esegui(["git", "push", REMOTO, tag], repo)
+            righe.append(f"rilascio: {pbi} → {tag}")
+    return righe
+
+
 def file_di_pausa() -> Path:
     """`~/asdlc-tick.pausa`, calcolato quando serve e non all'import: i test
     spostano `HOME` (PBI-385, decisione 5). Non sta in `asdlc.toml`, che non
