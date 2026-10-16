@@ -142,9 +142,10 @@ salvo dove è scritto che il giro chiude `senza esito`.
   `## Guardia di processo`, una riga per regola (`ok`, `violata`, `non eseguita`). Un giro
   senza Solver non ha la sezione. R4 è `non eseguita (PBI-511)` finché non c'è la traccia
   delle letture; R5-R7 leggono la PR a monte (git e `gh`) e sono `non eseguita` senza PR o
-  se `gh` o git non rispondono, scadono o rendono un'uscita illeggibile. Ogni riga
-  `violata` o `non eseguita` è anche un avviso nella nota del giro. Il Critic rilegge
-  l'output del Solver e non rifà questi controlli.
+  se `gh` o git non rispondono, scadono o rendono un'uscita illeggibile. R5 vuole anche che
+  la testa della PR stia su un fork: se sta in `asdlc` è `violata`, se il fatto manca è
+  `non eseguita`. Ogni riga `violata` o `non eseguita` è anche un avviso nella nota del
+  giro. Il Critic rilegge l'output del Solver e non rifà questi controlli.
 
 ## Il tick è sempre attivo
 

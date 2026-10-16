@@ -4234,13 +4234,20 @@ class AMonte:
     base: str
     pbi: str
     causa: str
+    # La testa della PR sta su un fork (`isCrossRepository` di `gh pr view`); `None` se il
+    # fatto non c'è, e allora R5 è `non eseguita` e non `ok`.
+    da_un_fork: bool | None = None
 
 
 def controllo_r5(a_monte: AMonte) -> str:
-    """R5: la PR parte da un ramo che non è `main` né la sua base, e non tocca `AGENTS.md`
-    né file esistenti di `decisions/` (`git diff --name-status` contro la base)."""
+    """R5: la PR parte da un ramo di un fork che non è `main` né la sua base, e non tocca
+    `AGENTS.md` né file esistenti di `decisions/` (`git diff --name-status` contro la base)."""
     if a_monte.ramo in ("main", a_monte.base):
         return f"R5: violata (la PR parte da {a_monte.ramo})"
+    if a_monte.da_un_fork is None:
+        return "R5: non eseguita (non si sa se la testa della PR sta su un fork)"
+    if not a_monte.da_un_fork:
+        return f"R5: violata (la testa {a_monte.ramo} non sta su un fork ma in asdlc)"
     code, uscita = esegui(["git", "diff", "--name-status", f"{a_monte.base}...{a_monte.ramo}"],
                           a_monte.repo, timeout=120)
     if code != 0:
