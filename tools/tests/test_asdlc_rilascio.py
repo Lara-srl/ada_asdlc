@@ -198,7 +198,7 @@ class MondoProgetto:
     un `origin` vero e un `gh` finto che racconta la PR a monte, i suoi tag e la PR del pin."""
 
     def __init__(self, tmp_path, stato_monte="MERGED", tag=("v0.4.0",), pin=None,
-                 contiene="ahead"):
+                 contiene="ahead", mergiato=False):
         self.origin = tmp_path / "progetto-origin.git"
         self.repo = tmp_path / "progetto"
         git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.origin))
@@ -213,7 +213,9 @@ class MondoProgetto:
         git(self.repo, "commit", "-qm", "base")
         git(self.repo, "push", "-q", "origin", "main")
         self.stato_monte, self.tag, self.pin = stato_monte, list(tag), pin
-        self.contiene = contiene
+        self.contiene, self.mergiato = contiene, mergiato
+        # Il giro fermo del PBI: un ramo su origin, e nessuna PR del PBI in main.
+        git(self.repo, "push", "-q", "origin", "main:refs/heads/pbi/pbi-700")
         self.chiamate: list[list[str]] = []
 
     def esegui(self, cmd, cwd):
@@ -227,6 +229,10 @@ class MondoProgetto:
             return 0, "\n".join(self.tag)
         if cmd[:2] == ["gh", "api"] and "/compare/" in cmd[2]:
             return 0, self.contiene
+        if cmd[:3] == ["gh", "pr", "list"] and "--state" in cmd and "merged" in cmd:
+            return 0, json.dumps([{"title": "PBI-700: il pbi fermo", "headRefName":
+                                   "pbi/pbi-700", "files": [{"path": "src/a.py"}]}]
+                                 if self.mergiato else [])
         if cmd[:3] == ["gh", "pr", "list"]:
             return 0, json.dumps([{"number": 40}] if self.pin else [])
         if cmd[:3] == ["gh", "pr", "view"] and cmd[3] == "40":
@@ -237,7 +243,7 @@ class MondoProgetto:
 
     def rami_su_origin(self):
         return [r.strip() for r in git(self.origin, "branch", "--list").splitlines()
-                if r.strip().lstrip("* ") != "main"]
+                if r.strip().lstrip("* ") not in ("main", "pbi/pbi-700")]
 
     def comandi(self, *inizio):
         return [c for c in self.chiamate if c[:len(inizio)] == list(inizio)]
@@ -314,4 +320,17 @@ def test_con_la_pr_del_pin_aperta_o_chiusa_senza_merge_la_pausa_resta(
     coda.pin(m.repo)
 
     assert pausa_del_progetto.exists()
+    assert m.comandi("gh", "pr", "create") == []
+
+
+def test_un_pbi_con_attende_gia_in_main_non_apre_niente_e_non_tocca_la_pausa(
+        progetto, pausa_del_progetto):
+    """Il file del PBI resta in `backlog/` per sempre, con la sua riga `attende:`: il tick
+    guarda solo i PBI fermi, cioè col ramo su origin e senza merge (R10)."""
+    m = progetto(pin="MERGED", mergiato=True)
+
+    coda.pin(m.repo)
+
+    assert pausa_del_progetto.exists()
+    assert m.rami_su_origin() == []
     assert m.comandi("gh", "pr", "create") == []
