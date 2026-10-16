@@ -873,6 +873,17 @@ def tag_del_rilascio(repo: Path, a_monte: str, pbi_a_monte: str) -> str | None:
     return None
 
 
+def stato_del_pin(repo: Path, ramo: str) -> str | None:
+    """Lo stato della PR del pin sul ramo `ramo`, da `gh pr view`; `None` se non c'è (R11)."""
+    codice, elenco = esegui(["gh", "pr", "list", "--head", ramo, "--state", "all",
+                             "--json", "number"], repo)
+    if codice != 0 or not (trovate := json.loads(elenco)):
+        return None
+    codice, vista = esegui(["gh", "pr", "view", str(trovate[0]["number"]),
+                            "--json", "state"], repo)
+    return json.loads(vista)["state"] if codice == 0 else "SCONOSCIUTO"
+
+
 def pin(repo: Path) -> list[str]:
     """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
     `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
@@ -883,6 +894,11 @@ def pin(repo: Path) -> list[str]:
             righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — non ancora rilasciato")
             continue
         ramo = f"pin/asdlc-{tag}"
+        if (stato := stato_del_pin(repo, ramo)) is not None:
+            if stato == "MERGED" and file_di_pausa().exists():
+                file_di_pausa().unlink()
+                righe.append(f"pin: {file} — PR del pin mergiata, pausa tolta")
+            continue
         with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
             toml = albero / "asdlc.toml"
             toml.write_text(RE_INSTALLA.sub(rf"\g<1>{tag}", toml.read_text(encoding="utf-8")),
