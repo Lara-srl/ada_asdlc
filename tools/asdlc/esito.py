@@ -132,7 +132,10 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
 
     Nel file entrano solo i campi dello schema del ruolo: la CLI non lo fa
     rispettare, e un argomento in più non deve riscrivere l'esito."""
-    if ruolo == "solver" and nome in ("risolvi", "segnala_limite_runner", "chiedi_a_francesco"):
+    if ruolo == "solver":
+        if nome not in ("risolvi", "segnala_limite_runner", "chiedi_a_francesco"):
+            return _contenuto(f"Lo strumento {nome!r} non è del Solver: chiama risolvi, "
+                              "segnala_limite_runner o chiedi_a_francesco.", errore=True)
         if not isinstance(argomenti, dict):
             return _contenuto(f"Gli argomenti di {nome} non sono un oggetto: richiama "
                               f"{nome} con i campi per nome.", errore=True)
