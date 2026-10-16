@@ -290,3 +290,24 @@ def test_il_solver_non_scrive_esiti_fuori_dai_suoi_tre(tmp_path, nome, argomenti
     assert risposta["isError"]
     assert all(s in risposta["content"][0]["text"] for s in STRUMENTI_DEL_SOLVER)
     assert not (tmp_path / "a.json").exists()
+
+
+def test_un_guasto_del_solver_non_salta_la_chiusura_del_giro(giro_fermato, monkeypatch):
+    """Il Solver è invocato e registrato, non seguito (decisione 11): se `esegui` solleva per il
+    suo ruolo, il giro fermato si chiude lo stesso, con lo stato del blocco e un avviso."""
+    interno = agente_finto({"builder": fermati("che faccio?")})
+
+    def guasto(cmd, cwd, timeout=7200, **k):
+        if ruolo_del(cmd) == "solver":
+            raise RuntimeError("disco pieno")
+        return interno(cmd, cwd, timeout, **k)
+
+    monkeypatch.setattr(runner, "git", git_del_senza_esito)
+    monkeypatch.setattr(runner, "esegui", guasto)
+
+    esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+
+    assert esito.stato == "domanda-del-builder"
+    assert "avviso: il Solver è fallito: RuntimeError: disco pieno" in esito.nota
+    assert esito.solver == []
+    assert esito.file_traceback
