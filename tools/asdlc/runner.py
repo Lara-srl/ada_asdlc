@@ -4224,13 +4224,47 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
         dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
 
 
-def guardia_del_solver(e: Esito) -> None:
+@dataclass(frozen=True)
+class AMonte:
+    """I fatti della PR a monte che la guardia controlla (`PBI-508`): il clone di `asdlc`,
+    il ramo della PR e la sua base, il PBI che porta (percorso nel clone) e la `causa`."""
+
+    repo: Path
+    ramo: str
+    base: str
+    pbi: str
+    causa: str
+
+
+def controllo_r5(a_monte: AMonte) -> str:
+    """R5: la PR parte da un ramo che non è `main` né la sua base, e non tocca `AGENTS.md`
+    né file esistenti di `decisions/` (`git diff --name-status` contro la base)."""
+    if a_monte.ramo in ("main", a_monte.base):
+        return f"R5: violata (la PR parte da {a_monte.ramo})"
+    code, uscita = esegui(["git", "diff", "--name-status", f"{a_monte.base}...{a_monte.ramo}"],
+                          a_monte.repo, timeout=120)
+    if code != 0:
+        return f"R5: non eseguita (git non risponde: {una_riga(uscita)[:100]})"
+    toccati = []
+    for riga in uscita.splitlines():
+        stato, _, percorso = riga.partition("\t")
+        if percorso == "AGENTS.md" or (percorso.startswith("decisions/") and stato != "A"):
+            toccati.append(percorso)
+    if toccati:
+        return f"R5: violata (la PR tocca {', '.join(toccati)})"
+    return "R5: ok"
+
+
+def guardia_del_solver(e: Esito, a_monte: AMonte | None = None) -> None:
     """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
     `ADR-0030` decisione 4, R13). Li fa il codice, leggendo i fatti; la guardia segnala
-    e non blocca (`ADR-0008`). Se il Solver non ha girato, la sezione non c'è."""
+    e non blocca (`ADR-0008`). Se il Solver non ha girato, la sezione non c'è. Senza la
+    PR a monte (`a_monte`) i controlli che la leggono sono `non eseguita`."""
     if not e.solver:
         return
-    e.guardia = "\n".join(["## Guardia di processo", "R4: non eseguita (PBI-511)"])
+    r5 = (controllo_r5(a_monte) if a_monte is not None
+          else "R5: non eseguita (nessuna PR a monte)")
+    e.guardia = "\n".join(["## Guardia di processo", "R4: non eseguita (PBI-511)", r5])
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
