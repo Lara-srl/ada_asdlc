@@ -841,18 +841,47 @@ def attese(repo: Path) -> list[tuple[str, str, str]]:
     return trovate
 
 
+def tag_del_rilascio(repo: Path, a_monte: str, pbi_a_monte: str) -> str | None:
+    """Il primo tag di `a_monte` che contiene il merge del PBI, o `None` (R10).
+
+    Lo stato della PR si chiede a `gh pr view` e non si legge dall'elenco: l'elenco è il
+    modo di trovare il numero, mai la prova del merge."""
+    codice, elenco = esegui(["gh", "pr", "list", "--repo", a_monte, "--state", "all",
+                             "--limit", str(LIMITE_PR), "--json", "number,title,headRefName"],
+                            repo)
+    if codice != 0:
+        return None
+    for pr in json.loads(elenco):
+        if pbi_nominato(pr) != pbi_a_monte:
+            continue
+        codice, vista = esegui(["gh", "pr", "view", str(pr["number"]), "--repo", a_monte,
+                                "--json", "state,mergeCommit"], repo)
+        if codice != 0:
+            continue
+        dati = json.loads(vista)
+        if dati.get("state") != "MERGED":
+            continue
+        oid = (dati.get("mergeCommit") or {}).get("oid")
+        codice, nomi = esegui(["gh", "api", f"repos/{a_monte}/tags", "--jq", ".[].name"], repo)
+        if codice != 0:
+            return None
+        for tag in sorted(nomi.split(), key=lambda t: [int(n) for n in re.findall(r"\d+", t)]):
+            _, stato = esegui(["gh", "api", f"repos/{a_monte}/compare/{oid}...{tag}",
+                               "--jq", ".status"], repo)
+            if stato.strip() in ("ahead", "identical"):
+                return tag
+    return None
+
+
 def pin(repo: Path) -> list[str]:
     """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
     `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
     righe = []
     for file, a_monte, pbi_a_monte in attese(repo):
-        _, elenco = esegui(["gh", "pr", "list", "--repo", a_monte, "--state", "merged",
-                            "--json", "number,title,headRefName"], repo)
-        numeri = [pr["number"] for pr in json.loads(elenco) if pbi_nominato(pr) == pbi_a_monte]
-        if not numeri:
+        tag = tag_del_rilascio(repo, a_monte, pbi_a_monte)
+        if tag is None:
+            righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — non ancora rilasciato")
             continue
-        _, uscita = esegui(["gh", "api", f"repos/{a_monte}/tags", "--jq", ".[].name"], repo)
-        tag = uscita.split()[0]
         ramo = f"pin/asdlc-{tag}"
         with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
             toml = albero / "asdlc.toml"
