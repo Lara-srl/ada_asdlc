@@ -310,3 +310,15 @@ def test_r7_non_scambia_per_un_file_del_progetto_un_file_nuovo_in_una_cartella_d
     con_gh(monkeypatch)
 
     assert riga(guardia_di(a_monte), "R7") == "R7: ok"
+
+
+def test_r6_confronta_la_causa_a_parola_intera(tmp_path, monkeypatch):
+    """Le cause `runner-*` sono un elenco chiuso con prefissi comuni: `runner-xy` e
+    `runner-x-due` non sono `runner-x`."""
+    a_monte = repo_a_monte(tmp_path)
+    (tmp_path / "backlog" / "PBI-702-altra.md").write_text(
+        "# PBI-702\n\n**Causa:** runner-xy\n", encoding="utf-8")
+    con_gh(monkeypatch, uscita='[{"number": 14, "title": "PBI-703: runner-x-due", "body": '
+                               '"vedi runner-xy", "headRefName": "pbi/altro"}]')
+
+    assert riga(guardia_di(a_monte), "R6") == "R6: ok"
