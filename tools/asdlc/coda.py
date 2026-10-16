@@ -781,6 +781,19 @@ def prossimo_tag(tag: list[str], come: str) -> str:
     return prefisso + ".".join(str(n) for n in nuova)
 
 
+def ci_verde(repo: Path) -> bool:
+    """L'ultima esecuzione della CI su `main` è finita `success` (R8)."""
+    codice, uscita = esegui(["gh", "run", "list", "--branch", BASE.removeprefix(f"{REMOTO}/"),
+                             "--limit", "1", "--json", "conclusion"], repo)
+    if codice != 0:
+        return False
+    try:
+        corse = json.loads(uscita)
+    except ValueError:
+        return False
+    return bool(corse) and corse[0].get("conclusion") == "success"
+
+
 def rilascia(repo: Path) -> list[str]:
     """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
     `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive."""
@@ -796,6 +809,12 @@ def rilascia(repo: Path) -> list[str]:
         for file in sorted((repo / BACKLOG).glob(f"{pbi}-*.md")):
             come = rilascia_del_pbi(file.read_text(encoding="utf-8"))
             if come is None:
+                continue
+            oid = (pr.get("mergeCommit") or {}).get("oid")
+            if oid and esegui(["git", "tag", "--contains", oid], repo)[1].strip():
+                continue
+            if not ci_verde(repo):
+                righe.append(f"rilascio: {pbi} non rilasciato, la CI di main non è verde")
                 continue
             _, elenco = esegui(["git", "tag", "--list"], repo)
             tag = prossimo_tag(elenco.split(), come)
