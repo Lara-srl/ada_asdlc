@@ -18,6 +18,11 @@ strumenti sono `Read`, `Grep`, `Glob` e `git diff`. Ciò che si esegue l'hanno g
 eseguito i gate deterministici, e i loro esiti te li passa il runner in fondo a questo
 prompt, sotto «I gate di questo giro»: non andarli a cercare nei log.
 
+Se il giro è passato dal Solver, rileggi anche l'output del Solver (`ADR-0030`). La sezione
+«Guardia di processo» del rapporto dice, riga per riga, se il codice ha trovato rispettate
+R4-R7 (`ok`, `violata`, `non eseguita`): quei controlli non rifarli, e non giudicarli da
+capo. Il tuo resta il giudizio sulla diagnosi del Solver.
+
 ## Cosa controllare, in quest'ordine
 1. **Criteri di verifica del PBI**: uno per uno, spuntato o no.
 2. **Scope**: file toccati fuori da quelli dichiarati?

@@ -60,7 +60,7 @@ from fnmatch import fnmatch
 import importlib.metadata
 from importlib import resources
 from pathlib import Path
-from typing import Iterable, NamedTuple
+from typing import Callable, Iterable, NamedTuple
 
 # La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
 # trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
@@ -447,6 +447,9 @@ class Esito:
     # I giri Solver↔Builder di questo PBI, contando quelli dei rapporti di prima
     # (`PBI-507`, decisione 10): il tetto è `[solver].giri_massimi`.
     giri_solver: int = 0
+    # La sezione `## Guardia di processo` (`PBI-508`): una riga per regola, `ok`, `violata`
+    # o `non eseguita`. Vuota se il Solver non ha girato.
+    guardia: str = ""
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -4156,6 +4159,7 @@ def esegui_pbi(
             traceback.print_exc()
             e.file_traceback = str(salva_il_traceback(pbi))
             dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
+        guardia_del_solver(e, dichiara=dichiara)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4218,6 +4222,136 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                     else {"esito": "senza esito", "uscita": invocazione.uscita})
     if dichiarato is not None and dichiarato["esito"] == "intento":
         dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
+
+
+@dataclass(frozen=True)
+class AMonte:
+    """I fatti della PR a monte che la guardia controlla (`PBI-508`): il clone di `asdlc`,
+    il ramo della PR e la sua base, il PBI che porta (percorso nel clone) e la `causa`."""
+
+    repo: Path
+    ramo: str
+    base: str
+    pbi: str
+    causa: str
+    # La testa della PR sta su un fork (`isCrossRepository` di `gh pr view`); `None` se il
+    # fatto non c'è, e allora R5 è `non eseguita` e non `ok`.
+    da_un_fork: bool | None = None
+
+
+def controllo_r5(a_monte: AMonte) -> str:
+    """R5: la PR parte da un ramo di un fork che non è `main` né la sua base, e non tocca
+    `AGENTS.md` né file esistenti di `decisions/` (`git diff --name-status --no-renames` contro la base: uno spostamento è una cancellazione
+    più un'aggiunta, e la cancellazione di `AGENTS.md` o di un ADR si vede)."""
+    if a_monte.ramo in ("main", a_monte.base):
+        return f"R5: violata (la PR parte da {a_monte.ramo})"
+    if a_monte.da_un_fork is None:
+        return "R5: non eseguita (non si sa se la testa della PR sta su un fork)"
+    if not a_monte.da_un_fork:
+        return f"R5: violata (la testa {a_monte.ramo} non sta su un fork ma in asdlc)"
+    code, uscita = esegui(["git", "diff", "--name-status", "--no-renames",
+                           f"{a_monte.base}...{a_monte.ramo}"],
+                          a_monte.repo, timeout=120)
+    if code != 0:
+        return f"R5: non eseguita (git non risponde: {una_riga(uscita)[:100]})"
+    toccati = []
+    for riga in uscita.splitlines():
+        stato, _, percorso = riga.partition("\t")
+        if percorso == "AGENTS.md" or (percorso.startswith("decisions/") and stato != "A"):
+            toccati.append(percorso)
+    if toccati:
+        return f"R5: violata (la PR tocca {', '.join(toccati)})"
+    return "R5: ok"
+
+
+# `gh pr list` taglia in silenzio al limite (30 se non glielo si dà): una lista piena non dice
+# di aver visto tutte le PR aperte.
+LIMITE_PR_R6 = 1000
+
+
+def controllo_r6(a_monte: AMonte) -> str:
+    """R6: nessun altro PBI in `backlog/` né PR aperta in `asdlc` con la stessa `causa`.
+    Il PBI e la PR del giro stesso non contano. La causa si confronta a parola intera:
+    `runner-xy` e `runner-x-due` non sono `runner-x`."""
+    causa = re.escape(a_monte.causa)
+    for file in sorted((a_monte.repo / "backlog").glob("PBI-*.md")):
+        if file.relative_to(a_monte.repo).as_posix() == a_monte.pbi:
+            continue
+        if re.search(rf"\*\*Causa:\*\*\s*{causa}(?![\w-])", file.read_text(encoding="utf-8")):
+            return f"R6: violata (la causa {a_monte.causa} è già in {file.name})"
+    code, uscita = esegui(["gh", "pr", "list", "--state", "open", "--limit", str(LIMITE_PR_R6),
+                           "--json", "number,title,body,headRefName"], a_monte.repo, timeout=300)
+    if code != 0:
+        return f"R6: non eseguita (gh non risponde: {una_riga(uscita)[:100]})"
+    aperte = json.loads(uscita)
+    if len(aperte) >= LIMITE_PR_R6:
+        return f"R6: non eseguita (lista troncata a {LIMITE_PR_R6} PR)"
+    for pr in aperte:
+        if (pr["headRefName"] != a_monte.ramo
+                and re.search(rf"(?<![\w-]){causa}(?![\w-])", f"{pr['title']}\n{pr['body']}")):
+            return f"R6: violata (la causa {a_monte.causa} è già nella PR #{pr['number']})"
+    return "R6: ok"
+
+
+def controllo_r7(a_monte: AMonte) -> str:
+    """R7: lo Scope del PBI a monte non elenca file del progetto. Si legge il PBI sul ramo
+    della PR. Ogni percorso fra apici inversi in una riga dello Scope è del progetto se la
+    riga dice «del progetto» (per `asdlc.toml`, che esiste in entrambi), oppure se né il
+    percorso né la sua prima cartella stanno nell'albero di `asdlc` al ramo della PR
+    (`git ls-tree`): la prova sta nei fatti e non nella formula del Solver. Un file nuovo
+    in una cartella che il runner ha già non è del progetto."""
+    code, testo = esegui(["git", "show", f"{a_monte.ramo}:{a_monte.pbi}"], a_monte.repo,
+                         timeout=120)
+    if code != 0:
+        return f"R7: non eseguita (git non risponde: {una_riga(testo)[:100]})"
+    code, albero = esegui(["git", "ls-tree", "-r", "--name-only", a_monte.ramo], a_monte.repo,
+                          timeout=120)
+    if code != 0:
+        return f"R7: non eseguita (git non risponde: {una_riga(albero)[:100]})"
+    file_del_runner = set(albero.splitlines())
+    cartelle_del_runner = {f.split("/")[0] for f in file_del_runner if "/" in f}
+    scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
+    file_del_progetto = []
+    for riga in (scope.group(1) if scope else "").splitlines():
+        for percorso in re.findall(r"`([^`]+)`", riga):
+            fuori_dall_albero = (percorso not in file_del_runner
+                                 and percorso.split("/")[0] not in cartelle_del_runner)
+            if "del progetto" in riga or fuori_dall_albero:
+                file_del_progetto.append(percorso)
+    if file_del_progetto:
+        return f"R7: violata (lo Scope elenca {', '.join(file_del_progetto)} del progetto)"
+    return "R7: ok"
+
+
+def controlla(regola: str, controllo: Callable[[AMonte], str], a_monte: AMonte | None) -> str:
+    """Un controllo che non può girare — nessuna PR, un comando che scade, un `gh` che scrive
+    prima del JSON, un file illeggibile — è `non eseguita` e non un'eccezione: la guardia sta
+    prima di `chiudi()` (difetto 37) e non deve saltarla."""
+    if a_monte is None:
+        return f"{regola}: non eseguita (nessuna PR a monte)"
+    try:
+        return controllo(a_monte)
+    except Exception as guasto:  # noqa: BLE001 — si registra come riga, non si tace
+        return f"{regola}: non eseguita ({type(guasto).__name__}: {una_riga(str(guasto))[:100]})"
+
+
+def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
+                       dichiara: Callable[[str], None] | None = None) -> None:
+    """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
+    `ADR-0030` decisione 4, R13). Li fa il codice, leggendo i fatti; la guardia segnala
+    e non blocca (`ADR-0008`). Se il Solver non ha girato, la sezione non c'è. Senza la
+    PR a monte (`a_monte`) i controlli che la leggono sono `non eseguita`. Ogni riga che non
+    è `ok` è anche un avviso, passato a `dichiara` (R13: «nel rapporto e nell'avviso»)."""
+    if not e.solver:
+        return
+    r5, r6, r7 = (controlla(regola, controllo, a_monte) for regola, controllo in
+                  (("R5", controllo_r5), ("R6", controllo_r6), ("R7", controllo_r7)))
+    righe = ["R4: non eseguita (PBI-511)", r5, r6, r7]
+    e.guardia = "\n".join(["## Guardia di processo", *righe])
+    if dichiara is not None:
+        for riga in righe:
+            if not riga.endswith(": ok"):
+                dichiara(f"avviso: guardia di processo — {riga}")
 
 
 def riga_di_registro(run: str, e: dict) -> dict:

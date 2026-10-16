@@ -61,19 +61,19 @@ R1 già prevede.
 Su `main` la guardia non esiste: ogni criterio è un **rosso atteso**.
 
 - ~~**R4 violata se `asdlc.toml` non è stato letto prima.**~~ Spostato in `PBI-511` (16/10).
-- [ ] **R4 è `non eseguita` finché `PBI-511` non porta la traccia.** La sezione `## Guardia di
+- [x] **R4 è `non eseguita` finché `PBI-511` non porta la traccia.** La sezione `## Guardia di
       processo` ha la riga R4 con `non eseguita` e il rinvio a `PBI-511`, sempre, e il giro non
       si ferma.
-- [ ] **R5 violata se la PR parte da `main` o tocca `AGENTS.md`.** Due violazioni e un caso
+- [x] **R5 violata se la PR parte da `main` o tocca `AGENTS.md`.** Due violazioni e un caso
       valido (repository temporaneo con base e ramo).
-- [ ] **R6 violata se esiste un PBI con la stessa causa.** Un file in `backlog/` con
+- [x] **R6 violata se esiste un PBI con la stessa causa.** Un file in `backlog/` con
       `**Causa:** runner-x` e una seconda segnalazione di `runner-x` → `violata`, con il
       riferimento al PBI esistente.
-- [ ] **R7 violata se lo Scope elenca un file del progetto.** Un PBI il cui Scope nomina
+- [x] **R7 violata se lo Scope elenca un file del progetto.** Un PBI il cui Scope nomina
       `asdlc.toml` del progetto → `violata`.
-- [ ] **Un controllo che non può girare è `non eseguita` e il giro non si ferma.** Con `gh`
+- [x] **Un controllo che non può girare è `non eseguita` e il giro non si ferma.** Con `gh`
       finto che esce 1, la riga è `non eseguita` e il giro chiude come prima.
-- [ ] **Nessun controllo legge testo libero di un modello.** Il test sostituisce l'uscita
+- [x] **Nessun controllo legge testo libero di un modello.** Il test sostituisce l'uscita
       grezza del Solver con rumore e verifica che la sezione non cambi.
 
 **Non regressione:** un giro senza Solver non ha la sezione; `python3 -m pytest -q tools/tests`

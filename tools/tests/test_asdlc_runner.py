@@ -585,7 +585,9 @@ class TestIlSenzaEsitoDiceLOraDelReset:
 
         registro = next(i for i in esito.invocazioni if i["ruolo"] == "builder")
         assert esito.stato == "senza esito"
-        assert esito.nota == (
+        # Gli avvisi della guardia di processo (`PBI-508`) si accodano: la nota di `PBI-367`
+        # resta intera in testa, parola per parola.
+        assert esito.nota.startswith(
             "builder-senza-esito: il builder non ha fatto nessuna chiamata valida — "
             "il builder non ha chiamato né fatto né fermati · codice d'uscita 1 · "
             f"stdout {registro['stdout']} · stderr {registro['stderr']}"
