@@ -6,9 +6,13 @@ di tre strumenti, che il server dell'esito valida (`ADR-0027`).
 
 import importlib
 import json
+import tomllib
 from pathlib import Path
 
 esito = importlib.import_module("asdlc.esito")
+config = importlib.import_module("asdlc.config")
+
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 STRUMENTI_DEL_SOLVER = {"risolvi", "segnala_limite_runner", "chiedi_a_francesco"}
 
@@ -114,3 +118,24 @@ def test_la_prima_chiamata_valida_del_solver_e_definitiva(tmp_path, monkeypatch)
         seconda = esito.chiama(nome, argomenti, "solver", str(file))
         assert seconda["isError"], nome
         assert file.read_text(encoding="utf-8") == dopo, nome
+
+
+def configurazione(sezione_solver: str = ""):
+    """La configurazione del progetto di prova con sopra la sezione `[solver]` data."""
+    testo = (PROGETTO / "asdlc.toml").read_text(encoding="utf-8") + "\n" + sezione_solver
+    return config.interpreta(tomllib.loads(testo), "asdlc.toml")
+
+
+def test_la_sezione_solver_ha_i_default_3_nessuna_causa_e_opus():
+    """Decisioni 8 e 12: `giri_massimi` 3, `cause` vuota, `modello` opus."""
+    solver = configurazione().solver
+
+    assert (solver.giri_massimi, solver.cause, solver.modello) == (3, (), "opus")
+
+
+def test_la_sezione_solver_si_legge_dal_toml():
+    solver = configurazione('[solver]\ngiri_massimi = 5\ncause = ["runner-a", "runner-b"]\n'
+                            'modello = "sonnet"\n').solver
+
+    assert (solver.giri_massimi, solver.cause, solver.modello) == (
+        5, ("runner-a", "runner-b"), "sonnet")
