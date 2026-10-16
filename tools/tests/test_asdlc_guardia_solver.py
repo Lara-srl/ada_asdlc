@@ -227,3 +227,33 @@ def test_una_riga_violata_o_non_eseguita_diventa_un_avviso_nella_nota(giro_ferma
 
     assert "avviso: guardia di processo — R4: non eseguita (PBI-511)" in esito.nota
     assert "avviso: guardia di processo — R5: non eseguita" in esito.nota
+
+
+def test_un_comando_che_scade_e_non_eseguita_e_non_un_eccezione(tmp_path, monkeypatch):
+    """Deciso 2 / difetto 37: `gh` o `git` che non rispondono non fanno salire l'eccezione
+    fuori dalla guardia, che sta prima di `chiudi()`."""
+    import subprocess
+    a_monte = repo_a_monte(tmp_path)
+
+    def _esegui(cmd, cwd, *a, **k):
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+
+    righe = guardia_di(a_monte)
+
+    for regola in ("R5", "R6", "R7"):
+        assert riga(righe, regola).startswith(f"{regola}: non eseguita"), righe
+
+
+def test_un_gh_che_scrive_un_avviso_prima_del_json_o_un_pbi_illeggibile_e_non_eseguita(
+        tmp_path, monkeypatch):
+    a_monte = repo_a_monte(tmp_path)
+    con_gh(monkeypatch, uscita="warning: a new release of gh is available\n[]")
+
+    assert riga(guardia_di(a_monte), "R6").startswith("R6: non eseguita")
+
+    con_gh(monkeypatch)
+    (tmp_path / "backlog" / "PBI-701-binario.md").write_bytes(b"\xff\xfe\x00 non utf-8")
+
+    assert riga(guardia_di(a_monte), "R6").startswith("R6: non eseguita")
