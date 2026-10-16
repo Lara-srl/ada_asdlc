@@ -114,7 +114,8 @@ modello = "opus"
 
 Dopo il merge di un PBI a monte, due passi del tick sostituiscono i cinque gesti a mano
 (`specs/solver-e-rilascio/spec.md`, R8-R11). Il merge resta sempre di una persona: nel
-pacchetto non c'è nessun `gh pr merge`.
+pacchetto non c'è nessun `gh pr merge`, e i test lo provano eseguendo i due passi con un `gh`
+finto.
 
 - **In `asdlc`:** per ogni PR di PBI mergiata il cui PBI dichiara `rilascia: patch|minor`
   (una riga sotto il titolo), con la CI di `main` verde e il merge non ancora in un tag, il
