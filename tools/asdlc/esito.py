@@ -2,14 +2,14 @@
 """Il server dell'esito: l'esito di un agente è una chiamata a strumento (`ADR-0027`).
 
 Un server MCP su stdio, in sola libreria standard, con due strumenti: `fatto` e
-`fermati`. Il modello li chiama, il server valida e scrive l'esito nel file che il
+`fermati` (il Solver ne ha tre, `PBI-507`). Il modello li chiama, il server valida e scrive l'esito nel file che il
 runner gli ha nominato. Il runner legge quel file, e non più il testo libero
 dell'agente (`backlog/PBI-366`; lo collega `PBI-367`).
 
 Il trasporto è quello stdio di MCP: un messaggio JSON-RPC per riga, in entrata
 su stdin e in uscita su stdout. Il runner lo configura con due variabili:
 
-    ASDLC_RUOLO   `builder` o `critic`: cambia lo schema di `fatto`
+    ASDLC_RUOLO   `builder`, `critic` o `solver`: cambia lo schema di `fatto`, o gli strumenti
     ASDLC_ESITO   il file in cui scrivere l'esito; accanto, `<esito>.chiamate.jsonl`
                   registra ogni chiamata, valida o rifiutata
 
@@ -31,7 +31,7 @@ from datetime import datetime
 NOME = "asdlc"
 VERSIONE = "1"
 
-RUOLI = ["builder", "critic"]
+RUOLI = ["builder", "critic", "solver"]
 VERDETTI = ["pass", "non pronto"]
 
 
@@ -39,10 +39,46 @@ def _testo(descrizione: str) -> dict:
     return {"type": "string", "description": descrizione}
 
 
+STRUMENTI_DEL_SOLVER = [
+    {
+        "name": "risolvi",
+        "description": ("Risolve il blocco con una risposta e la sua fonte. La prima "
+                        "chiamata valida è definitiva."),
+        "inputSchema": {"type": "object",
+                        "properties": {"risposta": _testo("La risposta al blocco."),
+                                       "evidenza": _testo("Il file che la prova, "
+                                                          "`percorso` o `percorso:riga`.")},
+                        "required": ["risposta", "evidenza"]},
+    },
+    {
+        "name": "segnala_limite_runner",
+        "description": ("Segnala un limite del runner, con la riproduzione. La prima "
+                        "chiamata valida è definitiva."),
+        "inputSchema": {"type": "object",
+                        "properties": {"causa": _testo("La causa `runner-*`."),
+                                       "comando": _testo("Il comando che riproduce."),
+                                       "output": _testo("L'output sbagliato."),
+                                       "commit": _testo("Il commit in cui si vede.")},
+                        "required": ["causa", "comando", "output", "commit"]},
+    },
+    {
+        "name": "chiedi_a_francesco",
+        "description": ("Chiede a Francesco una decisione che il Solver non può prendere. "
+                        "La prima chiamata valida è definitiva."),
+        "inputSchema": {"type": "object",
+                        "properties": {"domanda": _testo("La domanda, per intero.")},
+                        "required": ["domanda"]},
+    },
+]
+
+
 def strumenti(ruolo: str) -> list[dict]:
-    """I due strumenti con lo schema del ruolo. Lo schema è per il modello: la
-    CLI non lo fa rispettare, e le regole le applica il server (`ADR-0027`,
-    decisione 3)."""
+    """Gli strumenti con lo schema del ruolo: `fatto` e `fermati` per Builder e
+    Critic, i tre esiti del Solver per il Solver (`PBI-507`). Lo schema è per il
+    modello: la CLI non lo fa rispettare, e le regole le applica il server
+    (`ADR-0027`, decisione 3)."""
+    if ruolo == "solver":
+        return STRUMENTI_DEL_SOLVER
     proprieta_fatto = {"riepilogo": _testo("Il riepilogo del lavoro fatto.")}
     descrizione_fatto = "Dichiara che il lavoro è finito."
     if ruolo == "critic":
