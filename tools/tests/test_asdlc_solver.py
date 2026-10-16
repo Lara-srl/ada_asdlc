@@ -188,3 +188,13 @@ def test_il_server_del_solver_riceve_le_cause_del_progetto_in_asdlc_cause(monkey
     ambiente = json.loads(percorso.read_text(encoding="utf-8"))["mcpServers"]["asdlc"]["env"]
     assert ambiente["ASDLC_RUOLO"] == "solver"
     assert ambiente["ASDLC_CAUSE"] == "runner-a,runner-b"
+
+
+def test_chiedi_a_francesco_registra_l_esito_intento_con_la_domanda(tmp_path):
+    """Decisione 1: `chiedi_a_francesco(domanda)` è l'esito `intento`."""
+    risposta = esito.chiama("chiedi_a_francesco", {"domanda": "quale dei due?"}, "solver",
+                            str(tmp_path / "a.json"))
+
+    assert not risposta["isError"], risposta
+    assert json.loads((tmp_path / "a.json").read_text(encoding="utf-8")) == {
+        "esito": "intento", "domanda": "quale dei due?"}
