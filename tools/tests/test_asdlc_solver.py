@@ -73,3 +73,23 @@ def test_segnala_limite_runner_con_una_causa_in_elenco_registra_il_limite(tmp_pa
     registrato = json.loads((cartella / "a.json").read_text(encoding="utf-8"))
     assert registrato["esito"] == "limite-del-runner"
     assert registrato["causa"] == "runner-non-legge-junit"
+
+
+def test_segnala_limite_runner_rifiuta_causa_fuori_elenco_comando_o_output_vuoti_commit_sconosciuto(
+        tmp_path, monkeypatch):
+    """R3: quattro rifiuti, e nessun esito scritto."""
+    sha, cartella = albero_con_un_commit(tmp_path, monkeypatch)
+    monkeypatch.setenv("ASDLC_CAUSE", "runner-non-legge-junit")
+    valido = {"causa": "runner-non-legge-junit", "comando": "pytest -q", "output": "0 test",
+              "commit": sha}
+    guasti = [
+        {"causa": "runner-inventata"},
+        {"comando": "  "},
+        {"output": ""},
+        {"commit": "0123456789abcdef0123456789abcdef01234567"},
+    ]
+    for numero, guasto in enumerate(guasti):
+        file = cartella / f"{numero}.json"
+        risposta = esito.chiama("segnala_limite_runner", {**valido, **guasto}, "solver", str(file))
+        assert risposta["isError"], guasto
+        assert not file.exists(), guasto
