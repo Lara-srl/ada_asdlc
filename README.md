@@ -85,6 +85,31 @@ Se una domanda si apre a giro iniziato, il Builder chiama `fermati` e la coda si
 sé. Un giro fermato si chiude con `asdlc-chiudi-giro`, che mette il tag `giro-fermato/…` e
 toglie il ramo. Il rapporto e i log dei giri stanno in `runs/`.
 
+### Il Solver, il terzo ruolo
+
+Dopo un giro fermato — il `fermati` del Builder, una domanda bloccante del Critic, un agente
+`senza esito` — il runner lancia il **Solver** (sola lettura: `Read`, `Grep`, `Glob`). Smista
+il blocco con uno di tre strumenti, che il server dell'esito valida:
+
+- `risolvi(risposta, evidenza)` — `evidenza` è un file dell'albero, `percorso` o
+  `percorso:riga`;
+- `segnala_limite_runner(causa, comando, output, commit)` — la `causa` è una di
+  `[solver].cause`, `commit` esiste, `comando` e `output` non sono vuoti;
+- `chiedi_a_francesco(domanda)` — l'esito `intento`.
+
+Il Solver legge `asdlc.toml` prima di segnalare un limite e `backlog/PRECEDENTI.md` prima di
+chiedere. Il tetto è `[solver].giri_massimi` (3) giri per PBI, contati nel rapporto
+`runs/<run>.json` (`giri_solver`): oltre, o a `chiedi_a_francesco`, il giro si ferma con un
+avviso nella nota. Il modello è `[solver].modello` (`opus`). Per ora il Solver è invocato e
+registrato: non rilancia il Builder e non apre la PR a monte (`PBI-509`).
+
+```toml
+[solver]
+giri_massimi = 3
+cause = ["runner-non-legge-junit"]   # allineate a backlog/README.md di asdlc
+modello = "opus"
+```
+
 Un progetto che parte senza runner (il «livello zero») e sale a `mvp` con un ADR segue
 `template/ZERO.md`.
 

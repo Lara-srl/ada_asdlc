@@ -88,21 +88,21 @@ rilascio; qui basta che l'esito esista e sia valido.
 
 Su `main` il ruolo non esiste: ogni criterio è un **rosso atteso**.
 
-- [ ] **Il server dell'esito espone i tre strumenti al Solver e a nessun altro ruolo.**
+- [x] **Il server dell'esito espone i tre strumenti al Solver e a nessun altro ruolo.**
       `strumenti("solver")` elenca `risolvi`, `segnala_limite_runner`, `chiedi_a_francesco`;
       `strumenti("builder")` non li elenca.
-- [ ] **Un Solver senza chiamate chiude `senza esito`.** Con un finto `claude` che esce senza
+- [x] **Un Solver senza chiamate chiude `senza esito`.** Con un finto `claude` che esce senza
       chiamare niente, il giro chiude `senza esito` con l'uscita grezza (R1).
-- [ ] **`risolvi` rifiuta un'evidenza che non esiste.** Percorso inesistente → errore dello
+- [x] **`risolvi` rifiuta un'evidenza che non esiste.** Percorso inesistente → errore dello
       strumento; percorso esistente → esito `risolto` (R2, due casi).
-- [ ] **`segnala_limite_runner` rifiuta una causa fuori elenco, un comando o un output vuoti,
+- [x] **`segnala_limite_runner` rifiuta una causa fuori elenco, un comando o un output vuoti,
       un commit sconosciuto.** Quattro rifiuti e un caso valido (R3).
-- [ ] **La prima chiamata è definitiva.** Una seconda chiamata dopo un esito valido non cambia
+- [x] **La prima chiamata è definitiva.** Una seconda chiamata dopo un esito valido non cambia
       l'esito (`ADR-0027`).
-- [ ] **Il quarto giro Solver↔Builder si ferma con un avviso.** Con `giri_massimi = 3` e tre
+- [x] **Il quarto giro Solver↔Builder si ferma con un avviso.** Con `giri_massimi = 3` e tre
       giri già nel rapporto, il quarto non parte e l'avviso è scritto; `chiedi_a_francesco`
       ferma il giro con lo stesso avviso (R12).
-- [ ] **Il prompt dice di leggere `asdlc.toml` e il registro prima di segnalare.** Il test
+- [x] **Il prompt dice di leggere `asdlc.toml` e il registro prima di segnalare.** Il test
       verifica le due righe nel prompt e l'ordine degli esiti (R4, R12; come
       `test_asdlc_prompt.py`).
 
