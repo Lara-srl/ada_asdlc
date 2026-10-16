@@ -84,6 +84,12 @@ def test_il_registro_esiste_e_ogni_riga_ha_il_formato():
     assert storte == [], f"righe fuori formato: {storte}"
 
 
+def test_una_riga_barrata_del_registro_rispetta_il_formato():
+    barrata = "- ~~2026-10-14 · solver · decisione superata · PBI-1~~ → vedi ADR-0030"
+
+    assert RIGA_REGISTRO.match(barrata)
+
+
 def _perse(vecchio, nuovo):
     return importlib.import_module("asdlc.precedenti").righe_perse(vecchio, nuovo)
 
