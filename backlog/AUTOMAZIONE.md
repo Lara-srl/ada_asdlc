@@ -433,6 +433,14 @@ cd ../ada_asdlc-run && python3 -m venv .venv && .venv/bin/pip install pytest
 niente», e non `ambiente mancante`. Che il tick lo prepari da sé è un lavoro del pacchetto,
 non ancora un PBI.
 
+## Il rilascio a tick (`PBI-509`)
+
+Il tick di `asdlc` mette il tag dopo il merge di un PBI che dichiara `rilascia: patch|minor`
+(CI di `main` verde, merge non ancora in un tag), in un worktree usa-e-getta; il tick del
+progetto apre la PR del pin per i PBI fermi con `attende:` e toglie la pausa a pin mergiato.
+Entrambi osservano e segnalano (`ADR-0008`); il merge è di Francesco. Il dettaglio sta nel
+`README.md` e nella spec `specs/solver-e-rilascio/spec.md`.
+
 ## Spegnere il tick e chiudere un giro fermato
 
 **Il tick non si spegne nel crontab** (`PBI-385`). Cron lancia dalla tabella che ha caricato,

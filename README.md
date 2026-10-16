@@ -101,13 +101,34 @@ Il Solver legge `asdlc.toml` prima di segnalare un limite e `backlog/PRECEDENTI.
 chiedere. Il tetto è `[solver].giri_massimi` (3) giri per PBI, contati nel rapporto
 `runs/<run>.json` (`giri_solver`): oltre, o a `chiedi_a_francesco`, il giro si ferma con un
 avviso nella nota. Il modello è `[solver].modello` (`opus`). Per ora il Solver è invocato e
-registrato: non rilancia il Builder e non apre la PR a monte (`PBI-509`).
+registrato: non rilancia il Builder e non apre la PR a monte (`PBI-509`, in corso).
 
 ```toml
 [solver]
 giri_massimi = 3
 cause = ["runner-non-legge-junit"]   # allineate a backlog/README.md di asdlc
 modello = "opus"
+```
+
+### Il rilascio a tick
+
+Dopo il merge di un PBI a monte, due passi del tick sostituiscono i cinque gesti a mano
+(`specs/solver-e-rilascio/spec.md`, R8-R11). Il merge resta sempre di una persona: nel
+pacchetto non c'è nessun `gh pr merge`.
+
+- **In `asdlc`:** per ogni PR di PBI mergiata il cui PBI dichiara `rilascia: patch|minor`
+  (una riga sotto il titolo), con la CI di `main` verde e il merge non ancora in un tag, il
+  tick mette il tag successivo (`v0.3.0` → `v0.3.1` con `patch`, `v0.4.0` con `minor`).
+  `--registra` e il tag girano in un worktree usa-e-getta fuori dal checkout, che resta pulito.
+- **Nel progetto:** per ogni PBI fermo (ramo su `origin`, nessun merge) con
+  `attende: <repo>#<PBI>`, a PR a monte `MERGED` (`gh pr view`) e tag che la contiene il tick
+  apre la PR che cambia solo `[ambiente].installa`; a PR del pin `MERGED` toglie
+  `~/asdlc-tick.pausa`. Il pin gira anche con il tick in pausa, il rilascio no.
+
+```toml
+[rilascio]
+remote_fork = "fork"   # il remote del fork di asdlc da cui il Solver apre la PR a monte
+prefisso_tag = "v"
 ```
 
 Un progetto che parte senza runner (il «livello zero») e sale a `mvp` con un ADR segue
