@@ -21,3 +21,22 @@ def test_il_solver_ha_i_suoi_tre_strumenti_e_gli_altri_ruoli_no():
     assert STRUMENTI_DEL_SOLVER <= nomi("solver")
     assert not STRUMENTI_DEL_SOLVER & nomi("builder")
     assert not STRUMENTI_DEL_SOLVER & nomi("critic")
+
+
+def test_risolvi_rifiuta_un_evidenza_che_non_esiste_e_accetta_un_file_dell_albero(tmp_path, monkeypatch):
+    """R2: `evidenza` nomina un file dell'albero, con un eventuale `:riga`."""
+    monkeypatch.chdir(tmp_path)  # l'albero del giro è la cartella da cui parte il server
+    (tmp_path / "specs").mkdir()
+    (tmp_path / "specs" / "spec.md").write_text("x\n", encoding="utf-8")
+    cartella = tmp_path / "esito"
+    cartella.mkdir()
+
+    rifiutata = esito.chiama("risolvi", {"risposta": "perché sì", "evidenza": "specs/non-c-e.md"},
+                             "solver", str(cartella / "a.json"))
+    assert rifiutata["isError"]
+    assert not (cartella / "a.json").exists()
+
+    accettata = esito.chiama("risolvi", {"risposta": "perché sì", "evidenza": "specs/spec.md:3"},
+                             "solver", str(cartella / "b.json"))
+    assert not accettata["isError"], accettata
+    assert (cartella / "b.json").exists()
