@@ -24,12 +24,15 @@ R1 già prevede.
 
 - La PR a monte e il rilascio (`PBI-509`): qui si controlla la PR se c'è, non la si apre.
 - Qualunque giudizio sulla qualità della diagnosi.
+- Il controllo R4, cioè la traccia delle letture del Solver: è di `PBI-511`.
 
 ## ✅ Deciso
 
 1. **I controlli sono quelli di R4-R7, fatti sui fatti:**
-   - R4: il rapporto del Solver riporta la lettura di `asdlc.toml` del progetto prima di
-     `segnala_limite_runner` (il campo c'è e viene prima, in ordine di chiamata).
+   - ~~R4: il rapporto del Solver riporta la lettura di `asdlc.toml` del progetto prima di
+     `segnala_limite_runner` (il campo c'è e viene prima, in ordine di chiamata).~~ Spostata il
+     16/10 in `PBI-511`: il campo non esiste e il runner non registra le letture (giro 1).
+     Qui la riga R4 della sezione è sempre `non eseguita`, con il rinvio a `PBI-511`.
    - R5: la PR a monte parte da un ramo di un fork, non da `main`, e non tocca `AGENTS.md` né
      file esistenti di `decisions/` (`git diff --name-only` della PR contro la sua base).
    - R6: nessun altro PBI in `backlog/` né PR aperta in `asdlc` (`gh pr list`) con la stessa
@@ -44,6 +47,7 @@ R1 già prevede.
 ## Dipendenze
 
 - Bloccato da: `PBI-507` (il rapporto del Solver e i suoi campi).
+- Sblocca: `PBI-511` (porta la traccia e accende la riga R4).
 - Usa i fatti di `PBI-509` quando la PR a monte esiste; senza, i controlli R5-R7 sono
   `non eseguita`.
 
@@ -56,8 +60,10 @@ R1 già prevede.
 
 Su `main` la guardia non esiste: ogni criterio è un **rosso atteso**.
 
-- [ ] **R4 violata se `asdlc.toml` non è stato letto prima.** Rapporto senza il campo (o col
-      campo dopo la chiamata) → riga `violata`; col campo prima → `ok`.
+- ~~**R4 violata se `asdlc.toml` non è stato letto prima.**~~ Spostato in `PBI-511` (16/10).
+- [ ] **R4 è `non eseguita` finché `PBI-511` non porta la traccia.** La sezione `## Guardia di
+      processo` ha la riga R4 con `non eseguita` e il rinvio a `PBI-511`, sempre, e il giro non
+      si ferma.
 - [ ] **R5 violata se la PR parte da `main` o tocca `AGENTS.md`.** Due violazioni e un caso
       valido (repository temporaneo con base e ramo).
 - [ ] **R6 violata se esiste un PBI con la stessa causa.** Un file in `backlog/` con
@@ -72,3 +78,14 @@ Su `main` la guardia non esiste: ogni criterio è un **rosso atteso**.
 
 **Non regressione:** un giro senza Solver non ha la sezione; `python3 -m pytest -q tools/tests`
 resta verde.
+
+## Il giro 1, e cosa si riprende (16/10/2026)
+
+Il giro 1 (`20261016-154506`) si è fermato dopo 41 secondi con `domanda-del-builder`, senza
+commit: il criterio R4 chiedeva un campo che non c'è (`segnala_limite_runner` ha solo `causa`,
+`comando`, `output`, `commit`), e il log delle chiamate non registra `Read`, `Grep`, `Glob`.
+Francesco ha scelto (16/10) di far registrare le letture dal runner, **in un PBI a parte**:
+`PBI-511`. Il tag è `giro-fermato/pbi-508-giro1-20261016` (`f4f2b6f`, nessun commit del PBI).
+
+- Il ramo `pbi/pbi-508` è tolto da origin; il giro 2 riparte da `main`.
+- Gli altri criteri (R5, R6, R7, `non eseguita`, nessun testo libero) non cambiano.
