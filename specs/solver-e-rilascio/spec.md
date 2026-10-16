@@ -104,6 +104,8 @@ salvo dove è scritto che il giro chiude `senza esito`.
   (`gh run list`) e salta il PBI il cui merge è già contenuto in un tag (`git tag --contains`).
   Il tag è `[rilascio].prefisso_tag` + `X.Y.Z`, successivo all'ultimo: `patch` alza Z, `minor`
   alza Y e azzera Z. Senza `rilascia:` in nessun PBI non chiede niente al mondo.
+  Un errore del passo (un worktree che non si crea, un JSON di `gh` illeggibile) non esce dal
+  tick: `rilascia()` rende una riga `rilascio: avviso, …` e il tick prosegue (`ADR-0008`).
 
 ### R9 — Il giro del tag lavora in un worktree usa-e-getta
 
@@ -130,7 +132,9 @@ salvo dove è scritto che il giro chiude `senza esito`.
   i PBI fermi: ramo su `origin` e nessun merge, perché il file con `attende:` resta in
   `backlog/`. Il tag è il primo di `gh api repos/<repo>/tags` che contiene il merge
   (`compare`: `ahead` o `identical`). Il ramo è `pin/asdlc-<tag>`; con una PR già su quel
-  ramo, in qualunque stato, non se ne apre un'altra.
+  ramo, in qualunque stato, non se ne apre un'altra. Un errore del passo (un JSON di `gh`
+  illeggibile) non esce dal tick: `pin()` rende una riga `pin: avviso, …` e il tick prosegue
+  con gli altri passi e gli altri progetti (`ADR-0008`).
 
 ### R11 — La pausa si toglie solo a pin mergiato
 

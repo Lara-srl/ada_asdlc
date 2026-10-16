@@ -794,7 +794,7 @@ def ci_verde(repo: Path) -> bool:
     return bool(corse) and corse[0].get("conclusion") == "success"
 
 
-def rilascia(repo: Path) -> list[str]:
+def passo_di_rilascio(repo: Path) -> list[str]:
     """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
     `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive."""
     if not any(RE_RILASCIA.search(f.read_text(encoding="utf-8"))
@@ -887,7 +887,7 @@ def stato_del_pin(repo: Path, ramo: str) -> str | None:
     return json.loads(vista)["state"] if codice == 0 else "SCONOSCIUTO"
 
 
-def pin(repo: Path) -> list[str]:
+def passo_del_pin(repo: Path) -> list[str]:
     """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
     `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
     righe = []
@@ -925,6 +925,26 @@ def pin(repo: Path) -> list[str]:
                    albero)
         righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — PR del pin a {tag}")
     return righe
+
+
+def rilascia(repo: Path) -> list[str]:
+    """`passo_di_rilascio()` senza che un errore fermi il tick: un `gh` che risponde
+    male o un worktree che non si crea diventano una riga di avviso (`ADR-0008`)."""
+    try:
+        return passo_di_rilascio(repo)
+    except Exception as errore:
+        return [f"rilascio: avviso, il passo non è andato a buon fine — "
+                f"{in_una_riga(f'{type(errore).__name__}: {errore}')}"]
+
+
+def pin(repo: Path) -> list[str]:
+    """`passo_del_pin()` senza che un errore fermi il tick: un JSON illeggibile di `gh`
+    diventa una riga di avviso, e il tick prosegue (`ADR-0008`)."""
+    try:
+        return passo_del_pin(repo)
+    except Exception as errore:
+        return [f"pin: avviso, il passo non è andato a buon fine — "
+                f"{in_una_riga(f'{type(errore).__name__}: {errore}')}"]
 
 
 def file_di_pausa() -> Path:
