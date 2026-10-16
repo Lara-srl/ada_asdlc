@@ -157,3 +157,21 @@ def test_se_un_tag_contiene_gia_il_merge_del_pbi_non_ne_mette_un_altro(mondo):
     coda.rilascia(m.repo)
 
     assert m.tag_su_origin() == ["v0.3.0", "v0.3.1"]
+
+
+def test_il_rilascio_gira_in_un_worktree_separato_e_il_checkout_resta_pulito(mondo):
+    m = mondo(rilascia="patch")
+    prima = git(m.repo, "status", "--porcelain")
+
+    coda.rilascia(m.repo)
+
+    lavori = [(cmd, cwd) for cmd, cwd in m.chiamate
+              if "--registra" in cmd or cmd[:2] == ["git", "tag"] and cmd[2:3] == ["v0.3.1"]]
+    assert len(lavori) == 2, "il giro registra e mette il tag"
+    cartelle = {cwd for _, cwd in lavori}
+    assert len(cartelle) == 1 and m.repo.resolve() not in {c.resolve() for c in cartelle}, (
+        "--registra e il tag girano nello stesso worktree, che non è il checkout")
+    assert not cartelle.pop().exists(), "il worktree è tolto a fine passo"
+    assert git(m.repo, "status", "--porcelain") == prima == ""
+    assert git(m.repo, "worktree", "list").count("\n") == 0, "resta solo il checkout"
+    assert m.tag_su_origin() == ["v0.3.0", "v0.3.1"]
