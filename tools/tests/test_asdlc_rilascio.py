@@ -392,6 +392,36 @@ def test_con_dry_run_il_tick_non_rilascia_e_non_apre_il_pin(tick):
 
 
 # ---------------------------------------------------------------------------
+# Un errore non ferma il tick (ADR-0008)
+# ---------------------------------------------------------------------------
+
+def test_un_json_illeggibile_nel_pin_diventa_un_avviso_e_non_un_errore(progetto, monkeypatch):
+    m = progetto()
+    originale = m.esegui
+    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (0, "<html>502</html>")
+                        if cmd[:3] == ["gh", "pr", "list"] and A_MONTE in cmd
+                        else originale(cmd, cwd))
+
+    righe = coda.pin(m.repo)
+
+    assert len(righe) == 1 and righe[0].startswith("pin: avviso")
+    assert m.rami_su_origin() == []
+
+
+def test_un_worktree_che_non_si_crea_nel_rilascio_diventa_un_avviso(mondo, monkeypatch):
+    m = mondo()
+
+    def non_si_crea(repo, riferimento):
+        raise RuntimeError("`git worktree add` è uscito 128")
+    monkeypatch.setattr(coda.asdlc_runner, "worktree_di_rilascio", non_si_crea)
+
+    righe = coda.rilascia(m.repo)
+
+    assert len(righe) == 1 and righe[0].startswith("rilascio: avviso")
+    assert m.tag_su_origin() == ["v0.3.0"]
+
+
+# ---------------------------------------------------------------------------
 # Il merge è sempre di Francesco (R10-R11)
 # ---------------------------------------------------------------------------
 
