@@ -828,6 +828,47 @@ def rilascia(repo: Path) -> list[str]:
     return righe
 
 
+RE_ATTENDE = re.compile(r"^attende:\s*([\w.-]+/[\w.-]+)#(\S+)\s*$", re.MULTILINE)
+RE_INSTALLA = re.compile(r'^(installa\s*=\s*"[^"\n]*@)v\d+\.\d+\.\d+', re.MULTILINE)
+
+
+def attese(repo: Path) -> list[tuple[str, str, str]]:
+    """I PBI fermi del progetto con `attende: <repo>#<PBI>`: (PBI, repo a monte, PBI a monte)."""
+    trovate = []
+    for file in sorted((repo / BACKLOG).glob("*.md")):
+        for a_monte, pbi_a_monte in RE_ATTENDE.findall(file.read_text(encoding="utf-8")):
+            trovate.append((file.name, a_monte, pbi_a_monte))
+    return trovate
+
+
+def pin(repo: Path) -> list[str]:
+    """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
+    `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
+    righe = []
+    for file, a_monte, pbi_a_monte in attese(repo):
+        _, elenco = esegui(["gh", "pr", "list", "--repo", a_monte, "--state", "merged",
+                            "--json", "number,title,headRefName"], repo)
+        numeri = [pr["number"] for pr in json.loads(elenco) if pbi_nominato(pr) == pbi_a_monte]
+        if not numeri:
+            continue
+        _, uscita = esegui(["gh", "api", f"repos/{a_monte}/tags", "--jq", ".[].name"], repo)
+        tag = uscita.split()[0]
+        ramo = f"pin/asdlc-{tag}"
+        with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
+            toml = albero / "asdlc.toml"
+            toml.write_text(RE_INSTALLA.sub(rf"\g<1>{tag}", toml.read_text(encoding="utf-8")),
+                            encoding="utf-8")
+            esegui(["git", "switch", "-c", ramo], albero)
+            esegui(["git", "commit", "-am", f"chore(config): porta il pin di asdlc a {tag}"], albero)
+            esegui(["git", "push", REMOTO, ramo], albero)
+            esegui(["gh", "pr", "create", "--base", BASE.removeprefix(f"{REMOTO}/"),
+                    "--head", ramo, "--title", f"chore(config): porta il pin di asdlc a {tag}",
+                    "--body", f"{file} attende {a_monte}#{pbi_a_monte}, rilasciato in {tag}."],
+                   albero)
+        righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — PR del pin a {tag}")
+    return righe
+
+
 def file_di_pausa() -> Path:
     """`~/asdlc-tick.pausa`, calcolato quando serve e non all'import: i test
     spostano `HOME` (PBI-385, decisione 5). Non sta in `asdlc.toml`, che non
