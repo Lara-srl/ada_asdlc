@@ -888,7 +888,14 @@ def pin(repo: Path) -> list[str]:
     """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
     `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
     righe = []
+    try:
+        fermi = pbi_con_ramo(repo) - pbi_mergiati(repo)
+    except Guasto as guasto:
+        return [f"pin: {guasto}"]
     for file, a_monte, pbi_a_monte in attese(repo):
+        nome = asdlc_config.regex_del_modello(CFG.backlog.file).fullmatch(file)
+        if nome is None or CFG.backlog.id_di(nome.group("n")) not in fermi:
+            continue
         tag = tag_del_rilascio(repo, a_monte, pbi_a_monte)
         if tag is None:
             righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — non ancora rilasciato")
