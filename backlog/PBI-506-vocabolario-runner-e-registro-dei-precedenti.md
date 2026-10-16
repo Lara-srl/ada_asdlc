@@ -7,7 +7,9 @@ di due elenchi che oggi non esistono in forma leggibile da un agente: **le cause
 (R3: una causa fuori elenco non apre mai un PBI a monte) e **il registro dei precedenti**
 (R12: le decisioni di Francesco che fanno precedente, lette prima di chiedere).
 
-Il PBI è solo documentazione, più i test che ne fissano la forma. Non tocca il runner.
+Il PBI è documentazione, più i test che ne fissano la forma, più un piccolo modulo del runner
+(`tools/asdlc/precedenti.py`) che dà al criterio «solo in aggiunta» un codice da provare: senza,
+il test nasce verde e il gate del rosso lo ferma (`rosso-mai-visto`, giro 1).
 
 **Scope**
 
@@ -17,13 +19,17 @@ Il PBI è solo documentazione, più i test che ne fissano la forma. Non tocca il
   (`PBI-505`, difetto 3 di `ada_planning`).
 - `backlog/PRECEDENTI.md` — nuovo: il registro, solo in aggiunta, con l'intestazione e il
   formato della riga.
+- `tools/asdlc/precedenti.py` — nuovo: `righe_perse(vecchio, nuovo)`, le righe non barrate di
+  `vecchio` che in `nuovo` non ci sono più. **Deroga allo Scope** (`ADR-0015`): il PBI non
+  doveva toccare il runner; lo tocca solo per questa funzione, che non cambia nessun
+  comportamento esistente.
 - `tools/tests/test_asdlc_precedenti.py` — nuovo: i test dei criteri.
 - `backlog/PBI-506-vocabolario-runner-e-registro-dei-precedenti.md` — questo file, per la spunta.
 
 **Fuori scope**
 
 - Il Solver che legge i due file (`PBI-507`).
-- Il codice che aggiunge righe al registro: le scrive Francesco, o il Solver in una PR.
+- Il codice che legge `origin/main` o aggiunge righe al registro: le scrive Francesco, o il Solver in una PR.
 
 ## ✅ Deciso (Francesco, 16/10, `ADR-0030`)
 
@@ -63,7 +69,20 @@ Su `main` i due elenchi non esistono: ogni criterio è un **rosso atteso**.
 - [ ] **Il registro esiste e ogni riga ha il formato.** Il test legge `backlog/PRECEDENTI.md`
       e verifica che ogni riga che comincia per `- ` abbia data ISO, tre separatori `·` e un
       riferimento non vuoto.
-- [ ] **Il registro è solo in aggiunta.** Il test confronta le righe con la versione su
-      `origin/main`: nessuna riga non barrata è sparita (repository temporaneo, due commit).
+- [ ] **Il registro è solo in aggiunta.** `righe_perse(vecchio, nuovo)` restituisce le righe
+      non barrate di `vecchio` che in `nuovo` mancano. Rosso atteso: la funzione non esiste.
+      I test la provano su testi in memoria (nessuna riga persa; una cancellata; una riscritta;
+      una barrata che sparisce senza che conti) e su `backlog/PRECEDENTI.md` confrontato con la
+      versione del commit precedente in un repository temporaneo di due commit.
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde.
+
+## Il giro 1, e cosa si riprende (16/10/2026)
+
+Il giro 1 (`20261016-004505`) si è fermato con `rosso-mai-visto`: il test del criterio 4
+confrontava un file con se stesso e nasceva verde, senza codice da mutare. I commit dei
+criteri 1–3 erano buoni; stanno nel tag `giro-fermato/pbi-506-giro1-20261016` (`c307e78`).
+
+- Il ramo `pbi/pbi-506` è tolto da origin; il giro 2 riparte da `main`.
+- Si può riprendere dal tag: i criteri 1–3 (`54b1061`…`40b6080`) valgono, il criterio 4 si
+  rifà col suo RED sulla funzione `righe_perse`.
