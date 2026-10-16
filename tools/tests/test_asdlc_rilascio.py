@@ -334,3 +334,52 @@ def test_un_pbi_con_attende_gia_in_main_non_apre_niente_e_non_tocca_la_pausa(
     assert pausa_del_progetto.exists()
     assert m.rami_su_origin() == []
     assert m.comandi("gh", "pr", "create") == []
+
+
+# ---------------------------------------------------------------------------
+# Il tick li chiama
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tick(tmp_path, monkeypatch):
+    """Un `smista()` con rilascio e pin sostituiti da registratori, e la decisione `Finita`."""
+    repo = tmp_path / "tick"
+    (repo / "backlog").mkdir(parents=True)
+    (repo / "backlog" / "CODA.md").write_text("", encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    casa = tmp_path / "casa-tick"
+    casa.mkdir()
+    monkeypatch.setenv("HOME", str(casa))
+    chiamati: list[str] = []
+    monkeypatch.setattr(coda, "allinea", lambda repo: chiamati.append("allinea"))
+    monkeypatch.setattr(coda, "reinstalla", lambda repo, albero: None)
+    monkeypatch.setattr(coda, "decidi", lambda repo, albero: coda.Finita())
+    monkeypatch.setattr(coda, "rilascia", lambda repo: chiamati.append("rilascia")
+                        or ["rilascio: PBI-600 → v0.3.1"], raising=False)
+    monkeypatch.setattr(coda, "pin", lambda repo: chiamati.append("pin")
+                        or ["pin: PBI-700 — PR del pin a v0.4.0"], raising=False)
+
+    def gira(*argomenti):
+        return coda.smista(["--repo", str(repo), "--worktree", str(albero), *argomenti])
+    gira.chiamati, gira.repo, gira.casa = chiamati, repo, casa
+    return gira
+
+
+def test_il_tick_rilascia_dopo_aver_allineato_e_scrive_le_righe_nel_log(tick, capsys):
+    assert tick() == 0
+
+    assert tick.chiamati.index("allinea") < tick.chiamati.index("rilascia")
+    assert "rilascio: PBI-600 → v0.3.1" in capsys.readouterr().out
+    log = (tick.repo / coda.LOG).read_text(encoding="utf-8")
+    assert "rilascio: PBI-600 → v0.3.1" in log and "pin: PBI-700" in log
+
+
+def test_il_pin_gira_anche_con_il_tick_in_pausa_perche_e_lui_a_toglierla(tick):
+    (tick.casa / "asdlc-tick.pausa").write_text("in attesa del pin\n")
+
+    tick()
+
+    assert "pin" in tick.chiamati
+    assert "rilascia" not in tick.chiamati, "il rilascio no: chi ha messo la pausa lavora a mano"
+
