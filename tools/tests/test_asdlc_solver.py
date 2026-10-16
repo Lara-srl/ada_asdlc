@@ -10,7 +10,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from test_asdlc_runner import agente_finto, fermati, git_del_senza_esito
+from test_asdlc_runner import agente_finto, fermati, git_del_senza_esito, ruolo_ed_esito
 
 esito = importlib.import_module("asdlc.esito")
 config = importlib.import_module("asdlc.config")
@@ -148,6 +148,10 @@ def test_la_sezione_solver_si_legge_dal_toml():
         5, ("runner-a", "runner-b"), "sonnet")
 
 
+def ruolo_del(comando):
+    return ruolo_ed_esito(comando)[0]
+
+
 @pytest.fixture
 def giro_fermato(monkeypatch, tmp_path):
     """Un `esegui_pbi` il cui Builder si ferma con una domanda: `LOG_DIR` e `git` finti,
@@ -209,3 +213,40 @@ def test_gli_strumenti_del_solver_rifiutano_argomenti_che_non_reggono(tmp_path, 
 
     assert risposta["isError"]
     assert not (tmp_path / "a.json").exists()
+
+
+def rapporto_precedente(cartella, giri, pbi="PBI-102"):
+    """Il rapporto di un giro di prima, con `giri` giri Solver già contati."""
+    (cartella / "20261015-100000.json").write_text(json.dumps(
+        {"run": "20261015-100000", "stato": "finito",
+         "esiti": [{"pbi": pbi, "giri_solver": giri}]}), encoding="utf-8")
+
+
+def test_il_contatore_dei_giri_solver_si_rilegge_dal_rapporto_e_cresce_di_uno(giro_fermato,
+                                                                              tmp_path):
+    """Decisione 10: un intero per PBI nel rapporto, riletto dal giro dopo."""
+    rapporto_precedente(tmp_path, 2)
+
+    esito, agente = giro_fermato({}, {"solver": "boh"})
+
+    assert esito.giri_solver == 3
+    assert len(esito.solver) == 1
+
+
+def test_il_primo_giro_del_solver_conta_uno(giro_fermato):
+    esito, _ = giro_fermato({}, {"solver": "boh"})
+
+    assert esito.giri_solver == 1
+
+
+def test_il_quarto_giro_del_solver_non_parte_e_la_nota_lo_avvisa(giro_fermato, tmp_path):
+    """R12 (`ADR-0008`): avviso e non blocco. Con `giri_massimi = 3` e tre giri già
+    nel rapporto, il Solver non si lancia e il contatore resta com'è."""
+    rapporto_precedente(tmp_path, 3)
+
+    esito, agente = giro_fermato({}, {"solver": "boh"})
+
+    assert not any(ruolo_del(c) == "solver" for c in agente.comandi)
+    assert esito.solver == []
+    assert esito.giri_solver == 3
+    assert "tetto dei giri del Solver" in esito.nota
