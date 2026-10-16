@@ -83,7 +83,7 @@ sostituiti da finti; nessun test usa la rete.
 - [x] **La PR a monte non `MERGED` non apre niente.** Il progetto resta in attesa (R10).
 - [x] **La pausa si toglie solo a PR del pin `MERGED`,** verificata con `gh pr view`; con la
       PR aperta o chiusa senza merge la pausa resta (R11, due casi).
-- [ ] **Un errore in `rilascia()` o in `pin()` non ferma il tick.** Un JSON illeggibile (`pin`)
+- [x] **Un errore in `rilascia()` o in `pin()` non ferma il tick.** Un JSON illeggibile (`pin`)
       e un worktree che non si crea (`rilascia`) diventano un avviso e il tick va avanti
       con gli altri passi e gli altri progetti (`ADR-0008`).
 - [x] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
