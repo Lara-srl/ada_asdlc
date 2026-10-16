@@ -29,6 +29,7 @@ import sys
 import tempfile
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 NOME = "asdlc"
 VERSIONE = "1"
@@ -203,7 +204,11 @@ def _risolvi(argomenti: dict, esito: str) -> dict:
             return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
                               "richiama risolvi.", errore=True)
     percorso = re.sub(r":\d+$", "", evidenza.strip())
-    if not os.path.isfile(percorso):
+    # Relativo alla radice del progetto (decisione 3): un assoluto, o un `../` che esce
+    # dall'albero, esiste ma non è una fonte del repository.
+    radice = Path.cwd().resolve()
+    if (os.path.isabs(percorso) or not Path(percorso).resolve().is_relative_to(radice)
+            or not os.path.isfile(percorso)):
         return _contenuto(f"L'evidenza {evidenza!r} non è un file dell'albero: nomina "
                           "il file che prova la risposta e richiama risolvi.", errore=True)
     return _scrivi({"esito": "risolto", "risposta": risposta, "evidenza": evidenza},
