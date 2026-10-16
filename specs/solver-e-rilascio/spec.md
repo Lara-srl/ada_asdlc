@@ -138,6 +138,12 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Prova:** letta da campi del rapporto, da git e da `gh`; mai da un modello.
 - **Se manca:** si segnala nel rapporto e nell'avviso; il flusso non si blocca. Il giudizio
   sulla diagnosi del Solver non è nella guardia: lo dà il Critic.
+- **Dove sta:** `guardia_del_solver()` scrive in `Esito.guardia` la sezione
+  `## Guardia di processo`, una riga per regola (`ok`, `violata`, `non eseguita`). Un giro
+  senza Solver non ha la sezione. R4 è `non eseguita (PBI-511)` finché non c'è la traccia
+  delle letture; R5-R7 leggono la PR a monte (git e `gh`) e sono `non eseguita` senza PR o
+  se `gh` o git non rispondono. Il Critic rilegge l'output del Solver e non rifà questi
+  controlli.
 
 ## Il tick è sempre attivo
 
