@@ -2,14 +2,14 @@
 """Il server dell'esito: l'esito di un agente è una chiamata a strumento (`ADR-0027`).
 
 Un server MCP su stdio, in sola libreria standard, con due strumenti: `fatto` e
-`fermati`. Il modello li chiama, il server valida e scrive l'esito nel file che il
+`fermati` (il Solver ne ha tre, `PBI-507`). Il modello li chiama, il server valida e scrive l'esito nel file che il
 runner gli ha nominato. Il runner legge quel file, e non più il testo libero
 dell'agente (`backlog/PBI-366`; lo collega `PBI-367`).
 
 Il trasporto è quello stdio di MCP: un messaggio JSON-RPC per riga, in entrata
 su stdin e in uscita su stdout. Il runner lo configura con due variabili:
 
-    ASDLC_RUOLO   `builder` o `critic`: cambia lo schema di `fatto`
+    ASDLC_RUOLO   `builder`, `critic` o `solver`: cambia lo schema di `fatto`, o gli strumenti
     ASDLC_ESITO   il file in cui scrivere l'esito; accanto, `<esito>.chiamate.jsonl`
                   registra ogni chiamata, valida o rifiutata
 
@@ -23,15 +23,18 @@ variabili lo rende inutilizzabile.
 
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 NOME = "asdlc"
 VERSIONE = "1"
 
-RUOLI = ["builder", "critic"]
+RUOLI = ["builder", "critic", "solver"]
 VERDETTI = ["pass", "non pronto"]
 
 
@@ -39,10 +42,46 @@ def _testo(descrizione: str) -> dict:
     return {"type": "string", "description": descrizione}
 
 
+STRUMENTI_DEL_SOLVER = [
+    {
+        "name": "risolvi",
+        "description": ("Risolve il blocco con una risposta e la sua fonte. La prima "
+                        "chiamata valida è definitiva."),
+        "inputSchema": {"type": "object",
+                        "properties": {"risposta": _testo("La risposta al blocco."),
+                                       "evidenza": _testo("Il file che la prova, "
+                                                          "`percorso` o `percorso:riga`.")},
+                        "required": ["risposta", "evidenza"]},
+    },
+    {
+        "name": "segnala_limite_runner",
+        "description": ("Segnala un limite del runner, con la riproduzione. La prima "
+                        "chiamata valida è definitiva."),
+        "inputSchema": {"type": "object",
+                        "properties": {"causa": _testo("La causa `runner-*`."),
+                                       "comando": _testo("Il comando che riproduce."),
+                                       "output": _testo("L'output sbagliato."),
+                                       "commit": _testo("Il commit in cui si vede.")},
+                        "required": ["causa", "comando", "output", "commit"]},
+    },
+    {
+        "name": "chiedi_a_francesco",
+        "description": ("Chiede a Francesco una decisione che il Solver non può prendere. "
+                        "La prima chiamata valida è definitiva."),
+        "inputSchema": {"type": "object",
+                        "properties": {"domanda": _testo("La domanda, per intero.")},
+                        "required": ["domanda"]},
+    },
+]
+
+
 def strumenti(ruolo: str) -> list[dict]:
-    """I due strumenti con lo schema del ruolo. Lo schema è per il modello: la
-    CLI non lo fa rispettare, e le regole le applica il server (`ADR-0027`,
-    decisione 3)."""
+    """Gli strumenti con lo schema del ruolo: `fatto` e `fermati` per Builder e
+    Critic, i tre esiti del Solver per il Solver (`PBI-507`). Lo schema è per il
+    modello: la CLI non lo fa rispettare, e le regole le applica il server
+    (`ADR-0027`, decisione 3)."""
+    if ruolo == "solver":
+        return STRUMENTI_DEL_SOLVER
     proprieta_fatto = {"riepilogo": _testo("Il riepilogo del lavoro fatto.")}
     descrizione_fatto = "Dichiara che il lavoro è finito."
     if ruolo == "critic":
@@ -94,6 +133,15 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
 
     Nel file entrano solo i campi dello schema del ruolo: la CLI non lo fa
     rispettare, e un argomento in più non deve riscrivere l'esito."""
+    if ruolo == "solver":
+        if nome not in ("risolvi", "segnala_limite_runner", "chiedi_a_francesco"):
+            return _contenuto(f"Lo strumento {nome!r} non è del Solver: chiama risolvi, "
+                              "segnala_limite_runner o chiedi_a_francesco.", errore=True)
+        if not isinstance(argomenti, dict):
+            return _contenuto(f"Gli argomenti di {nome} non sono un oggetto: richiama "
+                              f"{nome} con i campi per nome.", errore=True)
+        return {"risolvi": _risolvi, "segnala_limite_runner": _segnala_limite,
+                "chiedi_a_francesco": _chiedi_a_francesco}[nome](argomenti, esito)
     if nome not in ("fatto", "fermati"):
         return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
                           errore=True)
@@ -125,6 +173,11 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
     if ruolo == "critic" and nome == "fatto":
         dichiarato["verdetto"] = argomenti["verdetto"]
     dichiarato[campo] = testo
+    return _scrivi(dichiarato, nome, esito)
+
+
+def _scrivi(dichiarato: dict, nome: str, esito: str) -> dict:
+    """Scrive `dichiarato` nel file `esito` se è la prima chiamata valida."""
     cartella, nome_esito = os.path.split(os.path.abspath(esito))
     descrittore, temporaneo = tempfile.mkstemp(dir=cartella, prefix=f"{nome_esito}.",
                                                suffix=".json")
@@ -139,6 +192,60 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
     finally:
         os.unlink(temporaneo)
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
+
+
+def _risolvi(argomenti: dict, esito: str) -> dict:
+    """`risolvi`: la risposta porta come `evidenza` un file che esiste nell'albero
+    del giro, con un eventuale `:riga` (`PBI-507`, R2). L'albero è la cartella da
+    cui parte il server."""
+    risposta, evidenza = argomenti.get("risposta"), argomenti.get("evidenza")
+    for campo, valore in (("risposta", risposta), ("evidenza", evidenza)):
+        if not isinstance(valore, str) or not valore.strip():
+            return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
+                              "richiama risolvi.", errore=True)
+    percorso = re.sub(r":\d+$", "", evidenza.strip())
+    # Relativo alla radice del progetto (decisione 3): un assoluto, o un `../` che esce
+    # dall'albero, esiste ma non è una fonte del repository.
+    radice = Path.cwd().resolve()
+    if (os.path.isabs(percorso) or not Path(percorso).resolve().is_relative_to(radice)
+            or not os.path.isfile(percorso)):
+        return _contenuto(f"L'evidenza {evidenza!r} non è un file dell'albero: nomina "
+                          "il file che prova la risposta e richiama risolvi.", errore=True)
+    return _scrivi({"esito": "risolto", "risposta": risposta, "evidenza": evidenza},
+                   "risolvi", esito)
+
+
+def _chiedi_a_francesco(argomenti: dict, esito: str) -> dict:
+    """`chiedi_a_francesco`: l'esito `intento`, con la domanda per intero."""
+    domanda = argomenti.get("domanda")
+    if not isinstance(domanda, str) or not domanda.strip():
+        return _contenuto("Il campo «domanda» è vuoto o non è testo: scrivilo e "
+                          "richiama chiedi_a_francesco.", errore=True)
+    return _scrivi({"esito": "intento", "domanda": domanda}, "chiedi_a_francesco", esito)
+
+
+def _segnala_limite(argomenti: dict, esito: str) -> dict:
+    """`segnala_limite_runner`: registra il limite del runner con la sua
+    riproduzione (`PBI-507`, R3)."""
+    dichiarato = {"esito": "limite-del-runner"}
+    for campo in ("causa", "comando", "output", "commit"):
+        valore = argomenti.get(campo)
+        if not isinstance(valore, str) or not valore.strip():
+            return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
+                              "richiama segnala_limite_runner.", errore=True)
+        dichiarato[campo] = valore
+    cause = [c.strip() for c in os.environ.get("ASDLC_CAUSE", "").split(",") if c.strip()]
+    if dichiarato["causa"].strip() not in cause:
+        return _contenuto(f"La causa {dichiarato['causa']!r} non è nell'elenco "
+                          f"{cause}: scegline una e richiama segnala_limite_runner.",
+                          errore=True)
+    esiste = subprocess.run(["git", "cat-file", "-e", f"{dichiarato['commit'].strip()}^{{commit}}"],
+                            capture_output=True).returncode == 0
+    if not esiste:
+        return _contenuto(f"Il commit {dichiarato['commit']!r} non esiste nell'albero: "
+                          "nomina quello in cui il limite si vede e richiama "
+                          "segnala_limite_runner.", errore=True)
+    return _scrivi(dichiarato, "segnala_limite_runner", esito)
 
 
 def registra(nome, argomenti, esito: str) -> None:

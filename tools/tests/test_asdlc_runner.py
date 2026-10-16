@@ -382,7 +382,8 @@ class TestSenzaChiamataLoStatoESenzaEsito:
             f"chiuso {esito.stato} con la nota «{esito.nota}»: senza una chiamata "
             "valida il testo non deve decidere niente"
         )
-        assert len(agente.comandi) == invocazioni, (
+        # Il Solver (PBI-507) parte dopo il Builder fermo: qui si conta chi lavora al PBI.
+        assert len([c for c in agente.comandi if ruolo_ed_esito(c)[0] != "solver"]) == invocazioni, (
             "un senza esito non rilancia l'agente: né igiene né un altro tentativo"
         )
         assert len(gate) == gate_attesi, "dopo un Builder senza esito i gate non partono"
@@ -477,7 +478,7 @@ class TestNelSenzaEsitoRestaLUscitaGrezza:
         rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
 
         assert esito.stato == "senza esito"
-        ultima = rapporto["esiti"][0]["invocazioni"][-1]
+        ultima = rapporto["esiti"][0]["invocazioni"][0]
         assert ultima["ruolo"] == "builder"
         assert ultima["codice"] == 1, "il codice d'uscita di claude -p non si scarta"
         assert ultima["stdout"] != ultima["stderr"], "i due flussi stanno in due file"
@@ -582,7 +583,7 @@ class TestIlSenzaEsitoDiceLOraDelReset:
 
         esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-        registro = esito.invocazioni[-1]
+        registro = next(i for i in esito.invocazioni if i["ruolo"] == "builder")
         assert esito.stato == "senza esito"
         assert esito.nota == (
             "builder-senza-esito: il builder non ha fatto nessuna chiamata valida — "
@@ -796,7 +797,8 @@ class TestLInventarioDelGiro:
 
         def _esegui(*a, **k):
             # Due gate del rosso dentro il giro: due alberi montati e smontati.
-            for sha in ("abc123", "def456"):
+            # Il Solver (PBI-507) non è un gate: i due alberi sono del Builder.
+            for sha in ("abc123", "def456") if ruolo_ed_esito(a[0])[0] != "solver" else ():
                 with runner.worktree_usa_e_getta(sha):
                     pass
             return agente(*a, **k)
@@ -867,7 +869,8 @@ class TestLInventarioDelGiro:
         agente = agente_finto({})
 
         def _esegui(*a, **k):
-            for sha in ("abc123", "def456"):
+            # Il Solver (PBI-507) non è un gate: i due alberi sono del Builder.
+            for sha in ("abc123", "def456") if ruolo_ed_esito(a[0])[0] != "solver" else ():
                 with runner.worktree_usa_e_getta(sha):
                     pass
             return agente(*a, **k)

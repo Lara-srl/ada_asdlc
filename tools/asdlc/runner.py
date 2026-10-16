@@ -132,11 +132,24 @@ CRITIC = ["claude", "-p", "--allowedTools",
           "Read,Grep,Glob,Bash(git diff:*),mcp__asdlc__fatto,mcp__asdlc__fermati",
           "--model", "opus"]
 
+# Il Solver (`PBI-507`, decisione 12) legge soltanto: nessun `Bash`, nessuna scrittura,
+# e i tre strumenti con cui smista il blocco. Il modello è `[solver].modello`.
+def comando_del_solver() -> list[str]:
+    return ["claude", "-p", "--allowedTools",
+            "Read,Grep,Glob,mcp__asdlc__risolvi,mcp__asdlc__segnala_limite_runner,"
+            "mcp__asdlc__chiedi_a_francesco", "--model", CFG.solver.modello]
+
+
+# I motivi d'uscita di un giro fermato che il Solver smista: il `fermati` del Builder, il
+# `sospeso` del Critic, e un agente dell'uno o dell'altro senza nessuna chiamata valida.
+BLOCCHI = ("domanda-del-builder", "builder-senza-esito", "domanda-del-critic",
+           "critic-senza-esito")
+
 # Il server dell'esito (`PBI-366`, `ADR-0027`) è il comando installato accanto
 # al runner, `<pacchetto>/bin/asdlc-esito` (PBI-384). I ruoli sono i suoi: un
 # altro valore lo ferma all'avvio.
 SERVER_DELL_ESITO = "asdlc-esito"
-RUOLI = ("builder", "critic")
+RUOLI = ("builder", "critic", "solver")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
 # il numero; la ragione di ognuno sta lì accanto, dove chi lo cambia la legge.
@@ -428,6 +441,12 @@ class Esito:
     domanda: str = ""
     # Una voce per invocazione di un agente, nell'ordine: `Invocazione.registro`.
     invocazioni: list[dict] = field(default_factory=list)
+    # Un esito per giro del Solver (`PBI-507`): `{"esito", ...}` come il server lo ha
+    # scritto, o `{"esito": "senza esito", "uscita"}` se non ha chiamato niente.
+    solver: list[dict] = field(default_factory=list)
+    # I giri Solver↔Builder di questo PBI, contando quelli dei rapporti di prima
+    # (`PBI-507`, decisione 10): il tetto è `[solver].giri_massimi`.
+    giri_solver: int = 0
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -994,7 +1013,7 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     """Scrive la config MCP che fa partire il server dell'esito per questa
     invocazione, accanto al suo file d'esito, e ne torna il percorso.
 
-    Un ruolo che non è `builder` o `critic`, o un file d'esito mancante,
+    Un ruolo che non è `builder`, `critic` o `solver`, o un file d'esito mancante,
     sollevano `ValueError` **prima** del lancio. Il server si fermerebbe da sé
     all'avvio, ma dentro un giro quella fermata arriverebbe come un agente
     senza esito, dopo i minuti del Builder (PBI-367, decisione 4).
@@ -1008,10 +1027,15 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     if esito is None:
         raise ValueError(f"il {ruolo} non ha un file d'esito in cui il server possa scrivere")
     config = esito.with_suffix(".mcp.json")
+    ambiente = {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)}
+    if ruolo == "solver":
+        # Le cause `runner-*` che il server accetta: la lista del progetto, senza
+        # rete (`PBI-507`, decisione 8).
+        ambiente["ASDLC_CAUSE"] = ",".join(CFG.solver.cause)
     config.write_text(json.dumps({"mcpServers": {"asdlc": {
         "command": str(comando_del_pacchetto(SERVER_DELL_ESITO)),
         "args": [],
-        "env": {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)},
+        "env": ambiente,
     }}}, indent=2, ensure_ascii=False), encoding="utf-8")
     return config
 
@@ -4122,6 +4146,16 @@ def esegui_pbi(
     # nell'`except`, che richiudeva `rosso` — e la seconda chiusura, riuscita,
     # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
     # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
+    if motivo in BLOCCHI:
+        # Il Solver è invocato e registrato, non seguito (`PBI-507`, decisione 11): un
+        # suo guasto è un avviso (`ADR-0008`) e non salta `chiudi()`, che è la strada
+        # d'uscita di ogni giro fermato (difetto 37).
+        try:
+            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
+        except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4145,6 +4179,45 @@ def esegui_pbi(
         if e.pr:
             print(f"    PR aperta: {e.pr}")
     return e
+
+
+def giri_solver_fatti(pbi: str) -> int:
+    """I giri Solver già contati per `pbi` nei rapporti di `LOG_DIR`: il più alto
+    `giri_solver` che un esito di quel PBI porta. Un file che non è un rapporto, o
+    che non si legge, non conta (`PBI-507`, decisione 10)."""
+    fatti = 0
+    for file in LOG_DIR.glob("*.json"):
+        try:
+            esiti = json.loads(file.read_text(encoding="utf-8")).get("esiti", [])
+            fatti = max([fatti] + [x.get("giri_solver", 0) for x in esiti
+                                   if x.get("pbi") == pbi])
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return fatti
+
+
+def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
+                     dichiara) -> None:
+    """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
+    `e.solver` (`PBI-507`, decisione 11). Oltre `[solver].giri_massimi` giri per lo
+    stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`)."""
+    e.giri_solver = giri_solver_fatti(e.pbi)
+    if e.giri_solver >= CFG.solver.giri_massimi:
+        dichiara(f"avviso: tetto dei giri del Solver raggiunto ({e.giri_solver} di "
+                 f"{CFG.solver.giri_massimi}), il Solver non parte")
+        return
+    e.giri_solver += 1
+    prompt, file_esito = file_dell_invocazione("solver")
+    prompt.write_text(prompt_del_pacchetto("solver").format(
+        pbi_path=pbi_path.relative_to(REPO), blocco=f"{motivo}: {dettaglio}"),
+        encoding="utf-8")
+    invocazione = invoca_agente("solver", comando_del_solver(), prompt, file_esito)
+    e.invocazioni.append(invocazione.registro)
+    dichiarato = invocazione.dichiarato
+    e.solver.append(dichiarato if dichiarato is not None
+                    else {"esito": "senza esito", "uscita": invocazione.uscita})
+    if dichiarato is not None and dichiarato["esito"] == "intento":
+        dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
