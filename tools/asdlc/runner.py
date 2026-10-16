@@ -447,6 +447,9 @@ class Esito:
     # I giri Solver↔Builder di questo PBI, contando quelli dei rapporti di prima
     # (`PBI-507`, decisione 10): il tetto è `[solver].giri_massimi`.
     giri_solver: int = 0
+    # La sezione `## Guardia di processo` (`PBI-508`): una riga per regola, `ok`, `violata`
+    # o `non eseguita`. Vuota se il Solver non ha girato.
+    guardia: str = ""
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -4156,6 +4159,7 @@ def esegui_pbi(
             traceback.print_exc()
             e.file_traceback = str(salva_il_traceback(pbi))
             dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
+        guardia_del_solver(e)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4218,6 +4222,15 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                     else {"esito": "senza esito", "uscita": invocazione.uscita})
     if dichiarato is not None and dichiarato["esito"] == "intento":
         dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
+
+
+def guardia_del_solver(e: Esito) -> None:
+    """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
+    `ADR-0030` decisione 4, R13). Li fa il codice, leggendo i fatti; la guardia segnala
+    e non blocca (`ADR-0008`). Se il Solver non ha girato, la sezione non c'è."""
+    if not e.solver:
+        return
+    e.guardia = "\n".join(["## Guardia di processo", "R4: non eseguita (PBI-511)"])
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
