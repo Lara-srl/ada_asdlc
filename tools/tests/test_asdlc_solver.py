@@ -173,3 +173,18 @@ def test_un_solver_senza_chiamate_chiude_senza_esito_con_l_uscita_grezza(giro_fe
         "il Solver è un terzo invocato con i suoi tre strumenti")
     assert [(s["esito"], s["uscita"]) for s in esito.solver] == [
         ("senza esito", "non so che dire")]
+
+
+def test_il_server_del_solver_riceve_le_cause_del_progetto_in_asdlc_cause(monkeypatch, tmp_path):
+    """Decisione 8: le cause `runner-*` viaggiano da `[solver].cause` alla variabile
+    `ASDLC_CAUSE`, separate da virgola; nessuna lettura di rete."""
+    import dataclasses
+    monkeypatch.setattr(runner, "PACCHETTO", tmp_path)
+    monkeypatch.setattr(runner, "CFG", dataclasses.replace(
+        runner.CFG, solver=config.Solver(cause=("runner-a", "runner-b"))))
+
+    percorso = runner.config_del_server("solver", tmp_path / "esito.json")
+
+    ambiente = json.loads(percorso.read_text(encoding="utf-8"))["mcpServers"]["asdlc"]["env"]
+    assert ambiente["ASDLC_RUOLO"] == "solver"
+    assert ambiente["ASDLC_CAUSE"] == "runner-a,runner-b"
