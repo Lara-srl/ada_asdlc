@@ -64,8 +64,11 @@ def test_nessuno_slug_runner_e_anche_una_causa_di_progetto():
     assert sorted(set(generali) & set(runner)) == []
 
 
+# Una riga barrata (`- ~~AAAA-MM-GG · … · … · …~~ → rinvio`) ha lo stesso formato dentro la
+# barratura, seguito dal rinvio alla decisione che la supera.
 RIGA_REGISTRO = re.compile(
-    r"^- (\d{4}-\d{2}-\d{2}) · ([^·]+) · ([^·]+) · (\S[^·]*)$")
+    r"^- (?:(\d{4}-\d{2}-\d{2}) · ([^·]+) · ([^·]+) · (\S[^·]*)"
+    r"|~~(\d{4}-\d{2}-\d{2}) · ([^·]+) · ([^·]+) · (\S[^·]*)~~ → \S.*)$")
 
 
 def _righe_del_registro(testo):
