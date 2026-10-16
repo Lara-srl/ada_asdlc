@@ -235,7 +235,7 @@ class MondoProgetto:
 
     def rami_su_origin(self):
         return [r.strip() for r in git(self.origin, "branch", "--list").splitlines()
-                if r.strip() != "main"]
+                if r.strip().lstrip("* ") != "main"]
 
     def comandi(self, *inizio):
         return [c for c in self.chiamate if c[:len(inizio)] == list(inizio)]
