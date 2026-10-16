@@ -132,15 +132,12 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
 
     Nel file entrano solo i campi dello schema del ruolo: la CLI non lo fa
     rispettare, e un argomento in più non deve riscrivere l'esito."""
-    if ruolo == "solver" and nome == "risolvi":
-        return _risolvi(argomenti, esito) if isinstance(argomenti, dict) else _contenuto(
-            "Gli argomenti di risolvi non sono un oggetto: richiama con i campi per nome.",
-            errore=True)
-    if ruolo == "solver" and nome == "chiedi_a_francesco":
-        return _scrivi({"esito": "intento", "domanda": argomenti.get("domanda")},
-                       nome, esito)
-    if ruolo == "solver" and nome == "segnala_limite_runner":
-        return _segnala_limite(argomenti, esito)
+    if ruolo == "solver" and nome in ("risolvi", "segnala_limite_runner", "chiedi_a_francesco"):
+        if not isinstance(argomenti, dict):
+            return _contenuto(f"Gli argomenti di {nome} non sono un oggetto: richiama "
+                              f"{nome} con i campi per nome.", errore=True)
+        return {"risolvi": _risolvi, "segnala_limite_runner": _segnala_limite,
+                "chiedi_a_francesco": _chiedi_a_francesco}[nome](argomenti, esito)
     if nome not in ("fatto", "fermati"):
         return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
                           errore=True)
@@ -208,6 +205,15 @@ def _risolvi(argomenti: dict, esito: str) -> dict:
                           "il file che prova la risposta e richiama risolvi.", errore=True)
     return _scrivi({"esito": "risolto", "risposta": risposta, "evidenza": evidenza},
                    "risolvi", esito)
+
+
+def _chiedi_a_francesco(argomenti: dict, esito: str) -> dict:
+    """`chiedi_a_francesco`: l'esito `intento`, con la domanda per intero."""
+    domanda = argomenti.get("domanda")
+    if not isinstance(domanda, str) or not domanda.strip():
+        return _contenuto("Il campo «domanda» è vuoto o non è testo: scrivilo e "
+                          "richiama chiedi_a_francesco.", errore=True)
+    return _scrivi({"esito": "intento", "domanda": domanda}, "chiedi_a_francesco", esito)
 
 
 def _segnala_limite(argomenti: dict, esito: str) -> dict:
