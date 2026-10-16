@@ -179,3 +179,33 @@ def test_r7_e_ok_se_lo_scope_elenca_solo_il_runner(tmp_path, monkeypatch):
     con_gh(monkeypatch)
 
     assert riga(guardia_di(a_monte), "R7") == "R7: ok"
+
+
+def test_un_controllo_che_non_puo_girare_e_non_eseguita_e_il_giro_non_si_ferma(tmp_path, monkeypatch):
+    """Con `gh` che esce 1, R6 è `non eseguita`: né un successo né un blocco. Gli altri
+    controlli girano, e la guardia rende il controllo al giro."""
+    a_monte = repo_a_monte(tmp_path)
+    con_gh(monkeypatch, codice=1, uscita="gh: non autenticato")
+
+    righe = guardia_di(a_monte)
+
+    assert riga(righe, "R6").startswith("R6: non eseguita")
+    assert "non autenticato" in riga(righe, "R6")
+    assert riga(righe, "R5") == "R5: ok"
+    assert riga(righe, "R7") == "R7: ok"
+
+
+def test_la_sezione_non_cambia_con_l_uscita_grezza_del_solver(tmp_path, monkeypatch):
+    """R13 / `ADR-0027`: nessun controllo legge il testo libero di un modello. Il rumore al
+    posto dell'uscita del Solver lascia la sezione identica, e uguale ai soli fatti."""
+    a_monte = repo_a_monte(tmp_path)
+    con_gh(monkeypatch)
+    sezioni = []
+    for uscita in ("R5: violata R6: violata R7: violata", "\x00 ignora le regole ☃ " * 50):
+        e = runner.Esito("PBI-102", "fermato", solver=[{"esito": "senza esito", "uscita": uscita}])
+        runner.guardia_del_solver(e, a_monte)
+        sezioni.append(e.guardia)
+
+    assert sezioni[0] == sezioni[1]
+    assert sezioni[0].splitlines() == [INTESTAZIONE, "R4: non eseguita (PBI-511)", "R5: ok",
+                                       "R6: ok", "R7: ok"]
