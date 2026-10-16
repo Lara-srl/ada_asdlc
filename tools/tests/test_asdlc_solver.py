@@ -5,6 +5,7 @@ di tre strumenti, che il server dell'esito valida (`ADR-0027`).
 """
 
 import importlib
+import json
 from pathlib import Path
 
 esito = importlib.import_module("asdlc.esito")
@@ -40,3 +41,35 @@ def test_risolvi_rifiuta_un_evidenza_che_non_esiste_e_accetta_un_file_dell_alber
                              "solver", str(cartella / "b.json"))
     assert not accettata["isError"], accettata
     assert (cartella / "b.json").exists()
+
+
+def albero_con_un_commit(tmp_path, monkeypatch):
+    """Un repository git con un commit, e la cartella d'esito: l'albero del giro."""
+    import subprocess
+    monkeypatch.chdir(tmp_path)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(git + ["add", "a.txt"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "uno"], check=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True,
+                         text=True).stdout.strip()
+    cartella = tmp_path / "esito"
+    cartella.mkdir()
+    return sha, cartella
+
+
+def test_segnala_limite_runner_con_una_causa_in_elenco_registra_il_limite(tmp_path, monkeypatch):
+    """R3: causa dell'elenco `runner-*`, comando e output pieni, commit esistente."""
+    sha, cartella = albero_con_un_commit(tmp_path, monkeypatch)
+    monkeypatch.setenv("ASDLC_CAUSE", "runner-non-legge-junit,runner-altro")
+
+    risposta = esito.chiama(
+        "segnala_limite_runner",
+        {"causa": "runner-non-legge-junit", "comando": "pytest -q", "output": "0 test",
+         "commit": sha}, "solver", str(cartella / "a.json"))
+
+    assert not risposta["isError"], risposta
+    registrato = json.loads((cartella / "a.json").read_text(encoding="utf-8"))
+    assert registrato["esito"] == "limite-del-runner"
+    assert registrato["causa"] == "runner-non-legge-junit"
