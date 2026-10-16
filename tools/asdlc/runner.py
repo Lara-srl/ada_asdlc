@@ -4289,6 +4289,18 @@ def controllo_r7(a_monte: AMonte) -> str:
     return "R7: ok"
 
 
+def controlla(regola: str, controllo: Callable[[AMonte], str], a_monte: AMonte | None) -> str:
+    """Un controllo che non può girare — nessuna PR, un comando che scade, un `gh` che scrive
+    prima del JSON, un file illeggibile — è `non eseguita` e non un'eccezione: la guardia sta
+    prima di `chiudi()` (difetto 37) e non deve saltarla."""
+    if a_monte is None:
+        return f"{regola}: non eseguita (nessuna PR a monte)"
+    try:
+        return controllo(a_monte)
+    except Exception as guasto:  # noqa: BLE001 — si registra come riga, non si tace
+        return f"{regola}: non eseguita ({type(guasto).__name__}: {una_riga(str(guasto))[:100]})"
+
+
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
                        dichiara: Callable[[str], None] | None = None) -> None:
     """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
@@ -4298,12 +4310,8 @@ def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
     è `ok` è anche un avviso, passato a `dichiara` (R13: «nel rapporto e nell'avviso»)."""
     if not e.solver:
         return
-    r5 = (controllo_r5(a_monte) if a_monte is not None
-          else "R5: non eseguita (nessuna PR a monte)")
-    r6 = (controllo_r6(a_monte) if a_monte is not None
-          else "R6: non eseguita (nessuna PR a monte)")
-    r7 = (controllo_r7(a_monte) if a_monte is not None
-          else "R7: non eseguita (nessuna PR a monte)")
+    r5, r6, r7 = (controlla(regola, controllo, a_monte) for regola, controllo in
+                  (("R5", controllo_r5), ("R6", controllo_r6), ("R7", controllo_r7)))
     righe = ["R4: non eseguita (PBI-511)", r5, r6, r7]
     e.guardia = "\n".join(["## Guardia di processo", *righe])
     if dichiara is not None:
