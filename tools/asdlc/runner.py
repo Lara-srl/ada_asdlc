@@ -60,7 +60,7 @@ from fnmatch import fnmatch
 import importlib.metadata
 from importlib import resources
 from pathlib import Path
-from typing import Iterable, NamedTuple
+from typing import Callable, Iterable, NamedTuple
 
 # La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
 # trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
@@ -4159,7 +4159,7 @@ def esegui_pbi(
             traceback.print_exc()
             e.file_traceback = str(salva_il_traceback(pbi))
             dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
-        guardia_del_solver(e)
+        guardia_del_solver(e, dichiara=dichiara)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4289,11 +4289,13 @@ def controllo_r7(a_monte: AMonte) -> str:
     return "R7: ok"
 
 
-def guardia_del_solver(e: Esito, a_monte: AMonte | None = None) -> None:
+def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
+                       dichiara: Callable[[str], None] | None = None) -> None:
     """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
     `ADR-0030` decisione 4, R13). Li fa il codice, leggendo i fatti; la guardia segnala
     e non blocca (`ADR-0008`). Se il Solver non ha girato, la sezione non c'è. Senza la
-    PR a monte (`a_monte`) i controlli che la leggono sono `non eseguita`."""
+    PR a monte (`a_monte`) i controlli che la leggono sono `non eseguita`. Ogni riga che non
+    è `ok` è anche un avviso, passato a `dichiara` (R13: «nel rapporto e nell'avviso»)."""
     if not e.solver:
         return
     r5 = (controllo_r5(a_monte) if a_monte is not None
@@ -4302,7 +4304,12 @@ def guardia_del_solver(e: Esito, a_monte: AMonte | None = None) -> None:
           else "R6: non eseguita (nessuna PR a monte)")
     r7 = (controllo_r7(a_monte) if a_monte is not None
           else "R7: non eseguita (nessuna PR a monte)")
-    e.guardia = "\n".join(["## Guardia di processo", "R4: non eseguita (PBI-511)", r5, r6, r7])
+    righe = ["R4: non eseguita (PBI-511)", r5, r6, r7]
+    e.guardia = "\n".join(["## Guardia di processo", *righe])
+    if dichiara is not None:
+        for riga in righe:
+            if not riga.endswith(": ok"):
+                dichiara(f"avviso: guardia di processo — {riga}")
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
