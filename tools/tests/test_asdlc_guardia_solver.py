@@ -53,7 +53,7 @@ def repo_a_monte(tmp_path, tocca=(), nuovo=("backlog/PBI-900-x.md",)):
     """Un repository `asdlc` finto: `main` con `AGENTS.md` e un ADR, e il ramo `pbi/x` che
     modifica i file di `tocca` e ne aggiunge di `nuovo`."""
     git_in(tmp_path, "init", "-q", "-b", "main")
-    for file in ("AGENTS.md", "decisions/ADR-0001-uno.md"):
+    for file in ("AGENTS.md", "decisions/ADR-0001-uno.md", "tools/asdlc/runner.py"):
         (tmp_path / file).parent.mkdir(exist_ok=True)
         (tmp_path / file).write_text("uno\n", encoding="utf-8")
     git_in(tmp_path, "add", "-A")
@@ -285,3 +285,28 @@ def test_r5_e_non_eseguita_se_il_fatto_del_fork_manca(tmp_path):
 
     assert riga(guardia_di(con_il_fork(a_monte, None, strict=True)), "R5").startswith(
         "R5: non eseguita")
+
+
+def test_r7_e_violata_per_un_percorso_che_non_sta_nell_albero_di_asdlc_anche_senza_la_frase(
+        tmp_path, monkeypatch):
+    """R13: la prova sta nei fatti, non nel testo che il Solver sceglie di scrivere. Un
+    `backend/app/x.py` non c'è nell'albero del runner: è un file del progetto."""
+    a_monte = repo_a_monte(tmp_path)
+    scrivi_il_pbi_a_monte(tmp_path, ["- `tools/asdlc/runner.py` — il fix.",
+                                     "- `backend/app/x.py` — il codice di dominio."])
+    con_gh(monkeypatch)
+
+    r7 = riga(guardia_di(a_monte), "R7")
+
+    assert r7.startswith("R7: violata")
+    assert "backend/app/x.py" in r7
+    assert "tools/asdlc/runner.py" not in r7
+
+
+def test_r7_non_scambia_per_un_file_del_progetto_un_file_nuovo_in_una_cartella_del_runner(
+        tmp_path, monkeypatch):
+    a_monte = repo_a_monte(tmp_path)
+    scrivi_il_pbi_a_monte(tmp_path, ["- `tools/tests/test_nuovo.py` — il test nuovo."])
+    con_gh(monkeypatch)
+
+    assert riga(guardia_di(a_monte), "R7") == "R7: ok"
