@@ -170,6 +170,18 @@ class Prompt:
 
 
 @dataclass(frozen=True)
+class Solver:
+    # Il tetto dei giri Solver↔Builder per lo stesso PBI (`PBI-507`, decisione 5).
+    giri_massimi: int = 3
+    # Le cause `runner-*` che `segnala_limite_runner` accetta: il progetto le tiene
+    # allineate a `backlog/README.md` di `asdlc` (decisione 8). Vuota, ogni causa
+    # è rifiutata.
+    cause: tuple[str, ...] = ()
+    # Il modello del Solver, come lo vuole `claude --model` (decisione 12).
+    modello: str = "opus"
+
+
+@dataclass(frozen=True)
 class Config:
     git: Git
     backlog: Backlog
@@ -181,6 +193,7 @@ class Config:
     gate: tuple[Gate, ...]
     prompt: Prompt = Prompt()
     junit: Junit = Junit()
+    solver: Solver = Solver()
 
 
 def radice(cwd: Path) -> Path:
@@ -354,6 +367,16 @@ def interpreta(dati: dict, file: str) -> Config:
                 f"{file}: `[junit].comando` deve contenere un argomento con `{{test}}`, "
                 "dove il runner mette i test da lanciare")
         junit = Junit(comando=comando)
+    # Facoltativa: i default valgono per un progetto che non la scrive (`PBI-507`).
+    solver = Solver()
+    if "solver" in sezione.dati:
+        dichiarato = sezione.dentro("solver")
+        dichiarato.solo("giri_massimi", "cause", "modello",
+                        perche="la sezione dice il tetto dei giri, le cause `runner-*` "
+                        "e il modello del Solver")
+        solver = Solver(giri_massimi=dichiarato.positivo("giri_massimi", default=3),
+                        cause=dichiarato.testi("cause", default=()),
+                        modello=dichiarato.testo("modello", default="opus"))
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
@@ -382,6 +405,7 @@ def interpreta(dati: dict, file: str) -> Config:
         gate=tuple(_gate(g) for g in sezione.elenco_di_sezioni("gate")),
         prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
         junit=junit,
+        solver=solver,
     )
 
 
