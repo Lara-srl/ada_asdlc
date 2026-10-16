@@ -24,6 +24,7 @@ variabili lo rende inutilizzabile.
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -211,7 +212,22 @@ def _segnala_limite(argomenti: dict, esito: str) -> dict:
     riproduzione (`PBI-507`, R3)."""
     dichiarato = {"esito": "limite-del-runner"}
     for campo in ("causa", "comando", "output", "commit"):
-        dichiarato[campo] = argomenti.get(campo)
+        valore = argomenti.get(campo)
+        if not isinstance(valore, str) or not valore.strip():
+            return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
+                              "richiama segnala_limite_runner.", errore=True)
+        dichiarato[campo] = valore
+    cause = [c.strip() for c in os.environ.get("ASDLC_CAUSE", "").split(",") if c.strip()]
+    if dichiarato["causa"].strip() not in cause:
+        return _contenuto(f"La causa {dichiarato['causa']!r} non è nell'elenco "
+                          f"{cause}: scegline una e richiama segnala_limite_runner.",
+                          errore=True)
+    esiste = subprocess.run(["git", "cat-file", "-e", f"{dichiarato['commit'].strip()}^{{commit}}"],
+                            capture_output=True).returncode == 0
+    if not esiste:
+        return _contenuto(f"Il commit {dichiarato['commit']!r} non esiste nell'albero: "
+                          "nomina quello in cui il limite si vede e richiama "
+                          "segnala_limite_runner.", errore=True)
     return _scrivi(dichiarato, "segnala_limite_runner", esito)
 
 
