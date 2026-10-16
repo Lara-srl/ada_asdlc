@@ -4273,6 +4273,22 @@ def controllo_r6(a_monte: AMonte) -> str:
     return "R6: ok"
 
 
+def controllo_r7(a_monte: AMonte) -> str:
+    """R7: lo Scope del PBI a monte non elenca file del progetto. Si legge il PBI sul ramo
+    della PR; una riga dello Scope con un percorso fra apici inversi e «del progetto» è
+    un file della parte a valle."""
+    code, testo = esegui(["git", "show", f"{a_monte.ramo}:{a_monte.pbi}"], a_monte.repo,
+                         timeout=120)
+    if code != 0:
+        return f"R7: non eseguita (git non risponde: {una_riga(testo)[:100]})"
+    scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
+    file_del_progetto = [m.group(1) for riga in (scope.group(1) if scope else "").splitlines()
+                         if "del progetto" in riga for m in [re.search(r"`([^`]+)`", riga)] if m]
+    if file_del_progetto:
+        return f"R7: violata (lo Scope elenca {', '.join(file_del_progetto)} del progetto)"
+    return "R7: ok"
+
+
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None) -> None:
     """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
     `ADR-0030` decisione 4, R13). Li fa il codice, leggendo i fatti; la guardia segnala
@@ -4284,7 +4300,9 @@ def guardia_del_solver(e: Esito, a_monte: AMonte | None = None) -> None:
           else "R5: non eseguita (nessuna PR a monte)")
     r6 = (controllo_r6(a_monte) if a_monte is not None
           else "R6: non eseguita (nessuna PR a monte)")
-    e.guardia = "\n".join(["## Guardia di processo", "R4: non eseguita (PBI-511)", r5, r6])
+    r7 = (controllo_r7(a_monte) if a_monte is not None
+          else "R7: non eseguita (nessuna PR a monte)")
+    e.guardia = "\n".join(["## Guardia di processo", "R4: non eseguita (PBI-511)", r5, r6, r7])
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
