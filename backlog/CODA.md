@@ -45,12 +45,13 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-507
 - PBI-508
 - PBI-509
+- PBI-512
 - PBI-510
 - PBI-511
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
-tocca `coda.py` come il 509 e viene dopo. **`PBI-509`** è stato accodato da Francesco il 16/10
+tocca `coda.py` come il 509 e viene dopo. **`PBI-512`** (la PR a monte del Solver, R5 e R6) esce dal 509 per decisione di Francesco del 16/10 e va subito dopo, perché legge `attende:` e il pin. **`PBI-509`** è stato accodato da Francesco il 16/10
 con la sua proposta di formato (`rilascia:`, `attende:`) presa come decisione; il Critic può
 chiedere di dividerlo. **`PBI-511`** (la traccia delle sessioni e il controllo R4) nasce dal giro 1
 del 508 e va dopo il 510; legge la guardia del 508 e accende la sua riga R4. Accodato da
