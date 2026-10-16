@@ -197,7 +197,8 @@ class MondoProgetto:
     """Il checkout di un progetto con un PBI fermo che `attende:` un PBI di `asdlc`,
     un `origin` vero e un `gh` finto che racconta la PR a monte, i suoi tag e la PR del pin."""
 
-    def __init__(self, tmp_path, stato_monte="MERGED", tag=("v0.4.0",), pin=None):
+    def __init__(self, tmp_path, stato_monte="MERGED", tag=("v0.4.0",), pin=None,
+                 contiene="ahead"):
         self.origin = tmp_path / "progetto-origin.git"
         self.repo = tmp_path / "progetto"
         git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.origin))
@@ -212,6 +213,7 @@ class MondoProgetto:
         git(self.repo, "commit", "-qm", "base")
         git(self.repo, "push", "-q", "origin", "main")
         self.stato_monte, self.tag, self.pin = stato_monte, list(tag), pin
+        self.contiene = contiene
         self.chiamate: list[list[str]] = []
 
     def esegui(self, cmd, cwd):
@@ -224,7 +226,7 @@ class MondoProgetto:
         if cmd[:2] == ["gh", "api"] and cmd[2].endswith("/tags"):
             return 0, "\n".join(self.tag)
         if cmd[:2] == ["gh", "api"] and "/compare/" in cmd[2]:
-            return 0, "ahead"
+            return 0, self.contiene
         if cmd[:3] == ["gh", "pr", "list"]:
             return 0, json.dumps([{"number": 40}] if self.pin else [])
         if cmd[:3] == ["gh", "pr", "view"] and cmd[3] == "40":
@@ -265,3 +267,18 @@ def test_un_pbi_fermo_con_attende_e_pr_a_monte_mergiata_con_tag_apre_la_pr_del_p
     [crea] = m.comandi("gh", "pr", "create")
     assert crea[crea.index("--base") + 1] == "main"
     assert crea[crea.index("--head") + 1] == ramo
+
+
+@pytest.mark.parametrize("situazione", [
+    {"stato_monte": "OPEN"},
+    {"stato_monte": "CLOSED"},
+    {"tag": ()},
+    {"contiene": "behind"},
+], ids=["pr-aperta", "pr-chiusa-senza-merge", "nessun-tag", "il-tag-non-contiene-il-merge"])
+def test_senza_pr_a_monte_mergiata_e_tag_che_la_contiene_non_si_apre_niente(progetto, situazione):
+    m = progetto(**situazione)
+
+    coda.pin(m.repo)
+
+    assert m.rami_su_origin() == []
+    assert m.comandi("gh", "pr", "create") == []
