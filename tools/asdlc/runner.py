@@ -4295,7 +4295,7 @@ def controllo_r6(a_monte: AMonte) -> str:
 
 def controllo_r7(a_monte: AMonte) -> str:
     """R7: lo Scope del PBI a monte non elenca file del progetto. Si legge il PBI sul ramo
-    della PR. Un percorso fra apici inversi in una riga dello Scope è del progetto se la
+    della PR. Ogni percorso fra apici inversi in una riga dello Scope è del progetto se la
     riga dice «del progetto» (per `asdlc.toml`, che esiste in entrambi), oppure se né il
     percorso né la sua prima cartella stanno nell'albero di `asdlc` al ramo della PR
     (`git ls-tree`): la prova sta nei fatti e non nella formula del Solver. Un file nuovo
@@ -4313,14 +4313,11 @@ def controllo_r7(a_monte: AMonte) -> str:
     scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
     file_del_progetto = []
     for riga in (scope.group(1) if scope else "").splitlines():
-        m = re.search(r"`([^`]+)`", riga)
-        if m is None:
-            continue
-        percorso = m.group(1)
-        fuori_dall_albero = (percorso not in file_del_runner
-                             and percorso.split("/")[0] not in cartelle_del_runner)
-        if "del progetto" in riga or fuori_dall_albero:
-            file_del_progetto.append(percorso)
+        for percorso in re.findall(r"`([^`]+)`", riga):
+            fuori_dall_albero = (percorso not in file_del_runner
+                                 and percorso.split("/")[0] not in cartelle_del_runner)
+            if "del progetto" in riga or fuori_dall_albero:
+                file_del_progetto.append(percorso)
     if file_del_progetto:
         return f"R7: violata (lo Scope elenca {', '.join(file_del_progetto)} del progetto)"
     return "R7: ok"

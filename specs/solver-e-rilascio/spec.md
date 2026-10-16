@@ -146,8 +146,8 @@ salvo dove è scritto che il giro chiude `senza esito`.
   stia su un fork: se sta in `asdlc` è `violata`, se il fatto manca è `non eseguita`. R5 non
   segue le rinomine: spostare `AGENTS.md` o un ADR esistente lo cancella dal suo posto ed è
   `violata`. R6 confronta la `causa` a parola intera (`runner-xy` non è `runner-x`) e chiede
-  a `gh` fino a 1000 PR aperte: se la lista torna piena non ha visto tutto ed è `non eseguita (lista troncata)`. R7 riconosce un file
-  del progetto dai fatti: un percorso dello Scope che non sta nell'albero di `asdlc` al ramo
+  a `gh` fino a 1000 PR aperte: se la lista torna piena non ha visto tutto ed è `non eseguita (lista troncata)`. R7 legge tutti i percorsi di
+  ogni riga dello Scope e riconosce un file del progetto dai fatti: un percorso dello Scope che non sta nell'albero di `asdlc` al ramo
   della PR, né nella sua prima cartella, oltre alla dicitura «del progetto» per `asdlc.toml`.
   Ogni riga `violata` o `non eseguita` è anche un avviso nella nota del giro. Il Critic
   rilegge l'output del Solver e non rifà questi controlli.
