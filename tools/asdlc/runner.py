@@ -4264,18 +4264,21 @@ def controllo_r5(a_monte: AMonte) -> str:
 
 def controllo_r6(a_monte: AMonte) -> str:
     """R6: nessun altro PBI in `backlog/` né PR aperta in `asdlc` con la stessa `causa`.
-    Il PBI e la PR del giro stesso non contano."""
+    Il PBI e la PR del giro stesso non contano. La causa si confronta a parola intera:
+    `runner-xy` e `runner-x-due` non sono `runner-x`."""
+    causa = re.escape(a_monte.causa)
     for file in sorted((a_monte.repo / "backlog").glob("PBI-*.md")):
         if file.relative_to(a_monte.repo).as_posix() == a_monte.pbi:
             continue
-        if f"**Causa:** {a_monte.causa}" in file.read_text(encoding="utf-8"):
+        if re.search(rf"\*\*Causa:\*\*\s*{causa}(?![\w-])", file.read_text(encoding="utf-8")):
             return f"R6: violata (la causa {a_monte.causa} è già in {file.name})"
     code, uscita = esegui(["gh", "pr", "list", "--state", "open", "--json",
                            "number,title,body,headRefName"], a_monte.repo, timeout=300)
     if code != 0:
         return f"R6: non eseguita (gh non risponde: {una_riga(uscita)[:100]})"
     for pr in json.loads(uscita):
-        if pr["headRefName"] != a_monte.ramo and a_monte.causa in f"{pr['title']}\n{pr['body']}":
+        if (pr["headRefName"] != a_monte.ramo
+                and re.search(rf"(?<![\w-]){causa}(?![\w-])", f"{pr['title']}\n{pr['body']}")):
             return f"R6: violata (la causa {a_monte.causa} è già nella PR #{pr['number']})"
     return "R6: ok"
 
