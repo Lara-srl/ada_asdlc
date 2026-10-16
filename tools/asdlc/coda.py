@@ -797,6 +797,9 @@ def ci_verde(repo: Path) -> bool:
 def rilascia(repo: Path) -> list[str]:
     """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
     `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive."""
+    if not any(RE_RILASCIA.search(f.read_text(encoding="utf-8"))
+               for f in (repo / BACKLOG).glob("*.md")):
+        return []
     codice, uscita = esegui(["gh", "pr", "list", "--state", "merged", "--limit", str(LIMITE_PR),
                              "--json", "title,headRefName,mergeCommit"], repo)
     if codice != 0:
@@ -888,11 +891,14 @@ def pin(repo: Path) -> list[str]:
     """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
     `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
     righe = []
+    in_attesa = attese(repo)
+    if not in_attesa:
+        return righe
     try:
         fermi = pbi_con_ramo(repo) - pbi_mergiati(repo)
     except Guasto as guasto:
-        return [f"pin: {guasto}"]
-    for file, a_monte, pbi_a_monte in attese(repo):
+        return [f"pin: {in_una_riga(str(guasto))}"]
+    for file, a_monte, pbi_a_monte in in_attesa:
         nome = asdlc_config.regex_del_modello(CFG.backlog.file).fullmatch(file)
         if nome is None or CFG.backlog.id_di(nome.group("n")) not in fermi:
             continue
@@ -1017,6 +1023,10 @@ def smista(argv: list[str] | None = None) -> int:
 
 def passaggio(a: argparse.Namespace) -> int:
     """Il tick col suo lucchetto in mano: la pausa, la decisione, il lancio."""
+    # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
+    for riga in () if a.dry_run else pin(a.repo):
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
@@ -1028,6 +1038,9 @@ def passaggio(a: argparse.Namespace) -> int:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
+    for riga in () if a.dry_run else rilascia(a.repo):
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
         print(riga)
         scrivi_nel_log(a.repo, riga)
