@@ -250,3 +250,14 @@ def test_il_quarto_giro_del_solver_non_parte_e_la_nota_lo_avvisa(giro_fermato, t
     assert esito.solver == []
     assert esito.giri_solver == 3
     assert "tetto dei giri del Solver" in esito.nota
+
+
+def test_chiedi_a_francesco_ferma_il_giro_con_un_avviso_che_porta_la_domanda(giro_fermato):
+    """R12: la domanda del Solver a Francesco chiude il giro con un avviso nella nota,
+    non con un blocco (`ADR-0008`); l'esito `intento` resta registrato."""
+    intento = {"esito": "intento", "domanda": "quale dei due lo scope?"}
+
+    esito, _ = giro_fermato({"solver": intento})
+
+    assert esito.solver == [intento]
+    assert "avviso: il Solver chiede a Francesco: quale dei due lo scope?" in esito.nota
