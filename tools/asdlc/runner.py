@@ -1010,7 +1010,7 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     """Scrive la config MCP che fa partire il server dell'esito per questa
     invocazione, accanto al suo file d'esito, e ne torna il percorso.
 
-    Un ruolo che non è `builder` o `critic`, o un file d'esito mancante,
+    Un ruolo che non è `builder`, `critic` o `solver`, o un file d'esito mancante,
     sollevano `ValueError` **prima** del lancio. Il server si fermerebbe da sé
     all'avvio, ma dentro un giro quella fermata arriverebbe come un agente
     senza esito, dopo i minuti del Builder (PBI-367, decisione 4).
@@ -1024,10 +1024,15 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     if esito is None:
         raise ValueError(f"il {ruolo} non ha un file d'esito in cui il server possa scrivere")
     config = esito.with_suffix(".mcp.json")
+    ambiente = {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)}
+    if ruolo == "solver":
+        # Le cause `runner-*` che il server accetta: la lista del progetto, senza
+        # rete (`PBI-507`, decisione 8).
+        ambiente["ASDLC_CAUSE"] = ",".join(CFG.solver.cause)
     config.write_text(json.dumps({"mcpServers": {"asdlc": {
         "command": str(comando_del_pacchetto(SERVER_DELL_ESITO)),
         "args": [],
-        "env": {"ASDLC_RUOLO": ruolo, "ASDLC_ESITO": str(esito)},
+        "env": ambiente,
     }}}, indent=2, ensure_ascii=False), encoding="utf-8")
     return config
 
