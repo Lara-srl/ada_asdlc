@@ -209,3 +209,12 @@ def test_la_sezione_non_cambia_con_l_uscita_grezza_del_solver(tmp_path, monkeypa
     assert sezioni[0] == sezioni[1]
     assert sezioni[0].splitlines() == [INTESTAZIONE, "R4: non eseguita (PBI-511)", "R5: ok",
                                        "R6: ok", "R7: ok"]
+
+
+def test_il_prompt_del_critic_rimanda_alla_guardia_e_gli_chiede_di_rileggere_il_solver():
+    """Scope di PBI-508: il Critic rilegge l'output del Solver e non rifà i controlli che la
+    sezione «Guardia di processo» ha già fatto."""
+    testo = runner.prompt_del_pacchetto("critic")
+
+    assert "Guardia di processo" in testo
+    assert "output del Solver" in testo
