@@ -121,6 +121,14 @@ def test_righe_perse_una_riga_barrata_che_sparisce_non_conta():
     assert _perse(vecchio, nuovo) == []
 
 
+def test_righe_perse_una_riga_che_nel_nuovo_compare_barrata_non_e_persa():
+    corpo = RIGA_A.removeprefix("- ")
+    vecchio = f"{RIGA_A}\n{RIGA_B}\n"
+    nuovo = f"- ~~{corpo}~~ → superata da {RIGA_B.split(' · ')[-1]}\n{RIGA_B}\n"
+
+    assert _perse(vecchio, nuovo) == []
+
+
 @pytest.mark.progetto_ospite
 def test_righe_perse_il_registro_aggiunto_in_un_secondo_commit_non_perde_righe(tmp_path):
     import subprocess
