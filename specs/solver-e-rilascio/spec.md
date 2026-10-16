@@ -4,7 +4,8 @@ Lo **stato** voluto del sistema (come funziona). Le decisioni e le alternative s
 `decisions/ADR-0030-il-solver-smista-i-blocchi-e-il-rilascio-corre-da-solo.md`; ciò che
 cambia, PBI per PBI, sta in `backlog/`.
 
-> **Stato di costruzione: niente di questo esiste ancora nel runner.** La spec descrive il
+> **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`); R8-R11 esistono
+> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) non ancora.** La spec descrive il
 > comportamento a cui i PBI devono arrivare. Oggi la catena è manuale (v. l'ADR, Contesto).
 
 ## Il ciclo
@@ -98,6 +99,12 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Se manca:** nessun tag; un PBI senza `rilascia:` non produce rilascio, ed è il caso dei
   PBI di documentazione.
 
+- **Dove sta:** `coda.rilascia()`, chiamata dal tick dopo `allinea()` (non con `--dry-run`).
+  Cerca le PR mergiate (`gh pr list`), legge `rilascia:` dal PBI nel checkout, chiede la CI
+  (`gh run list`) e salta il PBI il cui merge è già contenuto in un tag (`git tag --contains`).
+  Il tag è `[rilascio].prefisso_tag` + `X.Y.Z`, successivo all'ultimo: `patch` alza Z, `minor`
+  alza Y e azzera Z. Senza `rilascia:` in nessun PBI non chiede niente al mondo.
+
 ### R9 — Il giro del tag lavora in un worktree usa-e-getta
 
 - **Cosa:** `--registra` e il tag.
@@ -105,6 +112,10 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Prova:** i comandi girano in un worktree separato dal checkout del tick; il checkout
   del tick resta pulito.
 - **Se manca:** il tick si ferma con un avviso (un albero sporco ferma già il tick).
+
+- **Dove sta:** `runner.worktree_di_rilascio()`, un worktree staccato in una cartella
+  temporanea fuori dal checkout, tolto anche se il corpo alza. `--registra` legge i rapporti
+  del checkout; le righe che scrive restano nel worktree e spariscono con lui.
 
 ### R10 — Il progetto vede il tag e propone il pin
 
@@ -115,12 +126,21 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Se manca:** il progetto resta in attesa. Quando c'è, apre una PR che cambia solo la riga
   `[ambiente].installa` di `asdlc.toml`; la parte specifica del progetto è del PBI a valle.
 
+- **Dove sta:** `coda.pin()`, chiamata prima della pausa (non con `--dry-run`). Considera solo
+  i PBI fermi: ramo su `origin` e nessun merge, perché il file con `attende:` resta in
+  `backlog/`. Il tag è il primo di `gh api repos/<repo>/tags` che contiene il merge
+  (`compare`: `ahead` o `identical`). Il ramo è `pin/asdlc-<tag>`; con una PR già su quel
+  ramo, in qualunque stato, non se ne apre un'altra.
+
 ### R11 — La pausa si toglie solo a pin mergiato
 
 - **Cosa:** la ripartenza del PBI fermo.
 - **Quando:** a ogni tick del progetto, dopo R10.
 - **Prova:** la PR del pin è `MERGED`, verificata con `gh pr view`.
 - **Se manca:** la pausa resta.
+
+- **Dove sta:** `coda.stato_del_pin()`, che chiede lo stato a `gh pr view`. Solo `MERGED` toglie
+  `~/asdlc-tick.pausa`; `OPEN`, `CLOSED` o un `gh` muto la lasciano.
 
 ### R12 — Il ciclo ha un tetto, e Francesco è l'ultimo
 
