@@ -66,8 +66,18 @@ def repo_a_monte(tmp_path, tocca=(), nuovo=("backlog/PBI-900-x.md",)):
         (tmp_path / file).write_text("nuovo\n", encoding="utf-8")
     git_in(tmp_path, "add", "-A")
     git_in(tmp_path, "commit", "-q", "-m", "ramo")
-    return runner.AMonte(repo=tmp_path, ramo="pbi/x", base="main",
-                         pbi="backlog/PBI-900-x.md", causa="runner-x")
+    return con_il_fork(runner.AMonte(repo=tmp_path, ramo="pbi/x", base="main",
+                                     pbi="backlog/PBI-900-x.md", causa="runner-x"), True)
+
+
+def con_il_fork(a_monte, da_un_fork, strict=False):
+    """La stessa PR a monte con il fatto «la testa sta su un fork» (`isCrossRepository` di
+    `gh pr view`). Senza il campo: con `strict` è il fallimento del test, altrimenti la PR
+    resta com'è."""
+    if "da_un_fork" not in runner.AMonte.__dataclass_fields__:
+        assert not strict, "AMonte non porta il fatto del fork"
+        return a_monte
+    return runner.AMonte(**{**a_monte.__dict__, "da_un_fork": da_un_fork})
 
 
 def guardia_di(a_monte):
@@ -257,3 +267,21 @@ def test_un_gh_che_scrive_un_avviso_prima_del_json_o_un_pbi_illeggibile_e_non_es
     (tmp_path / "backlog" / "PBI-701-binario.md").write_bytes(b"\xff\xfe\x00 non utf-8")
 
     assert riga(guardia_di(a_monte), "R6").startswith("R6: non eseguita")
+
+
+def test_r5_e_violata_se_la_testa_della_pr_non_sta_su_un_fork(tmp_path):
+    """R5: «un ramo su un fork»; una PR da `pbi/x` dentro `asdlc` è la scrittura diretta."""
+    a_monte = repo_a_monte(tmp_path)
+
+    r5 = riga(guardia_di(con_il_fork(a_monte, False, strict=True)), "R5")
+
+    assert r5.startswith("R5: violata")
+    assert "fork" in r5
+
+
+def test_r5_e_non_eseguita_se_il_fatto_del_fork_manca(tmp_path):
+    """Un fatto che non c'è non è un `ok`."""
+    a_monte = repo_a_monte(tmp_path)
+
+    assert riga(guardia_di(con_il_fork(a_monte, None, strict=True)), "R5").startswith(
+        "R5: non eseguita")
