@@ -328,3 +328,12 @@ def test_risolvi_rifiuta_un_evidenza_fuori_dall_albero(tmp_path, monkeypatch, ev
 
     assert risposta["isError"]
     assert not (tmp_path / "a.json").exists()
+
+
+def test_l_invocazione_del_solver_entra_nelle_invocazioni_del_rapporto(giro_fermato):
+    """Una voce per invocazione di un agente, nell'ordine: anche il Solver, e anche quando
+    chiude `senza esito`, perché lì le sue chiamate e il suo stderr si ritrovano dal rapporto."""
+    esito, _ = giro_fermato({}, {"solver": "boh"})
+
+    assert [i["ruolo"] for i in esito.invocazioni] == ["builder", "solver"]
+    assert esito.invocazioni[-1]["codice"] == 0
