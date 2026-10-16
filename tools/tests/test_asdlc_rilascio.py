@@ -397,7 +397,7 @@ def test_con_dry_run_il_tick_non_rilascia_e_non_apre_il_pin(tick):
 
 import ast
 
-PACCHETTO = Path(__file__).resolve().parents[1] / "asdlc"
+PACCHETTO = Path(__file__).resolve().parent.parent / "asdlc"
 
 
 def chiamate_che_uniscono_una_pr(sorgente: str) -> list[int]:
