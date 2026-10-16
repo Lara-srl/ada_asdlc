@@ -182,6 +182,14 @@ class Solver:
 
 
 @dataclass(frozen=True)
+class Rilascio:
+    # Il remote git che punta al fork di `asdlc` da cui il Solver apre la PR a monte
+    # (`PBI-509`, R5), e il prefisso del tag di rilascio (`ADR-0026`: `vX.Y.Z`).
+    remote_fork: str = "fork"
+    prefisso_tag: str = "v"
+
+
+@dataclass(frozen=True)
 class Config:
     git: Git
     backlog: Backlog
@@ -194,6 +202,7 @@ class Config:
     prompt: Prompt = Prompt()
     junit: Junit = Junit()
     solver: Solver = Solver()
+    rilascio: Rilascio = Rilascio()
 
 
 def radice(cwd: Path) -> Path:
@@ -377,6 +386,15 @@ def interpreta(dati: dict, file: str) -> Config:
         solver = Solver(giri_massimi=dichiarato.positivo("giri_massimi", default=3),
                         cause=dichiarato.testi("cause", default=()),
                         modello=dichiarato.testo("modello", default="opus"))
+    # Facoltativa: i default valgono per un progetto che non la scrive (`PBI-509`).
+    rilascio = Rilascio()
+    if "rilascio" in sezione.dati:
+        dichiarato = sezione.dentro("rilascio")
+        dichiarato.solo("remote_fork", "prefisso_tag",
+                        perche="la sezione dice il remote del fork di `asdlc` e il "
+                        "prefisso del tag")
+        rilascio = Rilascio(remote_fork=dichiarato.testo("remote_fork", default="fork"),
+                            prefisso_tag=dichiarato.testo("prefisso_tag", default="v"))
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
@@ -406,6 +424,7 @@ def interpreta(dati: dict, file: str) -> Config:
         prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
         junit=junit,
         solver=solver,
+        rilascio=rilascio,
     )
 
 
