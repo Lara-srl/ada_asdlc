@@ -102,3 +102,49 @@ def test_r5_e_ok_per_un_ramo_che_aggiunge_solo_file_nuovi(tmp_path):
     a_monte = repo_a_monte(tmp_path, nuovo=("backlog/PBI-900-x.md", "decisions/ADR-0099-n.md"))
 
     assert riga(guardia_di(a_monte), "R5") == "R5: ok"
+
+
+def con_gh(monkeypatch, codice=0, uscita="[]"):
+    """`gh` finto: risponde `uscita` con `codice`; ogni altro comando va al varco vero."""
+    vero = runner.esegui
+
+    def _esegui(cmd, cwd, *a, **k):
+        if cmd[0] == "gh":
+            return codice, uscita
+        return vero(cmd, cwd, *a, **k)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+
+
+def test_r6_e_violata_se_un_altro_pbi_ha_la_stessa_causa_e_cita_il_pbi(tmp_path, monkeypatch):
+    """Un file in `backlog/` con `**Causa:** runner-x` e una seconda segnalazione di `runner-x`."""
+    a_monte = repo_a_monte(tmp_path)
+    (tmp_path / "backlog" / "PBI-700-prima.md").write_text(
+        "# PBI-700\n\n**Causa:** runner-x\n", encoding="utf-8")
+    con_gh(monkeypatch)
+
+    r6 = riga(guardia_di(a_monte), "R6")
+
+    assert r6.startswith("R6: violata")
+    assert "PBI-700-prima.md" in r6
+
+
+def test_r6_e_violata_se_una_pr_aperta_porta_la_stessa_causa_e_cita_la_pr(tmp_path, monkeypatch):
+    a_monte = repo_a_monte(tmp_path)
+    con_gh(monkeypatch, uscita='[{"number": 12, "title": "PBI-701: runner-x", "body": "",'
+                               ' "headRefName": "pbi/altro"}]')
+
+    r6 = riga(guardia_di(a_monte), "R6")
+
+    assert r6.startswith("R6: violata")
+    assert "#12" in r6
+
+
+def test_r6_e_ok_se_nessun_altro_pbi_ne_pr_ha_la_causa(tmp_path, monkeypatch):
+    """Il PBI della PR stessa non è un duplicato di sé, né lo è la sua PR."""
+    a_monte = repo_a_monte(tmp_path)
+    (tmp_path / "backlog" / "PBI-900-x.md").write_text("**Causa:** runner-x\n", encoding="utf-8")
+    con_gh(monkeypatch, uscita='[{"number": 13, "title": "runner-x", "body": "",'
+                               ' "headRefName": "pbi/x"}]')
+
+    assert riga(guardia_di(a_monte), "R6") == "R6: ok"
