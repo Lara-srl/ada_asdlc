@@ -86,8 +86,11 @@ sostituiti da finti; nessun test usa la rete.
 - [ ] **Un errore in `rilascia()` o in `pin()` non ferma il tick.** Un JSON illeggibile (`pin`)
       e un worktree che non si crea (`rilascia`) diventano un avviso e il tick va avanti
       con gli altri passi e gli altri progetti (`ADR-0008`).
-- [x] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
-      (R10-R11).
+- [ ] **Nessun `gh pr merge` esce dal tick.** Un test che esegue davvero `rilascia()` e `pin()`
+      con un finto `gh` e controlla che nessuna chiamata sia `pr merge`, in uno scenario che
+      rilascia e in uno che apre il pin (R10-R11). Deve poter fallire: aggiungere una chiamata
+      `gh pr merge` in uno dei due passi lo rende rosso. Un test che legge i sorgenti con l'AST
+      non lo è: nasce verde e non morde (il gate del rosso lo ferma, giro 4).
 
 **Non regressione:** il tick di un progetto senza `attende:` e senza `rilascia:` fa quello di
 prima; `python3 -m pytest -q tools/tests` resta verde.
@@ -111,3 +114,30 @@ backlog/PBI-509-il-rilascio-a-tick.md` e un commit. Niente da lasciare.
 gli altri progetti; nessuna eccezione esce da `tick()`. Casi: JSON illeggibile (`pin`),
 worktree che non si crea (`rilascia`). RED prima, poi GREEN; alla fine si spunta la riga e
 si aggiorna la spec nello stesso commit.
+
+## Il giro 5, e cosa si riprende
+
+Il giro 4 (16/10) ha fatto il criterio sulle eccezioni (RED `552daf2`, GREEN `2d68306`) e si
+è fermato a `rosso-mai-visto` su due test del giro 2 che nascono verdi e non mordono.
+Francesco ha scelto di tenere il criterio sul merge, ma con un test che morde (scelta «b»).
+
+**Si riprende il tag `giro-fermato/pbi-509-giro4-20261016`:** ramo da quel tag, niente
+cherry-pick; il file di questo PBI si prende da `main` (`git checkout origin/main --
+backlog/PBI-509-il-rilascio-a-tick.md`) e poi si spunta la riga del criterio sulle eccezioni (in
+`main` è `[ ]`, ma il codice e i test ci sono già). Niente da lasciare.
+
+**Da fare, due cose:**
+
+1. **`0fb1cea`, il test del `--dry-run`** («il tick non rilascia e non apre il pin»). Tutti i
+   173 mutanti di `coda.py::passaggio` lo lasciano verde: il test non dipende dalla riga
+   `a.dry_run`. Va riscritto perché fallisca se quel controllo si toglie: un finto `rilascia`
+   e un finto `pin` che registrano la chiamata, e `tick("--dry-run")` che non deve chiamarli
+   mentre `tick()` senza opzione sì (un solo test con i due casi, così il verde è la
+   differenza e non l'assenza).
+2. **`6a874a0`, il test dell'AST sul `gh pr merge`.** Si sostituisce con il test del criterio
+   scritto sopra (finto `gh`, `rilascia()` e `pin()` eseguiti davvero), e si toglie l'helper
+   `chiamate_che_uniscono_una_pr` con il suo test, che non guardano codice di produzione.
+
+Il rosso si osserva come sempre: il test nuovo prima fallisce contro una versione del passo
+che chiama `gh pr merge` (o senza il controllo del dry-run), poi passa. Spec, README e
+`AUTOMAZIONE.md` nello stesso commit, dove nominano il test dell'AST.
