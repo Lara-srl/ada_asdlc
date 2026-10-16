@@ -70,7 +70,9 @@ Su `main` i due elenchi non esistono: ogni criterio è un **rosso atteso**.
       e verifica che ogni riga che comincia per `- ` abbia data ISO, tre separatori `·` e un
       riferimento non vuoto.
 - [x] **Il registro è solo in aggiunta.** `righe_perse(vecchio, nuovo)` restituisce le righe
-      non barrate di `vecchio` che in `nuovo` mancano. Rosso atteso: la funzione non esiste.
+      non barrate di `vecchio` che in `nuovo` mancano: una riga che in `nuovo` compare barrata
+      (`- ~~<corpo>~~ → …`) non manca, barrarla è la modifica lecita. Rosso atteso: la funzione
+      non esiste.
       I test la provano su testi in memoria (nessuna riga persa; una cancellata; una riscritta;
       una barrata che sparisce senza che conti) e su `backlog/PRECEDENTI.md` confrontato con la
       versione del commit precedente in un repository temporaneo di due commit.
