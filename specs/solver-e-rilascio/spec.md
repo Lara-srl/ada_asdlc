@@ -144,7 +144,8 @@ salvo dove è scritto che il giro chiude `senza esito`.
   leggono la PR a monte (git e `gh`) e sono `non eseguita` senza PR o se `gh` o git non
   rispondono, scadono o rendono un'uscita illeggibile. R5 vuole anche che la testa della PR
   stia su un fork: se sta in `asdlc` è `violata`, se il fatto manca è `non eseguita`. R6
-  confronta la `causa` a parola intera (`runner-xy` non è `runner-x`). R7 riconosce un file
+  confronta la `causa` a parola intera (`runner-xy` non è `runner-x`) e chiede a `gh` fino a 1000 PR aperte: se la lista torna piena
+  non ha visto tutto ed è `non eseguita (lista troncata)`. R7 riconosce un file
   del progetto dai fatti: un percorso dello Scope che non sta nell'albero di `asdlc` al ramo
   della PR, né nella sua prima cartella, oltre alla dicitura «del progetto» per `asdlc.toml`.
   Ogni riga `violata` o `non eseguita` è anche un avviso nella nota del giro. Il Critic

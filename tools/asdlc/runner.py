@@ -4262,6 +4262,11 @@ def controllo_r5(a_monte: AMonte) -> str:
     return "R5: ok"
 
 
+# `gh pr list` taglia in silenzio al limite (30 se non glielo si dà): una lista piena non dice
+# di aver visto tutte le PR aperte.
+LIMITE_PR_R6 = 1000
+
+
 def controllo_r6(a_monte: AMonte) -> str:
     """R6: nessun altro PBI in `backlog/` né PR aperta in `asdlc` con la stessa `causa`.
     Il PBI e la PR del giro stesso non contano. La causa si confronta a parola intera:
@@ -4272,11 +4277,14 @@ def controllo_r6(a_monte: AMonte) -> str:
             continue
         if re.search(rf"\*\*Causa:\*\*\s*{causa}(?![\w-])", file.read_text(encoding="utf-8")):
             return f"R6: violata (la causa {a_monte.causa} è già in {file.name})"
-    code, uscita = esegui(["gh", "pr", "list", "--state", "open", "--json",
-                           "number,title,body,headRefName"], a_monte.repo, timeout=300)
+    code, uscita = esegui(["gh", "pr", "list", "--state", "open", "--limit", str(LIMITE_PR_R6),
+                           "--json", "number,title,body,headRefName"], a_monte.repo, timeout=300)
     if code != 0:
         return f"R6: non eseguita (gh non risponde: {una_riga(uscita)[:100]})"
-    for pr in json.loads(uscita):
+    aperte = json.loads(uscita)
+    if len(aperte) >= LIMITE_PR_R6:
+        return f"R6: non eseguita (lista troncata a {LIMITE_PR_R6} PR)"
+    for pr in aperte:
         if (pr["headRefName"] != a_monte.ramo
                 and re.search(rf"(?<![\w-]){causa}(?![\w-])", f"{pr['title']}\n{pr['body']}")):
             return f"R6: violata (la causa {a_monte.causa} è già nella PR #{pr['number']})"
