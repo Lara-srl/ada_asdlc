@@ -72,18 +72,18 @@ tale, la divisione in due è lecita e si dichiara (`ADR-0015`).
 Su `main` non c'è rilascio: ogni criterio è un **rosso atteso**. `gh` e `git remote` sono
 sostituiti da finti; nessun test usa la rete.
 
-- [ ] **Un PBI con `rilascia: patch` mergiato e CI verde produce il tag.** Da `v0.3.0` a
+- [x] **Un PBI con `rilascia: patch` mergiato e CI verde produce il tag.** Da `v0.3.0` a
       `v0.3.1`; con `minor`, `v0.4.0` (R8).
-- [ ] **Senza `rilascia:` non c'è tag.** Lo stesso scenario, nessun tag (R8).
-- [ ] **CI rossa o tag già esistente: nessun tag.** Due casi (R8).
-- [ ] **Il rilascio gira in un worktree separato e il checkout del tick resta pulito.** Il test
+- [x] **Senza `rilascia:` non c'è tag.** Lo stesso scenario, nessun tag (R8).
+- [x] **CI rossa o tag già esistente: nessun tag.** Due casi (R8).
+- [x] **Il rilascio gira in un worktree separato e il checkout del tick resta pulito.** Il test
       verifica lo stato del checkout prima e dopo, e che il worktree sia tolto (R9).
-- [ ] **Un PBI fermo con `attende:` e PR a monte `MERGED` con tag apre la PR del pin.** La PR
+- [x] **Un PBI fermo con `attende:` e PR a monte `MERGED` con tag apre la PR del pin.** La PR
       cambia solo `[ambiente].installa` (R10).
-- [ ] **La PR a monte non `MERGED` non apre niente.** Il progetto resta in attesa (R10).
-- [ ] **La pausa si toglie solo a PR del pin `MERGED`,** verificata con `gh pr view`; con la
+- [x] **La PR a monte non `MERGED` non apre niente.** Il progetto resta in attesa (R10).
+- [x] **La pausa si toglie solo a PR del pin `MERGED`,** verificata con `gh pr view`; con la
       PR aperta o chiusa senza merge la pausa resta (R11, due casi).
-- [ ] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
+- [x] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
       (R10-R11).
 
 **Non regressione:** il tick di un progetto senza `attende:` e senza `rilascia:` fa quello di
@@ -91,12 +91,20 @@ prima; `python3 -m pytest -q tools/tests` resta verde.
 
 ## Il giro 3, e cosa si riprende
 
-Il giro 2 si è fermato il 16/10 con otto criteri su dieci fatti e una domanda su R5 e R6.
-Francesco ha deciso: la PR a monte del Solver esce dal PBI e diventa `PBI-512`; qui resta il
-rilascio, il pin e la pausa, più la guardia sulle eccezioni (criterio nuovo, sopra).
+Il giro 2 (16/10) si è fermato con otto criteri su dieci e una domanda su R5 e R6. Francesco ha
+deciso: la PR a monte del Solver esce e diventa `PBI-512`; qui restano rilascio, pin e pausa,
+più la guardia sulle eccezioni. Il giro 3 ha ripreso i 24 commit, ma ha perso il criterio
+della guardia nel conflitto sul file di questo PBI e si è fermato a chiederlo (22:27).
 
-**Si riprende il tag `giro-fermato/pbi-509-giro2-20261016`** (e761c6e), cioè tutti i 24 commit
-del giro, in ordine con `git cherry-pick bfdfae0^..e761c6e`. Niente da lasciare. Nel commit
-31a0083 il file di questo PBI va in conflitto con la riduzione di sopra: si tengono le otto
-spunte `[x]` già fatte e i criteri come stanno qui. Resta da fare solo il criterio della
-guardia sulle eccezioni: RED, poi GREEN, in `coda.py`.
+**Si riprende il tag `giro-fermato/pbi-509-giro3-20261016`:** è il codice completo, gate verde
+(1004 test), con tutti gli sha del giro 2 già dentro. Si crea il ramo da quel tag e non si
+cherry-picka niente. Sul file di questo PBI vale la versione di `main`, che ha già le otto
+spunte `[x]` e il criterio nuovo, scritto sopra: `git checkout origin/main --
+backlog/PBI-509-il-rilascio-a-tick.md` e un commit. Niente da lasciare.
+
+**Resta da fare un solo criterio, quello sulle eccezioni** («Un errore in `rilascia()` o in
+`pin()` non ferma il tick»), in `tools/asdlc/coda.py`, nelle due funzioni `rilascia()` e
+`pin()`. Esito atteso: un avviso (`ADR-0008`) e il tick che prosegue con gli altri passi e
+gli altri progetti; nessuna eccezione esce da `tick()`. Casi: JSON illeggibile (`pin`),
+worktree che non si crea (`rilascia`). RED prima, poi GREEN; alla fine si spunta la riga e
+si aggiorna la spec nello stesso commit.
