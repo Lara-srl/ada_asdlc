@@ -129,3 +129,12 @@ def test_un_pbi_con_rilascia_minor_azzera_la_patch(mondo):
     coda.rilascia(m.repo)
 
     assert m.tag_su_origin() == ["v0.3.0", "v0.4.0"]
+
+
+def test_senza_rilascia_non_c_e_tag(mondo):
+    """Lo stesso scenario, ma il PBI non dichiara `rilascia:` (un PBI di documentazione)."""
+    m = mondo(rilascia=None)
+
+    coda.rilascia(m.repo)
+
+    assert m.tag_su_origin() == ["v0.3.0"]
