@@ -307,7 +307,7 @@ def test_un_guasto_del_solver_non_salta_la_chiusura_del_giro(giro_fermato, monke
 
     esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
 
-    assert esito.stato == "domanda-del-builder"
+    assert esito.stato == "fermato"
     assert "avviso: il Solver è fallito: RuntimeError: disco pieno" in esito.nota
     assert esito.solver == []
     assert esito.file_traceback
