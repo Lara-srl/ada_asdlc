@@ -198,3 +198,14 @@ def test_chiedi_a_francesco_registra_l_esito_intento_con_la_domanda(tmp_path):
     assert not risposta["isError"], risposta
     assert json.loads((tmp_path / "a.json").read_text(encoding="utf-8")) == {
         "esito": "intento", "domanda": "quale dei due?"}
+
+
+@pytest.mark.parametrize("nome", ["chiedi_a_francesco", "segnala_limite_runner", "risolvi"])
+@pytest.mark.parametrize("argomenti", [None, [], "testo", {"domanda": "  "}, {"domanda": 3}])
+def test_gli_strumenti_del_solver_rifiutano_argomenti_che_non_reggono(tmp_path, nome, argomenti):
+    """Un rifiuto torna al Solver come errore dello strumento (decisione 2): mai
+    un'eccezione, e mai un esito scritto."""
+    risposta = esito.chiama(nome, argomenti, "solver", str(tmp_path / "a.json"))
+
+    assert risposta["isError"]
+    assert not (tmp_path / "a.json").exists()
