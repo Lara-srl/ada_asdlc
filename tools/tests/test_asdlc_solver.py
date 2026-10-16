@@ -261,3 +261,19 @@ def test_chiedi_a_francesco_ferma_il_giro_con_un_avviso_che_porta_la_domanda(gir
 
     assert esito.solver == [intento]
     assert "avviso: il Solver chiede a Francesco: quale dei due lo scope?" in esito.nota
+
+
+def test_il_prompt_del_solver_legge_il_toml_e_i_precedenti_prima_di_segnalare_e_di_chiedere():
+    """R4 e R12: l'ordine degli esiti è `risolvi`, `segnala_limite_runner`,
+    `chiedi_a_francesco` (voci numerate); `asdlc.toml` si legge prima del limite del
+    runner e `backlog/PRECEDENTI.md` prima di chiedere a Francesco."""
+    import re
+    testo = runner.prompt_del_pacchetto("solver")
+
+    voci = [(m.group(1), m.start()) for m in re.finditer(
+        r"^\d\. `(risolvi|segnala_limite_runner|chiedi_a_francesco)`", testo, re.MULTILINE)]
+    assert [nome for nome, _ in voci] == ["risolvi", "segnala_limite_runner",
+                                          "chiedi_a_francesco"]
+    posizione = dict(voci)
+    assert 0 <= testo.find("asdlc.toml") < posizione["segnala_limite_runner"]
+    assert 0 <= testo.find("backlog/PRECEDENTI.md") < posizione["chiedi_a_francesco"]
