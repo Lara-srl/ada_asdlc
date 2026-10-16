@@ -218,3 +218,12 @@ def test_il_prompt_del_critic_rimanda_alla_guardia_e_gli_chiede_di_rileggere_il_
 
     assert "Guardia di processo" in testo
     assert "output del Solver" in testo
+
+
+def test_una_riga_violata_o_non_eseguita_diventa_un_avviso_nella_nota(giro_fermato):  # noqa: F811
+    """R13: «si segnala nel rapporto e nell'avviso». Nel giro R4-R7 sono `non eseguita`, e la
+    nota del giro, che si legge nel registro, lo dice."""
+    esito, _ = giro_fermato({}, {"solver": "boh"})
+
+    assert "avviso: guardia di processo — R4: non eseguita (PBI-511)" in esito.nota
+    assert "avviso: guardia di processo — R5: non eseguita" in esito.nota
