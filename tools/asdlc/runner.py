@@ -444,6 +444,9 @@ class Esito:
     # Un esito per giro del Solver (`PBI-507`): `{"esito", ...}` come il server lo ha
     # scritto, o `{"esito": "senza esito", "uscita"}` se non ha chiamato niente.
     solver: list[dict] = field(default_factory=list)
+    # I giri Solver↔Builder di questo PBI, contando quelli dei rapporti di prima
+    # (`PBI-507`, decisione 10): il tetto è `[solver].giri_massimi`.
+    giri_solver: int = 0
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -4144,7 +4147,7 @@ def esegui_pbi(
     # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
     # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
     if motivo in BLOCCHI:
-        smista_il_blocco(e, pbi_path, motivo, dettaglio)
+        smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4170,9 +4173,32 @@ def esegui_pbi(
     return e
 
 
-def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str) -> None:
+def giri_solver_fatti(pbi: str) -> int:
+    """I giri Solver già contati per `pbi` nei rapporti di `LOG_DIR`: il più alto
+    `giri_solver` che un esito di quel PBI porta. Un file che non è un rapporto, o
+    che non si legge, non conta (`PBI-507`, decisione 10)."""
+    fatti = 0
+    for file in LOG_DIR.glob("*.json"):
+        try:
+            esiti = json.loads(file.read_text(encoding="utf-8")).get("esiti", [])
+            fatti = max([fatti] + [x.get("giri_solver", 0) for x in esiti
+                                   if x.get("pbi") == pbi])
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return fatti
+
+
+def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
+                     dichiara) -> None:
     """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
-    `e.solver` (`PBI-507`, decisione 11)."""
+    `e.solver` (`PBI-507`, decisione 11). Oltre `[solver].giri_massimi` giri per lo
+    stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`)."""
+    e.giri_solver = giri_solver_fatti(e.pbi)
+    if e.giri_solver >= CFG.solver.giri_massimi:
+        dichiara(f"avviso: tetto dei giri del Solver raggiunto ({e.giri_solver} di "
+                 f"{CFG.solver.giri_massimi}), il Solver non parte")
+        return
+    e.giri_solver += 1
     prompt, file_esito = file_dell_invocazione("solver")
     prompt.write_text(prompt_del_pacchetto("solver").format(
         pbi_path=pbi_path.relative_to(REPO), blocco=f"{motivo}: {dettaglio}"),
