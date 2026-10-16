@@ -9,10 +9,17 @@ import json
 import tomllib
 from pathlib import Path
 
+import pytest
+from test_asdlc_runner import agente_finto, fermati, git_del_senza_esito
+
 esito = importlib.import_module("asdlc.esito")
 config = importlib.import_module("asdlc.config")
 
 PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
+
+runner = importlib.import_module("asdlc.runner")
+runner.REPO = PROGETTO
+runner.configura(runner.asdlc_config.carica(PROGETTO))
 
 STRUMENTI_DEL_SOLVER = {"risolvi", "segnala_limite_runner", "chiedi_a_francesco"}
 
@@ -139,3 +146,30 @@ def test_la_sezione_solver_si_legge_dal_toml():
 
     assert (solver.giri_massimi, solver.cause, solver.modello) == (
         5, ("runner-a", "runner-b"), "sonnet")
+
+
+@pytest.fixture
+def giro_fermato(monkeypatch, tmp_path):
+    """Un `esegui_pbi` il cui Builder si ferma con una domanda: `LOG_DIR` e `git` finti,
+    l'agente lo sceglie il test."""
+    monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(runner, "git", git_del_senza_esito)
+
+    def lancia(esiti, testo=""):
+        agente = agente_finto({"builder": fermati("che faccio?"), **esiti}, testo)
+        monkeypatch.setattr(runner, "esegui", agente)
+        return runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False), agente
+
+    return lancia
+
+
+def test_un_solver_senza_chiamate_chiude_senza_esito_con_l_uscita_grezza(giro_fermato):
+    """R1: dopo il `fermati` del Builder il Solver parte; se non chiama niente,
+    l'esito del suo giro è `senza esito` e porta l'uscita com'è."""
+    esito, agente = giro_fermato({}, {"solver": "non so che dire"})
+
+    assert any("--model" in c and c[c.index("--model") + 1] == "opus"
+               and "mcp__asdlc__risolvi" in " ".join(c) for c in agente.comandi), (
+        "il Solver è un terzo invocato con i suoi tre strumenti")
+    assert [(s["esito"], s["uscita"]) for s in esito.solver] == [
+        ("senza esito", "non so che dire")]
