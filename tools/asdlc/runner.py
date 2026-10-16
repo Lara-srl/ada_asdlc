@@ -4241,14 +4241,16 @@ class AMonte:
 
 def controllo_r5(a_monte: AMonte) -> str:
     """R5: la PR parte da un ramo di un fork che non è `main` né la sua base, e non tocca
-    `AGENTS.md` né file esistenti di `decisions/` (`git diff --name-status` contro la base)."""
+    `AGENTS.md` né file esistenti di `decisions/` (`git diff --name-status --no-renames` contro la base: uno spostamento è una cancellazione
+    più un'aggiunta, e la cancellazione di `AGENTS.md` o di un ADR si vede)."""
     if a_monte.ramo in ("main", a_monte.base):
         return f"R5: violata (la PR parte da {a_monte.ramo})"
     if a_monte.da_un_fork is None:
         return "R5: non eseguita (non si sa se la testa della PR sta su un fork)"
     if not a_monte.da_un_fork:
         return f"R5: violata (la testa {a_monte.ramo} non sta su un fork ma in asdlc)"
-    code, uscita = esegui(["git", "diff", "--name-status", f"{a_monte.base}...{a_monte.ramo}"],
+    code, uscita = esegui(["git", "diff", "--name-status", "--no-renames",
+                           f"{a_monte.base}...{a_monte.ramo}"],
                           a_monte.repo, timeout=120)
     if code != 0:
         return f"R5: non eseguita (git non risponde: {una_riga(uscita)[:100]})"
