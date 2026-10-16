@@ -4147,7 +4147,15 @@ def esegui_pbi(
     # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
     # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
     if motivo in BLOCCHI:
-        smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
+        # Il Solver è invocato e registrato, non seguito (`PBI-507`, decisione 11): un
+        # suo guasto è un avviso (`ADR-0008`) e non salta `chiudi()`, che è la strada
+        # d'uscita di ogni giro fermato (difetto 37).
+        try:
+            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
+        except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
