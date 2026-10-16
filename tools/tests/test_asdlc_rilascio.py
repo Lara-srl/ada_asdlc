@@ -138,3 +138,22 @@ def test_senza_rilascia_non_c_e_tag(mondo):
     coda.rilascia(m.repo)
 
     assert m.tag_su_origin() == ["v0.3.0"]
+
+
+def test_con_la_ci_di_main_rossa_non_c_e_tag(mondo):
+    m = mondo(rilascia="patch", ci="failure")
+
+    coda.rilascia(m.repo)
+
+    assert m.tag_su_origin() == ["v0.3.0"]
+
+
+def test_se_un_tag_contiene_gia_il_merge_del_pbi_non_ne_mette_un_altro(mondo):
+    """Il tick rigira ogni dieci minuti: il PBI già rilasciato non deve dare v0.3.2."""
+    m = mondo(rilascia="patch")
+    git(m.repo, "tag", "v0.3.1")
+    git(m.repo, "push", "-q", "origin", "v0.3.1")
+
+    coda.rilascia(m.repo)
+
+    assert m.tag_su_origin() == ["v0.3.0", "v0.3.1"]
