@@ -311,3 +311,20 @@ def test_un_guasto_del_solver_non_salta_la_chiusura_del_giro(giro_fermato, monke
     assert "avviso: il Solver è fallito: RuntimeError: disco pieno" in esito.nota
     assert esito.solver == []
     assert esito.file_traceback
+
+
+@pytest.mark.parametrize("evidenza", ["{fuori}", "../fuori.md", "specs/../../fuori.md:2"])
+def test_risolvi_rifiuta_un_evidenza_fuori_dall_albero(tmp_path, monkeypatch, evidenza):
+    """R2 e decisione 3: l'evidenza è un percorso relativo alla radice del progetto. Un
+    assoluto o un `../` che esce dall'albero esiste, ma non è una fonte del repository."""
+    albero = tmp_path / "albero"
+    (albero / "specs").mkdir(parents=True)
+    (tmp_path / "fuori.md").write_text("x\n", encoding="utf-8")
+    monkeypatch.chdir(albero)
+
+    risposta = esito.chiama(
+        "risolvi", {"risposta": "perché sì", "evidenza": evidenza.format(fuori=tmp_path / "fuori.md")},
+        "solver", str(tmp_path / "a.json"))
+
+    assert risposta["isError"]
+    assert not (tmp_path / "a.json").exists()
