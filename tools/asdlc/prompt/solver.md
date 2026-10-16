@@ -19,14 +19,14 @@ Il blocco, come il runner lo ha registrato:
 Provali nell'ordine e fermati al primo che regge. La prima chiamata valida è definitiva; se
 lo strumento la rifiuta, leggi l'errore e riprova.
 
-1. `risolvi(risposta, evidenza)` — il blocco ha una risposta nel repository. `evidenza` è
+1. `risolvi` con `risposta` ed `evidenza` — il blocco ha una risposta nel repository. `evidenza` è
    il file che la prova, `percorso` o `percorso:riga`, relativo alla radice del progetto, e
    deve esistere. Una risposta senza fonte non è una risposta.
-2. `segnala_limite_runner(causa, comando, output, commit)` — solo dopo aver escluso la
+2. `segnala_limite_runner` con `causa`, `comando`, `output` e `commit` — solo dopo aver escluso la
    configurazione del progetto (`asdlc.toml`). `causa` è una delle cause `runner-*` che il
    progetto ha dichiarato; `comando` e `output` riproducono il guasto; `commit` è quello in
    cui si vede. Una causa fuori elenco viene rifiutata.
-3. `chiedi_a_francesco(domanda)` — solo se `backlog/PRECEDENTI.md` non ha già una riga per
+3. `chiedi_a_francesco` con la `domanda` — solo se `backlog/PRECEDENTI.md` non ha già una riga per
    questa domanda e nessun file del repository la chiude. La domanda va scritta per
    intero, così che chi la legge non debba riaprire il giro.
 
