@@ -132,11 +132,24 @@ CRITIC = ["claude", "-p", "--allowedTools",
           "Read,Grep,Glob,Bash(git diff:*),mcp__asdlc__fatto,mcp__asdlc__fermati",
           "--model", "opus"]
 
+# Il Solver (`PBI-507`, decisione 12) legge soltanto: nessun `Bash`, nessuna scrittura,
+# e i tre strumenti con cui smista il blocco. Il modello è `[solver].modello`.
+def comando_del_solver() -> list[str]:
+    return ["claude", "-p", "--allowedTools",
+            "Read,Grep,Glob,mcp__asdlc__risolvi,mcp__asdlc__segnala_limite_runner,"
+            "mcp__asdlc__chiedi_a_francesco", "--model", CFG.solver.modello]
+
+
+# I motivi d'uscita di un giro fermato che il Solver smista: il `fermati` del Builder, il
+# `sospeso` del Critic, e un agente dell'uno o dell'altro senza nessuna chiamata valida.
+BLOCCHI = ("domanda-del-builder", "builder-senza-esito", "domanda-del-critic",
+           "critic-senza-esito")
+
 # Il server dell'esito (`PBI-366`, `ADR-0027`) è il comando installato accanto
 # al runner, `<pacchetto>/bin/asdlc-esito` (PBI-384). I ruoli sono i suoi: un
 # altro valore lo ferma all'avvio.
 SERVER_DELL_ESITO = "asdlc-esito"
-RUOLI = ("builder", "critic")
+RUOLI = ("builder", "critic", "solver")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
 # il numero; la ragione di ognuno sta lì accanto, dove chi lo cambia la legge.
@@ -428,6 +441,9 @@ class Esito:
     domanda: str = ""
     # Una voce per invocazione di un agente, nell'ordine: `Invocazione.registro`.
     invocazioni: list[dict] = field(default_factory=list)
+    # Un esito per giro del Solver (`PBI-507`): `{"esito", ...}` come il server lo ha
+    # scritto, o `{"esito": "senza esito", "uscita"}` se non ha chiamato niente.
+    solver: list[dict] = field(default_factory=list)
     # Il Review Gate è stato saltato (`--senza-critic`). Un booleano e non una
     # frase dentro `nota`: la nota la legge una persona, questo lo legge il corpo
     # della PR, che deve dire il vero senza doverla interpretare.
@@ -4122,6 +4138,8 @@ def esegui_pbi(
     # nell'`except`, che richiudeva `rosso` — e la seconda chiusura, riuscita,
     # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
     # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
+    if motivo in BLOCCHI:
+        smista_il_blocco(e, pbi_path, motivo, dettaglio)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4145,6 +4163,19 @@ def esegui_pbi(
         if e.pr:
             print(f"    PR aperta: {e.pr}")
     return e
+
+
+def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str) -> None:
+    """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
+    `e.solver` (`PBI-507`, decisione 11)."""
+    prompt, file_esito = file_dell_invocazione("solver")
+    prompt.write_text(prompt_del_pacchetto("solver").format(
+        pbi_path=pbi_path.relative_to(REPO), blocco=f"{motivo}: {dettaglio}"),
+        encoding="utf-8")
+    invocazione = invoca_agente("solver", comando_del_solver(), prompt, file_esito)
+    dichiarato = invocazione.dichiarato
+    e.solver.append(dichiarato if dichiarato is not None
+                    else {"esito": "senza esito", "uscita": invocazione.uscita})
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
