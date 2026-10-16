@@ -144,7 +144,9 @@ salvo dove è scritto che il giro chiude `senza esito`.
   delle letture; R5-R7 leggono la PR a monte (git e `gh`) e sono `non eseguita` senza PR o
   se `gh` o git non rispondono, scadono o rendono un'uscita illeggibile. R5 vuole anche che
   la testa della PR stia su un fork: se sta in `asdlc` è `violata`, se il fatto manca è
-  `non eseguita`. Ogni riga `violata` o `non eseguita` è anche un avviso nella nota del
+  `non eseguita`. R7 riconosce un file del progetto dai fatti: un percorso dello Scope che non sta
+  nell'albero di `asdlc` al ramo della PR, né nella sua prima cartella, oltre alla dicitura
+  «del progetto» per `asdlc.toml`. Ogni riga `violata` o `non eseguita` è anche un avviso nella nota del
   giro. Il Critic rilegge l'output del Solver e non rifà questi controlli.
 
 ## Il tick è sempre attivo

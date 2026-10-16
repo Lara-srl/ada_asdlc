@@ -4282,15 +4282,32 @@ def controllo_r6(a_monte: AMonte) -> str:
 
 def controllo_r7(a_monte: AMonte) -> str:
     """R7: lo Scope del PBI a monte non elenca file del progetto. Si legge il PBI sul ramo
-    della PR; una riga dello Scope con un percorso fra apici inversi e «del progetto» è
-    un file della parte a valle."""
+    della PR. Un percorso fra apici inversi in una riga dello Scope è del progetto se la
+    riga dice «del progetto» (per `asdlc.toml`, che esiste in entrambi), oppure se né il
+    percorso né la sua prima cartella stanno nell'albero di `asdlc` al ramo della PR
+    (`git ls-tree`): la prova sta nei fatti e non nella formula del Solver. Un file nuovo
+    in una cartella che il runner ha già non è del progetto."""
     code, testo = esegui(["git", "show", f"{a_monte.ramo}:{a_monte.pbi}"], a_monte.repo,
                          timeout=120)
     if code != 0:
         return f"R7: non eseguita (git non risponde: {una_riga(testo)[:100]})"
+    code, albero = esegui(["git", "ls-tree", "-r", "--name-only", a_monte.ramo], a_monte.repo,
+                          timeout=120)
+    if code != 0:
+        return f"R7: non eseguita (git non risponde: {una_riga(albero)[:100]})"
+    file_del_runner = set(albero.splitlines())
+    cartelle_del_runner = {f.split("/")[0] for f in file_del_runner if "/" in f}
     scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
-    file_del_progetto = [m.group(1) for riga in (scope.group(1) if scope else "").splitlines()
-                         if "del progetto" in riga for m in [re.search(r"`([^`]+)`", riga)] if m]
+    file_del_progetto = []
+    for riga in (scope.group(1) if scope else "").splitlines():
+        m = re.search(r"`([^`]+)`", riga)
+        if m is None:
+            continue
+        percorso = m.group(1)
+        fuori_dall_albero = (percorso not in file_del_runner
+                             and percorso.split("/")[0] not in cartelle_del_runner)
+        if "del progetto" in riga or fuori_dall_albero:
+            file_del_progetto.append(percorso)
     if file_del_progetto:
         return f"R7: violata (lo Scope elenca {', '.join(file_del_progetto)} del progetto)"
     return "R7: ok"
