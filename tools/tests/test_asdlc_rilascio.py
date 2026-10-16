@@ -385,10 +385,17 @@ def test_il_pin_gira_anche_con_il_tick_in_pausa_perche_e_lui_a_toglierla(tick):
 
 
 
-def test_con_dry_run_il_tick_non_rilascia_e_non_apre_il_pin(tick):
+def test_il_dry_run_non_chiama_rilascia_e_pin_mentre_il_tick_senza_opzione_si(tick):
+    """Un solo test con i due casi: il verde è la differenza fra le due corse, non
+    l'assenza di una chiamata che il tick, per altri motivi, potrebbe non fare comunque."""
     tick("--dry-run")
+    col_dry_run = list(tick.chiamati)
+    tick.chiamati.clear()
 
-    assert "rilascia" not in tick.chiamati and "pin" not in tick.chiamati
+    tick()
+
+    assert "rilascia" not in col_dry_run and "pin" not in col_dry_run
+    assert "rilascia" in tick.chiamati and "pin" in tick.chiamati
 
 
 # ---------------------------------------------------------------------------
