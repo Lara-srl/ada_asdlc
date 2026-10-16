@@ -432,35 +432,29 @@ def test_un_worktree_che_non_si_crea_nel_rilascio_diventa_un_avviso(mondo, monke
 # Il merge è sempre di Francesco (R10-R11)
 # ---------------------------------------------------------------------------
 
-import ast
-
-PACCHETTO = Path(__file__).resolve().parent.parent / "asdlc"
-
-
-def chiamate_che_uniscono_una_pr(sorgente: str) -> list[int]:
-    """Le righe delle chiamate che fra i loro argomenti, anche annidati, hanno la
-    sequenza di testi `pr`, `merge` (un `gh pr merge` in lista) o la frase `pr merge`."""
-    righe = []
-    for nodo in ast.walk(ast.parse(sorgente)):
-        if not isinstance(nodo, ast.Call):
-            continue
-        testi = [n.value for n in ast.walk(nodo)
-                 if isinstance(n, ast.Constant) and isinstance(n.value, str)]
-        in_lista = any(a == "pr" and b == "merge" for a, b in zip(testi, testi[1:]))
-        if in_lista or any("pr merge" in t for t in testi):
-            righe.append(nodo.lineno)
-    return righe
+def uniscono_una_pr(comandi) -> list[list[str]]:
+    return [c for c in comandi if c[:3] == ["gh", "pr", "merge"]]
 
 
-def test_nessuna_chiamata_del_pacchetto_contiene_gh_pr_merge():
-    """Il merge non è mai automatico: è il cancello di Francesco (`ADR-0030`)."""
-    trovate = {f.name: chiamate_che_uniscono_una_pr(f.read_text(encoding="utf-8"))
-               for f in sorted(PACCHETTO.glob("*.py"))}
+def test_il_rilascio_esegue_davvero_il_suo_lavoro_e_nessuna_chiamata_unisce_una_pr(mondo):
+    """Il merge non è mai automatico: è il cancello di Francesco (`ADR-0030`). Il passo
+    gira con un finto `gh` che registra tutto; la prova che morde è doppia: il lavoro
+    del passo (registra, tag) c'è, e fra le chiamate non c'è nessun `gh pr merge`."""
+    m = mondo(rilascia="patch")
 
-    assert {nome: righe for nome, righe in trovate.items() if righe} == {}
+    coda.rilascia(m.repo)
+
+    chiamate = [cmd for cmd, _ in m.chiamate]
+    assert m.tag_su_origin() == ["v0.3.0", "v0.3.1"], "lo scenario rilascia davvero"
+    assert any(c[:2] == ["gh", "pr"] for c in chiamate), "il passo ha parlato con gh pr"
+    assert uniscono_una_pr(chiamate) == []
 
 
-def test_il_rilevatore_di_gh_pr_merge_vede_le_due_forme():
-    assert chiamate_che_uniscono_una_pr('esegui(["gh", "pr", "merge", "12"], repo)')
-    assert chiamate_che_uniscono_una_pr('subprocess.run("gh pr merge 12", shell=True)')
-    assert not chiamate_che_uniscono_una_pr('esegui(["gh", "pr", "view", "12"], repo)')
+def test_il_pin_esegue_davvero_il_suo_lavoro_e_nessuna_chiamata_unisce_una_pr(progetto):
+    m = progetto(pin=None)
+
+    coda.pin(m.repo)
+
+    assert len(m.comandi("gh", "pr", "create")) == 1, "lo scenario apre davvero il pin"
+    assert uniscono_una_pr(m.chiamate) == []
+    assert len(m.comandi("gh", "pr", "view")) >= 1
