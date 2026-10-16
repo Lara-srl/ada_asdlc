@@ -277,3 +277,16 @@ def test_il_prompt_del_solver_legge_il_toml_e_i_precedenti_prima_di_segnalare_e_
     posizione = dict(voci)
     assert 0 <= testo.find("asdlc.toml") < posizione["segnala_limite_runner"]
     assert 0 <= testo.find("backlog/PRECEDENTI.md") < posizione["chiedi_a_francesco"]
+
+
+@pytest.mark.parametrize("nome,argomenti", [("fatto", {"riepilogo": "x"}),
+                                            ("fermati", {"domanda": "che faccio?"}),
+                                            ("sconosciuto", {})])
+def test_il_solver_non_scrive_esiti_fuori_dai_suoi_tre(tmp_path, nome, argomenti):
+    """R1 / `ADR-0027`: le regole le applica il server, non la CLI. `fatto` e `fermati` sono
+    del Builder e del Critic; il Solver che li chiama riceve un errore che nomina i suoi tre."""
+    risposta = esito.chiama(nome, argomenti, "solver", str(tmp_path / "a.json"))
+
+    assert risposta["isError"]
+    assert all(s in risposta["content"][0]["text"] for s in STRUMENTI_DEL_SOLVER)
+    assert not (tmp_path / "a.json").exists()
