@@ -922,6 +922,24 @@ def esegui(cmd: list[str], cwd: Path, timeout: int = 7200,
     return p.returncode, (p.stdout + p.stderr)
 
 
+@contextmanager
+def worktree_di_rilascio(repo: Path, riferimento: str):
+    """Un worktree staccato a `riferimento`, in una cartella temporanea fuori da `repo`,
+    che si toglie all'uscita anche se il corpo alza (`PBI-509`, R9). Rende il percorso.
+    Il checkout del tick non cambia ramo né stato: è lì che ci sono le persone."""
+    cartella = Path(tempfile.mkdtemp(prefix="asdlc-rilascio-")) / "albero"
+    codice, uscita = esegui(["git", "worktree", "add", "--detach", str(cartella), riferimento],
+                            repo, timeout=300)
+    if codice != 0:
+        shutil.rmtree(cartella.parent, ignore_errors=True)
+        raise RuntimeError(f"`git worktree add` è uscito {codice}: {uscita.strip()[:200]}")
+    try:
+        yield cartella
+    finally:
+        esegui(["git", "worktree", "remove", "--force", str(cartella)], repo, timeout=300)
+        shutil.rmtree(cartella.parent, ignore_errors=True)
+
+
 class TettoSuperato(Exception):
     """Una chiamata scaduta: il codice d'uscita del processo ucciso, e l'uscita
     parziale che i file dei flussi hanno raccolto."""
