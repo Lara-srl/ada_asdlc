@@ -135,6 +135,8 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
         return _risolvi(argomenti, esito) if isinstance(argomenti, dict) else _contenuto(
             "Gli argomenti di risolvi non sono un oggetto: richiama con i campi per nome.",
             errore=True)
+    if ruolo == "solver" and nome == "segnala_limite_runner":
+        return _segnala_limite(argomenti, esito)
     if nome not in ("fatto", "fermati"):
         return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
                           errore=True)
@@ -202,6 +204,15 @@ def _risolvi(argomenti: dict, esito: str) -> dict:
                           "il file che prova la risposta e richiama risolvi.", errore=True)
     return _scrivi({"esito": "risolto", "risposta": risposta, "evidenza": evidenza},
                    "risolvi", esito)
+
+
+def _segnala_limite(argomenti: dict, esito: str) -> dict:
+    """`segnala_limite_runner`: registra il limite del runner con la sua
+    riproduzione (`PBI-507`, R3)."""
+    dichiarato = {"esito": "limite-del-runner"}
+    for campo in ("causa", "comando", "output", "commit"):
+        dichiarato[campo] = argomenti.get(campo)
+    return _scrivi(dichiarato, "segnala_limite_runner", esito)
 
 
 def registra(nome, argomenti, esito: str) -> None:
