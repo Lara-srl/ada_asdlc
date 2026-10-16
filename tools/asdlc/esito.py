@@ -23,6 +23,7 @@ variabili lo rende inutilizzabile.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import traceback
@@ -130,6 +131,10 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
 
     Nel file entrano solo i campi dello schema del ruolo: la CLI non lo fa
     rispettare, e un argomento in più non deve riscrivere l'esito."""
+    if ruolo == "solver" and nome == "risolvi":
+        return _risolvi(argomenti, esito) if isinstance(argomenti, dict) else _contenuto(
+            "Gli argomenti di risolvi non sono un oggetto: richiama con i campi per nome.",
+            errore=True)
     if nome not in ("fatto", "fermati"):
         return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
                           errore=True)
@@ -161,6 +166,11 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
     if ruolo == "critic" and nome == "fatto":
         dichiarato["verdetto"] = argomenti["verdetto"]
     dichiarato[campo] = testo
+    return _scrivi(dichiarato, nome, esito)
+
+
+def _scrivi(dichiarato: dict, nome: str, esito: str) -> dict:
+    """Scrive `dichiarato` nel file `esito` se è la prima chiamata valida."""
     cartella, nome_esito = os.path.split(os.path.abspath(esito))
     descrittore, temporaneo = tempfile.mkstemp(dir=cartella, prefix=f"{nome_esito}.",
                                                suffix=".json")
@@ -175,6 +185,23 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
     finally:
         os.unlink(temporaneo)
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
+
+
+def _risolvi(argomenti: dict, esito: str) -> dict:
+    """`risolvi`: la risposta porta come `evidenza` un file che esiste nell'albero
+    del giro, con un eventuale `:riga` (`PBI-507`, R2). L'albero è la cartella da
+    cui parte il server."""
+    risposta, evidenza = argomenti.get("risposta"), argomenti.get("evidenza")
+    for campo, valore in (("risposta", risposta), ("evidenza", evidenza)):
+        if not isinstance(valore, str) or not valore.strip():
+            return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
+                              "richiama risolvi.", errore=True)
+    percorso = re.sub(r":\d+$", "", evidenza.strip())
+    if not os.path.isfile(percorso):
+        return _contenuto(f"L'evidenza {evidenza!r} non è un file dell'albero: nomina "
+                          "il file che prova la risposta e richiama risolvi.", errore=True)
+    return _scrivi({"esito": "risolto", "risposta": risposta, "evidenza": evidenza},
+                   "risolvi", esito)
 
 
 def registra(nome, argomenti, esito: str) -> None:
