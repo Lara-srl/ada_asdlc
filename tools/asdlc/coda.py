@@ -818,8 +818,12 @@ def rilascia(repo: Path) -> list[str]:
                 continue
             _, elenco = esegui(["git", "tag", "--list"], repo)
             tag = prossimo_tag(elenco.split(), come)
-            esegui(["git", "tag", tag], repo)
-            esegui(["git", "push", REMOTO, tag], repo)
+            # Il giro del tag lavora fuori dal checkout del tick, che resta com'è (R9).
+            with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
+                esegui([str(runner_installato()), "--registra",
+                        str(repo / CFG.registro.cartella)], albero)
+                esegui(["git", "tag", tag], albero)
+                esegui(["git", "push", REMOTO, tag], albero)
             righe.append(f"rilascio: {pbi} → {tag}")
     return righe
 
