@@ -204,6 +204,17 @@ def test_r7_e_violata_se_lo_scope_elenca_un_file_del_progetto(tmp_path, monkeypa
     assert "asdlc.toml" in r7
 
 
+def test_r7_e_violata_se_il_file_del_progetto_e_il_secondo_percorso_della_riga(tmp_path, monkeypatch):
+    a_monte = repo_a_monte(tmp_path)
+    scrivi_il_pbi_a_monte(tmp_path, ["- `tools/asdlc/runner.py` e `backend/app/x.py` — il fix."])
+    con_gh(monkeypatch)
+
+    r7 = riga(guardia_di(a_monte), "R7")
+
+    assert r7.startswith("R7: violata")
+    assert "backend/app/x.py" in r7
+
+
 def test_r5_e_violata_se_la_pr_sposta_agents_md(tmp_path):
     a_monte = repo_a_monte(tmp_path)
     (tmp_path / "doc").mkdir()
