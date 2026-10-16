@@ -114,3 +114,15 @@ conto a quel giorno: `due-fonti` 8, `chiusura-saltata` 6, `ingresso-non-validato
 approccio si scrivono in quest'ordine: 374, 375, e la riga di 369 e l'allargamento di 363, poi
 376, tutti prima dei PBI di impacchettamento di `ADR-0026`. `codice-letto-come-testo` va al
 repository `asdlc`.
+
+## Le cause `runner-*`
+
+Uno slug che comincia per `runner-` è una causa **del runner** e di nessun altro: indica un
+limite di `asdlc`, che si corregge con un PBI in `asdlc` e non a mano nel progetto. L'elenco è
+**chiuso** e si allarga con un ADR. Il Solver (`specs/solver-e-rilascio/spec.md`, R3) non apre
+mai un PBI a monte per una causa fuori da questo elenco. I progetti lo citano con un URL
+pinnato al tag e tengono solo le proprie cause.
+
+| Slug | Cosa vuol dire | PBI |
+|---|---|---|
+| `runner-non-legge-junit` | il runner decide l'esito di un test senza leggere il rapporto JUnit, o ne legge uno incompleto (difetto 3 di `ada_planning`) | `PBI-505` |
