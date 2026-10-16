@@ -54,7 +54,7 @@ def repo_a_monte(tmp_path, tocca=(), nuovo=("backlog/PBI-900-x.md",)):
     modifica i file di `tocca` e ne aggiunge di `nuovo`."""
     git_in(tmp_path, "init", "-q", "-b", "main")
     for file in ("AGENTS.md", "decisions/ADR-0001-uno.md", "tools/asdlc/runner.py"):
-        (tmp_path / file).parent.mkdir(exist_ok=True)
+        (tmp_path / file).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / file).write_text("uno\n", encoding="utf-8")
     git_in(tmp_path, "add", "-A")
     git_in(tmp_path, "commit", "-q", "-m", "base")
@@ -62,7 +62,7 @@ def repo_a_monte(tmp_path, tocca=(), nuovo=("backlog/PBI-900-x.md",)):
     for file in tocca:
         (tmp_path / file).write_text("due\n", encoding="utf-8")
     for file in nuovo:
-        (tmp_path / file).parent.mkdir(exist_ok=True)
+        (tmp_path / file).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / file).write_text("nuovo\n", encoding="utf-8")
     git_in(tmp_path, "add", "-A")
     git_in(tmp_path, "commit", "-q", "-m", "ramo")
