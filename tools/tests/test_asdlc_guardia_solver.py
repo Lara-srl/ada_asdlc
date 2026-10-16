@@ -148,3 +148,34 @@ def test_r6_e_ok_se_nessun_altro_pbi_ne_pr_ha_la_causa(tmp_path, monkeypatch):
                                ' "headRefName": "pbi/x"}]')
 
     assert riga(guardia_di(a_monte), "R6") == "R6: ok"
+
+
+def scrivi_il_pbi_a_monte(tmp_path, scope):
+    """Riscrive sul ramo il PBI della PR con lo Scope dato (un elenco di righe)."""
+    testo = "# PBI-900: x\n\n## Direttiva\n\n**Scope**\n\n" + "\n".join(scope) + (
+        "\n\n**Fuori scope**\n\n- `asdlc.toml` del progetto: è del PBI a valle.\n")
+    (tmp_path / "backlog" / "PBI-900-x.md").write_text(testo, encoding="utf-8")
+    git_in(tmp_path, "add", "-A")
+    git_in(tmp_path, "commit", "-q", "-m", "scope")
+
+
+def test_r7_e_violata_se_lo_scope_elenca_un_file_del_progetto(tmp_path, monkeypatch):
+    a_monte = repo_a_monte(tmp_path)
+    scrivi_il_pbi_a_monte(tmp_path, ["- `tools/asdlc/runner.py` — il fix.",
+                                     "- `asdlc.toml` del progetto — la sezione `[junit]`."])
+    con_gh(monkeypatch)
+
+    r7 = riga(guardia_di(a_monte), "R7")
+
+    assert r7.startswith("R7: violata")
+    assert "asdlc.toml" in r7
+
+
+def test_r7_e_ok_se_lo_scope_elenca_solo_il_runner(tmp_path, monkeypatch):
+    """La riga di «Fuori scope» che nomina il file del progetto non è nello Scope."""
+    a_monte = repo_a_monte(tmp_path)
+    scrivi_il_pbi_a_monte(tmp_path, ["- `tools/asdlc/runner.py` — il fix.",
+                                     "- `tools/tests/test_x.py` — il test."])
+    con_gh(monkeypatch)
+
+    assert riga(guardia_di(a_monte), "R7") == "R7: ok"
