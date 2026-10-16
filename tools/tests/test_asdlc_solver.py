@@ -93,3 +93,24 @@ def test_segnala_limite_runner_rifiuta_causa_fuori_elenco_comando_o_output_vuoti
         risposta = esito.chiama("segnala_limite_runner", {**valido, **guasto}, "solver", str(file))
         assert risposta["isError"], guasto
         assert not file.exists(), guasto
+
+
+def test_la_prima_chiamata_valida_del_solver_e_definitiva(tmp_path, monkeypatch):
+    """`ADR-0027`: una seconda chiamata dopo un esito valido non cambia l'esito."""
+    sha, cartella = albero_con_un_commit(tmp_path, monkeypatch)
+    monkeypatch.setenv("ASDLC_CAUSE", "runner-non-legge-junit")
+    file = cartella / "a.json"
+
+    prima = esito.chiama("risolvi", {"risposta": "perché sì", "evidenza": "a.txt"},
+                         "solver", str(file))
+    assert not prima["isError"], prima
+    dopo = file.read_text(encoding="utf-8")
+
+    for nome, argomenti in (
+        ("risolvi", {"risposta": "altro", "evidenza": "a.txt"}),
+        ("segnala_limite_runner", {"causa": "runner-non-legge-junit", "comando": "x",
+                                   "output": "y", "commit": sha}),
+    ):
+        seconda = esito.chiama(nome, argomenti, "solver", str(file))
+        assert seconda["isError"], nome
+        assert file.read_text(encoding="utf-8") == dopo, nome
