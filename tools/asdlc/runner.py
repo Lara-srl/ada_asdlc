@@ -4212,6 +4212,7 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
         pbi_path=pbi_path.relative_to(REPO), blocco=f"{motivo}: {dettaglio}"),
         encoding="utf-8")
     invocazione = invoca_agente("solver", comando_del_solver(), prompt, file_esito)
+    e.invocazioni.append(invocazione.registro)
     dichiarato = invocazione.dichiarato
     e.solver.append(dichiarato if dichiarato is not None
                     else {"esito": "senza esito", "uscita": invocazione.uscita})
