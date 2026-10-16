@@ -136,6 +136,9 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
         return _risolvi(argomenti, esito) if isinstance(argomenti, dict) else _contenuto(
             "Gli argomenti di risolvi non sono un oggetto: richiama con i campi per nome.",
             errore=True)
+    if ruolo == "solver" and nome == "chiedi_a_francesco":
+        return _scrivi({"esito": "intento", "domanda": argomenti.get("domanda")},
+                       nome, esito)
     if ruolo == "solver" and nome == "segnala_limite_runner":
         return _segnala_limite(argomenti, esito)
     if nome not in ("fatto", "fermati"):
