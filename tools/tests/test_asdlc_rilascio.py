@@ -175,3 +175,93 @@ def test_il_rilascio_gira_in_un_worktree_separato_e_il_checkout_resta_pulito(mon
     assert git(m.repo, "status", "--porcelain") == prima == ""
     assert git(m.repo, "worktree", "list").count("\n") == 0, "resta solo il checkout"
     assert m.tag_su_origin() == ["v0.3.0", "v0.3.1"]
+
+
+# ---------------------------------------------------------------------------
+# Lato progetto: il pin e la pausa (R10, R11)
+# ---------------------------------------------------------------------------
+
+A_MONTE = "Lara-srl/ada_asdlc"
+INSTALLA_VECCHIO = "git+https://github.com/Lara-srl/ada_asdlc@v0.3.0"
+TOML_DEL_PROGETTO = f"""\
+[ambiente]
+venv = ".venv"
+installa = "{INSTALLA_VECCHIO}"
+
+[junit]
+comando = ["mvn", "-Dtest={{test}}"]
+"""
+
+
+class MondoProgetto:
+    """Il checkout di un progetto con un PBI fermo che `attende:` un PBI di `asdlc`,
+    un `origin` vero e un `gh` finto che racconta la PR a monte, i suoi tag e la PR del pin."""
+
+    def __init__(self, tmp_path, stato_monte="MERGED", tag=("v0.4.0",), pin=None):
+        self.origin = tmp_path / "progetto-origin.git"
+        self.repo = tmp_path / "progetto"
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        git(tmp_path, "clone", "-q", str(self.origin), str(self.repo))
+        git(self.repo, "config", "user.email", "t@t")
+        git(self.repo, "config", "user.name", "t")
+        (self.repo / "asdlc.toml").write_text(TOML_DEL_PROGETTO)
+        (self.repo / "backlog").mkdir()
+        (self.repo / "backlog" / "PBI-700-il-pbi-fermo.md").write_text(
+            f"# PBI-700: il PBI fermo\n\nattende: {A_MONTE}#PBI-505\n\n## Direttiva\n\nAspetta.\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "base")
+        git(self.repo, "push", "-q", "origin", "main")
+        self.stato_monte, self.tag, self.pin = stato_monte, list(tag), pin
+        self.chiamate: list[list[str]] = []
+
+    def esegui(self, cmd, cwd):
+        self.chiamate.append(list(cmd))
+        if cmd[:3] == ["gh", "pr", "list"] and A_MONTE in cmd:
+            return 0, json.dumps([{"number": 12, "title": "PBI-505: il runner", "headRefName":
+                                   "pbi/pbi-505"}])
+        if cmd[:3] == ["gh", "pr", "view"] and cmd[3] == "12":
+            return 0, json.dumps({"state": self.stato_monte, "mergeCommit": {"oid": "abc"}})
+        if cmd[:2] == ["gh", "api"] and cmd[2].endswith("/tags"):
+            return 0, "\n".join(self.tag)
+        if cmd[:2] == ["gh", "api"] and "/compare/" in cmd[2]:
+            return 0, "ahead"
+        if cmd[:3] == ["gh", "pr", "list"]:
+            return 0, json.dumps([{"number": 40}] if self.pin else [])
+        if cmd[:3] == ["gh", "pr", "view"] and cmd[3] == "40":
+            return 0, json.dumps({"state": self.pin})
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return 0, "https://github.com/x/y/pull/41"
+        return ESEGUI_VERO(cmd, cwd)
+
+    def rami_su_origin(self):
+        return [r.strip() for r in git(self.origin, "branch", "--list").splitlines()
+                if r.strip() != "main"]
+
+    def comandi(self, *inizio):
+        return [c for c in self.chiamate if c[:len(inizio)] == list(inizio)]
+
+
+@pytest.fixture
+def progetto(tmp_path, monkeypatch):
+    def crea(**kwargs):
+        m = MondoProgetto(tmp_path, **kwargs)
+        monkeypatch.setattr(coda, "esegui", m.esegui)
+        return m
+    return crea
+
+
+def test_un_pbi_fermo_con_attende_e_pr_a_monte_mergiata_con_tag_apre_la_pr_del_pin(progetto):
+    m = progetto()
+
+    coda.pin(m.repo)
+
+    [ramo] = m.rami_su_origin()
+    cambiati = git(m.origin, "diff", "--numstat", f"main...{ramo}").splitlines()
+    assert [riga.split("\t")[2] for riga in cambiati] == ["asdlc.toml"], "solo asdlc.toml"
+    assert cambiati[0].split("\t")[:2] == ["1", "1"], "una riga sola"
+    nuovo = git(m.origin, "show", f"{ramo}:asdlc.toml")
+    assert 'installa = "git+https://github.com/Lara-srl/ada_asdlc@v0.4.0"' in nuovo
+    assert "[junit]" in nuovo, "il resto del file non si tocca"
+    [crea] = m.comandi("gh", "pr", "create")
+    assert crea[crea.index("--base") + 1] == "main"
+    assert crea[crea.index("--head") + 1] == ramo
