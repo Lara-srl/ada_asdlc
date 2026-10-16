@@ -4207,6 +4207,8 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
     dichiarato = invocazione.dichiarato
     e.solver.append(dichiarato if dichiarato is not None
                     else {"esito": "senza esito", "uscita": invocazione.uscita})
+    if dichiarato is not None and dichiarato["esito"] == "intento":
+        dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
 
 
 def riga_di_registro(run: str, e: dict) -> dict:
