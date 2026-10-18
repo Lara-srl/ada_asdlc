@@ -83,11 +83,14 @@ sostituiti da finti; nessun test usa la rete.
 - [x] **La PR a monte non `MERGED` non apre niente.** Il progetto resta in attesa (R10).
 - [x] **La pausa si toglie solo a PR del pin `MERGED`,** verificata con `gh pr view`; con la
       PR aperta o chiusa senza merge la pausa resta (R11, due casi).
-- [x] **Un errore in `rilascia()` o in `pin()` non ferma il tick.** Un JSON illeggibile (`pin`)
+- [ ] **Un errore in `rilascia()` o in `pin()` non ferma il tick.** Un JSON illeggibile (`pin`)
       e un worktree che non si crea (`rilascia`) diventano un avviso e il tick va avanti
       con gli altri passi e gli altri progetti (`ADR-0008`).
-- [x] **Nessun `gh pr merge` nel pacchetto.** Un test sull'AST che nessuna chiamata lo contenga
-      (R10-R11).
+- [ ] **Nessun `gh pr merge` esce dal tick.** Un test che esegue davvero `rilascia()` e `pin()`
+      con un finto `gh` e controlla che nessuna chiamata sia `pr merge`, in uno scenario che
+      rilascia e in uno che apre il pin (R10-R11). Deve poter fallire: aggiungere una chiamata
+      `gh pr merge` in uno dei due passi lo rende rosso. Un test che legge i sorgenti con l'AST
+      non lo è: nasce verde e non morde (il gate del rosso lo ferma, giro 4).
 
 **Non regressione:** il tick di un progetto senza `attende:` e senza `rilascia:` fa quello di
 prima; `python3 -m pytest -q tools/tests` resta verde.
@@ -111,3 +114,72 @@ backlog/PBI-509-il-rilascio-a-tick.md` e un commit. Niente da lasciare.
 gli altri progetti; nessuna eccezione esce da `tick()`. Casi: JSON illeggibile (`pin`),
 worktree che non si crea (`rilascia`). RED prima, poi GREEN; alla fine si spunta la riga e
 si aggiorna la spec nello stesso commit.
+
+## Il giro 5, e cosa si riprende
+
+Il giro 4 (16/10) ha fatto il criterio sulle eccezioni (RED `552daf2`, GREEN `2d68306`) e si
+è fermato a `rosso-mai-visto` su due test del giro 2 che nascono verdi e non mordono.
+Francesco ha scelto di tenere il criterio sul merge, ma con un test che morde (scelta «b»).
+
+**Si riprende il tag `giro-fermato/pbi-509-giro4-20261016`:** ramo da quel tag, niente
+cherry-pick; il file di questo PBI si prende da `main` (`git checkout origin/main --
+backlog/PBI-509-il-rilascio-a-tick.md`) e poi si spunta la riga del criterio sulle eccezioni (in
+`main` è `[ ]`, ma il codice e i test ci sono già). Niente da lasciare.
+
+**Da fare, due cose:**
+
+1. **`0fb1cea`, il test del `--dry-run`** («il tick non rilascia e non apre il pin»). Tutti i
+   173 mutanti di `coda.py::passaggio` lo lasciano verde: il test non dipende dalla riga
+   `a.dry_run`. Va riscritto perché fallisca se quel controllo si toglie: un finto `rilascia`
+   e un finto `pin` che registrano la chiamata, e `tick("--dry-run")` che non deve chiamarli
+   mentre `tick()` senza opzione sì (un solo test con i due casi, così il verde è la
+   differenza e non l'assenza).
+2. **`6a874a0`, il test dell'AST sul `gh pr merge`.** Si sostituisce con il test del criterio
+   scritto sopra (finto `gh`, `rilascia()` e `pin()` eseguiti davvero), e si toglie l'helper
+   `chiamate_che_uniscono_una_pr` con il suo test, che non guardano codice di produzione.
+
+Il rosso si osserva come sempre: il test nuovo prima fallisce contro una versione del passo
+che chiama `gh pr merge` (o senza il controllo del dry-run), poi passa. Spec, README e
+`AUTOMAZIONE.md` nello stesso commit, dove nominano il test dell'AST.
+
+## Il giro 6, e cosa si riprende
+
+Il giro 5 (16/10) ha riscritto il test del `--dry-run` e quello sul `gh pr merge`, e si è
+fermato di nuovo a `rosso-mai-visto`. Non per il lavoro del giro, ma per la storia: `0fb1cea`
+e `6a874a0` stanno sotto il tag del giro 4, quindi ogni ramo che ne parte li porta con sé, e la
+guardia li rilegge anche se alla punta quei test non ci sono più. Il test nuovo del dry-run
+(`dcfcb9d`) è nato verde per la stessa ragione di `0fb1cea`: i controlli `a.dry_run` in
+`tick()` c'erano già, e un test scritto dopo il codice non può essere rosso (`ADR-0021`: il
+ciclo mancato è ex ante e nessuna fix lo annulla). `06f9a69` (il gh finto) non è stato
+contestato.
+
+**Si riprende il tag `ripresa/pbi-509-giro6`** (non un `giro-fermato/…`): è la storia del giro 4
+senza `0fb1cea`, `6a874a0` e il fix dell'AST `5793d74`, più un commit `b502a52` che toglie a
+mano i due controlli `a.dry_run` su `pin()` e `rilascia()` in `tick()` (`coda.py`, funzione
+`passaggio`), così il test del dry-run può nascere rosso. Gate verde sul tag (1003 test). Ramo
+da quel tag, niente cherry-pick e niente rebase: la storia è già pulita. Il file di questo PBI
+si prende da `main` (`git checkout origin/main -- backlog/PBI-509-il-rilascio-a-tick.md`), un
+commit. Non c'è conflitto da risolvere: il tag ha il file di `main` com'era al giro 4, e se
+`git` ne vede uno sul file di questo PBI vale sempre la versione di `main`.
+
+**Da fare, in quest'ordine:**
+
+1. **Il test del `--dry-run`, RED.** Un solo test con i due casi: finti `rilascia` e `pin` che
+   registrano la chiamata; con `tick("--dry-run")` non sono chiamati, con `tick()` senza
+   opzione sì. Contro il tag fallisce (i due controlli non ci sono): quello è il rosso, e va
+   in un commit `test(coda): …(RED)` da solo.
+2. **GREEN.** Si rimettono i due controlli in `passaggio` — `for riga in () if a.dry_run else
+   pin(a.repo):` e `for riga in () if a.dry_run else rilascia(a.repo):` — e il test passa. Un
+   commit `feat(coda): …` con il solo codice che lo fa passare.
+3. **Il criterio sul `gh pr merge`.** Un test che esegue `rilascia()` e `pin()` con un finto
+   `gh` (come `06f9a69` nel giro 5, che la guardia non ha contestato): nessuna chiamata è
+   `pr merge`, e iniettarne una in uno dei due passi lo fa fallire. Qui il codice di produzione
+   non va toccato: il test nasce verde contro un codice che non fa mai quel merge, e morde
+   perché un mutante che lo aggiunge lo rende rosso. Spec, README e `AUTOMAZIONE.md` smettono
+   di nominare il test dell'AST.
+4. Si spuntano le due righe aperte (eccezioni e `gh pr merge`) e si aggiorna la spec nello stesso
+   commit.
+
+**Non si fa:** non si rimettono `0fb1cea`, `6a874a0`, `dcfcb9d`, `06f9a69` né `80d35d2` (stanno
+sul ramo del giro 5, non su questo tag), e non si tocca il commit `b502a52`: il GREEN del punto
+2 lo annulla con un commit nuovo, non lo riscrive.
