@@ -384,6 +384,17 @@ def test_il_pin_gira_anche_con_il_tick_in_pausa_perche_e_lui_a_toglierla(tick):
     assert "rilascia" not in tick.chiamati, "il rilascio no: chi ha messo la pausa lavora a mano"
 
 
+def test_il_dry_run_non_rilascia_e_non_apre_il_pin_ma_il_tick_senza_opzione_si(tick):
+    assert tick("--dry-run") == 0
+    con_dry_run = list(tick.chiamati)
+    tick.chiamati.clear()
+
+    assert tick() == 0
+
+    assert "rilascia" not in con_dry_run and "pin" not in con_dry_run
+    assert "rilascia" in tick.chiamati and "pin" in tick.chiamati
+
+
 # ---------------------------------------------------------------------------
 # Un errore non ferma il tick (ADR-0008)
 # ---------------------------------------------------------------------------
