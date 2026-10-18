@@ -145,6 +145,8 @@ salvo dove è scritto che il giro chiude `senza esito`.
 
 - **Dove sta:** `coda.stato_del_pin()`, che chiede lo stato a `gh pr view`. Solo `MERGED` toglie
   `~/asdlc-tick.pausa`; `OPEN`, `CLOSED` o un `gh` muto la lasciano.
+- **Il merge non è del tick:** né `rilascia()` né `pin()` emettono mai `gh pr merge`. Lo prova un
+  test che li esegue davvero con un finto `gh` e guarda i comandi emessi (R10-R11).
 
 ### R12 — Il ciclo ha un tetto, e Francesco è l'ultimo
 
