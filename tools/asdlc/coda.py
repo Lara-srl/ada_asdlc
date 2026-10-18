@@ -1044,7 +1044,7 @@ def smista(argv: list[str] | None = None) -> int:
 def passaggio(a: argparse.Namespace) -> int:
     """Il tick col suo lucchetto in mano: la pausa, la decisione, il lancio."""
     # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
-    for riga in () if a.dry_run else pin(a.repo):
+    for riga in pin(a.repo):
         print(riga)
         scrivi_nel_log(a.repo, riga)
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
@@ -1058,7 +1058,7 @@ def passaggio(a: argparse.Namespace) -> int:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
-    for riga in () if a.dry_run else rilascia(a.repo):
+    for riga in rilascia(a.repo):
         print(riga)
         scrivi_nel_log(a.repo, riga)
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
