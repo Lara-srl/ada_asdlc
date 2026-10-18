@@ -172,10 +172,11 @@ commit. Non c'è conflitto da risolvere: il tag ha il file di `main` com'era al 
    pin(a.repo):` e `for riga in () if a.dry_run else rilascia(a.repo):` — e il test passa. Un
    commit `feat(coda): …` con il solo codice che lo fa passare.
 3. **Il criterio sul `gh pr merge`.** Un test che esegue `rilascia()` e `pin()` con un finto
-   `gh` (come `06f9a69` nel giro 5, ma qui lo si riscrive): nessuna chiamata è `pr merge`, e
-   iniettarne una in uno dei due passi lo fa fallire. RED prima non serve cambiare produzione:
-   il test deve però mordere contro un mutante, non contro l'assenza. Si toglie il test dell'AST
-   dalla spec, dal README e da `AUTOMAZIONE.md` dove lo nominano.
+   `gh` (come `06f9a69` nel giro 5, che la guardia non ha contestato): nessuna chiamata è
+   `pr merge`, e iniettarne una in uno dei due passi lo fa fallire. Qui il codice di produzione
+   non va toccato: il test nasce verde contro un codice che non fa mai quel merge, e morde
+   perché un mutante che lo aggiunge lo rende rosso. Spec, README e `AUTOMAZIONE.md` smettono
+   di nominare il test dell'AST.
 4. Si spuntano le due righe aperte (eccezioni e `gh pr merge`) e si aggiorna la spec nello stesso
    commit.
 
