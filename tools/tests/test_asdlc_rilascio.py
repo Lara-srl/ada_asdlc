@@ -336,6 +336,21 @@ def test_un_pbi_con_attende_gia_in_main_non_apre_niente_e_non_tocca_la_pausa(
     assert m.comandi("gh", "pr", "create") == []
 
 
+def test_nessun_gh_pr_merge_esce_da_rilascia_ne_da_pin(mondo, progetto):
+    """R10-R11: il merge è sempre di Francesco. Si eseguono davvero i due passi, in uno
+    scenario che rilascia e in uno che apre il pin, e si guardano i comandi emessi."""
+    rilascio = mondo()
+    assert coda.rilascia(rilascio.repo) == ["rilascio: PBI-600 → v0.3.1"]
+    assert rilascio.tag_su_origin() == ["v0.3.0", "v0.3.1"], "lo scenario deve rilasciare"
+
+    apertura = progetto()
+    assert coda.pin(apertura.repo)
+    assert apertura.comandi("gh", "pr", "create"), "lo scenario deve aprire il pin"
+
+    emessi = [c for c, _ in rilascio.chiamate] + apertura.chiamate
+    assert emessi and not [c for c in emessi if c[:3] == ["gh", "pr", "merge"]]
+
+
 # ---------------------------------------------------------------------------
 # Il tick li chiama
 # ---------------------------------------------------------------------------
