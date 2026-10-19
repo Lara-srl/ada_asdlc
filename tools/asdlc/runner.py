@@ -51,6 +51,7 @@ import sys
 import tempfile
 import time
 import traceback
+import uuid
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
@@ -1136,6 +1137,9 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
     porta allora `tetto_minuti`, che è ciò che la nota dice.
 
+    Ogni invocazione riceve `--session-id` con un uuid nuovo, che il registro riporta in
+    `sessione` (PBI-511, decisione 1).
+
     Il Builder riceve con `--settings` la guardia di fase del giro, e
     `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
     """
@@ -1145,12 +1149,13 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     if ruolo == "builder":
         della_sessione = ["--settings", str(impostazioni_della_sessione(esito))]
         ambiente = AMBIENTE_DEL_GIRO
+    sessione = str(uuid.uuid4())
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
     scaduto = False
     t0 = time.monotonic()
     try:
-        codice, uscita = esegui(comando + della_sessione
+        codice, uscita = esegui(comando + della_sessione + ["--session-id", sessione]
                                 + ["--mcp-config", str(config), "--strict-mcp-config",
                                    f"@{prompt}"], REPO, timeout=minuti * 60,
                                 flussi=(fuori, dentro), ambiente=ambiente)
@@ -1158,7 +1163,8 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
         codice, uscita, scaduto = tetto.codice, tetto.uscita, True
     registro = {"ruolo": ruolo, "codice": codice,
                 "durata_s": round(time.monotonic() - t0, 1), "stdout": str(fuori),
-                "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl"}
+                "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl",
+                "sessione": sessione}
     if scaduto:
         registro["tetto_minuti"] = minuti
     dichiarato = None if scaduto else esito_dichiarato(esito)
