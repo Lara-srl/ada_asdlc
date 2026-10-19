@@ -9,6 +9,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from test_asdlc_runner import TestLaSessioneRuotaFraLeRevisioni, agente_finto, git_finto  # noqa: F401
 
 runner = importlib.import_module("asdlc.runner")
@@ -237,3 +239,17 @@ def test_il_registro_del_rilancio_porta_il_uuid_del_fork_e_ne_copia_la_traccia(
     assert rilancio.registro["sessione"] == fork
     assert fork != primo.registro["sessione"]
     assert Path(rilancio.registro["traccia"]).read_text(encoding="utf-8").endswith(fork + "\n")
+
+
+@pytest.mark.parametrize("ruolo", ["builder", "critic"])
+@pytest.mark.parametrize("continua", [[], ["-c"], ["--resume", "abc"]],
+                         ids=["primo", "rilancio-c", "rilancio-resume"])
+def test_session_id_con_c_o_resume_esce_sempre_con_fork_session(monkeypatch, tmp_path,
+                                                                 ruolo, continua):
+    comando = {"builder": runner.BUILDER, "critic": runner.CRITIC}[ruolo] + continua
+
+    _, cmd = lancia(monkeypatch, tmp_path, ruolo, comando)
+
+    assert "--session-id" in cmd
+    if "-c" in cmd or "--resume" in cmd:
+        assert "--fork-session" in cmd
