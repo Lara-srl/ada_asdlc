@@ -193,6 +193,13 @@ class Rilascio:
 
 
 @dataclass(frozen=True)
+class Tick:
+    # Il distacco dal battito precedente oltre il quale il tick avvisa, in minuti
+    # (`PBI-510`, decisione 1).
+    soglia_battito_minuti: int = 30
+
+
+@dataclass(frozen=True)
 class Config:
     git: Git
     backlog: Backlog
@@ -206,6 +213,7 @@ class Config:
     junit: Junit = Junit()
     solver: Solver = Solver()
     rilascio: Rilascio = Rilascio()
+    tick: Tick = Tick()
 
 
 def radice(cwd: Path) -> Path:
@@ -399,6 +407,14 @@ def interpreta(dati: dict, file: str) -> Config:
         rilascio = Rilascio(remote_fork=dichiarato.testo("remote_fork", default="fork"),
                             prefisso_tag=dichiarato.testo("prefisso_tag", default="v"),
                             clone=dichiarato.testo("clone", default=None))
+    # Facoltativa: il default vale per un progetto che non la scrive (`PBI-510`).
+    tick = Tick()
+    if "tick" in sezione.dati:
+        dichiarato = sezione.dentro("tick")
+        dichiarato.solo("soglia_battito_minuti",
+                        perche="la sezione dice la soglia del battito del tick")
+        tick = Tick(soglia_battito_minuti=dichiarato.positivo("soglia_battito_minuti",
+                                                              default=30))
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
@@ -429,6 +445,7 @@ def interpreta(dati: dict, file: str) -> Config:
         junit=junit,
         solver=solver,
         rilascio=rilascio,
+        tick=tick,
     )
 
 
