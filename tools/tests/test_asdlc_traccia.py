@@ -210,3 +210,30 @@ def test_la_prima_invocazione_del_giro_non_porta_fork_session_ne_c(monkeypatch, 
     assert "--session-id" in primo
     assert "-c" not in primo
     assert "--fork-session" not in primo
+
+
+def test_il_registro_del_rilancio_porta_il_uuid_del_fork_e_ne_copia_la_traccia(
+        monkeypatch, tmp_path):
+    cartella = tmp_path / "claude" / "progetto"
+    cartella.mkdir(parents=True)
+    monkeypatch.setattr(runner, "cartella_delle_sessioni", lambda: cartella)
+    monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+    interno = agente_finto({})
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        uuid = cmd[cmd.index("--session-id") + 1]
+        (cartella / f"{uuid}.jsonl").write_text(sessione_finta([RIGHE[0]]) + uuid + "\n",
+                                                encoding="utf-8")
+        return interno(cmd, cwd, timeout, **k)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("x", encoding="utf-8")
+    primo = runner.invoca_agente("builder", runner.BUILDER, prompt, tmp_path / "primo.json")
+    rilancio = runner.invoca_agente("builder", runner.BUILDER + ["-c"], prompt,
+                                    tmp_path / "rilancio.json")
+
+    fork = interno.comandi[1][interno.comandi[1].index("--session-id") + 1]
+    assert rilancio.registro["sessione"] == fork
+    assert fork != primo.registro["sessione"]
+    assert Path(rilancio.registro["traccia"]).read_text(encoding="utf-8").endswith(fork + "\n")
