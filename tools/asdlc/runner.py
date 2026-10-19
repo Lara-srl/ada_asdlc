@@ -61,7 +61,7 @@ from fnmatch import fnmatch
 import importlib.metadata
 from importlib import resources
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple
+from typing import Callable, Iterable, Iterator, NamedTuple
 
 # La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
 # trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
@@ -1142,6 +1142,45 @@ def copia_la_traccia(sessione: str, destinazione: Path, registro: dict) -> None:
         registro["traccia_nota"] = f"sessione non trovata o non copiabile: {sorgente} ({guasto})"
         return
     registro["traccia"] = str(destinazione)
+    try:
+        registro["contenuto"] = contenuto_della_traccia(destinazione)
+    except (OSError, ValueError) as guasto:
+        registro["traccia_nota"] = f"traccia copiata ma non leggibile ({guasto})"
+
+
+def blocchi_della_traccia(percorso: Path) -> Iterator[tuple[str, str, dict]]:
+    """I blocchi di una traccia di sessione nell'ordine in cui sono avvenuti, come
+    `(ruolo, id del messaggio, blocco)`; senza id, il numero di riga. Il contenuto di un messaggio testuale è una
+    stringa, e vale un blocco `text`. Una riga che non è JSON alza `ValueError`."""
+    for numero, riga in enumerate(percorso.read_text(encoding="utf-8").splitlines()):
+        if not riga.strip():
+            continue
+        messaggio = json.loads(riga).get("message")
+        if not isinstance(messaggio, dict):
+            continue
+        contenuto = messaggio.get("content")
+        if isinstance(contenuto, str):
+            contenuto = [{"type": "text", "text": contenuto}]
+        for blocco in contenuto if isinstance(contenuto, list) else []:
+            if isinstance(blocco, dict):
+                yield messaggio.get("role", ""), messaggio.get("id") or f"riga {numero}", blocco
+
+
+def contenuto_della_traccia(percorso: Path) -> dict[str, int]:
+    """Cosa contiene la traccia: chiamate a strumento (`tool_use`), risposte (messaggi
+    dell'assistente, contati per id: Claude Code scrive un blocco per riga) e blocchi
+    `thinking`. Uno zero in `thinking` dice che la sessione non porta ragionamenti."""
+    risposte: set[str] = set()
+    conto = {"chiamate": 0, "thinking": 0}
+    for ruolo, id_messaggio, blocco in blocchi_della_traccia(percorso):
+        if ruolo == "assistant":
+            risposte.add(id_messaggio)
+            if blocco.get("type") == "tool_use":
+                conto["chiamate"] += 1
+            elif blocco.get("type") == "thinking":
+                conto["thinking"] += 1
+    return {"chiamate": conto["chiamate"], "risposte": len(risposte),
+            "thinking": conto["thinking"]}
 
 
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
