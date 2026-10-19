@@ -4536,6 +4536,34 @@ def controlla(regola: str, controllo: Callable[[AMonte], str], a_monte: AMonte |
         return f"{regola}: non eseguita ({type(guasto).__name__}: {una_riga(str(guasto))[:100]})"
 
 
+SEGNALA_LIMITE = "mcp__asdlc__segnala_limite_runner"
+
+
+def controllo_r4(e: Esito) -> str:
+    """R4: il Solver ha letto `asdlc.toml` prima di `segnala_limite_runner`. Lo dice la
+    traccia della sua sessione, nell'ordine delle chiamate a strumento (`PBI-511`): mai il
+    testo di una risposta (`ADR-0027`)."""
+    voci = [v for v in e.invocazioni if v.get("ruolo") == "solver" and v.get("traccia")]
+    letto = False
+    for ruolo, _, blocco in blocchi_della_traccia(Path(voci[-1]["traccia"])):
+        if ruolo != "assistant" or blocco.get("type") != "tool_use":
+            continue
+        if blocco["name"] == SEGNALA_LIMITE and letto:
+            return "R4: ok"
+        if blocco["name"] == "Read":
+            letto = letto or Path(blocco["input"].get("file_path", "")).name == "asdlc.toml"
+    return "R4: non eseguita (PBI-511)"
+
+
+def controlla_r4(e: Esito) -> str:
+    """R4 con la stessa rete di `controlla`: una traccia assente o illeggibile non ferma la
+    guardia."""
+    try:
+        return controllo_r4(e)
+    except Exception:  # noqa: BLE001 — la riga resta quella di prima, non si tace il resto
+        return "R4: non eseguita (PBI-511)"
+
+
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
                        dichiara: Callable[[str], None] | None = None) -> None:
     """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
@@ -4547,7 +4575,7 @@ def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
         return
     r5, r6, r7 = (controlla(regola, controllo, a_monte) for regola, controllo in
                   (("R5", controllo_r5), ("R6", controllo_r6), ("R7", controllo_r7)))
-    righe = ["R4: non eseguita (PBI-511)", r5, r6, r7]
+    righe = [controlla_r4(e), r5, r6, r7]
     e.guardia = "\n".join(["## Guardia di processo", *righe])
     if dichiara is not None:
         for riga in righe:
