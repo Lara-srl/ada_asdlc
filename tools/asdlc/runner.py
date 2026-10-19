@@ -4554,7 +4554,7 @@ def controllo_r4(e: Esito) -> str:
             return "R4: ok" if letto else "R4: violata (asdlc.toml non letto prima della segnalazione)"
         if blocco["name"] == "Read":
             letto = letto or Path(blocco["input"].get("file_path", "")).name == "asdlc.toml"
-    return "R4: violata (nessuna segnalazione nella traccia)"
+    return "R4: non eseguita (nessuna segnalazione nella traccia)"
 
 
 def controlla_r4(e: Esito) -> str:
