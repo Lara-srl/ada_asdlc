@@ -91,3 +91,19 @@ def test_se_la_sessione_manca_il_rapporto_lo_dice_e_il_giro_non_si_ferma(monkeyp
     assert invocazione.registro["traccia"] is None
     assert invocazione.registro["traccia_nota"].startswith("sessione non trovata")
     assert invocazione.codice == 0
+
+
+def test_il_rapporto_conta_chiamate_risposte_e_blocchi_thinking(monkeypatch, tmp_path):
+    invocazione = con_la_sessione(monkeypatch, tmp_path, RIGHE)
+
+    assert invocazione.registro["contenuto"] == {"chiamate": 1, "risposte": 2, "thinking": 1}
+
+
+def test_una_traccia_senza_ragionamenti_si_vede_dallo_zero(monkeypatch, tmp_path):
+    senza = [r for r in RIGHE]
+    senza[1] = {"type": "assistant", "message": {"role": "assistant", "content": [
+        senza[1]["message"]["content"][1]]}}
+
+    invocazione = con_la_sessione(monkeypatch, tmp_path, senza)
+
+    assert invocazione.registro["contenuto"]["thinking"] == 0
