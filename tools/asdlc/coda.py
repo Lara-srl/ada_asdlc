@@ -938,7 +938,7 @@ def passo_del_pin(repo: Path) -> list[str]:
             if codice != 0:
                 # Il tick dopo riparte da zero: né il ramo locale (i ref sono del
                 # checkout) né quello su origin devono restare a metà.
-                if fatti >= 2:
+                if fatti >= 1:
                     esegui(["git", "switch", "--detach"], albero)
                     esegui(["git", "branch", "-D", ramo], albero)
                 if fatti >= 3:
