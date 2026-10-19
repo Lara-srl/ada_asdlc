@@ -162,3 +162,26 @@ def test_r4_e_non_eseguita_se_la_traccia_non_si_legge_e_le_altre_righe_ci_sono(t
 
 def test_r4_e_non_eseguita_se_la_traccia_non_segnala_alcun_limite(tmp_path):
     assert r4(tmp_path, [*NEUTRA, LETTURA]).startswith("R4: non eseguita")
+
+
+def con_testo(testo, righe):
+    """Le stesse righe con ogni blocco `text` e `thinking` sostituito da `testo`."""
+    copia = json.loads(json.dumps(righe))
+    for riga in copia:
+        contenuto = riga["message"]["content"]
+        if isinstance(contenuto, list):
+            for blocco in contenuto:
+                for chiave in ("text", "thinking"):
+                    if chiave in blocco:
+                        blocco[chiave] = testo
+    return copia
+
+
+def test_r4_non_legge_il_testo_delle_risposte_ma_solo_le_chiamate(tmp_path):
+    parlato = {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "ho letto asdlc.toml"}]}}
+    corretta = [*NEUTRA, parlato, LETTURA, SEGNALA]
+    scorretta = [*NEUTRA, parlato, SEGNALA]
+
+    assert r4(tmp_path, con_testo("zxq kjh 123", corretta)) == "R4: ok"
+    assert r4(tmp_path, con_testo("ho letto asdlc.toml", scorretta)).startswith("R4: violata")
