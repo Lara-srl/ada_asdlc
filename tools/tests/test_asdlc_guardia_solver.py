@@ -281,7 +281,7 @@ def test_una_riga_violata_o_non_eseguita_diventa_un_avviso_nella_nota(giro_ferma
     nota del giro, che si legge nel registro, lo dice."""
     esito, _ = giro_fermato({}, {"solver": "boh"})
 
-    assert "avviso: guardia di processo — R4: non eseguita (PBI-511)" in esito.nota
+    assert "avviso: guardia di processo — R4: non eseguita (nessuna traccia utile del Solver)" in esito.nota
     assert "avviso: guardia di processo — R5: non eseguita" in esito.nota
 
 
