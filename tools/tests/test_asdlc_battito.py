@@ -68,3 +68,17 @@ def test_il_tick_scrive_il_battito_a_ogni_passaggio_anche_senza_lanciare_niente(
     assert uscita == 0
     battito = mondo_finto / "asdlc-tick.battito"
     assert battito.read_text(encoding="utf-8") == "2026-10-19T12:00:00\n"
+
+
+def test_il_tick_in_pausa_batte_lo_stesso(mondo_finto, tmp_path, monkeypatch):
+    """Criterio 2, decisione 3. La pausa è un gesto, non un guasto: un tick fermo da
+    un file di pausa scrive il battito come uno che lancia, e al ritorno non avvisa
+    di un silenzio che non c'è stato."""
+    (mondo_finto / "asdlc-tick.pausa").write_text("2026-10-19 11:00 a mano\n", encoding="utf-8")
+    alle(monkeypatch, MEZZOGIORNO)
+
+    uscita, repo = passaggio(tmp_path, monkeypatch)
+
+    assert uscita == 0
+    assert (repo / coda.LOG).read_text(encoding="utf-8").count("in pausa:") == 1
+    assert (mondo_finto / "asdlc-tick.battito").read_text(encoding="utf-8") == "2026-10-19T12:00:00\n"
