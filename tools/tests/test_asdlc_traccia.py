@@ -202,3 +202,11 @@ def test_r4_non_legge_il_testo_delle_risposte_ma_solo_le_chiamate(tmp_path):
 
     assert r4(tmp_path, con_testo("zxq kjh 123", corretta)) == "R4: ok"
     assert r4(tmp_path, con_testo("ho letto asdlc.toml", scorretta)).startswith("R4: violata")
+
+
+def test_la_prima_invocazione_del_giro_non_porta_fork_session_ne_c(monkeypatch, git_finto):
+    primo = lanci_del_builder(monkeypatch)[0]
+
+    assert "--session-id" in primo
+    assert "-c" not in primo
+    assert "--fork-session" not in primo
