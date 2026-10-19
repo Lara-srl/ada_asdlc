@@ -4222,6 +4222,68 @@ def giri_solver_fatti(pbi: str) -> int:
     return fatti
 
 
+RE_PBI_DEL_BACKLOG = re.compile(r"^PBI-(\d+)")
+RE_RIGA_DI_CODA = re.compile(r"^- (PBI-\d+|‖)")
+
+
+def passo_a_monte(cmd: list[str], cwd: Path) -> str:
+    """Un passo verso `asdlc`: l'uscita, o `RuntimeError` che nomina il comando se esce ≠ 0."""
+    codice, uscita = esegui(cmd, cwd, timeout=300)
+    if codice != 0:
+        raise RuntimeError(f"`{' '.join(cmd[:3])}` è uscito {codice}: {una_riga(uscita)[:200]}")
+    return uscita.strip()
+
+
+def pbi_a_monte_numerato(testo: str, numero: int, causa: str) -> tuple[str, str]:
+    """Il testo del Solver col numero dato nell'intestazione e la riga `**Causa:**` (R6 la
+    cerca lì), e il nome del file `PBI-NNN-<titolo>.md`. Il resto resta com'è."""
+    righe = testo.strip().splitlines()
+    titolo = re.sub(r"^#\s*(PBI-\d+\s*:\s*)?", "", righe[0]).strip()
+    corpo = righe[1:]
+    if not any(re.match(rf"\*\*Causa:\*\*\s*{re.escape(causa)}(?![\w-])", r) for r in corpo):
+        corpo = ["", f"**Causa:** {causa}", *corpo]
+    parole = re.sub(r"[^a-z0-9]+", "-", titolo.lower()).strip("-")[:50].strip("-")
+    return "\n".join([f"# PBI-{numero}: {titolo}", *corpo]) + "\n", f"PBI-{numero}-{parole}.md"
+
+
+def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
+    """Apre il PBI a monte (`PBI-512`, R5): un ramo sul fork di `asdlc` e una PR da lì verso
+    `main`, mai una scrittura su `main`. Il testo del PBI è quello del Solver, col numero
+    successivo a quelli di `backlog/` del clone `[rilascio].clone` e la riga in `CODA.md`.
+    Rende il PBI a monte e l'URL della PR; un passo che esce ≠ 0 alza `RuntimeError`."""
+    clone, fork = Path(CFG.rilascio.clone), CFG.rilascio.remote_fork
+    passo_a_monte(["git", "fetch", "origin"], clone)
+    nome_repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
+                               ".nameWithOwner"], clone)
+    with worktree_di_rilascio(clone, "origin/main") as albero:
+        presenti = [int(m.group(1)) for f in (albero / "backlog").glob("PBI-*.md")
+                    if (m := RE_PBI_DEL_BACKLOG.match(f.name))]
+        numero = max(presenti, default=0) + 1
+        pbi = f"PBI-{numero}"
+        testo, nome_file = pbi_a_monte_numerato(dichiarato["pbi"], numero, dichiarato["causa"])
+        (albero / "backlog" / nome_file).write_text(testo, encoding="utf-8")
+        coda = albero / "backlog" / "CODA.md"
+        righe = coda.read_text(encoding="utf-8").splitlines() if coda.exists() else []
+        dopo = max([i for i, r in enumerate(righe) if RE_RIGA_DI_CODA.match(r)], default=len(righe) - 1)
+        righe.insert(dopo + 1, f"- {pbi}")
+        coda.write_text("\n".join(righe) + "\n", encoding="utf-8")
+        titolo = testo.splitlines()[0].removeprefix("# ")
+        ramo = f"pbi/pbi-{numero}"
+        passo_a_monte(["git", "switch", "-c", ramo], albero)
+        passo_a_monte(["git", "add", "-A"], albero)
+        passo_a_monte(["git", "commit", "-m", f"docs(backlog): apri {titolo}\n\n"
+                       f"Limite del runner, causa {dichiarato['causa']}."], albero)
+        passo_a_monte(["git", "push", fork, ramo], albero)
+        url_fork = passo_a_monte(["git", "remote", "get-url", fork], albero)
+        proprietario = re.search(r"github\.com[:/]([^/]+)/", url_fork)
+        testa = f"{proprietario.group(1)}:{ramo}" if proprietario else ramo
+        corpo = (f"**Causa:** {dichiarato['causa']}\n\nComando: `{dichiarato['comando']}`\n"
+                 f"Commit: {dichiarato['commit']}\n\n```\n{dichiarato['output']}\n```\n")
+        url = passo_a_monte(["gh", "pr", "create", "--repo", nome_repo, "--base", "main",
+                             "--head", testa, "--title", titolo, "--body", corpo], albero)
+    return pbi, url
+
+
 def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                      dichiara) -> None:
     """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
