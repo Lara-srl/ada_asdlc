@@ -112,6 +112,22 @@ def test_un_distacco_di_31_minuti_scrive_l_avviso_nel_log_e_a_schermo(
 
 
 
+def test_il_distacco_avvisa_solo_oltre_la_soglia_29_30_e_31_minuti(
+    mondo_finto, tmp_path, monkeypatch
+):
+    """Criterio 3, il confine. A 29 minuti il tick tace, a 30 esatti tace ancora
+    («oltre» non è «alla» soglia), a 31 avvisa."""
+    avvisati = {}
+    for minuti in (29, 30, 31):
+        battito_di(mondo_finto, MEZZOGIORNO - datetime.timedelta(minutes=minuti))
+        alle(monkeypatch, MEZZOGIORNO)
+        _, repo = passaggio(tmp_path / f"m{minuti}", monkeypatch)
+        log = (repo / coda.LOG).read_text(encoding="utf-8")
+        avvisati[minuti] = "battito precedente" in log
+
+    assert avvisati == {29: False, 30: False, 31: True}
+
+
 def test_un_battito_che_manca_non_e_un_avviso_e_il_primo_passaggio_lo_scrive(
     mondo_finto, tmp_path, monkeypatch, capsys
 ):
