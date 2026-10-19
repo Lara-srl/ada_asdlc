@@ -158,3 +158,7 @@ def test_r4_e_non_eseguita_se_la_traccia_non_si_legge_e_le_altre_righe_ci_sono(t
     righe = e.guardia.splitlines()
     assert next(r for r in righe if r.startswith("R4:")).startswith("R4: non eseguita")
     assert [r[:2] for r in righe[1:]] == ["R4", "R5", "R6", "R7"]
+
+
+def test_r4_e_non_eseguita_se_la_traccia_non_segnala_alcun_limite(tmp_path):
+    assert r4(tmp_path, [*NEUTRA, LETTURA]).startswith("R4: non eseguita")
