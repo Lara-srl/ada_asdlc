@@ -62,3 +62,44 @@ Le decisioni di Francesco (16/10), che qui valgono:
 - [ ] **Nessun `gh pr merge` nel pacchetto** (il test AST di `PBI-509` resta verde).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde; senza Solver nulla cambia.
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (19/10, run `20261019-095506`) ha fatto i primi tre passi con le loro coppie
+RED→GREEN: `[rilascio].clone` (`e24c13e`, `ca8063a`), il campo `pbi` e l'errore senza clone in
+`segnala_limite_runner` (`f56a996`, `d1ef6c4`), e `apri_pr_a_monte` con `ASDLC_CLONE` dal runner
+(`5e8d045`, `21c8f8e`). Poi ha chiamato `fermati` su una domanda vera, non su un difetto del
+codice: il test `test_il_limite_apre_un_ramo_sul_fork_e_una_pr_verso_main_col_pbi_successivo`
+(`tools/tests/test_asdlc_pr_a_monte.py`) asserisce `mondo.rami(mondo.fork) == ["main",
+"pbi/pbi-513"]`, ma `MondoAMonte` crea il fork come repository nudo vuoto e non vi spinge mai
+`main`: l'elenco reale è `["pbi/pbi-513"]`. In IMPL il Builder non poteva correggere un test.
+
+**Decisione di Francesco (19/10): la fixture si corregge, l'asserzione resta.** Un fork vero ha
+`main`: la fixture ci spinge `main`, e il test continua a chiedere `["main", "pbi/pbi-513"]`.
+Non si abbassa l'asserzione a `["pbi/pbi-513"]`.
+
+**Si riprende il tag `giro-fermato/pbi-512-giro1-20261019`** (21c8f8e): ramo da quel tag, niente
+cherry-pick e niente rebase. Il file di questo PBI si prende da `main` (`git checkout
+origin/main -- backlog/PBI-512-la-pr-a-monte-del-solver.md`), un commit; se `git` vede un
+conflitto su quel file vale la versione di `main`.
+
+**Da fare, in quest'ordine:**
+
+1. **La fixture, un commit di soli test.** In `MondoAMonte.__init__` si spinge `main` sul fork
+   (dopo `git remote add fork`, prima che il test lo usi), e basta: nessun'altra riga del test
+   cambia. Il commit è `test(runner): il fork della fixture ha main come un fork vero`, da solo,
+   prima di ogni altro. Non è un nuovo ciclo: il rosso del test lo ha già osservato il gate nel
+   giro 1 (`5e8d045`), e questo commit lo riporta alla sua intenzione. Il test deve passare
+   contro `21c8f8e` senza toccare produzione. Se il gate del rosso lo ferma comunque, `fermati`
+   con la riga della guardia, non una riscrittura della storia.
+2. **R6, la causa già a monte.** Un test e poi il codice: con un PBI già a monte per la stessa
+   causa, `segnala_limite_runner` non apre un ramo né una PR, e cita il PBI o la PR esistente.
+3. **`attende:` e la pausa.** Dopo la PR il PBI fermo ha la riga `attende:` e la pausa esiste;
+   con una causa già a monte vale lo stesso. La chiamata passa da `smista_il_blocco`.
+4. **`prompt/solver.md`, README, `AUTOMAZIONE.md` e la spec** nello stesso commit del codice che
+   ne cambia il comportamento, e le spunte del PBI man mano.
+
+**Non si fa:** non si rifanno i tre passi del giro 1, non si tocca la storia del tag e non si
+abbassa l'asserzione del test. Il criterio «nessun `gh pr merge`» si chiude con il test di
+`PBI-509` che usa un finto `gh` (`tools/tests/test_asdlc_rilascio.py`), non con un test dell'AST:
+quello è stato tolto dal giro 5 di `PBI-509`.
