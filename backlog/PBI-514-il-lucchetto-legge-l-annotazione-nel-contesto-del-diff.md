@@ -1,6 +1,6 @@
 # PBI-514: il lucchetto di fase legge l'annotazione JUnit nel contesto del diff
 
-**Stato:** da accodare (hotfix di `v0.3.0`/`v0.4.0`; ha una domanda aperta)
+**Stato:** pronto da accodare (hotfix di `v0.3.0`/`v0.4.0`; domanda chiusa da Francesco il 19/10)
 
 ## Direttiva
 
@@ -52,22 +52,11 @@ Il secondo commit (`1a7f3f6`) dà lo stesso `[]`; la sua causa non è stata rico
    cambia solo il modo di riconoscere il metodo, non la sottrazione.
 3. **Il diff vero è la fixture**, non uno scritto a mano (protocollo di rifinitura di
    `PBI-505`).
-4. **Lo scope dei commit è `runner`.**
-
-## ❓ Domanda aperta, per Francesco (non accodare prima di averla chiusa)
-
-Un RED che **riscrive un test esistente senza cambiarne il nome** (cambio di decisione del
-PBI: stesso metodo, asserzione opposta) non ha nessun nome nuovo. Oggi il lucchetto lo
-rifiuta come «nessun test nuovo». Due scelte:
-
-- **A.** Resta così: il Builder deve far nascere un test con un nome nuovo, e il PBI lo scrive.
-  Regola semplice, coerente con «un nome nuovo è un test che nasce» (`ADR-0021`).
-- **B.** Il lucchetto riconosce anche il test **modificato** (il corpo cambia nel diff) e ne
-  osserva il rosso. Copre il caso reale di PBI-015 (D1 ribalta una decisione), ma allarga la
-  regola: un test ritoccato per sbaglio aprirebbe `IMPL`.
-
-Questo PBI implementa **solo** il punto 1 della *Deciso*, che vale con A e con B. Se scegli B
-è un PBI a parte.
+4. **Un test riscritto con lo stesso nome non è una nascita** (Francesco, 19/10, scelta A).
+   Il lucchetto non guarda il corpo dei test: per aprire `IMPL` il Builder fa nascere un test
+   con un nome nuovo (`ADR-0021`), e il PBI che ribalta una decisione lo scrive nella *Verifica*.
+   Un test modificato con lo stesso nome resta «nessun test nuovo», com'è oggi.
+5. **Lo scope dei commit è `runner`.**
 
 ## Dipendenze
 

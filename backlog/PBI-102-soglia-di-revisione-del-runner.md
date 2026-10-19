@@ -1978,20 +1978,20 @@ del difetto 23 sul lancio di PBI-335, che qui sta scritta accanto alla sua spunt
     rinomina un test parametrico, con `@ParameterizedTest` e `@ValueSource` invariati, dà
     `([], set())`, e `--chiedi-impl` dice «nessun test nuovo». Riprodotto il 19/10 sul commit
     `d11525c` di `ada_planning` (difetto 5, terza occorrenza di `runner-non-legge-junit`, PBI-015).
-    Resta una domanda aperta: il test riscritto con lo stesso nome (in `PBI-514`).
+    Il test riscritto con lo stesso nome non è una nascita (scelta A di Francesco, 19/10, in `PBI-514`).
 
     **Causa:** `codice-letto-come-testo`
-    **Stato:** `PBI-514`, da accodare (ha una domanda aperta).
+    **Stato:** `PBI-514`, pronto da accodare (domanda chiusa: scelta A, Francesco 19/10).
 
 101. **Il lucchetto di fase tratta come produzione i file di supporto sotto `src/test/`.**
     `e_file_di_test()` riconosce sotto `src/test/` solo i `.java` (scelta di non regressione di
     `PBI-505`), e `ESTENSIONI_CODICE` contiene `.sh` e `.sql`: uno script di fixture sotto
     `app/src/test/resources/` è produzione, e il Builder si ferma prima del primo RED. Visto da
-    `ada_planning` (difetto 6, PBI-005, giri 20261019-144204 e 170204). Gli scheletri vuoti sono
-    una domanda aperta (in `PBI-515`).
+    `ada_planning` (difetto 6, PBI-005, giri 20261019-144204 e 170204). Gli scheletri vuoti
+    si ammettono in `TEST_ONLY` (scelta B di Francesco, 19/10, in `PBI-515`).
 
     **Causa:** `caso-scoperto`
-    **Stato:** `PBI-515`, da accodare (ha una domanda aperta).
+    **Stato:** `PBI-515`, pronto da accodare (domanda chiusa: scelta B, Francesco 19/10).
 
 ## ⛔ `ada-notte.sh` deve sparire (Francesco, 26/08/2026)
 
