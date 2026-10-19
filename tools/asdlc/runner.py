@@ -4338,12 +4338,20 @@ def metti_in_attesa_del_pbi_a_monte(pbi_path: Path, dichiarato: dict) -> None:
         if nominato is None:
             raise RuntimeError(f"la PR {url} non nomina il suo PBI")
         pbi_a_monte = nominato.group(0)
-    testo = pbi_path.read_text(encoding="utf-8").rstrip("\n")
-    pbi_path.write_text(f"{testo}\n\nattende: {repo}#{pbi_a_monte}\n", encoding="utf-8")
-    git("add", str(pbi_path.relative_to(REPO)))
+    originale = pbi_path.read_text(encoding="utf-8")
+    pbi_path.write_text(f"{originale.rstrip(chr(10))}\n\nattende: {repo}#{pbi_a_monte}\n",
+                        encoding="utf-8")
+    relativo = str(pbi_path.relative_to(REPO))
     fermo = re.match(r"PBI-\d+", pbi_path.name)
-    git("commit", "-m", f"chore(coda): {fermo.group(0) if fermo else pbi_path.stem} "
-        f"attende {repo}#{pbi_a_monte}")
+    try:
+        git("add", relativo)
+        git("commit", "-m", f"chore(coda): {fermo.group(0) if fermo else pbi_path.stem} "
+            f"attende {repo}#{pbi_a_monte}")
+    except RuntimeError:
+        # Un passo fallito non lascia la riga né nello stage né nel file (spec, «Dopo la PR»).
+        esegui(["git", "reset", "-q", "HEAD", "--", relativo], REPO)
+        pbi_path.write_text(originale, encoding="utf-8")
+        raise
     # Lo stesso file di `coda.file_di_pausa()`: `coda` importa il runner, non il contrario.
     (Path.home() / "asdlc-tick.pausa").write_text(
         f"{datetime.now():%Y-%m-%d %H:%M} PR a monte {pbi_a_monte}\n", encoding="utf-8")
