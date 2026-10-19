@@ -345,6 +345,7 @@ def test_la_riga_scritta_dal_runner_e_quella_che_attese_legge_dal_ramo_su_origin
     git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
     smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato_del_limite())
     git(tmp_path, "remote", "add", "origin", str(origin))
+    git(tmp_path, "push", "-q", "origin", "HEAD~1:refs/heads/main")  # il PBI fermo senza riga
     git(tmp_path, "push", "-q", "origin", "HEAD:refs/heads/pbi/pbi-400")
     tick = tmp_path / "tick"
     git(tmp_path, "clone", "-q", str(origin), str(tick))
