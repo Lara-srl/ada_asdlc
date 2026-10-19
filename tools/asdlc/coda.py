@@ -1034,6 +1034,24 @@ def fermo_in_pausa(repo: Path) -> bool:
     return True
 
 
+def adesso() -> datetime:
+    """L'ora del tick. I test la sostituiscono: il battito si prova con un'ora
+    data e non con l'orologio vero (PBI-510)."""
+    return datetime.now()
+
+
+def file_del_battito() -> Path:
+    """`~/asdlc-tick.battito`, accanto a `~/asdlc-tick.pausa` e calcolato come
+    lei, quando serve (PBI-510, decisione 2)."""
+    return Path.home() / "asdlc-tick.battito"
+
+
+def batti() -> None:
+    """Scrive l'ora del passaggio, in ISO su una riga, nel file del battito."""
+    file_del_battito().write_text(adesso().isoformat(timespec="seconds") + "\n",
+                                  encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Un tick: legge `asdlc.toml`, poi guarda, decide una cosa, la fa, e finisce.
 
@@ -1088,7 +1106,8 @@ def smista(argv: list[str] | None = None) -> int:
 
 
 def passaggio(a: argparse.Namespace) -> int:
-    """Il tick col suo lucchetto in mano: la pausa, la decisione, il lancio."""
+    """Il tick col suo lucchetto in mano: il battito, la pausa, la decisione, il lancio."""
+    batti()
     # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
     for riga in () if a.dry_run else pin(a.repo):
         print(riga)
