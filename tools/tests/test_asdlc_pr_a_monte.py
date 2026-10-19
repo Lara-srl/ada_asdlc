@@ -291,3 +291,12 @@ def test_con_una_causa_gia_in_una_pr_il_pbi_fermo_attende_il_pbi_di_quella_pr(a_
     assert f"attende: {ASDLC}#PBI-600" in pbi_fermo.read_text(encoding="utf-8").splitlines()
     assert (tmp_path / "casa" / "asdlc-tick.pausa").exists()
     assert not mondo.comandi("gh", "pr", "create")
+
+
+def test_il_prompt_del_solver_spiega_il_campo_pbi_di_segnala_limite_runner():
+    """Decisione 1: il Solver scrive il testo del PBI a monte, e il prompt gli dice come."""
+    voce = next(r for r in runner.prompt_del_pacchetto("solver").split("\n\n")
+                if "`segnala_limite_runner`" in r)
+
+    assert "`pbi`" in voce
+    assert "Scope" in voce and "Verifica" in voce
