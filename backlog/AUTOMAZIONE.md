@@ -458,6 +458,12 @@ echo "$(date '+%F %H:%M') la ragione" > ~/asdlc-tick.pausa   # spento
 rm ~/asdlc-tick.pausa                                          # riacceso
 ```
 
+**Il battito** (`PBI-510`). A ogni passaggio il tick scrive l'ora in `~/asdlc-tick.battito`,
+anche in pausa; se il battito precedente è più vecchio di `[tick].soglia_battito_minuti` (30)
+scrive un avviso in `runs/coda.log` e a schermo, e prosegue (`ADR-0008`). Il file che manca
+non avvisa. Il PC spento ferma la coda: l'unità e il timer di systemd che la rilanciano alla
+ripartenza sono una ricetta, in `README.md`, che si installa a mano come il crontab.
+
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:
 
