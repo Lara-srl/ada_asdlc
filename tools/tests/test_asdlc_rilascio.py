@@ -490,3 +490,20 @@ def test_un_passo_del_pin_fallito_e_un_avviso_e_il_tick_dopo_riprova(progetto, m
     [riga] = coda.pin(m.repo)
     assert riga.endswith("PR del pin a v0.4.0")
     assert len(m.rami_su_origin()) == 1
+
+
+def test_un_git_commit_del_pin_fallito_non_lascia_il_ramo_locale_e_il_tick_dopo_riprova(progetto, monkeypatch):
+    m = progetto()
+    ripara = fallisce(m, monkeypatch, ["git", "commit"])
+
+    righe = coda.pin(m.repo)
+
+    assert len(righe) == 1 and righe[0].startswith("pin: avviso"), righe
+    assert "PR del pin a" not in righe[0]
+    assert git(m.repo, "branch", "--list", "pin/*").strip() == "", "nessun ramo locale a metà"
+    assert m.rami_su_origin() == []
+
+    ripara()
+    [riga] = coda.pin(m.repo)
+    assert riga.endswith("PR del pin a v0.4.0")
+    assert len(m.rami_su_origin()) == 1
