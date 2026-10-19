@@ -1059,7 +1059,7 @@ def batti(repo: Path) -> None:
     if precedente is not None:
         minuti = int((ora - precedente).total_seconds() // 60)
         soglia = CFG.tick.soglia_battito_minuti
-        if minuti >= soglia - 1:
+        if minuti > soglia:
             riga = (f"avviso, il battito precedente è di {minuti} minuti fa — il tick "
                     f"era fermo, soglia {soglia}")
             print(riga)
