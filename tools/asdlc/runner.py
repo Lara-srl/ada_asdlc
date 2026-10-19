@@ -1200,7 +1200,8 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     Ogni invocazione riceve `--session-id` con un uuid nuovo, che il registro riporta in
     `sessione` (PBI-511, decisione 1), e a fine invocazione ne copia la traccia accanto ai
     file del giro (`copia_la_traccia`, decisione 2). La CLI accetta `--session-id` con
-    `-c` solo insieme a `--fork-session` (PBI-513).
+    `-c` solo insieme a `--fork-session`, e il runner lo aggiunge soltanto
+    lì: il rilancio continua il contesto e scrive sotto il uuid nuovo (PBI-513).
 
     Il Builder riceve con `--settings` la guardia di fase del giro, e
     `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
@@ -1212,12 +1213,14 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
         della_sessione = ["--settings", str(impostazioni_della_sessione(esito))]
         ambiente = AMBIENTE_DEL_GIRO
     sessione = str(uuid.uuid4())
+    if "-c" in comando:
+        della_sessione.append("--fork-session")
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
     scaduto = False
     t0 = time.monotonic()
     try:
-        codice, uscita = esegui(comando + della_sessione + ["--fork-session", "--session-id", sessione]
+        codice, uscita = esegui(comando + della_sessione + ["--session-id", sessione]
                                 + ["--mcp-config", str(config), "--strict-mcp-config",
                                    f"@{prompt}"], REPO, timeout=minuti * 60,
                                 flussi=(fuori, dentro), ambiente=ambiente)
