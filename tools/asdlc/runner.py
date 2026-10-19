@@ -4299,7 +4299,8 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                      dichiara) -> None:
     """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
     `e.solver` (`PBI-507`, decisione 11). Oltre `[solver].giri_massimi` giri per lo
-    stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`)."""
+    stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`). A un limite del
+    runner apre il PBI a monte e mette il progetto in attesa (`PBI-512`)."""
     e.giri_solver = giri_solver_fatti(e.pbi)
     if e.giri_solver >= CFG.solver.giri_massimi:
         dichiara(f"avviso: tetto dei giri del Solver raggiunto ({e.giri_solver} di "
@@ -4317,6 +4318,21 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                     else {"esito": "senza esito", "uscita": invocazione.uscita})
     if dichiarato is not None and dichiarato["esito"] == "intento":
         dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
+    if dichiarato is not None and dichiarato["esito"] == "limite-del-runner":
+        metti_in_attesa_del_pbi_a_monte(pbi_path, dichiarato)
+
+
+def metti_in_attesa_del_pbi_a_monte(pbi_path: Path, dichiarato: dict) -> None:
+    """Apre il PBI a monte e mette il progetto in attesa (`PBI-512`, decisione 4): scrive nel
+    PBI fermo `attende: <repo>#<PBI>` (formato di `PBI-509`) e crea la pausa del tick."""
+    from asdlc import coda  # import tardivo: `coda` importa il runner
+    pbi_a_monte, _ = apri_pr_a_monte(dichiarato)
+    repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
+                          ".nameWithOwner"], Path(CFG.rilascio.clone))
+    testo = pbi_path.read_text(encoding="utf-8").rstrip("\n")
+    pbi_path.write_text(f"{testo}\n\nattende: {repo}#{pbi_a_monte}\n", encoding="utf-8")
+    coda.file_di_pausa().write_text(
+        f"{datetime.now():%Y-%m-%d %H:%M} PR a monte {pbi_a_monte}\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)
