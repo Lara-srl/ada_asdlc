@@ -79,6 +79,9 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Cosa:** i duplicati.
 - **Quando:** prima di aprire la PR.
 - **Prova:** nessun PBI in `backlog/` né PR aperta in `asdlc` con la stessa `causa`.
+- **Oggi (`PBI-512`):** `apri_pr_a_monte` cerca la `causa` a parola intera nei PBI di `backlog/`
+  di `origin/main` del clone e nelle PR aperte; se la trova non apre né ramo né PR e rende il
+  PBI (URL vuoto) o `PR #N` con il suo URL.
 - **Se manca:** si cita il PBI o la PR esistente e il progetto si mette in attesa di quello.
 
 ### R7 — Il PBI a monte cambia solo il runner

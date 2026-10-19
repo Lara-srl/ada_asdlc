@@ -4250,8 +4250,8 @@ def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
     """Apre il PBI a monte (`PBI-512`, R5): un ramo sul fork di `asdlc` e una PR da lì verso
     `main`, mai una scrittura su `main`. Il testo del PBI è quello del Solver, col numero
     successivo a quelli di `backlog/` del clone `[rilascio].clone` e la riga in `CODA.md`.
-    Se un PBI di `backlog/` porta già la stessa causa (R6) non apre niente e rende quel PBI con
-    l'URL vuoto. Rende il PBI a monte e l'URL della PR; un passo che esce ≠ 0 alza `RuntimeError`."""
+    Se un PBI di `backlog/` o una PR aperta porta già la stessa causa (R6) non apre niente e
+    rende quel PBI con l'URL vuoto, o `PR #N` con il suo URL. Rende il PBI a monte e l'URL della PR; un passo che esce ≠ 0 alza `RuntimeError`."""
     clone, fork = Path(CFG.rilascio.clone), CFG.rilascio.remote_fork
     passo_a_monte(["git", "fetch", "origin"], clone)
     nome_repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
@@ -4261,6 +4261,12 @@ def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
         for file in sorted((albero / "backlog").glob("PBI-*.md")):
             if re.search(rf"\*\*Causa:\*\*\s*{causa}(?![\w-])", file.read_text(encoding="utf-8")):
                 return f"PBI-{RE_PBI_DEL_BACKLOG.match(file.name).group(1)}", ""
+        aperte = json.loads(passo_a_monte(
+            ["gh", "pr", "list", "--repo", nome_repo, "--state", "open", "--limit",
+             str(LIMITE_PR_R6), "--json", "number,title,body,url"], albero))
+        for pr in aperte:
+            if re.search(rf"(?<![\w-]){causa}(?![\w-])", f"{pr['title']}\n{pr['body']}"):
+                return f"PR #{pr['number']}", pr["url"]
         presenti = [int(m.group(1)) for f in (albero / "backlog").glob("PBI-*.md")
                     if (m := RE_PBI_DEL_BACKLOG.match(f.name))]
         numero = max(presenti, default=0) + 1
