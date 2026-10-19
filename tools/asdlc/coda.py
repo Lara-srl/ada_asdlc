@@ -1123,13 +1123,14 @@ def smista(argv: list[str] | None = None) -> int:
 
 def passaggio(a: argparse.Namespace) -> int:
     """Il tick col suo lucchetto in mano: il battito, la pausa, la decisione, il lancio."""
+    # Il battito per primo, prima del pin e della pausa: l'avviso va nel log prima di
+    # fare altro, e un tick in pausa batte lo stesso, perché la pausa è un gesto e non
+    # un guasto (PBI-510, decisioni 3 e 4).
+    batti(a.repo)
     # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
     for riga in () if a.dry_run else pin(a.repo):
         print(riga)
         scrivi_nel_log(a.repo, riga)
-    # Il battito prima della pausa: un tick in pausa batte lo stesso, perché la
-    # pausa è un gesto e non un guasto (PBI-510, decisione 3).
-    batti(a.repo)
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
