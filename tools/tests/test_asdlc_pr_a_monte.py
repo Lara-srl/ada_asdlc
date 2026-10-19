@@ -276,3 +276,18 @@ def test_dopo_la_pr_il_pbi_fermo_attende_il_pbi_a_monte_e_la_pausa_esiste(a_mont
 
     assert f"attende: {ASDLC}#PBI-513" in pbi_fermo.read_text(encoding="utf-8").splitlines()
     assert (tmp_path / "casa" / "asdlc-tick.pausa").exists()
+
+
+def test_con_una_causa_gia_in_una_pr_il_pbi_fermo_attende_il_pbi_di_quella_pr(a_monte, tmp_path,
+                                                                              monkeypatch):
+    """Criterio 4, causa già a monte: la riga `attende:` nomina il PBI della PR esistente
+    (quello del titolo), e la pausa esiste lo stesso; nessuna PR nuova."""
+    esistente = f"https://github.com/{ASDLC}/pull/40"
+    mondo = a_monte(pr_aperte=[{"number": 40, "title": "PBI-600: altro", "url": esistente,
+                                "body": "**Causa:** runner-x\n", "headRefName": "pbi/pbi-600"}])
+
+    pbi_fermo = smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato_del_limite())
+
+    assert f"attende: {ASDLC}#PBI-600" in pbi_fermo.read_text(encoding="utf-8").splitlines()
+    assert (tmp_path / "casa" / "asdlc-tick.pausa").exists()
+    assert not mondo.comandi("gh", "pr", "create")
