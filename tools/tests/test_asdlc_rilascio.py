@@ -543,6 +543,16 @@ def test_attese_legge_la_riga_che_sta_solo_sul_ramo_pbi_di_origin(tmp_path):
 
 def test_attese_conta_una_volta_sola_il_pbi_con_la_riga_in_main_e_sul_ramo(progetto):
     m = progetto()
+    # Il ramo del PBI fermo ha un commit oltre main che cambia il suo file lasciando la stessa
+    # riga `attende:`: è `--no-merged` e il file compare nel diff, quindi `attese()` lo legge
+    # davvero e la terna arriva due volte a `raccogli`.
+    file = m.repo / "backlog" / "PBI-700-il-pbi-fermo.md"
+    git(m.repo, "checkout", "-q", "-b", "ramo-fermo")
+    file.write_text(file.read_text() + "\nUna riga in più.\n")
+    git(m.repo, "commit", "-qam", "il ramo cambia il file, la riga resta")
+    git(m.repo, "push", "-q", "-f", "origin", "ramo-fermo:refs/heads/pbi/pbi-700")
+    git(m.repo, "checkout", "-q", "main")
+    git(m.repo, "fetch", "-q", "origin")
 
     assert coda.attese(m.repo) == [("PBI-700-il-pbi-fermo.md", A_MONTE, "PBI-505")]
 
