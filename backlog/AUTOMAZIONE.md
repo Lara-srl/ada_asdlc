@@ -140,12 +140,13 @@ Il terzo ruolo è il **Solver** (`ADR-0030`, `PBI-507`). Non giudica il lavoro: 
 giro fermato. Il runner lo lancia dopo un `fermati` del Builder, una domanda del Critic o un
 agente `senza esito`, in sola lettura, e il server dell'esito gli lascia tre strumenti:
 `risolvi` (con un file dell'albero come evidenza), `segnala_limite_runner` (causa in
-`[solver].cause`, comando, output, commit esistente) e `chiedi_a_francesco`. Prima di
+`[solver].cause`, comando, output, commit esistente, `pbi` col testo del PBI a monte) e `chiedi_a_francesco`. Prima di
 segnalare un limite del runner legge `asdlc.toml`; prima di chiedere legge
 `backlog/PRECEDENTI.md`. Il tetto è di 3 giri per PBI (`[solver].giri_massimi`), contati in
 `giri_solver` nel rapporto: al quarto, o a `chiedi_a_francesco`, il giro si ferma con un
-avviso e non con un blocco (`ADR-0008`). Il Solver per ora si invoca e si registra: non
-rilancia il Builder e non apre la PR a monte.
+avviso e non con un blocco (`ADR-0008`). Il Solver non rilancia il Builder; a un limite del
+runner apre la PR a monte da un fork di `asdlc` (`[rilascio].clone`, numero successivo libero,
+mai due PBI per la stessa causa), scrive `attende:` nel PBI fermo e crea la pausa (`PBI-512`).
 
 Il runner controlla anche **l'igiene**: se dopo un giro restano modifiche non committate,
 rimanda l'agente a committarle — ciò che non è committato non esiste, non si giudica e non

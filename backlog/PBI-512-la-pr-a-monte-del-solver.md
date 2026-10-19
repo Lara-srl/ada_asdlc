@@ -52,14 +52,14 @@ Le decisioni di Francesco (16/10), che qui valgono:
 
 `gh` e `git` sono sostituiti da finti; nessun test usa la rete.
 
-- [ ] **`segnala_limite_runner` apre il ramo sul fork e la PR, mai su `main`.** Il test verifica
+- [x] **`segnala_limite_runner` apre il ramo sul fork e la PR, mai su `main`.** Il test verifica
       il ramo, la base della PR e che la PR porti il PBI col numero successivo e la riga di
       `backlog/CODA.md` (R5).
-- [ ] **Senza `[rilascio].clone` la PR non si apre** e lo strumento rende un errore al Solver.
-- [ ] **Una causa con PBI già a monte non ne apre un altro.** Cita il PBI o la PR esistente (R6).
-- [ ] **Dopo la PR il progetto è in attesa:** il PBI fermo ha la riga `attende:` e la pausa
+- [x] **Senza `[rilascio].clone` la PR non si apre** e lo strumento rende un errore al Solver.
+- [x] **Una causa con PBI già a monte non ne apre un altro.** Cita il PBI o la PR esistente (R6).
+- [x] **Dopo la PR il progetto è in attesa:** il PBI fermo ha la riga `attende:` e la pausa
       esiste; con una causa già a monte vale lo stesso.
-- [ ] **Nessun `gh pr merge` nel pacchetto** (il test AST di `PBI-509` resta verde).
+- [x] **Nessun `gh pr merge` nel pacchetto** (il test AST di `PBI-509` resta verde).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde; senza Solver nulla cambia.
 

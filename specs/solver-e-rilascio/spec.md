@@ -5,7 +5,7 @@ Lo **stato** voluto del sistema (come funziona). Le decisioni e le alternative s
 cambia, PBI per PBI, sta in `backlog/`.
 
 > **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`); R8-R11 esistono
-> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) non ancora.** La spec descrive il
+> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`).** La spec descrive il
 > comportamento a cui i PBI devono arrivare. Oggi la catena è manuale (v. l'ADR, Contesto).
 
 ## Il ciclo
