@@ -19,8 +19,11 @@ PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 config = importlib.import_module("asdlc.config")
 esito = importlib.import_module("asdlc.esito")
 runner = importlib.import_module("asdlc.runner")
+coda = importlib.import_module("asdlc.coda")
 runner.REPO = PROGETTO
 runner.configura(runner.asdlc_config.carica(PROGETTO))
+coda.REPO = PROGETTO
+coda.configura(coda.asdlc_config.carica(PROGETTO))
 
 TESTO_DEL_PBI = "# PBI-900: il limite\n\n## Direttiva\n\nCorreggi.\n\n**Scope**\n\n- `tools/asdlc/x.py`\n"
 
@@ -254,6 +257,12 @@ def smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato):
     (tmp_path / "backlog").mkdir()
     pbi_fermo = tmp_path / "backlog" / "PBI-400-fermo.md"
     pbi_fermo.write_text("# PBI-400: fermo\n", encoding="utf-8")
+    # Il worktree del giro: un repository vero sul ramo del PBI fermo.
+    git(tmp_path, "init", "-q", "-b", "pbi/pbi-400")
+    git(tmp_path, "config", "user.email", "t@t")
+    git(tmp_path, "config", "user.name", "t")
+    git(tmp_path, "add", "backlog")
+    git(tmp_path, "commit", "-qm", "il PBI fermo")
     monkeypatch.setenv("HOME", str(tmp_path / "casa"))
     (tmp_path / "casa").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -291,6 +300,36 @@ def test_con_una_causa_gia_in_una_pr_il_pbi_fermo_attende_il_pbi_di_quella_pr(a_
     assert f"attende: {ASDLC}#PBI-600" in pbi_fermo.read_text(encoding="utf-8").splitlines()
     assert (tmp_path / "casa" / "asdlc-tick.pausa").exists()
     assert not mondo.comandi("gh", "pr", "create")
+
+
+def test_la_riga_attende_e_in_un_commit_del_ramo_e_il_worktree_resta_pulito(a_monte, tmp_path,
+                                                                           monkeypatch):
+    """Giro 3, decisione (a): la riga non resta come modifica nel worktree del runner, ma
+    sta in un commit del ramo del PBI fermo."""
+    mondo = a_monte()
+
+    smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato_del_limite())
+
+    assert git(tmp_path, "status", "--porcelain", "--", "backlog") == ""
+    nel_commit = git(tmp_path, "show", "HEAD:backlog/PBI-400-fermo.md").splitlines()
+    assert f"attende: {ASDLC}#PBI-513" in nel_commit
+
+
+def test_la_riga_scritta_dal_runner_e_quella_che_attese_legge_dal_ramo_su_origin(
+        a_monte, tmp_path, monkeypatch):
+    """La catena intera: il runner committa la riga, il ramo arriva su `origin` e il checkout
+    del progetto, su `main` e senza la riga, la legge con `coda.attese()`."""
+    mondo = a_monte()
+    origin = tmp_path / "progetto-origin.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato_del_limite())
+    git(tmp_path, "remote", "add", "origin", str(origin))
+    git(tmp_path, "push", "-q", "origin", "HEAD:refs/heads/pbi/pbi-400")
+    tick = tmp_path / "tick"
+    git(tmp_path, "clone", "-q", str(origin), str(tick))
+    git(tick, "fetch", "-q", "origin")
+
+    assert coda.attese(tick) == [("PBI-400-fermo.md", ASDLC, "PBI-513")]
 
 
 def test_il_prompt_del_solver_spiega_il_campo_pbi_di_segnala_limite_runner():
