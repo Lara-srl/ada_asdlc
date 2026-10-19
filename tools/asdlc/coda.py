@@ -1059,7 +1059,7 @@ def batti(repo: Path) -> None:
     if precedente is not None:
         minuti = int((ora - precedente).total_seconds() // 60)
         soglia = CFG.tick.soglia_battito_minuti
-        if minuti > soglia:
+        if minuti >= soglia - 1:
             riga = (f"avviso, il battito precedente è di {minuti} minuti fa — il tick "
                     f"era fermo, soglia {soglia}")
             print(riga)
@@ -1123,7 +1123,6 @@ def smista(argv: list[str] | None = None) -> int:
 
 def passaggio(a: argparse.Namespace) -> int:
     """Il tick col suo lucchetto in mano: il battito, la pausa, la decisione, il lancio."""
-    batti(a.repo)
     # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
     for riga in () if a.dry_run else pin(a.repo):
         print(riga)
@@ -1132,6 +1131,7 @@ def passaggio(a: argparse.Namespace) -> int:
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
         return 0
+    batti(a.repo)
     # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
     # di decidere, col lucchetto del tick già preso.
     if not a.dry_run and (ragione := allinea(a.repo)) is not None:
