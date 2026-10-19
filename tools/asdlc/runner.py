@@ -4544,6 +4544,8 @@ def controllo_r4(e: Esito) -> str:
     traccia della sua sessione, nell'ordine delle chiamate a strumento (`PBI-511`): mai il
     testo di una risposta (`ADR-0027`)."""
     voci = [v for v in e.invocazioni if v.get("ruolo") == "solver" and v.get("traccia")]
+    if not voci:
+        return "R4: non eseguita (PBI-511)"
     letto = False
     for ruolo, _, blocco in blocchi_della_traccia(Path(voci[-1]["traccia"])):
         if ruolo != "assistant" or blocco.get("type") != "tool_use":
@@ -4552,16 +4554,13 @@ def controllo_r4(e: Esito) -> str:
             return "R4: ok" if letto else "R4: violata (asdlc.toml non letto prima della segnalazione)"
         if blocco["name"] == "Read":
             letto = letto or Path(blocco["input"].get("file_path", "")).name == "asdlc.toml"
-    return "R4: non eseguita (PBI-511)"
+    return "R4: violata (nessuna segnalazione nella traccia)"
 
 
 def controlla_r4(e: Esito) -> str:
     """R4 con la stessa rete di `controlla`: una traccia assente o illeggibile non ferma la
     guardia."""
-    try:
-        return controllo_r4(e)
-    except Exception:  # noqa: BLE001 — la riga resta quella di prima, non si tace il resto
-        return "R4: non eseguita (PBI-511)"
+    return controllo_r4(e)
 
 
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
