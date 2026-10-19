@@ -1,6 +1,6 @@
 # PBI-513: il rilancio del Builder forka la sessione
 
-**Stato:** da accodare (hotfix di `v0.4.0`, da tagliare `v0.4.1`)
+**Stato:** in coda; giro 1 fermato il 19/10 (hotfix di `v0.4.0`, da tagliare `v0.4.1`)
 
 ## Direttiva
 
@@ -82,3 +82,45 @@ Su `main` il rilancio non porta `--fork-session`, quindi ogni criterio è un **r
 
 - `python3 -m pytest -q tools/tests` resta verde; nessun test esistente cambia asserzione.
 - La traccia del primo lancio di ogni giro si copia come prima.
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (19/10, run `20261019-230506`, 15 minuti) ha fatto **tutto il lavoro** del PBI: i
+quattro criteri con le loro coppie RED→GREEN, la guardia anche per `--resume`, le spunte. La suite
+dava `1058 passed`. Si è fermato solo alla fine, con una domanda del Builder: la cura fa sì che
+`invoca_agente` aggiunga `--fork-session` ai comandi con `-c` o `--resume`, e il test
+`TestIlTimeoutDiUnAgenteChiudeSenzaEsito` (`tools/tests/test_asdlc_runner.py`, riga ~8478) usa un
+agente finto `sh -c` che scrive il suo esito in `"${2%.mcp.json}.json"`. Con `--fork-session`
+`$2` diventa `--session-id`, e ogni `pytest` lascia `tools/tests/dati/progetto/--session-id.json`
+non tracciato: l'albero resta sporco. Su `main` non succede. Il Critic non è girato.
+
+**Risposta (il Solver, `fable`, 19/10, confermata da Francesco con lo stesso precedente di
+`PBI-511`): strada B.** Il file si ignora, non si committa e non si cancella a mano. La cura vera
+(il finto che scrive su `tmp_path` e non legge `$2`) è un PBI a parte, non questo. La strada C
+(restringere la condizione ai soli comandi `claude`) **no**: la decisione 3 vuole la guardia su
+ogni comando con `-c` o `--resume`, e non si piega su un finto dei test.
+
+**Si riprende il tag `giro-fermato/pbi-513-giro1-20261019`** (`fc8a898`): ramo da quel tag, niente
+cherry-pick e niente rebase. Il file di questo PBI si prende da `main` (`git checkout
+origin/main -- backlog/PBI-513-il-rilancio-del-builder-forka-la-sessione.md`), un commit; sul tag
+ha le spunte e su `main` questa sezione. **Dopo averlo preso, i quattro criteri vanno
+rispuntati**: sono già fatti, i commit lo provano.
+
+**Da fare, in quest'ordine:**
+
+1. **Una riga in `tools/tests/dati/progetto/.gitignore`**, accanto a quella dei JSON con nome
+   uuid: `--*.json`, con il commento sul perché (l'esito che il finto scrive quando `$2` è un
+   flag). Un commit `chore(runner): …`, il primo del giro. La deroga allo Scope (`ADR-0015`) si
+   dichiara nel suo messaggio: cosa (la riga), perché (il gate sporca l'albero con l'esito di un
+   test finto), cosa non cambia (nessun file tracciato della cartella, `runs/` e gli uuid restano
+   ignorati). Non è codice di produzione e non ha un rosso da osservare.
+2. **Il gate** sul ramo: verde, e `git status --porcelain` vuoto dopo averlo girato.
+3. **`fatto`**, perché il Critic legga il lavoro del giro 1 e questo commit. Se il gate è rosso o
+   `git status` mostra altro, è un fatto nuovo: `fermati` con la domanda.
+4. **Nella risposta `fatto` una riga che nomina il PBI da aprire:** il finto `AGENTE_CHE_DORME`
+   legge `$2` invece di `--mcp-config` o `ASDLC_ESITO` e scrive in `tools/tests/dati/progetto/`:
+   deve scrivere su `tmp_path`.
+
+**Non si fa:** non si rifanno i passi del giro 1, non si riscrive la storia del tag, non si
+tocca `tools/tests/test_asdlc_runner.py` (la cura del finto è di un PBI suo) e non si committa
+nessun JSON.
