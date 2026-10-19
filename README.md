@@ -126,7 +126,7 @@ pacchetto non c'è nessun `gh pr merge`.
   tick mette il tag successivo (`v0.3.0` → `v0.3.1` con `patch`, `v0.4.0` con `minor`).
   `--registra` e il tag girano in un worktree usa-e-getta fuori dal checkout, che resta pulito.
 - **Nel progetto:** per ogni PBI fermo (ramo su `origin`, nessun merge) con
-  `attende: <repo>#<PBI>`, a PR a monte `MERGED` (`gh pr view`) e tag che la contiene il tick
+  `attende: <repo>#<PBI>` (letta anche dai rami `pbi/*` su `origin`, non solo da `main`), a PR a monte `MERGED` (`gh pr view`) e tag che la contiene il tick
   apre la PR che cambia solo `[ambiente].installa`; a PR del pin `MERGED` toglie
   `~/asdlc-tick.pausa`. Il pin gira anche con il tick in pausa, il rilascio no.
 

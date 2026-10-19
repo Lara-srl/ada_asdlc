@@ -845,11 +845,31 @@ RE_INSTALLA = re.compile(r'^(installa\s*=\s*"[^"\n]*@)v\d+\.\d+\.\d+', re.MULTIL
 
 
 def attese(repo: Path) -> list[tuple[str, str, str]]:
-    """I PBI fermi del progetto con `attende: <repo>#<PBI>`: (PBI, repo a monte, PBI a monte)."""
+    """I PBI fermi del progetto con `attende: <repo>#<PBI>`: (PBI, repo a monte, PBI a monte).
+
+    La riga si legge da `backlog/` del checkout e dai file di `backlog/` dei rami `pbi/*` su
+    `origin` (`git show origin/<ramo>:<file>`): il runner la committa sul ramo del PBI fermo,
+    non in `main`. Un PBI che compare in tutti e due i posti si conta una volta."""
     trovate = []
+    visti = set()
+
+    def raccogli(nome: str, testo: str) -> None:
+        for a_monte, pbi_a_monte in RE_ATTENDE.findall(testo):
+            if (nome, a_monte, pbi_a_monte) not in visti:
+                visti.add((nome, a_monte, pbi_a_monte))
+                trovate.append((nome, a_monte, pbi_a_monte))
+
     for file in sorted((repo / BACKLOG).glob("*.md")):
-        for a_monte, pbi_a_monte in RE_ATTENDE.findall(file.read_text(encoding="utf-8")):
-            trovate.append((file.name, a_monte, pbi_a_monte))
+        raccogli(file.name, file.read_text(encoding="utf-8"))
+    _, rami = esegui(["git", "for-each-ref", "--format=%(refname:short)",
+                      f"refs/remotes/{REMOTO}/pbi/"], repo)
+    for ramo in sorted(rami.split()):
+        _, nomi = esegui(["git", "ls-tree", "--name-only", ramo, f"{BACKLOG}/"], repo)
+        for percorso in sorted(nomi.split()):
+            if percorso.endswith(".md"):
+                codice, testo = esegui(["git", "show", f"{ramo}:{percorso}"], repo)
+                if codice == 0:
+                    raccogli(Path(percorso).name, testo)
     return trovate
 
 

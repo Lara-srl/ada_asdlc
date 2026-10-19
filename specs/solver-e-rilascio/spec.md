@@ -143,7 +143,10 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
 - **Se manca:** il progetto resta in attesa. Quando c'è, apre una PR che cambia solo la riga
   `[ambiente].installa` di `asdlc.toml`; la parte specifica del progetto è del PBI a valle.
 
-- **Dove sta:** `coda.pin()`, chiamata prima della pausa (non con `--dry-run`). Considera solo
+- **Dove sta:** `coda.pin()`, chiamata prima della pausa (non con `--dry-run`). `coda.attese()` legge la riga `attende:` da `backlog/` del checkout e dai file di
+  `backlog/` dei rami `pbi/*` su `origin` (`git show origin/<ramo>:<file>`), perché il runner la
+  committa sul ramo del PBI fermo e non in `main`; un PBI in tutti e due i posti si conta una
+  volta. Considera solo
   i PBI fermi: ramo su `origin` e nessun merge, perché il file con `attende:` resta in
   `backlog/`. Il tag è il primo di `gh api repos/<repo>/tags` che contiene il merge
   (`compare`: `ahead` o `identical`). Il ramo è `pin/asdlc-<tag>`; con una PR già su quel
