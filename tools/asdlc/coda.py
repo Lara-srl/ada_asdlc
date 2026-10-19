@@ -847,8 +847,8 @@ RE_INSTALLA = re.compile(r'^(installa\s*=\s*"[^"\n]*@)v\d+\.\d+\.\d+', re.MULTIL
 def attese(repo: Path) -> list[tuple[str, str, str]]:
     """I PBI fermi del progetto con `attende: <repo>#<PBI>`: (PBI, repo a monte, PBI a monte).
 
-    La riga si legge da `backlog/` del checkout e dai file di `backlog/` dei rami `pbi/*` su
-    `origin` (`git show origin/<ramo>:<file>`): il runner la committa sul ramo del PBI fermo,
+    La riga si legge da `backlog/` del checkout e dai file di `backlog/` che i rami `pbi/*` su
+    `origin` non ancora in `main` cambiano rispetto a `main` (`git show origin/<ramo>:<file>`): il runner la committa sul ramo del PBI fermo,
     non in `main`. Un PBI che compare in tutti e due i posti si conta una volta."""
     trovate = []
     visti = set()
@@ -862,9 +862,12 @@ def attese(repo: Path) -> list[tuple[str, str, str]]:
     for file in sorted((repo / BACKLOG).glob("*.md")):
         raccogli(file.name, file.read_text(encoding="utf-8"))
     _, rami = esegui(["git", "for-each-ref", "--format=%(refname:short)",
-                      f"refs/remotes/{REMOTO}/pbi/"], repo)
+                      f"--no-merged={BASE}", f"refs/remotes/{REMOTO}/pbi/"], repo)
     for ramo in sorted(rami.split()):
-        _, nomi = esegui(["git", "ls-tree", "--name-only", ramo, f"{BACKLOG}/"], repo)
+        # Solo i file che il ramo cambia rispetto a `BASE`: le copie ferme di altri PBI
+        # riporterebbero bersagli superati.
+        _, nomi = esegui(["git", "diff", "--name-only", f"{BASE}...{ramo}", "--",
+                          f"{BACKLOG}/"], repo)
         for percorso in sorted(nomi.split()):
             if percorso.endswith(".md"):
                 codice, testo = esegui(["git", "show", f"{ramo}:{percorso}"], repo)
