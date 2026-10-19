@@ -1123,6 +1123,27 @@ def una_riga(testo: str) -> str:
     return " / ".join(r.strip() for r in testo.splitlines() if r.strip())
 
 
+def cartella_delle_sessioni() -> Path:
+    """Dove Claude Code scrive le sessioni di `REPO`: `~/.claude/projects/<percorso>`, col
+    percorso della cartella di lavoro in cui ogni carattere non alfanumerico è un `-`."""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(REPO))
+
+
+def copia_la_traccia(sessione: str, destinazione: Path, registro: dict) -> None:
+    """Copia il `jsonl` della sessione accanto ai file del giro e ne scrive il percorso in
+    `registro["traccia"]`. La cartella di Claude Code è fuori dal repository e può essere
+    ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
+    `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`)."""
+    sorgente = cartella_delle_sessioni() / f"{sessione}.jsonl"
+    try:
+        shutil.copyfile(sorgente, destinazione)
+    except OSError as guasto:
+        registro["traccia"] = None
+        registro["traccia_nota"] = f"sessione non trovata o non copiabile: {sorgente} ({guasto})"
+        return
+    registro["traccia"] = str(destinazione)
+
+
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
                   esito: Path | None) -> Invocazione:
     """Lancia un agente con il server dell'esito accanto, e legge l'esito.
@@ -1138,7 +1159,8 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     porta allora `tetto_minuti`, che è ciò che la nota dice.
 
     Ogni invocazione riceve `--session-id` con un uuid nuovo, che il registro riporta in
-    `sessione` (PBI-511, decisione 1).
+    `sessione` (PBI-511, decisione 1), e a fine invocazione ne copia la traccia accanto ai
+    file del giro (`copia_la_traccia`, decisione 2).
 
     Il Builder riceve con `--settings` la guardia di fase del giro, e
     `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
@@ -1167,6 +1189,7 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
                 "sessione": sessione}
     if scaduto:
         registro["tetto_minuti"] = minuti
+    copia_la_traccia(sessione, Path(f"{esito}.sessione.jsonl"), registro)
     dichiarato = None if scaduto else esito_dichiarato(esito)
     return Invocazione(codice, uscita, dichiarato, registro)
 
