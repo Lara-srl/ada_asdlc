@@ -110,6 +110,35 @@ def test_un_distacco_di_31_minuti_scrive_l_avviso_nel_log_e_a_schermo(
     assert righe.index(avvisi[0]) == 0, righe
 
 
+def test_l_avviso_viene_prima_delle_righe_del_pin(mondo_finto, tmp_path, monkeypatch):
+    """Criterio 3, decisione 4, «prima di fare altro». Il pin ha qualcosa da dire e il
+    battito precedente è di 31 minuti prima: la prima riga del log è l'avviso, la
+    riga del pin viene dopo. Il battito non aspetta il pin, che parla con `git` e `gh`."""
+    monkeypatch.setattr(coda, "pin", lambda repo: ["pin: qualcosa"])
+    battito_di(mondo_finto, MEZZOGIORNO - datetime.timedelta(minutes=31))
+    alle(monkeypatch, MEZZOGIORNO)
+
+    _, repo = passaggio(tmp_path, monkeypatch)
+
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert "avviso" in righe[0] and "battito" in righe[0], righe
+    assert righe[1].endswith("  pin: qualcosa"), righe
+
+
+def test_il_battito_si_scrive_anche_se_il_pin_solleva(mondo_finto, tmp_path, monkeypatch):
+    """Criterio 1. Se `pin()` solleva, il passaggio cade ma il battito è già scritto:
+    il passaggio dopo non avvisa di un silenzio falso."""
+    def pin_rotto(repo):
+        raise RuntimeError("gh non risponde")
+    monkeypatch.setattr(coda, "pin", pin_rotto)
+    alle(monkeypatch, MEZZOGIORNO)
+
+    with pytest.raises(RuntimeError):
+        passaggio(tmp_path, monkeypatch)
+
+    assert (mondo_finto / "asdlc-tick.battito").read_text(encoding="utf-8") == "2026-10-19T12:00:00\n"
+
+
 
 
 def test_il_distacco_avvisa_solo_oltre_la_soglia_29_30_e_31_minuti(
