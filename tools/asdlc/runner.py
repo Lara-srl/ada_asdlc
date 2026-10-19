@@ -4325,13 +4325,21 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
 def metti_in_attesa_del_pbi_a_monte(pbi_path: Path, dichiarato: dict) -> None:
     """Apre il PBI a monte e mette il progetto in attesa (`PBI-512`, decisione 4): scrive nel
     PBI fermo `attende: <repo>#<PBI>` (formato di `PBI-509`) e crea la pausa del tick."""
-    from asdlc import coda  # import tardivo: `coda` importa il runner
-    pbi_a_monte, _ = apri_pr_a_monte(dichiarato)
+    pbi_a_monte, url = apri_pr_a_monte(dichiarato)
+    clone = Path(CFG.rilascio.clone)
     repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
-                          ".nameWithOwner"], Path(CFG.rilascio.clone))
+                          ".nameWithOwner"], clone)
+    if pbi_a_monte.startswith("PR #"):  # la causa è già in una PR aperta: il suo PBI è nel titolo
+        vista = json.loads(passo_a_monte(["gh", "pr", "view", url, "--repo", repo, "--json",
+                                          "title,headRefName"], clone))
+        nominato = re.search(r"PBI-\d+", f"{vista['title']} {vista['headRefName']}")
+        if nominato is None:
+            raise RuntimeError(f"la PR {url} non nomina il suo PBI")
+        pbi_a_monte = nominato.group(0)
     testo = pbi_path.read_text(encoding="utf-8").rstrip("\n")
     pbi_path.write_text(f"{testo}\n\nattende: {repo}#{pbi_a_monte}\n", encoding="utf-8")
-    coda.file_di_pausa().write_text(
+    # Lo stesso file di `coda.file_di_pausa()`: `coda` importa il runner, non il contrario.
+    (Path.home() / "asdlc-tick.pausa").write_text(
         f"{datetime.now():%Y-%m-%d %H:%M} PR a monte {pbi_a_monte}\n", encoding="utf-8")
 
 
