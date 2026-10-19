@@ -31,6 +31,8 @@ c'è e il rapporto dice cosa manca; non promette ciò che la sessione non contie
   traccia delle sessioni, nello stesso commit del codice che li cambia (`AGENTS.md`, SEMPRE).
 - `tools/tests/test_asdlc_guardia_solver.py` — **allargamento del 19/10**: il test di `PBI-508`
   che nomina il rinvio «(PBI-511)» cambia con il testo di R4.
+- `tools/tests/dati/progetto/.gitignore` — **allargamento del 19/10** (giro 3): una riga per i
+  JSON con nome uuid che il gate lascia nell'albero (vedi sotto).
 
 **Fuori scope**
 
@@ -133,3 +135,38 @@ committa** e non si tocca la cartella: se un test in questo giro lo scrive, il t
 
 **Non si fa:** non si riscrive `df769b7`, non si rifà il caso «la traccia non c'è», non si tocca
 `fe51914` (i GREEN lo annullano con commit nuovi) e non si riscrive la storia del tag.
+
+## Il giro 3, e cosa si riprende
+
+Il giro 2 (19/10, run `20261019-170508`) ha fatto **tutto il lavoro** del PBI: i quattro passi
+con le loro coppie RED→GREEN, il testo nuovo di R4, la spec e le spunte. Si è fermato solo alla
+fine, con una domanda del Builder: il gate lascia nell'albero un
+`tools/tests/dati/progetto/<uuid>.json` non tracciato, il controllo dell'albero pulito ne vuole
+il commit e la ripresa del giro 2 diceva di non committarlo e di non toccare la cartella. La
+contraddizione era della ripresa, non del Builder.
+
+**Decisione di Francesco (19/10): il file si ignora, non si committa e non si cancella a mano.**
+Il file è l'esito che un test del gate scrive in `tools/tests/dati/progetto/`; ogni giro lo
+rigenera e ferma anche gli altri PBI con `albero-sporco-all-ingresso`. La cura vera (il test su
+`tmp_path`) è un PBI a parte.
+
+**Si riprende il tag `giro-fermato/pbi-511-giro2-20261019`** (bdfeb2d): ramo da quel tag, niente
+cherry-pick e niente rebase. Il file di questo PBI si prende da `main` (`git checkout
+origin/main -- backlog/PBI-511-la-traccia-delle-sessioni.md`), un commit; se `git` vede un
+conflitto su quel file vale la versione di `main`, e le spunte del giro 2 restano.
+
+**Da fare, in quest'ordine:**
+
+1. **Una riga in `tools/tests/dati/progetto/.gitignore`** (esiste già e ignora `runs/`) per i
+   JSON con nome uuid, `[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*.json` o un'espressione
+   equivalente, con il commento sul perché. Un commit `chore(runner): …`, il primo del giro. La
+   deroga allo Scope (`ADR-0015`) si dichiara nel suo messaggio: cosa (la riga), perché (il gate
+   sporca l'albero con l'esito di un test), cosa non cambia (nessun file tracciato della
+   cartella, `runs/` resta ignorata). Non è codice di produzione né ha un rosso da osservare.
+2. **Il gate** sul ramo: deve essere verde e l'albero deve restare pulito dopo averlo girato
+   (`git status` vuoto, il JSON è ignorato).
+3. **`fatto`**, perché il Critic legga il lavoro del giro 2. Se il gate è rosso o `git status`
+   mostra altro, è un fatto nuovo: `fermati` con la domanda.
+
+**Non si fa:** non si rifanno i passi del giro 1 e 2, non si riscrive la storia del tag, non si
+committa nessun JSON uuid e non si tocca nessun test.
