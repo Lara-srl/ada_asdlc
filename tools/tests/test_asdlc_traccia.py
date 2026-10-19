@@ -107,3 +107,29 @@ def test_una_traccia_senza_ragionamenti_si_vede_dallo_zero(monkeypatch, tmp_path
     invocazione = con_la_sessione(monkeypatch, tmp_path, senza)
 
     assert invocazione.registro["contenuto"]["thinking"] == 0
+
+
+def chiamata(nome, **input):
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "t", "name": nome, "input": input}]}}
+
+
+LETTURA = chiamata("Read", file_path="/progetto/asdlc.toml")
+SEGNALA = chiamata("mcp__asdlc__segnala_limite_runner", causa="x")
+
+
+def r4(tmp_path, righe, **registro):
+    """La riga R4 della guardia per un Solver la cui traccia è `righe` (`None`: nessun file)."""
+    voce = {"ruolo": "solver", "traccia": None, **registro}
+    if righe is not None:
+        traccia = tmp_path / "solver.sessione.jsonl"
+        traccia.write_text(sessione_finta(righe), encoding="utf-8")
+        voce["traccia"] = str(traccia)
+    e = runner.Esito("PBI-102", "fermato", solver=[{"esito": "limite-del-runner"}],
+                     invocazioni=[voce])
+    runner.guardia_del_solver(e)
+    return next(r for r in e.guardia.splitlines() if r.startswith("R4:"))
+
+
+def test_r4_e_ok_se_asdlc_toml_e_letto_prima_di_segnala_limite_runner(tmp_path):
+    assert r4(tmp_path, [*RIGHE, LETTURA, SEGNALA]) == "R4: ok"
