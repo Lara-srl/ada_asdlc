@@ -27,6 +27,10 @@ c'è e il rapporto dice cosa manca; non promette ciò che la sessione non contie
   scritto nel rapporto del giro; la lettura della traccia; la riga R4 della guardia.
 - `tools/tests/test_asdlc_traccia.py` — nuovo: i test dei criteri.
 - `backlog/PBI-511-la-traccia-delle-sessioni.md` — questo file, per la spunta.
+- `specs/solver-e-rilascio/spec.md` — **allargamento del 19/10** (giro 2): R4, R13 e la
+  traccia delle sessioni, nello stesso commit del codice che li cambia (`AGENTS.md`, SEMPRE).
+- `tools/tests/test_asdlc_guardia_solver.py` — **allargamento del 19/10**: il test di `PBI-508`
+  che nomina il rinvio «(PBI-511)» cambia con il testo di R4.
 
 **Fuori scope**
 
@@ -81,3 +85,51 @@ Su `main` la traccia non esiste: ogni criterio è un **rosso atteso**.
 
 **Non regressione:** i ruoli ricevono gli stessi strumenti di prima;
 `python3 -m pytest -q tools/tests` resta verde.
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (19/10, run `20261019-155507`) ha fatto i criteri 1-5 e 7 e si è fermato a
+`rosso-mai-visto` su `df769b7` («R4 è non eseguita se la traccia manca, è illeggibile o non
+segnala alcun limite»). Nasce verde per la ragione di `PBI-509` e `PBI-510`: il codice c'era già
+(`controlla_r4` aveva la sua rete e `controllo_r4` finiva con «non eseguita»), e un test scritto
+dopo il codice non può essere rosso (`ADR-0021`). Dei tre casi del test uno non potrà mai
+essere rosso: **«la traccia non c'è»** è già presidiato dal test di `PBI-508`
+(`test_la_riga_r4_e_non_eseguita_con_il_rinvio_a_pbi_511`) e non si riscrive.
+
+**Si riprende il tag `ripresa/pbi-511-giro2`** (fe51914), non un `giro-fermato/…`: è la storia del
+giro 1 fino a `f559361` (i criteri 1-5, 4 coppie RED→GREEN più la base delle tracce di R4),
+**senza `df769b7` e senza i quattro commit dopo**, più un commit `fe51914` che toglie a mano due
+cose da `runner.py`: `controlla_r4` non intercetta più l'eccezione (una traccia illeggibile
+arriva alla guardia) e `controllo_r4` senza `segnala_limite_runner` nella traccia rende `violata`
+invece di `non eseguita`. Resta il caso senza traccia (`if not voci`). Gate verde sul tag (1044
+test). Ramo da quel tag, niente cherry-pick e niente rebase. Il file di questo PBI si prende da
+`main` (`git checkout origin/main -- backlog/PBI-511-la-traccia-delle-sessioni.md`), un commit;
+se `git` vede un conflitto su quel file vale la versione di `main`, poi si spunta ciò che il
+giro ha fatto.
+
+**Da fare, in quest'ordine:**
+
+1. **Traccia illeggibile, RED.** Un test: una traccia che non è JSON → la riga è «R4: non
+   eseguita» e le righe R5-R7 ci sono lo stesso (il corpo del secondo test di `df769b7`). Contro
+   il tag fallisce: l'eccezione esce dalla guardia. Un commit `test(runner): …(RED)` da solo.
+2. **GREEN.** Si rimette la rete in `controlla_r4`. Un commit `feat(runner): …`.
+3. **Nessuna segnalazione, RED.** Un test: una traccia con la lettura di `asdlc.toml` ma senza
+   `segnala_limite_runner` → «R4: non eseguita». Contro il tag è `violata`. Un commit
+   `test(runner): …(RED)` da solo.
+4. **GREEN.** `controllo_r4` torna a rendere «non eseguita» in fondo. Un commit `feat(runner): …`.
+5. **Il criterio 7 (il testo libero non conta),** che il giro 1 aveva coperto in `a91120a`, e il
+   **testo del caso senza traccia**, «nessuna traccia utile del Solver» al posto del rinvio
+   provvisorio «(PBI-511)» (`c1d76ed`, `e88e1ac`, `1e32bf8` del giro 1): si rifanno come
+   coppie RED→GREEN, ciascuna col suo commit. Il test di `PBI-508` che nomina il rinvio cambia nel
+   commit del testo nuovo.
+6. **La spec** (R4, R13, la traccia delle sessioni) e le spunte dei sette criteri, nello stesso
+   commit del codice che ne cambia il comportamento.
+
+**Un file che non è del giro.** I test del gate lasciano nell'albero un
+`tools/tests/dati/progetto/<uuid>.json` non tracciato (il giro 1 lo ha segnalato come «il giro
+lascia: file tools +1»; un altro l'ha committato per errore, tolto in `1e32bf8`). **Non si
+committa** e non si tocca la cartella: se un test in questo giro lo scrive, il test si sposta su
+`tmp_path`. Fuori da questo, un test che scrive in `tools/tests/dati/` è un difetto a parte.
+
+**Non si fa:** non si riscrive `df769b7`, non si rifà il caso «la traccia non c'è», non si tocca
+`fe51914` (i GREEN lo annullano con commit nuovi) e non si riscrive la storia del tag.
