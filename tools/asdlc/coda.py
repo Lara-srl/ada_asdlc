@@ -1127,11 +1127,13 @@ def passaggio(a: argparse.Namespace) -> int:
     for riga in () if a.dry_run else pin(a.repo):
         print(riga)
         scrivi_nel_log(a.repo, riga)
+    # Il battito prima della pausa: un tick in pausa batte lo stesso, perché la
+    # pausa è un gesto e non un guasto (PBI-510, decisione 3).
+    batti(a.repo)
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
         return 0
-    batti(a.repo)
     # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
     # di decidere, col lucchetto del tick già preso.
     if not a.dry_run and (ragione := allinea(a.repo)) is not None:
