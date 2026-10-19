@@ -761,6 +761,215 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
         log.write(f"{datetime.now().isoformat(timespec='seconds')}  {riga}\n")
 
 
+RE_RILASCIA = re.compile(r"^rilascia:\s*(patch|minor)\s*$", re.MULTILINE)
+
+
+def rilascia_del_pbi(testo: str) -> str | None:
+    """`patch` o `minor` se il PBI dichiara `rilascia:`, altrimenti `None` (R8)."""
+    trovato = RE_RILASCIA.search(testo)
+    return trovato.group(1) if trovato else None
+
+
+def prossimo_tag(tag: list[str], come: str) -> str:
+    """Il tag che segue l'ultimo `<prefisso>X.Y.Z` di `tag`: `patch` alza Z, `minor`
+    alza Y e azzera Z."""
+    prefisso = CFG.rilascio.prefisso_tag
+    versioni = [tuple(int(n) for n in t.removeprefix(prefisso).split("."))
+                for t in tag if re.fullmatch(rf"{re.escape(prefisso)}\d+\.\d+\.\d+", t)]
+    x, y, z = max(versioni, default=(0, 0, 0))
+    nuova = (x, y, z + 1) if come == "patch" else (x, y + 1, 0)
+    return prefisso + ".".join(str(n) for n in nuova)
+
+
+def ci_verde(repo: Path) -> bool:
+    """L'ultima esecuzione della CI su `main` è finita `success` (R8)."""
+    codice, uscita = esegui(["gh", "run", "list", "--branch", BASE.removeprefix(f"{REMOTO}/"),
+                             "--limit", "1", "--json", "conclusion"], repo)
+    if codice != 0:
+        return False
+    try:
+        corse = json.loads(uscita)
+    except ValueError:
+        return False
+    return bool(corse) and corse[0].get("conclusion") == "success"
+
+
+def passo_di_rilascio(repo: Path) -> list[str]:
+    """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
+    `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive."""
+    if not any(RE_RILASCIA.search(f.read_text(encoding="utf-8"))
+               for f in (repo / BACKLOG).glob("*.md")):
+        return []
+    codice, uscita = esegui(["gh", "pr", "list", "--state", "merged", "--limit", str(LIMITE_PR),
+                             "--json", "title,headRefName,mergeCommit"], repo)
+    if codice != 0:
+        return [f"rilascio: gh non risponde (uscita {codice})"]
+    righe = []
+    for pr in json.loads(uscita):
+        pbi = pbi_nominato(pr)
+        if pbi is None:
+            continue
+        for file in sorted((repo / BACKLOG).glob(f"{pbi}-*.md")):
+            come = rilascia_del_pbi(file.read_text(encoding="utf-8"))
+            if come is None:
+                continue
+            oid = (pr.get("mergeCommit") or {}).get("oid")
+            if oid and esegui(["git", "tag", "--contains", oid], repo)[1].strip():
+                continue
+            if not ci_verde(repo):
+                righe.append(f"rilascio: {pbi} non rilasciato, la CI di main non è verde")
+                continue
+            _, elenco = esegui(["git", "tag", "--list"], repo)
+            tag = prossimo_tag(elenco.split(), come)
+            # Il giro del tag lavora fuori dal checkout del tick, che resta com'è (R9).
+            with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
+                esegui([str(runner_installato()), "--registra",
+                        str(repo / CFG.registro.cartella)], albero)
+                codice, uscita = esegui(["git", "tag", tag], albero)
+                if codice == 0:
+                    codice, uscita = esegui(["git", "push", REMOTO, tag], albero)
+                    if codice != 0:
+                        # I ref sono del checkout: senza toglierlo, il tag locale
+                        # farebbe saltare il PBI al tick dopo e su origin non arriva.
+                        esegui(["git", "tag", "-d", tag], albero)
+            if codice != 0:
+                righe.append(f"rilascio: avviso, {pbi} non rilasciato, il tag {tag} non è "
+                             f"arrivato su {REMOTO} (uscita {codice}): {in_una_riga(uscita)}")
+                continue
+            righe.append(f"rilascio: {pbi} → {tag}")
+    return righe
+
+
+RE_ATTENDE = re.compile(r"^attende:\s*([\w.-]+/[\w.-]+)#(\S+)\s*$", re.MULTILINE)
+RE_INSTALLA = re.compile(r'^(installa\s*=\s*"[^"\n]*@)v\d+\.\d+\.\d+', re.MULTILINE)
+
+
+def attese(repo: Path) -> list[tuple[str, str, str]]:
+    """I PBI fermi del progetto con `attende: <repo>#<PBI>`: (PBI, repo a monte, PBI a monte)."""
+    trovate = []
+    for file in sorted((repo / BACKLOG).glob("*.md")):
+        for a_monte, pbi_a_monte in RE_ATTENDE.findall(file.read_text(encoding="utf-8")):
+            trovate.append((file.name, a_monte, pbi_a_monte))
+    return trovate
+
+
+def tag_del_rilascio(repo: Path, a_monte: str, pbi_a_monte: str) -> str | None:
+    """Il primo tag di `a_monte` che contiene il merge del PBI, o `None` (R10).
+
+    Lo stato della PR si chiede a `gh pr view` e non si legge dall'elenco: l'elenco è il
+    modo di trovare il numero, mai la prova del merge."""
+    codice, elenco = esegui(["gh", "pr", "list", "--repo", a_monte, "--state", "all",
+                             "--limit", str(LIMITE_PR), "--json", "number,title,headRefName"],
+                            repo)
+    if codice != 0:
+        return None
+    for pr in json.loads(elenco):
+        if pbi_nominato(pr) != pbi_a_monte:
+            continue
+        codice, vista = esegui(["gh", "pr", "view", str(pr["number"]), "--repo", a_monte,
+                                "--json", "state,mergeCommit"], repo)
+        if codice != 0:
+            continue
+        dati = json.loads(vista)
+        if dati.get("state") != "MERGED":
+            continue
+        oid = (dati.get("mergeCommit") or {}).get("oid")
+        codice, nomi = esegui(["gh", "api", f"repos/{a_monte}/tags", "--jq", ".[].name"], repo)
+        if codice != 0:
+            return None
+        for tag in sorted(nomi.split(), key=lambda t: [int(n) for n in re.findall(r"\d+", t)]):
+            _, stato = esegui(["gh", "api", f"repos/{a_monte}/compare/{oid}...{tag}",
+                               "--jq", ".status"], repo)
+            if stato.strip() in ("ahead", "identical"):
+                return tag
+    return None
+
+
+def stato_del_pin(repo: Path, ramo: str) -> str | None:
+    """Lo stato della PR del pin sul ramo `ramo`, da `gh pr view`; `None` se non c'è (R11)."""
+    codice, elenco = esegui(["gh", "pr", "list", "--head", ramo, "--state", "all",
+                             "--json", "number"], repo)
+    if codice != 0 or not (trovate := json.loads(elenco)):
+        return None
+    codice, vista = esegui(["gh", "pr", "view", str(trovate[0]["number"]),
+                            "--json", "state"], repo)
+    return json.loads(vista)["state"] if codice == 0 else "SCONOSCIUTO"
+
+
+def passo_del_pin(repo: Path) -> list[str]:
+    """Il passo del progetto (R10): per ogni PBI che `attende:`, la PR che porta
+    `[ambiente].installa` al tag del rilascio a monte. Rende le righe del log."""
+    righe = []
+    in_attesa = attese(repo)
+    if not in_attesa:
+        return righe
+    try:
+        fermi = pbi_con_ramo(repo) - pbi_mergiati(repo)
+    except Guasto as guasto:
+        return [f"pin: {in_una_riga(str(guasto))}"]
+    for file, a_monte, pbi_a_monte in in_attesa:
+        nome = asdlc_config.regex_del_modello(CFG.backlog.file).fullmatch(file)
+        if nome is None or CFG.backlog.id_di(nome.group("n")) not in fermi:
+            continue
+        tag = tag_del_rilascio(repo, a_monte, pbi_a_monte)
+        if tag is None:
+            righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — non ancora rilasciato")
+            continue
+        ramo = f"pin/asdlc-{tag}"
+        if (stato := stato_del_pin(repo, ramo)) is not None:
+            if stato == "MERGED" and file_di_pausa().exists():
+                file_di_pausa().unlink()
+                righe.append(f"pin: {file} — PR del pin mergiata, pausa tolta")
+            continue
+        with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
+            toml = albero / "asdlc.toml"
+            toml.write_text(RE_INSTALLA.sub(rf"\g<1>{tag}", toml.read_text(encoding="utf-8")),
+                            encoding="utf-8")
+            titolo = f"chore(config): porta il pin di asdlc a {tag}"
+            passi = [["git", "switch", "-c", ramo], ["git", "commit", "-am", titolo],
+                     ["git", "push", REMOTO, ramo],
+                     ["gh", "pr", "create", "--base", BASE.removeprefix(f"{REMOTO}/"),
+                      "--head", ramo, "--title", titolo,
+                      "--body", f"{file} attende {a_monte}#{pbi_a_monte}, rilasciato in {tag}."]]
+            for fatti, passo in enumerate(passi):
+                codice, uscita = esegui(passo, albero)
+                if codice != 0:
+                    break
+            if codice != 0:
+                # Il tick dopo riparte da zero: né il ramo locale (i ref sono del
+                # checkout) né quello su origin devono restare a metà.
+                if fatti >= 1:
+                    esegui(["git", "switch", "--detach"], albero)
+                    esegui(["git", "branch", "-D", ramo], albero)
+                if fatti >= 3:
+                    esegui(["git", "push", REMOTO, "--delete", ramo], albero)
+                righe.append(f"pin: avviso, {file}: nessuna PR per il pin {tag} — "
+                             f"{' '.join(passo[:2])} è uscito {codice}: {in_una_riga(uscita)}")
+                continue
+        righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — PR del pin a {tag}")
+    return righe
+
+
+def rilascia(repo: Path) -> list[str]:
+    """`passo_di_rilascio()` senza che un errore fermi il tick: un `gh` che risponde
+    male o un worktree che non si crea diventano una riga di avviso (`ADR-0008`)."""
+    try:
+        return passo_di_rilascio(repo)
+    except Exception as errore:
+        return [f"rilascio: avviso, il passo non è andato a buon fine — "
+                f"{in_una_riga(f'{type(errore).__name__}: {errore}')}"]
+
+
+def pin(repo: Path) -> list[str]:
+    """`passo_del_pin()` senza che un errore fermi il tick: un JSON illeggibile di `gh`
+    diventa una riga di avviso, e il tick prosegue (`ADR-0008`)."""
+    try:
+        return passo_del_pin(repo)
+    except Exception as errore:
+        return [f"pin: avviso, il passo non è andato a buon fine — "
+                f"{in_una_riga(f'{type(errore).__name__}: {errore}')}"]
+
+
 def file_di_pausa() -> Path:
     """`~/asdlc-tick.pausa`, calcolato quando serve e non all'import: i test
     spostano `HOME` (PBI-385, decisione 5). Non sta in `asdlc.toml`, che non
@@ -857,6 +1066,10 @@ def smista(argv: list[str] | None = None) -> int:
 
 def passaggio(a: argparse.Namespace) -> int:
     """Il tick col suo lucchetto in mano: la pausa, la decisione, il lancio."""
+    # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
+    for riga in () if a.dry_run else pin(a.repo):
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
@@ -868,6 +1081,9 @@ def passaggio(a: argparse.Namespace) -> int:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
+    for riga in () if a.dry_run else rilascia(a.repo):
+        print(riga)
+        scrivi_nel_log(a.repo, riga)
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
         print(riga)
         scrivi_nel_log(a.repo, riga)
