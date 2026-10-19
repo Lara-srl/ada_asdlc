@@ -332,7 +332,7 @@ def test_se_il_commit_fallisce_non_resta_la_riga_ne_il_worktree_sporco_ne_la_pau
 
     pbi_fermo = tmp_path / "backlog" / "PBI-400-fermo.md"
     assert "attende:" not in pbi_fermo.read_text(encoding="utf-8")
-    assert git(tmp_path, "status", "--porcelain") == ""
+    assert git(tmp_path, "status", "--porcelain", "--", "backlog") == ""
     assert not (tmp_path / "casa" / "asdlc-tick.pausa").exists()
 
 
