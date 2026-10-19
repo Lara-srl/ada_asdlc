@@ -33,6 +33,10 @@ Le decisioni di Francesco (16/10), che qui valgono:
 - `README.md`, `backlog/AUTOMAZIONE.md`, `specs/solver-e-rilascio/spec.md` — la sezione, nello
   stesso commit del codice.
 - `backlog/PBI-512-la-pr-a-monte-del-solver.md` — questo file, per la spunta.
+- `tools/asdlc/coda.py` e `tools/tests/test_asdlc_rilascio.py` — **allargamento del 19/10**
+  (giro 3): `attese()` legge anche i rami `pbi/*` su `origin`, e R10 cambia di conseguenza.
+- `tools/tests/test_asdlc_solver.py` — già toccato in `f56a996` (giro 1) per il campo `pbi`;
+  il file entra nello Scope a posteriori, e il commit non lo dichiarava.
 
 **Fuori scope**
 
@@ -52,14 +56,14 @@ Le decisioni di Francesco (16/10), che qui valgono:
 
 `gh` e `git` sono sostituiti da finti; nessun test usa la rete.
 
-- [x] **`segnala_limite_runner` apre il ramo sul fork e la PR, mai su `main`.** Il test verifica
+- [ ] **`segnala_limite_runner` apre il ramo sul fork e la PR, mai su `main`.** Il test verifica
       il ramo, la base della PR e che la PR porti il PBI col numero successivo e la riga di
       `backlog/CODA.md` (R5).
-- [x] **Senza `[rilascio].clone` la PR non si apre** e lo strumento rende un errore al Solver.
-- [x] **Una causa con PBI già a monte non ne apre un altro.** Cita il PBI o la PR esistente (R6).
-- [x] **Dopo la PR il progetto è in attesa:** il PBI fermo ha la riga `attende:` e la pausa
+- [ ] **Senza `[rilascio].clone` la PR non si apre** e lo strumento rende un errore al Solver.
+- [ ] **Una causa con PBI già a monte non ne apre un altro.** Cita il PBI o la PR esistente (R6).
+- [ ] **Dopo la PR il progetto è in attesa:** il PBI fermo ha la riga `attende:` e la pausa
       esiste; con una causa già a monte vale lo stesso.
-- [x] **Nessun `gh pr merge` nel pacchetto** (il test AST di `PBI-509` resta verde).
+- [ ] **Nessun `gh pr merge` nel pacchetto** (il test AST di `PBI-509` resta verde).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde; senza Solver nulla cambia.
 
@@ -103,3 +107,54 @@ conflitto su quel file vale la versione di `main`.
 abbassa l'asserzione del test. Il criterio «nessun `gh pr merge`» si chiude con il test di
 `PBI-509` che usa un finto `gh` (`tools/tests/test_asdlc_rilascio.py`), non con un test dell'AST:
 quello è stato tolto dal giro 5 di `PBI-509`.
+
+## Il giro 3, e cosa si riprende
+
+Il giro 2 (19/10, run `20261019-103507`) ha chiuso `sospeso` con una domanda del Critic, non
+per un difetto da riscrivere: la fixture è corretta (`81a39b0`, l'asserzione non è abbassata), i
+criteri 1-3 hanno i loro test con `git` vero e `gh` finto, ogni passo ha la coppia RED→GREEN,
+nel diff non c'è nessun `gh pr merge`. Il difetto è di disegno, e il Critic lo ha messo in
+chiaro: `metti_in_attesa_del_pbi_a_monte` (`runner.py`) scrive `attende: <repo>#<PBI>` nel file
+del PBI fermo **nel worktree del runner** e non lo committa, mentre `coda.attese()` legge
+`backlog/*.md` del **checkout del tick** (su `main`). La riga non arriva mai dove il pin la
+cerca, e il worktree resta sporco (`albero-sporco-all-ingresso` al giro dopo).
+
+**Decisione di Francesco (19/10): (a)+(d).**
+
+- **(a)** La riga `attende:` si **committa sul ramo del PBI fermo** e il ramo si pubblica, così
+  il worktree del runner resta pulito. È un commit del giro, con la sua coppia RED→GREEN.
+- **(d)** `coda.attese()` legge anche i file `backlog/*.md` dei rami `pbi/*` su `origin` non
+  ancora in `main` (`git show origin/<ramo>:backlog/<file>`), oltre a quelli del checkout. Un
+  PBI che compare in tutti e due i posti si conta una volta. R10 della spec dice già «ramo su
+  `origin` e nessun merge»: si aggiorna la riga «Dove sta» perché dica dove la riga si legge.
+- **Lo Scope si allarga** a `coda.py` e a `test_asdlc_rilascio.py`, come sopra. La deroga
+  (ADR-0015) si dichiara nel messaggio del **primo commit che tocca `coda.py`**: cosa (la
+  lettura dei rami in `attese()`), perché (la riga di `PBI-512` è sul ramo del PBI fermo e il
+  pin non la vedeva), cosa non cambia (le righe lette da `main`, `rilascia()`, il merge mai del
+  tick).
+
+**Si riprende il tag `giro-fermato/pbi-512-giro2-20261019`** (db4e12a): ramo da quel tag, niente
+cherry-pick e niente rebase. Il file di questo PBI si prende da `main` (`git checkout
+origin/main -- backlog/PBI-512-la-pr-a-monte-del-solver.md`), un commit; se `git` vede un
+conflitto su quel file vale la versione di `main`.
+
+**Da fare, in quest'ordine:**
+
+1. **(d), RED poi GREEN.** Un test di `attese()` con un repository vero: il PBI fermo ha la riga
+   `attende:` solo sul ramo `pbi/…` su `origin`, non in `main`; `attese()` lo rende. Poi anche
+   il caso con la riga già in `main` (una volta sola). Il rosso si osserva contro `attese()` di
+   oggi. Spec e README nello stesso commit del codice.
+2. **(a), RED poi GREEN.** Un test di `metti_in_attesa_del_pbi_a_monte`: dopo la chiamata il
+   worktree del runner è pulito e la riga è in un commit del ramo del PBI fermo. Poi il test
+   di punta, uno solo, che prova la catena intera: la riga scritta dal runner è la riga che
+   `attese()` legge dal ramo.
+3. **La pausa:** resta come ora, creata dopo la PR. Si toglie solo a pin `MERGED` (R11,
+   invariato).
+4. **Documenti e spunte** nello stesso commit del codice che cambia il comportamento, ciascuno
+   col suo (README, `AUTOMAZIONE.md`, spec): non tutti insieme alla fine, come ha rilevato il
+   Critic su `db4e12a`. Per i commit già fatti (`d9c8472` senza la spec, `db4e12a` che raccoglie
+   i documenti) non si riscrive: se ne dà conto nel messaggio dei commit nuovi.
+
+**Non si fa:** non si rifanno i passi del giro 1 e 2, non si riscrive la storia del tag, non si
+tocca `rilascia()` né il rilascio a tick, e non si scrive `attende:` su `main` né nel checkout del
+tick. Il criterio «nessun `gh pr merge`» resta chiuso dal test di `PBI-509` con il finto `gh`.
