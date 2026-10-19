@@ -56,16 +56,16 @@ Il limite resta dichiarato nella spec: il PC spento ferma la coda.
 Su `main` il battito non esiste: ogni criterio è un **rosso atteso**. L'ora è un parametro dei
 test, mai l'orologio vero.
 
-- [ ] **Il tick scrive il battito a ogni passaggio,** anche quando non lancia niente.
-- [ ] **Il tick in pausa batte lo stesso.**
-- [ ] **Un distacco oltre la soglia scrive l'avviso,** nel log e a schermo; sotto la soglia
+- [x] **Il tick scrive il battito a ogni passaggio,** anche quando non lancia niente.
+- [x] **Il tick in pausa batte lo stesso.**
+- [x] **Un distacco oltre la soglia scrive l'avviso,** nel log e a schermo; sotto la soglia
       no. Tre casi, con 29, 30 e 31 minuti: a 30 esatti non avvisa, perché «oltre» non è «alla»
       (il caso al confine distingue `>` da `>=`, giro 2).
-- [ ] **Un battito che manca non è un avviso.** Il primo passaggio assoluto scrive il file e
+- [x] **Un battito che manca non è un avviso.** Il primo passaggio assoluto scrive il file e
       tace.
-- [ ] **La soglia si legge da `[tick]`.** Con 10 minuti nel file di configurazione, 11 minuti
+- [x] **La soglia si legge da `[tick]`.** Con 10 minuti nel file di configurazione, 11 minuti
       di distacco avvisano.
-- [ ] **L'avviso non ferma il tick.** Dopo l'avviso, il passaggio prosegue come prima
+- [x] **L'avviso non ferma il tick.** Dopo l'avviso, il passaggio prosegue come prima
       (`ADR-0008`).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde.
