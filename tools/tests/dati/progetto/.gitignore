@@ -1,3 +1,6 @@
 # Il registro del progetto di prova: i test del tick ci prendono il lucchetto
 # `runs/.tick.lock`, come nel progetto che li ospitava, dove `runs/` è ignorata.
 runs/
+# Il gate lascia qui un JSON con nome uuid, esito di un test: non è tracciato
+# e non va committato; si ignora perché non sporchi l'albero a ogni giro.
+[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*.json

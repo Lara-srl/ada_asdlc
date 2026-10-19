@@ -51,6 +51,7 @@ import sys
 import tempfile
 import time
 import traceback
+import uuid
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
@@ -60,7 +61,7 @@ from fnmatch import fnmatch
 import importlib.metadata
 from importlib import resources
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple
+from typing import Callable, Iterable, Iterator, NamedTuple
 
 # La radice del progetto: il primo antenato della cwd che contiene `asdlc.toml`,
 # trovato da `main()` (PBI-382). Non la cartella di questo file: installato, il
@@ -1122,6 +1123,66 @@ def una_riga(testo: str) -> str:
     return " / ".join(r.strip() for r in testo.splitlines() if r.strip())
 
 
+def cartella_delle_sessioni() -> Path:
+    """Dove Claude Code scrive le sessioni di `REPO`: `~/.claude/projects/<percorso>`, col
+    percorso della cartella di lavoro in cui ogni carattere non alfanumerico è un `-`."""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(REPO))
+
+
+def copia_la_traccia(sessione: str, destinazione: Path, registro: dict) -> None:
+    """Copia il `jsonl` della sessione accanto ai file del giro e ne scrive il percorso in
+    `registro["traccia"]`. La cartella di Claude Code è fuori dal repository e può essere
+    ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
+    `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`)."""
+    sorgente = cartella_delle_sessioni() / f"{sessione}.jsonl"
+    try:
+        shutil.copyfile(sorgente, destinazione)
+    except OSError as guasto:
+        registro["traccia"] = None
+        registro["traccia_nota"] = f"sessione non trovata o non copiabile: {sorgente} ({guasto})"
+        return
+    registro["traccia"] = str(destinazione)
+    try:
+        registro["contenuto"] = contenuto_della_traccia(destinazione)
+    except (OSError, ValueError) as guasto:
+        registro["traccia_nota"] = f"traccia copiata ma non leggibile ({guasto})"
+
+
+def blocchi_della_traccia(percorso: Path) -> Iterator[tuple[str, str, dict]]:
+    """I blocchi di una traccia di sessione nell'ordine in cui sono avvenuti, come
+    `(ruolo, id del messaggio, blocco)`; senza id, il numero di riga. Il contenuto di un messaggio testuale è una
+    stringa, e vale un blocco `text`. Una riga che non è JSON alza `ValueError`."""
+    for numero, riga in enumerate(percorso.read_text(encoding="utf-8").splitlines()):
+        if not riga.strip():
+            continue
+        messaggio = json.loads(riga).get("message")
+        if not isinstance(messaggio, dict):
+            continue
+        contenuto = messaggio.get("content")
+        if isinstance(contenuto, str):
+            contenuto = [{"type": "text", "text": contenuto}]
+        for blocco in contenuto if isinstance(contenuto, list) else []:
+            if isinstance(blocco, dict):
+                yield messaggio.get("role", ""), messaggio.get("id") or f"riga {numero}", blocco
+
+
+def contenuto_della_traccia(percorso: Path) -> dict[str, int]:
+    """Cosa contiene la traccia: chiamate a strumento (`tool_use`), risposte (messaggi
+    dell'assistente, contati per id: Claude Code scrive un blocco per riga) e blocchi
+    `thinking`. Uno zero in `thinking` dice che la sessione non porta ragionamenti."""
+    risposte: set[str] = set()
+    conto = {"chiamate": 0, "thinking": 0}
+    for ruolo, id_messaggio, blocco in blocchi_della_traccia(percorso):
+        if ruolo == "assistant":
+            risposte.add(id_messaggio)
+            if blocco.get("type") == "tool_use":
+                conto["chiamate"] += 1
+            elif blocco.get("type") == "thinking":
+                conto["thinking"] += 1
+    return {"chiamate": conto["chiamate"], "risposte": len(risposte),
+            "thinking": conto["thinking"]}
+
+
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
                   esito: Path | None) -> Invocazione:
     """Lancia un agente con il server dell'esito accanto, e legge l'esito.
@@ -1136,6 +1197,10 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
     porta allora `tetto_minuti`, che è ciò che la nota dice.
 
+    Ogni invocazione riceve `--session-id` con un uuid nuovo, che il registro riporta in
+    `sessione` (PBI-511, decisione 1), e a fine invocazione ne copia la traccia accanto ai
+    file del giro (`copia_la_traccia`, decisione 2).
+
     Il Builder riceve con `--settings` la guardia di fase del giro, e
     `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
     """
@@ -1145,12 +1210,13 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     if ruolo == "builder":
         della_sessione = ["--settings", str(impostazioni_della_sessione(esito))]
         ambiente = AMBIENTE_DEL_GIRO
+    sessione = str(uuid.uuid4())
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
     minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
     scaduto = False
     t0 = time.monotonic()
     try:
-        codice, uscita = esegui(comando + della_sessione
+        codice, uscita = esegui(comando + della_sessione + ["--session-id", sessione]
                                 + ["--mcp-config", str(config), "--strict-mcp-config",
                                    f"@{prompt}"], REPO, timeout=minuti * 60,
                                 flussi=(fuori, dentro), ambiente=ambiente)
@@ -1158,9 +1224,11 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
         codice, uscita, scaduto = tetto.codice, tetto.uscita, True
     registro = {"ruolo": ruolo, "codice": codice,
                 "durata_s": round(time.monotonic() - t0, 1), "stdout": str(fuori),
-                "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl"}
+                "stderr": str(dentro), "chiamate": f"{esito}.chiamate.jsonl",
+                "sessione": sessione}
     if scaduto:
         registro["tetto_minuti"] = minuti
+    copia_la_traccia(sessione, Path(f"{esito}.sessione.jsonl"), registro)
     dichiarato = None if scaduto else esito_dichiarato(esito)
     return Invocazione(codice, uscita, dichiarato, registro)
 
@@ -4468,6 +4536,36 @@ def controlla(regola: str, controllo: Callable[[AMonte], str], a_monte: AMonte |
         return f"{regola}: non eseguita ({type(guasto).__name__}: {una_riga(str(guasto))[:100]})"
 
 
+SEGNALA_LIMITE = "mcp__asdlc__segnala_limite_runner"
+
+
+def controllo_r4(e: Esito) -> str:
+    """R4: il Solver ha letto `asdlc.toml` prima di `segnala_limite_runner`. Lo dice la
+    traccia della sua sessione, nell'ordine delle chiamate a strumento (`PBI-511`): mai il
+    testo di una risposta (`ADR-0027`)."""
+    voci = [v for v in e.invocazioni if v.get("ruolo") == "solver" and v.get("traccia")]
+    if not voci:
+        return "R4: non eseguita (nessuna traccia utile del Solver)"
+    letto = False
+    for ruolo, _, blocco in blocchi_della_traccia(Path(voci[-1]["traccia"])):
+        if ruolo != "assistant" or blocco.get("type") != "tool_use":
+            continue
+        if blocco["name"] == SEGNALA_LIMITE:
+            return "R4: ok" if letto else "R4: violata (asdlc.toml non letto prima della segnalazione)"
+        if blocco["name"] == "Read":
+            letto = letto or Path(blocco["input"].get("file_path", "")).name == "asdlc.toml"
+    return "R4: non eseguita (nessuna segnalazione nella traccia)"
+
+
+def controlla_r4(e: Esito) -> str:
+    """R4 con la stessa rete di `controlla`: una traccia assente o illeggibile non ferma la
+    guardia."""
+    try:
+        return controllo_r4(e)
+    except Exception as guasto:  # noqa: BLE001 — si registra come riga, non si tace
+        return f"R4: non eseguita ({type(guasto).__name__}: {una_riga(str(guasto))[:100]})"
+
+
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
                        dichiara: Callable[[str], None] | None = None) -> None:
     """Scrive in `e.guardia` l'esito dei controlli di processo sul Solver (`PBI-508`,
@@ -4479,7 +4577,7 @@ def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
         return
     r5, r6, r7 = (controlla(regola, controllo, a_monte) for regola, controllo in
                   (("R5", controllo_r5), ("R6", controllo_r6), ("R7", controllo_r7)))
-    righe = ["R4: non eseguita (PBI-511)", r5, r6, r7]
+    righe = [controlla_r4(e), r5, r6, r7]
     e.guardia = "\n".join(["## Guardia di processo", *righe])
     if dichiara is not None:
         for riga in righe:

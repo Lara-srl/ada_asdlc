@@ -4,7 +4,7 @@ Lo **stato** voluto del sistema (come funziona). Le decisioni e le alternative s
 `decisions/ADR-0030-il-solver-smista-i-blocchi-e-il-rilascio-corre-da-solo.md`; ciò che
 cambia, PBI per PBI, sta in `backlog/`.
 
-> **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`); R8-R11 esistono
+> **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`, la traccia di R4 in `PBI-511`); R8-R11 esistono
 > (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`).** La spec descrive il
 > comportamento a cui i PBI devono arrivare. Oggi la catena è manuale (v. l'ADR, Contesto).
 
@@ -62,8 +62,12 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Cosa:** che il blocco non venga da una chiave sbagliata del progetto (per esempio
   `[gate_del_rosso]` o `[ambiente].eseguibili`).
 - **Quando:** prima di `segnala_limite_runner`; l'ordine è `risolto`, poi `limite-del-runner`.
-- **Prova:** il rapporto del Solver riporta la lettura di `asdlc.toml` del progetto.
-- **Se manca:** il Critic lo segnala nella rilettura.
+- **Prova:** la traccia della sessione del Solver (v. «La traccia delle sessioni») ha un `Read`
+  di `asdlc.toml` prima della chiamata a `segnala_limite_runner`. La guardia la legge dalle
+  chiamate a strumento, nell'ordine in cui sono avvenute, mai dal testo delle risposte.
+- **Se manca:** la guardia (R13) scrive `violata` se la lettura manca o viene dopo la
+  segnalazione, e `non eseguita` se la traccia non c'è, non si legge o non segnala alcun limite.
+  Il Critic lo vede nella rilettura.
 
 ### R5 — A monte si scrive solo con una PR
 
@@ -183,6 +187,16 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
   decisione che fa precedente si scrive nel registro dei precedenti (`backlog/PRECEDENTI.md`), che il Solver legge
   prima di chiedere.
 
+### La traccia delle sessioni (`PBI-511`)
+
+Il runner lancia Builder, Critic e Solver con `claude -p --session-id <uuid>`, un uuid per
+invocazione, e lo scrive nel rapporto del giro. A fine invocazione copia il `.jsonl` che Claude
+Code ha scritto per quella sessione in `runs/`, accanto agli altri file del giro: la cartella di
+Claude Code è fuori dal repository e può essere ripulita. Il rapporto dice, per ogni invocazione,
+quante chiamate a strumento, risposte e blocchi `thinking` la traccia contiene, così che una
+traccia senza ragionamenti si veda subito. Se il file non c'è, il rapporto lo dice e il giro non
+si ferma (`ADR-0008`).
+
 ### R13 — La guardia di processo è codice
 
 - **Cosa:** che R1-R12 siano state rispettate.
@@ -192,7 +206,7 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
   sulla diagnosi del Solver non è nella guardia: lo dà il Critic.
 - **Dove sta:** `guardia_del_solver()` scrive in `Esito.guardia` la sezione `## Guardia di
   processo`, una riga per regola (`ok`, `violata`, `non eseguita`). Un giro senza Solver non
-  ha la sezione. R4 è `non eseguita (PBI-511)` finché non c'è la traccia delle letture; R5-R7
+  ha la sezione. R4 si legge dalla traccia del Solver (v. «La traccia delle sessioni»); R5-R7
   leggono la PR a monte (git e `gh`) e sono `non eseguita` senza PR o se `gh` o git non
   rispondono, scadono o rendono un'uscita illeggibile. R5 vuole anche che la testa della PR
   stia su un fork: se sta in `asdlc` è `violata`, se il fatto manca è `non eseguita`. R5 non
