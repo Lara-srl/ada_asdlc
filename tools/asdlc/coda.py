@@ -1046,13 +1046,10 @@ def file_del_battito() -> Path:
     return Path.home() / "asdlc-tick.battito"
 
 
-SOGLIA_BATTITO_MINUTI = 30
-
-
 def batti(repo: Path) -> None:
     """Scrive l'ora del passaggio, in ISO su una riga, nel file del battito. Prima
-    guarda il battito precedente: se il distacco supera la soglia lo dice a schermo
-    e in `coda.log`, e il passaggio prosegue (`ADR-0008`: si segnala, non si ferma)."""
+    guarda il battito precedente: se il distacco supera `[tick].soglia_battito_minuti`
+    lo dice a schermo e in `coda.log`, e il passaggio prosegue (`ADR-0008`: si segnala, non si ferma)."""
     ora = adesso()
     try:
         precedente = datetime.fromisoformat(
@@ -1061,9 +1058,10 @@ def batti(repo: Path) -> None:
         precedente = None
     if precedente is not None:
         minuti = int((ora - precedente).total_seconds() // 60)
-        if minuti > SOGLIA_BATTITO_MINUTI:
+        soglia = CFG.tick.soglia_battito_minuti
+        if minuti > soglia:
             riga = (f"avviso, il battito precedente è di {minuti} minuti fa — il tick "
-                    f"era fermo, soglia {SOGLIA_BATTITO_MINUTI}")
+                    f"era fermo, soglia {soglia}")
             print(riga)
             scrivi_nel_log(repo, riga)
     file_del_battito().write_text(ora.isoformat(timespec="seconds") + "\n",
