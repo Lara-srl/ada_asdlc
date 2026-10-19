@@ -65,21 +65,21 @@ c'è e il rapporto dice cosa manca; non promette ciò che la sessione non contie
 
 Su `main` la traccia non esiste: ogni criterio è un **rosso atteso**.
 
-- [ ] **Il rapporto del giro riporta l'id di sessione di ogni invocazione.** Con un finto
+- [x] **Il rapporto del giro riporta l'id di sessione di ogni invocazione.** Con un finto
       `claude` che registra gli argomenti, ogni invocazione riceve `--session-id` e lo stesso
       uuid sta nel rapporto, per Builder, Critic e Solver.
-- [ ] **La traccia della sessione si copia intera in `runs/`.** Con un finto file di sessione
+- [x] **La traccia della sessione si copia intera in `runs/`.** Con un finto file di sessione
       sotto una cartella di prova, a fine invocazione la copia è identica, con prompt,
       chiamate, risultati, risposte e blocchi `thinking`; se il file manca, il rapporto lo dice
       e il giro non si ferma (`ADR-0008`).
-- [ ] **Il rapporto dice cosa contiene la traccia.** Per ogni invocazione: numero di chiamate
+- [x] **Il rapporto dice cosa contiene la traccia.** Per ogni invocazione: numero di chiamate
       a strumento, di risposte e di blocchi `thinking`, così che una traccia senza ragionamenti
       si veda subito.
-- [ ] **R4 è `ok` se `asdlc.toml` è letto prima di `segnala_limite_runner`.** Una traccia con
+- [x] **R4 è `ok` se `asdlc.toml` è letto prima di `segnala_limite_runner`.** Una traccia con
       `Read` su `asdlc.toml` e poi la chiamata → `ok`.
-- [ ] **R4 è `violata` se la lettura manca o viene dopo.** Due tracce, due `violata`.
-- [ ] **R4 è `non eseguita` se la traccia non c'è o non si legge.** Il giro chiude come prima.
-- [ ] **Nessun controllo legge testo libero di un modello.** Si sostituisce il testo delle
+- [x] **R4 è `violata` se la lettura manca o viene dopo.** Due tracce, due `violata`.
+- [x] **R4 è `non eseguita` se la traccia non c'è o non si legge.** Il giro chiude come prima.
+- [x] **Nessun controllo legge testo libero di un modello.** Si sostituisce il testo delle
       risposte nella traccia con rumore, lasciando le chiamate a strumento: la riga R4 non
       cambia.
 

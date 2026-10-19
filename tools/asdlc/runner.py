@@ -4545,7 +4545,7 @@ def controllo_r4(e: Esito) -> str:
     testo di una risposta (`ADR-0027`)."""
     voci = [v for v in e.invocazioni if v.get("ruolo") == "solver" and v.get("traccia")]
     if not voci:
-        return "R4: non eseguita (PBI-511)"
+        return "R4: non eseguita (nessuna traccia utile del Solver)"
     letto = False
     for ruolo, _, blocco in blocchi_della_traccia(Path(voci[-1]["traccia"])):
         if ruolo != "assistant" or blocco.get("type") != "tool_use":
