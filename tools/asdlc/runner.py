@@ -4250,12 +4250,17 @@ def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
     """Apre il PBI a monte (`PBI-512`, R5): un ramo sul fork di `asdlc` e una PR da lì verso
     `main`, mai una scrittura su `main`. Il testo del PBI è quello del Solver, col numero
     successivo a quelli di `backlog/` del clone `[rilascio].clone` e la riga in `CODA.md`.
-    Rende il PBI a monte e l'URL della PR; un passo che esce ≠ 0 alza `RuntimeError`."""
+    Se un PBI di `backlog/` porta già la stessa causa (R6) non apre niente e rende quel PBI con
+    l'URL vuoto. Rende il PBI a monte e l'URL della PR; un passo che esce ≠ 0 alza `RuntimeError`."""
     clone, fork = Path(CFG.rilascio.clone), CFG.rilascio.remote_fork
     passo_a_monte(["git", "fetch", "origin"], clone)
     nome_repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
                                ".nameWithOwner"], clone)
     with worktree_di_rilascio(clone, "origin/main") as albero:
+        causa = re.escape(dichiarato["causa"])
+        for file in sorted((albero / "backlog").glob("PBI-*.md")):
+            if re.search(rf"\*\*Causa:\*\*\s*{causa}(?![\w-])", file.read_text(encoding="utf-8")):
+                return f"PBI-{RE_PBI_DEL_BACKLOG.match(file.name).group(1)}", ""
         presenti = [int(m.group(1)) for f in (albero / "backlog").glob("PBI-*.md")
                     if (m := RE_PBI_DEL_BACKLOG.match(f.name))]
         numero = max(presenti, default=0) + 1
