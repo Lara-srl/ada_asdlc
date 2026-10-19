@@ -4324,7 +4324,9 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
 
 def metti_in_attesa_del_pbi_a_monte(pbi_path: Path, dichiarato: dict) -> None:
     """Apre il PBI a monte e mette il progetto in attesa (`PBI-512`, decisione 4): scrive nel
-    PBI fermo `attende: <repo>#<PBI>` (formato di `PBI-509`) e crea la pausa del tick."""
+    PBI fermo `attende: <repo>#<PBI>` (formato di `PBI-509`), la committa sul ramo del giro
+    (il worktree resta pulito e `chiudi()` pubblica il ramo: `coda.attese()` la legge da
+    lì) e crea la pausa del tick."""
     pbi_a_monte, url = apri_pr_a_monte(dichiarato)
     clone = Path(CFG.rilascio.clone)
     repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
@@ -4338,6 +4340,10 @@ def metti_in_attesa_del_pbi_a_monte(pbi_path: Path, dichiarato: dict) -> None:
         pbi_a_monte = nominato.group(0)
     testo = pbi_path.read_text(encoding="utf-8").rstrip("\n")
     pbi_path.write_text(f"{testo}\n\nattende: {repo}#{pbi_a_monte}\n", encoding="utf-8")
+    git("add", str(pbi_path.relative_to(REPO)))
+    fermo = re.match(r"PBI-\d+", pbi_path.name)
+    git("commit", "-m", f"chore(coda): {fermo.group(0) if fermo else pbi_path.stem} "
+        f"attende {repo}#{pbi_a_monte}")
     # Lo stesso file di `coda.file_di_pausa()`: `coda` importa il runner, non il contrario.
     (Path.home() / "asdlc-tick.pausa").write_text(
         f"{datetime.now():%Y-%m-%d %H:%M} PR a monte {pbi_a_monte}\n", encoding="utf-8")

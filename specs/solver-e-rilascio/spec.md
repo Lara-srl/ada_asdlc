@@ -77,7 +77,8 @@ salvo dove è scritto che il giro chiude `senza esito`.
 ### Dopo la PR: l'attesa (`PBI-512`)
 
 A un `segnala_limite_runner`, `smista_il_blocco` apre il PBI a monte (R5-R6), scrive nel PBI
-fermo la riga `attende: <repo>#<PBI>` (formato di R8) e crea la pausa `~/asdlc-tick.pausa`;
+fermo la riga `attende: <repo>#<PBI>` (formato di R8), la committa sul ramo del PBI fermo (il
+worktree del runner resta pulito e il ramo si pubblica alla chiusura del giro) e crea la pausa `~/asdlc-tick.pausa`;
 a tornare in marcia ci pensa il pin (R10-R11). Con una causa già a monte la riga nomina il PBI
 esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che fallisce è un avviso del Solver
 (`ADR-0008`) e non scrive né la riga né la pausa.

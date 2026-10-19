@@ -106,7 +106,8 @@ del PBI a monte scritto dal Solver) apre un ramo su un fork di `asdlc` e una PR 
 `main` (mai una scrittura su `main`), col PBI numerato al successivo libero di `backlog/` del
 clone `[rilascio].clone` (senza la chiave la PR non si apre e il Solver riceve l'errore); con la
 stessa causa già in un PBI o in una PR aperta non ne apre un'altra. Poi scrive nel PBI fermo
-`attende: <repo>#<PBI>` e crea `~/asdlc-tick.pausa` (`PBI-512`).
+`attende: <repo>#<PBI>`, la committa sul ramo del PBI fermo e crea `~/asdlc-tick.pausa`
+(`PBI-512`).
 
 ```toml
 [solver]

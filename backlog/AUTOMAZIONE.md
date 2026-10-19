@@ -146,7 +146,7 @@ segnalare un limite del runner legge `asdlc.toml`; prima di chiedere legge
 `giri_solver` nel rapporto: al quarto, o a `chiedi_a_francesco`, il giro si ferma con un
 avviso e non con un blocco (`ADR-0008`). Il Solver non rilancia il Builder; a un limite del
 runner apre la PR a monte da un fork di `asdlc` (`[rilascio].clone`, numero successivo libero,
-mai due PBI per la stessa causa), scrive `attende:` nel PBI fermo e crea la pausa (`PBI-512`).
+mai due PBI per la stessa causa), scrive `attende:` nel PBI fermo (in un commit del suo ramo) e crea la pausa (`PBI-512`).
 
 Il runner controlla anche **l'igiene**: se dopo un giro restano modifiche non committate,
 rimanda l'agente a committarle — ciò che non è committato non esiste, non si giudica e non
