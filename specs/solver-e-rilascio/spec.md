@@ -208,8 +208,11 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
 
 - **Meccanismo:** un cron per progetto, come oggi (`asdlc-coda`), più un timer che recupera i
   tick persi quando il PC riparte.
-- **Battito:** a ogni giro il tick scrive un file con l'ora; se il file è più vecchio di una
-  soglia (30 minuti), l'avviso parte.
+- **Battito:** a ogni passaggio — anche in pausa, anche senza lanciare niente — il tick scrive
+  l'ora in ISO su una riga in `~/asdlc-tick.battito`, accanto a `~/asdlc-tick.pausa`; se il file
+  è più vecchio di una soglia (`[tick].soglia_battito_minuti`, default 30), l'avviso parte: al passaggio dopo, il tick legge il
+  battito precedente e, se il distacco supera la soglia, scrive l'avviso a schermo e in
+  `coda.log` prima di fare altro. Il passaggio prosegue (`ADR-0008`).
 - **Limite dichiarato:** se il PC è spento o in sospensione, la coda si ferma e riprende da
   sola alla ripartenza. Un server sempre acceso è un'alternativa da rivalutare se i progetti
   crescono.

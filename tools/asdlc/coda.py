@@ -1034,6 +1034,40 @@ def fermo_in_pausa(repo: Path) -> bool:
     return True
 
 
+def adesso() -> datetime:
+    """L'ora del tick. I test la sostituiscono: il battito si prova con un'ora
+    data e non con l'orologio vero (PBI-510)."""
+    return datetime.now()
+
+
+def file_del_battito() -> Path:
+    """`~/asdlc-tick.battito`, accanto a `~/asdlc-tick.pausa` e calcolato come
+    lei, quando serve (PBI-510, decisione 2)."""
+    return Path.home() / "asdlc-tick.battito"
+
+
+def batti(repo: Path) -> None:
+    """Scrive l'ora del passaggio, in ISO su una riga, nel file del battito. Prima
+    guarda il battito precedente: se il distacco supera `[tick].soglia_battito_minuti`
+    lo dice a schermo e in `coda.log`, e il passaggio prosegue (`ADR-0008`: si segnala, non si ferma)."""
+    ora = adesso()
+    try:
+        precedente = datetime.fromisoformat(
+            file_del_battito().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        precedente = None
+    if precedente is not None:
+        minuti = int((ora - precedente).total_seconds() // 60)
+        soglia = CFG.tick.soglia_battito_minuti
+        if minuti > soglia:
+            riga = (f"avviso, il battito precedente è di {minuti} minuti fa — il tick "
+                    f"era fermo, soglia {soglia}")
+            print(riga)
+            scrivi_nel_log(repo, riga)
+    file_del_battito().write_text(ora.isoformat(timespec="seconds") + "\n",
+                                  encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Un tick: legge `asdlc.toml`, poi guarda, decide una cosa, la fa, e finisce.
 
@@ -1088,7 +1122,11 @@ def smista(argv: list[str] | None = None) -> int:
 
 
 def passaggio(a: argparse.Namespace) -> int:
-    """Il tick col suo lucchetto in mano: la pausa, la decisione, il lancio."""
+    """Il tick col suo lucchetto in mano: il battito, la pausa, la decisione, il lancio."""
+    # Il battito per primo, prima del pin e della pausa: l'avviso va nel log prima di
+    # fare altro, e un tick in pausa batte lo stesso, perché la pausa è un gesto e non
+    # un guasto (PBI-510, decisioni 3 e 4).
+    batti(a.repo)
     # Il pin prima della pausa: è il passo che la toglie, a PR del pin mergiata (R11).
     for riga in () if a.dry_run else pin(a.repo):
         print(riga)

@@ -141,6 +141,61 @@ prefisso_tag = "v"
 Un progetto che parte senza runner (il «livello zero») e sale a `mvp` con un ADR segue
 `template/ZERO.md`.
 
+### Il battito del tick e il recupero dopo lo spegnimento
+
+Il tick è un cron su un PC: se il PC si spegne o si sospende, la coda si ferma in silenzio
+(`PBI-510`, `ADR-0030` decisione 5). **Il limite resta: il PC spento ferma la coda**, che
+riprende da sola alla ripartenza.
+
+- **Il battito:** a ogni passaggio — anche in pausa, anche a coda finita — il tick scrive
+  l'ora in ISO su una riga in `~/asdlc-tick.battito`, accanto a `~/asdlc-tick.pausa`. Al
+  passaggio dopo legge il battito precedente: se il distacco supera
+  `[tick].soglia_battito_minuti` (default 30) scrive un avviso a schermo e in `runs/coda.log`,
+  poi prosegue (`ADR-0008`: avviso, non blocco). Un file che manca è «mai partito», non un
+  avviso. L'avviso resta nel log: un canale fuori dal log (mail, notifica) è un altro PBI.
+- **Il recupero:** un timer di systemd (utente) rilancia il tick all'avvio e a ogni ora piena
+  mancata durante lo spegnimento, senza aspettare il passaggio del cron. È una ricetta che si
+  installa a mano, come il crontab: il codice non la installa.
+
+```toml
+[tick]
+soglia_battito_minuti = 30
+```
+
+`~/.config/systemd/user/asdlc-tick.service`:
+
+```ini
+[Unit]
+Description=Un passaggio del tick ASDLC
+
+[Service]
+Type=oneshot
+WorkingDirectory=/percorso/del/progetto
+ExecStart=/percorso/del/progetto/.venv-asdlc/bin/asdlc-coda
+```
+
+`~/.config/systemd/user/asdlc-tick.timer`:
+
+```ini
+[Unit]
+Description=Recupera il tick ASDLC dopo lo spegnimento
+
+[Timer]
+OnBootSec=2min
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now asdlc-tick.timer
+```
+
+Il lucchetto del tick rende innocuo il doppio passaggio con il cron: il secondo scrive
+`occupato:` e esce.
+
 ## Linguaggi e stack
 
 Il runner non è legato a un linguaggio: esegue i comandi che il progetto dichiara in
