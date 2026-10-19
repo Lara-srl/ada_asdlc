@@ -166,3 +166,24 @@ def test_la_soglia_si_legge_da_tick_nel_file_di_configurazione(
     righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     avvisi = [r for r in righe if "avviso" in r and "battito" in r]
     assert len(avvisi) == 1 and "11 minuti" in avvisi[0], righe
+
+
+def test_l_avviso_non_ferma_il_tick_che_lancia_come_prima(mondo_finto, tmp_path, monkeypatch):
+    """Criterio 6, `ADR-0008`. Dopo l'avviso il passaggio prosegue: la testa della
+    coda parte, e il log ha l'avviso seguito dalla riga `lancia:`."""
+    battito_di(mondo_finto, MEZZOGIORNO - datetime.timedelta(minutes=90))
+    alle(monkeypatch, MEZZOGIORNO)
+    lanciati = []
+    repo = tmp_path / "repo"
+    (repo / "backlog").mkdir(parents=True)
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    monkeypatch.setattr(coda, "decidi", lambda repo, worktree: coda.Lancia("PBI-337"))
+    monkeypatch.setattr(coda, "lancia", lambda pbi, worktree: lanciati.append(pbi))
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert lanciati == ["PBI-337"]
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert "avviso" in righe[0] and righe[1].endswith("  lancia: PBI-337"), righe
