@@ -4548,8 +4548,8 @@ def controllo_r4(e: Esito) -> str:
     for ruolo, _, blocco in blocchi_della_traccia(Path(voci[-1]["traccia"])):
         if ruolo != "assistant" or blocco.get("type") != "tool_use":
             continue
-        if blocco["name"] == SEGNALA_LIMITE and letto:
-            return "R4: ok"
+        if blocco["name"] == SEGNALA_LIMITE:
+            return "R4: ok" if letto else "R4: violata (asdlc.toml non letto prima della segnalazione)"
         if blocco["name"] == "Read":
             letto = letto or Path(blocco["input"].get("file_path", "")).name == "asdlc.toml"
     return "R4: non eseguita (PBI-511)"
