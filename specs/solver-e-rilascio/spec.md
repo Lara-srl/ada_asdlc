@@ -106,6 +106,10 @@ salvo dove è scritto che il giro chiude `senza esito`.
   alza Y e azzera Z. Senza `rilascia:` in nessun PBI non chiede niente al mondo.
   Un errore del passo (un worktree che non si crea, un JSON di `gh` illeggibile) non esce dal
   tick: `rilascia()` rende una riga `rilascio: avviso, …` e il tick prosegue (`ADR-0008`).
+  Un `git tag` o un `git push` del tag che esce ≠ 0 non è un rilascio: la riga è
+  `rilascio: avviso, …` e non `rilascio: <PBI> → <tag>`, e il tag locale si toglie (`git tag -d`),
+  perché i ref sono del checkout e un tag rimasto farebbe saltare il PBI al tick dopo, con
+  `origin` senza tag.
 
 ### R9 — Il giro del tag lavora in un worktree usa-e-getta
 
@@ -135,6 +139,9 @@ salvo dove è scritto che il giro chiude `senza esito`.
   ramo, in qualunque stato, non se ne apre un'altra. Un errore del passo (un JSON di `gh`
   illeggibile) non esce dal tick: `pin()` rende una riga `pin: avviso, …` e il tick prosegue
   con gli altri passi e gli altri progetti (`ADR-0008`).
+  Un passo della PR (`git switch -c`, `git commit`, `git push`, `gh pr create`) che esce ≠ 0 dà
+  `pin: avviso, …` e non «PR del pin a <tag>»; il ramo, locale e su `origin`, si toglie, così il
+  tick dopo riparte da zero.
 
 ### R11 — La pausa si toglie solo a pin mergiato
 

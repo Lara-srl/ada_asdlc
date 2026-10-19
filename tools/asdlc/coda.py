@@ -825,8 +825,17 @@ def passo_di_rilascio(repo: Path) -> list[str]:
             with asdlc_runner.worktree_di_rilascio(repo, BASE) as albero:
                 esegui([str(runner_installato()), "--registra",
                         str(repo / CFG.registro.cartella)], albero)
-                esegui(["git", "tag", tag], albero)
-                esegui(["git", "push", REMOTO, tag], albero)
+                codice, uscita = esegui(["git", "tag", tag], albero)
+                if codice == 0:
+                    codice, uscita = esegui(["git", "push", REMOTO, tag], albero)
+                    if codice != 0:
+                        # I ref sono del checkout: senza toglierlo, il tag locale
+                        # farebbe saltare il PBI al tick dopo e su origin non arriva.
+                        esegui(["git", "tag", "-d", tag], albero)
+            if codice != 0:
+                righe.append(f"rilascio: avviso, {pbi} non rilasciato, il tag {tag} non è "
+                             f"arrivato su {REMOTO} (uscita {codice}): {in_una_riga(uscita)}")
+                continue
             righe.append(f"rilascio: {pbi} → {tag}")
     return righe
 
@@ -916,13 +925,27 @@ def passo_del_pin(repo: Path) -> list[str]:
             toml = albero / "asdlc.toml"
             toml.write_text(RE_INSTALLA.sub(rf"\g<1>{tag}", toml.read_text(encoding="utf-8")),
                             encoding="utf-8")
-            esegui(["git", "switch", "-c", ramo], albero)
-            esegui(["git", "commit", "-am", f"chore(config): porta il pin di asdlc a {tag}"], albero)
-            esegui(["git", "push", REMOTO, ramo], albero)
-            esegui(["gh", "pr", "create", "--base", BASE.removeprefix(f"{REMOTO}/"),
-                    "--head", ramo, "--title", f"chore(config): porta il pin di asdlc a {tag}",
-                    "--body", f"{file} attende {a_monte}#{pbi_a_monte}, rilasciato in {tag}."],
-                   albero)
+            titolo = f"chore(config): porta il pin di asdlc a {tag}"
+            passi = [["git", "switch", "-c", ramo], ["git", "commit", "-am", titolo],
+                     ["git", "push", REMOTO, ramo],
+                     ["gh", "pr", "create", "--base", BASE.removeprefix(f"{REMOTO}/"),
+                      "--head", ramo, "--title", titolo,
+                      "--body", f"{file} attende {a_monte}#{pbi_a_monte}, rilasciato in {tag}."]]
+            for fatti, passo in enumerate(passi):
+                codice, uscita = esegui(passo, albero)
+                if codice != 0:
+                    break
+            if codice != 0:
+                # Il tick dopo riparte da zero: né il ramo locale (i ref sono del
+                # checkout) né quello su origin devono restare a metà.
+                if fatti >= 2:
+                    esegui(["git", "switch", "--detach"], albero)
+                    esegui(["git", "branch", "-D", ramo], albero)
+                if fatti >= 3:
+                    esegui(["git", "push", REMOTO, "--delete", ramo], albero)
+                righe.append(f"pin: avviso, {file}: nessuna PR per il pin {tag} — "
+                             f"{' '.join(passo[:2])} è uscito {codice}: {in_una_riga(uscita)}")
+                continue
         righe.append(f"pin: {file} attende {a_monte}#{pbi_a_monte} — PR del pin a {tag}")
     return righe
 
