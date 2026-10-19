@@ -1962,6 +1962,37 @@ del difetto 23 sul lancio di PBI-335, che qui sta scritta accanto alla sua spunt
 
     **Causa:** `test-per-il-motivo-sbagliato` (nuova, Francesco 09/10)
 
+99. **Il rilancio del Builder con `-c` porta anche `--session-id`, e la CLI lo rifiuta.**
+    Da `PBI-511` (`v0.4.0`) ogni invocazione riceve `--session-id <uuid>`; il rilancio dopo un
+    gate rosso usa `BUILDER + ["-c"]`, e `claude` risponde «`--session-id` can only be used with
+    `--continue` or `--resume` if `--fork-session` is also specified». Il giro chiude `senza
+    esito`. Visto da `ada_planning` (difetto 7, giro 20261019-215204 di PBI-006). Il test di
+    `PBI-511` provava solo la prima invocazione. Verificato a mano il 19/10: `-c --fork-session
+    --session-id <uuid>` mantiene il contesto e scrive la sessione nuova.
+
+    **Causa:** `caso-scoperto`
+    **Stato:** `PBI-513`, da accodare (hotfix, `v0.4.1`).
+
+100. **Il lucchetto di fase non vede un test JUnit la cui annotazione è una riga di contesto.**
+    `nomi_dei_test_junit()` arma l'attesa del metodo solo sulle righe `+`/`-`. Un RED che
+    rinomina un test parametrico, con `@ParameterizedTest` e `@ValueSource` invariati, dà
+    `([], set())`, e `--chiedi-impl` dice «nessun test nuovo». Riprodotto il 19/10 sul commit
+    `d11525c` di `ada_planning` (difetto 5, terza occorrenza di `runner-non-legge-junit`, PBI-015).
+    Il test riscritto con lo stesso nome non è una nascita (scelta A di Francesco, 19/10, in `PBI-514`).
+
+    **Causa:** `codice-letto-come-testo`
+    **Stato:** `PBI-514`, pronto da accodare (domanda chiusa: scelta A, Francesco 19/10).
+
+101. **Il lucchetto di fase tratta come produzione i file di supporto sotto `src/test/`.**
+    `e_file_di_test()` riconosce sotto `src/test/` solo i `.java` (scelta di non regressione di
+    `PBI-505`), e `ESTENSIONI_CODICE` contiene `.sh` e `.sql`: uno script di fixture sotto
+    `app/src/test/resources/` è produzione, e il Builder si ferma prima del primo RED. Visto da
+    `ada_planning` (difetto 6, PBI-005, giri 20261019-144204 e 170204). Gli scheletri vuoti
+    si ammettono in `TEST_ONLY` (scelta B di Francesco, 19/10, in `PBI-515`).
+
+    **Causa:** `caso-scoperto`
+    **Stato:** `PBI-515`, pronto da accodare (domanda chiusa: scelta B, Francesco 19/10).
+
 ## ⛔ `ada-notte.sh` deve sparire (Francesco, 26/08/2026)
 
 > *«Non voglio più vedere ada-notte.sh: eliminato, e usiamo solo asdlc_runner.»*
