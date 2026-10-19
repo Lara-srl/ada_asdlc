@@ -183,3 +183,28 @@ commit. Non c'è conflitto da risolvere: il tag ha il file di `main` com'era al 
 **Non si fa:** non si rimettono `0fb1cea`, `6a874a0`, `dcfcb9d`, `06f9a69` né `80d35d2` (stanno
 sul ramo del giro 5, non su questo tag), e non si tocca il commit `b502a52`: il GREEN del punto
 2 lo annulla con un commit nuovo, non lo riscrive.
+
+## Il giro 7, e cosa si riprende
+
+Il giro 6 (18/10) ha fatto tutti e quattro i punti della sezione sopra e si è fermato prima del
+Critic, **non per il lavoro**: il Builder ha chiuso `fatto` e il gate del rosso è passato anche
+sull'ultimo test (`a39e4f3`, «nato verde, ma morde»: la riga di `coda.py` cancellata lo uccide
+per asserzione). Poi il Critic è uscito dopo due secondi, senza nessuna chiamata: il limite
+d'uso dell'account (`critic-senza-esito`, reset alle 2:10). Nessun rilievo, nessun verdetto:
+il lavoro non è mai stato letto.
+
+**Si riprende il tag `giro-fermato/pbi-509-giro6-20261018`** (17572a3): è la punta del giro 6,
+discendente di `ripresa/pbi-509-giro6`, con RED `df13958`, GREEN `27500a3`, il test del
+`gh pr merge` `a39e4f3` e le spunte con la spec `17572a3`. Ramo da quel tag, niente
+cherry-pick e niente rebase. Il file di questo PBI si prende da `main`
+(`git checkout origin/main -- backlog/PBI-509-il-rilascio-a-tick.md`), un commit, e poi si
+spuntano le due righe aperte (eccezioni e `gh pr merge`), che in `main` sono `[ ]`. Se `git`
+vede un conflitto su questo file vale sempre la versione di `main`.
+
+**Da fare:** niente codice nuovo. Il Builder rilancia il gate sul ramo (deve essere verde),
+controlla che i quattro punti del giro 6 siano in piedi e chiama `fatto`, perché il Critic
+legga ciò che il giro 6 non ha potuto fargli leggere. Se il gate è rosso o un punto manca, è
+un fatto nuovo: `fermati` con la domanda, non una riscrittura.
+
+**Non si fa:** non si riscrive la storia del tag, non si rifanno RED e GREEN (il rosso è già
+stato osservato dal gate nel giro 6) e non si tocca la spec oltre alle spunte.
