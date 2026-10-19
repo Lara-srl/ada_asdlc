@@ -540,3 +540,9 @@ def test_attese_legge_la_riga_che_sta_solo_sul_ramo_pbi_di_origin(tmp_path):
 
     assert coda.attese(repo) == [("PBI-700-il-pbi-fermo.md", A_MONTE, "PBI-505")]
 
+
+
+def test_attese_conta_una_volta_sola_il_pbi_con_la_riga_in_main_e_sul_ramo(progetto):
+    m = progetto()
+
+    assert coda.attese(m.repo) == [("PBI-700-il-pbi-fermo.md", A_MONTE, "PBI-505")]
