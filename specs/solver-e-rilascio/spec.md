@@ -5,7 +5,7 @@ Lo **stato** voluto del sistema (come funziona). Le decisioni e le alternative s
 cambia, PBI per PBI, sta in `backlog/`.
 
 > **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`); R8-R11 esistono
-> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) non ancora.** La spec descrive il
+> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`).** La spec descrive il
 > comportamento a cui i PBI devono arrivare. Oggi la catena è manuale (v. l'ADR, Contesto).
 
 ## Il ciclo
@@ -74,11 +74,23 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Se manca:** la guardia di processo (v. sotto) lo segnala. Il merge di Francesco resta il
   cancello della coda.
 
+### Dopo la PR: l'attesa (`PBI-512`)
+
+A un `segnala_limite_runner`, `smista_il_blocco` apre il PBI a monte (R5-R6), scrive nel PBI
+fermo la riga `attende: <repo>#<PBI>` (formato di R8), la committa sul ramo del PBI fermo (il
+worktree del runner resta pulito e il ramo si pubblica alla chiusura del giro) e crea la pausa `~/asdlc-tick.pausa`;
+a tornare in marcia ci pensa il pin (R10-R11). Con una causa già a monte la riga nomina il PBI
+esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che fallisce è un avviso del Solver
+(`ADR-0008`) e non scrive né la riga né la pausa.
+
 ### R6 — Un solo PBI a monte per causa
 
 - **Cosa:** i duplicati.
 - **Quando:** prima di aprire la PR.
 - **Prova:** nessun PBI in `backlog/` né PR aperta in `asdlc` con la stessa `causa`.
+- **Oggi (`PBI-512`):** `apri_pr_a_monte` cerca la `causa` a parola intera nei PBI di `backlog/`
+  di `origin/main` del clone e nelle PR aperte; se la trova non apre né ramo né PR e rende il
+  PBI (URL vuoto) o `PR #N` con il suo URL.
 - **Se manca:** si cita il PBI o la PR esistente e il progetto si mette in attesa di quello.
 
 ### R7 — Il PBI a monte cambia solo il runner
@@ -132,7 +144,14 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Se manca:** il progetto resta in attesa. Quando c'è, apre una PR che cambia solo la riga
   `[ambiente].installa` di `asdlc.toml`; la parte specifica del progetto è del PBI a valle.
 
-- **Dove sta:** `coda.pin()`, chiamata prima della pausa (non con `--dry-run`). Considera solo
+- **Dove sta:** `coda.pin()`, chiamata prima della pausa (non con `--dry-run`). `coda.attese()` legge la riga `attende:` da `backlog/` del checkout e dai
+  rami `pbi/*` su `origin`, perché il runner la committa sul ramo del PBI fermo e non in `main`.
+  Dei rami legge solo quelli non ancora in `origin/main` (`for-each-ref --no-merged`) e, di
+  ciascuno, solo i file di `backlog/` che il ramo cambia rispetto a `main`
+  (`git diff --name-only main...<ramo>`, poi `git show origin/<ramo>:<file>`): le copie ferme
+  di altri PBI riporterebbero bersagli superati. Si conta una volta la stessa riga, cioè la
+  terna (file, repo a monte, PBI a monte); se lo stesso PBI ha in `main` e sul ramo due righe
+  con bersagli diversi, si contano entrambe. Considera solo
   i PBI fermi: ramo su `origin` e nessun merge, perché il file con `attende:` resta in
   `backlog/`. Il tag è il primo di `gh api repos/<repo>/tags` che contiene il merge
   (`compare`: `ahead` o `identical`). Il ramo è `pin/asdlc-<tag>`; con una PR già su quel

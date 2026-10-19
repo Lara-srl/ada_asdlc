@@ -187,6 +187,9 @@ class Rilascio:
     # (`PBI-509`, R5), e il prefisso del tag di rilascio (`ADR-0026`: `vX.Y.Z`).
     remote_fork: str = "fork"
     prefisso_tag: str = "v"
+    # Il percorso della copia di `asdlc` sul disco da cui si apre la PR a monte
+    # (`PBI-512`, decisione 3). Non si deduce da altro: senza, la PR non si apre.
+    clone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -390,11 +393,12 @@ def interpreta(dati: dict, file: str) -> Config:
     rilascio = Rilascio()
     if "rilascio" in sezione.dati:
         dichiarato = sezione.dentro("rilascio")
-        dichiarato.solo("remote_fork", "prefisso_tag",
-                        perche="la sezione dice il remote del fork di `asdlc` e il "
-                        "prefisso del tag")
+        dichiarato.solo("remote_fork", "prefisso_tag", "clone",
+                        perche="la sezione dice il remote del fork di `asdlc`, il "
+                        "prefisso del tag e il clone di `asdlc` da cui aprire la PR a monte")
         rilascio = Rilascio(remote_fork=dichiarato.testo("remote_fork", default="fork"),
-                            prefisso_tag=dichiarato.testo("prefisso_tag", default="v"))
+                            prefisso_tag=dichiarato.testo("prefisso_tag", default="v"),
+                            clone=dichiarato.testo("clone", default=None))
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:

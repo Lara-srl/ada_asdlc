@@ -1053,6 +1053,10 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
         # Le cause `runner-*` che il server accetta: la lista del progetto, senza
         # rete (`PBI-507`, decisione 8).
         ambiente["ASDLC_CAUSE"] = ",".join(CFG.solver.cause)
+        # Il clone di `asdlc` da cui si apre la PR a monte (`PBI-512`): senza chiave la
+        # variabile manca e lo strumento rifiuta la chiamata.
+        if CFG.rilascio.clone:
+            ambiente["ASDLC_CLONE"] = CFG.rilascio.clone
     config.write_text(json.dumps({"mcpServers": {"asdlc": {
         "command": str(comando_del_pacchetto(SERVER_DELL_ESITO)),
         "args": [],
@@ -4218,11 +4222,85 @@ def giri_solver_fatti(pbi: str) -> int:
     return fatti
 
 
+RE_PBI_DEL_BACKLOG = re.compile(r"^PBI-(\d+)")
+RE_RIGA_DI_CODA = re.compile(r"^- (PBI-\d+|‖)")
+
+
+def passo_a_monte(cmd: list[str], cwd: Path) -> str:
+    """Un passo verso `asdlc`: l'uscita, o `RuntimeError` che nomina il comando se esce ≠ 0."""
+    codice, uscita = esegui(cmd, cwd, timeout=300)
+    if codice != 0:
+        raise RuntimeError(f"`{' '.join(cmd[:3])}` è uscito {codice}: {una_riga(uscita)[:200]}")
+    return uscita.strip()
+
+
+def pbi_a_monte_numerato(testo: str, numero: int, causa: str) -> tuple[str, str]:
+    """Il testo del Solver col numero dato nell'intestazione e la riga `**Causa:**` (R6 la
+    cerca lì), e il nome del file `PBI-NNN-<titolo>.md`. Il resto resta com'è."""
+    righe = testo.strip().splitlines()
+    titolo = re.sub(r"^#\s*(PBI-\d+\s*:\s*)?", "", righe[0]).strip()
+    corpo = righe[1:]
+    if not any(re.match(rf"\*\*Causa:\*\*\s*{re.escape(causa)}(?![\w-])", r) for r in corpo):
+        corpo = ["", f"**Causa:** {causa}", *corpo]
+    parole = re.sub(r"[^a-z0-9]+", "-", titolo.lower()).strip("-")[:50].strip("-")
+    return "\n".join([f"# PBI-{numero}: {titolo}", *corpo]) + "\n", f"PBI-{numero}-{parole}.md"
+
+
+def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
+    """Apre il PBI a monte (`PBI-512`, R5): un ramo sul fork di `asdlc` e una PR da lì verso
+    `main`, mai una scrittura su `main`. Il testo del PBI è quello del Solver, col numero
+    successivo a quelli di `backlog/` del clone `[rilascio].clone` e la riga in `CODA.md`.
+    Se un PBI di `backlog/` o una PR aperta porta già la stessa causa (R6) non apre niente e
+    rende quel PBI con l'URL vuoto, o `PR #N` con il suo URL. Rende il PBI a monte e l'URL della PR; un passo che esce ≠ 0 alza `RuntimeError`."""
+    clone, fork = Path(CFG.rilascio.clone), CFG.rilascio.remote_fork
+    passo_a_monte(["git", "fetch", "origin"], clone)
+    nome_repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
+                               ".nameWithOwner"], clone)
+    with worktree_di_rilascio(clone, "origin/main") as albero:
+        causa = re.escape(dichiarato["causa"])
+        for file in sorted((albero / "backlog").glob("PBI-*.md")):
+            if re.search(rf"\*\*Causa:\*\*\s*{causa}(?![\w-])", file.read_text(encoding="utf-8")):
+                return f"PBI-{RE_PBI_DEL_BACKLOG.match(file.name).group(1)}", ""
+        aperte = json.loads(passo_a_monte(
+            ["gh", "pr", "list", "--repo", nome_repo, "--state", "open", "--limit",
+             str(LIMITE_PR_R6), "--json", "number,title,body,url"], albero))
+        for pr in aperte:
+            if re.search(rf"(?<![\w-]){causa}(?![\w-])", f"{pr['title']}\n{pr['body']}"):
+                return f"PR #{pr['number']}", pr["url"]
+        presenti = [int(m.group(1)) for f in (albero / "backlog").glob("PBI-*.md")
+                    if (m := RE_PBI_DEL_BACKLOG.match(f.name))]
+        numero = max(presenti, default=0) + 1
+        pbi = f"PBI-{numero}"
+        testo, nome_file = pbi_a_monte_numerato(dichiarato["pbi"], numero, dichiarato["causa"])
+        (albero / "backlog" / nome_file).write_text(testo, encoding="utf-8")
+        coda = albero / "backlog" / "CODA.md"
+        righe = coda.read_text(encoding="utf-8").splitlines() if coda.exists() else []
+        dopo = max([i for i, r in enumerate(righe) if RE_RIGA_DI_CODA.match(r)], default=len(righe) - 1)
+        righe.insert(dopo + 1, f"- {pbi}")
+        coda.write_text("\n".join(righe) + "\n", encoding="utf-8")
+        titolo = testo.splitlines()[0].removeprefix("# ")
+        ramo = f"pbi/pbi-{numero}"
+        passo_a_monte(["git", "switch", "-c", ramo], albero)
+        passo_a_monte(["git", "add", "-A"], albero)
+        passo_a_monte(["git", "commit", "-m", f"docs(backlog): apri {titolo}\n\n"
+                       f"Limite del runner, causa {dichiarato['causa']}."], albero)
+        passo_a_monte(["git", "push", fork, ramo], albero)
+        url_fork = passo_a_monte(["git", "remote", "get-url", fork], albero)
+        proprietario = re.search(r"github\.com[:/]([^/]+)/", url_fork)
+        testa = f"{proprietario.group(1)}:{ramo}" if proprietario else ramo
+        corpo = (f"**Causa:** {dichiarato['causa']}\n\nComando: `{dichiarato['comando']}`\n"
+                 f"Commit: {dichiarato['commit']}\n\n```\n{dichiarato['output']}\n```\n")
+        url = passo_a_monte(["gh", "pr", "create", "--repo", nome_repo, "--base", "main",
+                             "--head", testa, "--title", titolo, "--body", corpo], albero)
+    return pbi, url
+
+
 def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                      dichiara) -> None:
     """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
     `e.solver` (`PBI-507`, decisione 11). Oltre `[solver].giri_massimi` giri per lo
-    stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`)."""
+    stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`). A un limite del
+    runner apre il PBI a monte e mette il progetto in attesa (`PBI-512`)."""
     e.giri_solver = giri_solver_fatti(e.pbi)
     if e.giri_solver >= CFG.solver.giri_massimi:
         dichiara(f"avviso: tetto dei giri del Solver raggiunto ({e.giri_solver} di "
@@ -4240,6 +4318,43 @@ def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
                     else {"esito": "senza esito", "uscita": invocazione.uscita})
     if dichiarato is not None and dichiarato["esito"] == "intento":
         dichiara(f"avviso: il Solver chiede a Francesco: {una_riga(dichiarato['domanda'])}")
+    if dichiarato is not None and dichiarato["esito"] == "limite-del-runner":
+        metti_in_attesa_del_pbi_a_monte(pbi_path, dichiarato)
+
+
+def metti_in_attesa_del_pbi_a_monte(pbi_path: Path, dichiarato: dict) -> None:
+    """Apre il PBI a monte e mette il progetto in attesa (`PBI-512`, decisione 4): scrive nel
+    PBI fermo `attende: <repo>#<PBI>` (formato di `PBI-509`), la committa sul ramo del giro
+    (il worktree resta pulito e `chiudi()` pubblica il ramo: `coda.attese()` la legge da
+    lì) e crea la pausa del tick."""
+    pbi_a_monte, url = apri_pr_a_monte(dichiarato)
+    clone = Path(CFG.rilascio.clone)
+    repo = passo_a_monte(["gh", "repo", "view", "--json", "nameWithOwner", "-q",
+                          ".nameWithOwner"], clone)
+    if pbi_a_monte.startswith("PR #"):  # la causa è già in una PR aperta: il suo PBI è nel titolo
+        vista = json.loads(passo_a_monte(["gh", "pr", "view", url, "--repo", repo, "--json",
+                                          "title,headRefName"], clone))
+        nominato = re.search(r"PBI-\d+", f"{vista['title']} {vista['headRefName']}")
+        if nominato is None:
+            raise RuntimeError(f"la PR {url} non nomina il suo PBI")
+        pbi_a_monte = nominato.group(0)
+    originale = pbi_path.read_text(encoding="utf-8")
+    pbi_path.write_text(f"{originale.rstrip(chr(10))}\n\nattende: {repo}#{pbi_a_monte}\n",
+                        encoding="utf-8")
+    relativo = str(pbi_path.relative_to(REPO))
+    fermo = re.match(r"PBI-\d+", pbi_path.name)
+    try:
+        git("add", relativo)
+        git("commit", "-m", f"chore(coda): {fermo.group(0) if fermo else pbi_path.stem} "
+            f"attende {repo}#{pbi_a_monte}")
+    except RuntimeError:
+        # Un passo fallito non lascia la riga né nello stage né nel file (spec, «Dopo la PR»).
+        esegui(["git", "reset", "-q", "HEAD", "--", relativo], REPO)
+        pbi_path.write_text(originale, encoding="utf-8")
+        raise
+    # Lo stesso file di `coda.file_di_pausa()`: `coda` importa il runner, non il contrario.
+    (Path.home() / "asdlc-tick.pausa").write_text(
+        f"{datetime.now():%Y-%m-%d %H:%M} PR a monte {pbi_a_monte}\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)

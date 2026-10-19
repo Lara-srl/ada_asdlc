@@ -74,11 +74,12 @@ def test_segnala_limite_runner_con_una_causa_in_elenco_registra_il_limite(tmp_pa
     """R3: causa dell'elenco `runner-*`, comando e output pieni, commit esistente."""
     sha, cartella = albero_con_un_commit(tmp_path, monkeypatch)
     monkeypatch.setenv("ASDLC_CAUSE", "runner-non-legge-junit,runner-altro")
+    monkeypatch.setenv("ASDLC_CLONE", str(tmp_path))
 
     risposta = esito.chiama(
         "segnala_limite_runner",
         {"causa": "runner-non-legge-junit", "comando": "pytest -q", "output": "0 test",
-         "commit": sha}, "solver", str(cartella / "a.json"))
+         "commit": sha, "pbi": "# PBI-9: x\n"}, "solver", str(cartella / "a.json"))
 
     assert not risposta["isError"], risposta
     registrato = json.loads((cartella / "a.json").read_text(encoding="utf-8"))
@@ -91,8 +92,9 @@ def test_segnala_limite_runner_rifiuta_causa_fuori_elenco_comando_o_output_vuoti
     """R3: quattro rifiuti, e nessun esito scritto."""
     sha, cartella = albero_con_un_commit(tmp_path, monkeypatch)
     monkeypatch.setenv("ASDLC_CAUSE", "runner-non-legge-junit")
+    monkeypatch.setenv("ASDLC_CLONE", str(tmp_path))
     valido = {"causa": "runner-non-legge-junit", "comando": "pytest -q", "output": "0 test",
-              "commit": sha}
+              "commit": sha, "pbi": "# PBI-9: x\n"}
     guasti = [
         {"causa": "runner-inventata"},
         {"comando": "  "},
@@ -110,6 +112,7 @@ def test_la_prima_chiamata_valida_del_solver_e_definitiva(tmp_path, monkeypatch)
     """`ADR-0027`: una seconda chiamata dopo un esito valido non cambia l'esito."""
     sha, cartella = albero_con_un_commit(tmp_path, monkeypatch)
     monkeypatch.setenv("ASDLC_CAUSE", "runner-non-legge-junit")
+    monkeypatch.setenv("ASDLC_CLONE", str(tmp_path))
     file = cartella / "a.json"
 
     prima = esito.chiama("risolvi", {"risposta": "perché sì", "evidenza": "a.txt"},
@@ -120,7 +123,7 @@ def test_la_prima_chiamata_valida_del_solver_e_definitiva(tmp_path, monkeypatch)
     for nome, argomenti in (
         ("risolvi", {"risposta": "altro", "evidenza": "a.txt"}),
         ("segnala_limite_runner", {"causa": "runner-non-legge-junit", "comando": "x",
-                                   "output": "y", "commit": sha}),
+                                   "output": "y", "commit": sha, "pbi": "# PBI-9: x\n"}),
     ):
         seconda = esito.chiama(nome, argomenti, "solver", str(file))
         assert seconda["isError"], nome

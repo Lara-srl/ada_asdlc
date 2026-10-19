@@ -101,7 +101,13 @@ Il Solver legge `asdlc.toml` prima di segnalare un limite e `backlog/PRECEDENTI.
 chiedere. Il tetto è `[solver].giri_massimi` (3) giri per PBI, contati nel rapporto
 `runs/<run>.json` (`giri_solver`): oltre, o a `chiedi_a_francesco`, il giro si ferma con un
 avviso nella nota. Il modello è `[solver].modello` (`opus`). Per ora il Solver è invocato e
-registrato: non rilancia il Builder e non apre la PR a monte (`PBI-509`, in corso).
+registrato e non rilancia il Builder. A `segnala_limite_runner` (che porta anche `pbi`, il testo
+del PBI a monte scritto dal Solver) apre un ramo su un fork di `asdlc` e una PR da lì verso
+`main` (mai una scrittura su `main`), col PBI numerato al successivo libero di `backlog/` del
+clone `[rilascio].clone` (senza la chiave la PR non si apre e il Solver riceve l'errore); con la
+stessa causa già in un PBI o in una PR aperta non ne apre un'altra. Poi scrive nel PBI fermo
+`attende: <repo>#<PBI>`, la committa sul ramo del PBI fermo e crea `~/asdlc-tick.pausa`
+(`PBI-512`).
 
 ```toml
 [solver]
@@ -121,13 +127,14 @@ pacchetto non c'è nessun `gh pr merge`.
   tick mette il tag successivo (`v0.3.0` → `v0.3.1` con `patch`, `v0.4.0` con `minor`).
   `--registra` e il tag girano in un worktree usa-e-getta fuori dal checkout, che resta pulito.
 - **Nel progetto:** per ogni PBI fermo (ramo su `origin`, nessun merge) con
-  `attende: <repo>#<PBI>`, a PR a monte `MERGED` (`gh pr view`) e tag che la contiene il tick
+  `attende: <repo>#<PBI>` (letta anche dai rami `pbi/*` su `origin` non ancora in `main`, nei soli file di `backlog/` che il ramo cambia, non solo da `main`), a PR a monte `MERGED` (`gh pr view`) e tag che la contiene il tick
   apre la PR che cambia solo `[ambiente].installa`; a PR del pin `MERGED` toglie
   `~/asdlc-tick.pausa`. Il pin gira anche con il tick in pausa, il rilascio no.
 
 ```toml
 [rilascio]
 remote_fork = "fork"   # il remote del fork di asdlc da cui il Solver apre la PR a monte
+clone = "/percorso/di/asdlc"   # la copia di asdlc su disco; senza, la PR a monte non si apre
 prefisso_tag = "v"
 ```
 
