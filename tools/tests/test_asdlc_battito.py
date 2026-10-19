@@ -118,3 +118,19 @@ def test_un_distacco_di_29_minuti_non_avvisa(mondo_finto, tmp_path, monkeypatch)
 
     righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
     assert not [r for r in righe if "battito" in r], righe
+
+
+def test_un_battito_che_manca_non_e_un_avviso_e_il_primo_passaggio_lo_scrive(
+    mondo_finto, tmp_path, monkeypatch, capsys
+):
+    """Criterio 4, decisione 2. Il primo passaggio assoluto non trova il file: è «mai
+    partito», non una violazione. Il tick tace e lascia il suo primo battito."""
+    alle(monkeypatch, MEZZOGIORNO)
+    assert not (mondo_finto / "asdlc-tick.battito").exists()
+
+    uscita, repo = passaggio(tmp_path, monkeypatch)
+
+    assert uscita == 0
+    assert "battito" not in (repo / coda.LOG).read_text(encoding="utf-8")
+    assert "battito" not in capsys.readouterr().out
+    assert (mondo_finto / "asdlc-tick.battito").read_text(encoding="utf-8") == "2026-10-19T12:00:00\n"
