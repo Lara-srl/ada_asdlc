@@ -438,3 +438,55 @@ def test_un_worktree_che_non_si_crea_nel_rilascio_diventa_un_avviso(mondo, monke
 
     assert len(righe) == 1 and righe[0].startswith("rilascio: avviso")
     assert m.tag_su_origin() == ["v0.3.0"]
+
+
+# ---------------------------------------------------------------------------
+# Un passo che fallisce non si dichiara riuscito (ADR-0008)
+# ---------------------------------------------------------------------------
+
+def fallisce(m, monkeypatch, inizio):
+    """Il finto di `m` con un comando che esce 1 finché `rotto` è vero; rende il comando
+    che lo aggiusta."""
+    stato = {"rotto": True}
+    originale = m.esegui
+
+    def esegui(cmd, cwd):
+        if stato["rotto"] and cmd[:len(inizio)] == inizio:
+            return 1, "rifiutato"
+        return originale(cmd, cwd)
+    monkeypatch.setattr(coda, "esegui", esegui)
+    return lambda: stato.update(rotto=False)
+
+
+def test_un_git_push_del_tag_fallito_e_un_avviso_e_il_tick_dopo_riprova(mondo, monkeypatch):
+    m = mondo(rilascia="patch")
+    ripara = fallisce(m, monkeypatch, ["git", "push"])
+
+    righe = coda.rilascia(m.repo)
+
+    assert len(righe) == 1 and righe[0].startswith("rilascio: avviso"), righe
+    assert "→" not in righe[0]
+    assert m.tag_su_origin() == ["v0.3.0"]
+    assert git(m.repo, "tag", "--list").split() == ["v0.3.0"], "nessun tag locale che fermi il tick dopo"
+
+    ripara()
+    assert coda.rilascia(m.repo) == ["rilascio: PBI-600 → v0.3.1"]
+    assert m.tag_su_origin() == ["v0.3.0", "v0.3.1"]
+
+
+@pytest.mark.parametrize("rotto", [["git", "push"], ["gh", "pr", "create"]],
+                         ids=["git-push", "gh-pr-create"])
+def test_un_passo_del_pin_fallito_e_un_avviso_e_il_tick_dopo_riprova(progetto, monkeypatch, rotto):
+    m = progetto()
+    ripara = fallisce(m, monkeypatch, rotto)
+
+    righe = coda.pin(m.repo)
+
+    assert len(righe) == 1 and righe[0].startswith("pin: avviso"), righe
+    assert "PR del pin a" not in righe[0]
+    assert m.rami_su_origin() == [], "nessun ramo a metà su origin"
+
+    ripara()
+    [riga] = coda.pin(m.repo)
+    assert riga.endswith("PR del pin a v0.4.0")
+    assert len(m.rami_su_origin()) == 1
