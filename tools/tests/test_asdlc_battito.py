@@ -82,3 +82,28 @@ def test_il_tick_in_pausa_batte_lo_stesso(mondo_finto, tmp_path, monkeypatch):
     assert uscita == 0
     assert (repo / coda.LOG).read_text(encoding="utf-8").count("in pausa:") == 1
     assert (mondo_finto / "asdlc-tick.battito").read_text(encoding="utf-8") == "2026-10-19T12:00:00\n"
+
+
+def battito_di(casa, ora):
+    """Il battito che un passaggio precedente ha lasciato, all'ora data."""
+    (casa / "asdlc-tick.battito").write_text(ora.isoformat(timespec="seconds") + "\n",
+                                              encoding="utf-8")
+
+
+def test_un_distacco_di_31_minuti_scrive_l_avviso_nel_log_e_a_schermo(
+    mondo_finto, tmp_path, monkeypatch, capsys
+):
+    """Criterio 3, decisione 4. Il battito precedente è di 31 minuti prima, oltre la
+    soglia di 30: il tick lo dice nel log e a schermo, prima di fare altro."""
+    battito_di(mondo_finto, MEZZOGIORNO - datetime.timedelta(minutes=31))
+    alle(monkeypatch, MEZZOGIORNO)
+
+    uscita, repo = passaggio(tmp_path, monkeypatch)
+
+    assert uscita == 0
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    avvisi = [r for r in righe if "avviso" in r and "battito" in r]
+    assert len(avvisi) == 1 and "31 minuti" in avvisi[0], righe
+    assert avvisi[0].split("  ", 1)[1] in capsys.readouterr().out
+    assert righe.index(avvisi[0]) == 0, righe
+
