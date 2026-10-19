@@ -9,6 +9,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from test_asdlc_runner import TestLaSessioneRuotaFraLeRevisioni, agente_finto, git_finto  # noqa: F401
 
 runner = importlib.import_module("asdlc.runner")
@@ -210,3 +212,17 @@ def test_la_prima_invocazione_del_giro_non_porta_fork_session_ne_c(monkeypatch, 
     assert "--session-id" in primo
     assert "-c" not in primo
     assert "--fork-session" not in primo
+
+
+@pytest.mark.parametrize("ruolo", ["builder", "critic"])
+@pytest.mark.parametrize("continua", [[], ["-c"], ["--resume", "abc"]],
+                         ids=["primo", "rilancio-c", "rilancio-resume"])
+def test_session_id_con_c_o_resume_esce_sempre_con_fork_session(monkeypatch, tmp_path,
+                                                                 ruolo, continua):
+    comando = {"builder": runner.BUILDER, "critic": runner.CRITIC}[ruolo] + continua
+
+    _, cmd = lancia(monkeypatch, tmp_path, ruolo, comando)
+
+    assert "--session-id" in cmd
+    if "-c" in cmd or "--resume" in cmd:
+        assert "--fork-session" in cmd
