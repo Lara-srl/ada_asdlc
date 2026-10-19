@@ -66,15 +66,15 @@ registro e `copia_la_traccia` continuano a vedere un uuid per invocazione, come 
 
 Su `main` il rilancio non porta `--fork-session`, quindi ogni criterio è un **rosso atteso**.
 
-- [ ] **Il rilancio del Builder porta `-c`, `--fork-session` e `--session-id`.** Con `esegui()`
+- [x] **Il rilancio del Builder porta `-c`, `--fork-session` e `--session-id`.** Con `esegui()`
       finto, al secondo lancio dello stesso giro il comando contiene `-c`, `--fork-session` e
       `--session-id <uuid>` (pytest).
-- [ ] **La prima invocazione non porta `--fork-session` né `-c`.** Primo lancio del giro: il
+- [x] **La prima invocazione non porta `--fork-session` né `-c`.** Primo lancio del giro: il
       comando ha `--session-id` e nessuno dei due (pytest).
-- [ ] **Il registro del rilancio porta il uuid del fork.** `sessione` nel registro del secondo
+- [x] **Il registro del rilancio porta il uuid del fork.** `sessione` nel registro del secondo
       lancio è l'uuid nuovo e differisce da quello del primo; la traccia si copia da quel uuid
       (pytest, `esegui()` finto che scrive il file della sessione).
-- [ ] **Guardia: `--session-id` con `-c` o `--resume` senza `--fork-session` non esce mai.** Su
+- [x] **Guardia: `--session-id` con `-c` o `--resume` senza `--fork-session` non esce mai.** Su
       ogni comando costruito da `invoca_agente` per Builder e Critic, in primo lancio e in
       rilancio (pytest, parametrizzato).
 
