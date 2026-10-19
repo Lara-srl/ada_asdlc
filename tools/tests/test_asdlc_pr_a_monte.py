@@ -250,9 +250,10 @@ def test_una_causa_gia_in_una_pr_aperta_non_apre_un_secondo_pbi(a_monte):
 # ---------------------------------------------------------------------------
 
 
-def smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato):
+def smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato, commit_rifiutato=False):
     """`smista_il_blocco` su un PBI fermo, con un Solver che dichiara `dichiarato`.
-    Rende il file del PBI fermo; `HOME` è in `tmp_path`, dove vive la pausa."""
+    Rende il file del PBI fermo; `HOME` è in `tmp_path`, dove vive la pausa. Con
+    `commit_rifiutato` un hook `pre-commit` fa fallire ogni commit dopo il primo."""
     (tmp_path / "log").mkdir()
     (tmp_path / "backlog").mkdir()
     pbi_fermo = tmp_path / "backlog" / "PBI-400-fermo.md"
@@ -263,6 +264,10 @@ def smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato):
     git(tmp_path, "config", "user.name", "t")
     git(tmp_path, "add", "backlog")
     git(tmp_path, "commit", "-qm", "il PBI fermo")
+    if commit_rifiutato:
+        hook = tmp_path / ".git" / "hooks" / "pre-commit"
+        hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
     monkeypatch.setenv("HOME", str(tmp_path / "casa"))
     (tmp_path / "casa").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -313,6 +318,22 @@ def test_la_riga_attende_e_in_un_commit_del_ramo_e_il_worktree_resta_pulito(a_mo
     assert git(tmp_path, "status", "--porcelain", "--", "backlog") == ""
     nel_commit = git(tmp_path, "show", "HEAD:backlog/PBI-400-fermo.md").splitlines()
     assert f"attende: {ASDLC}#PBI-513" in nel_commit
+
+
+def test_se_il_commit_fallisce_non_resta_la_riga_ne_il_worktree_sporco_ne_la_pausa(
+        a_monte, tmp_path, monkeypatch):
+    """Giro 3, rilievo 1: un passo che fallisce non scrive né la riga né la pausa (spec,
+    «Dopo la PR»); il worktree resta pulito."""
+    mondo = a_monte()
+
+    with pytest.raises(RuntimeError):  # il chiamante di `smista_il_blocco` ne fa un avviso
+        smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato_del_limite(),
+                         commit_rifiutato=True)
+
+    pbi_fermo = tmp_path / "backlog" / "PBI-400-fermo.md"
+    assert "attende:" not in pbi_fermo.read_text(encoding="utf-8")
+    assert git(tmp_path, "status", "--porcelain") == ""
+    assert not (tmp_path / "casa" / "asdlc-tick.pausa").exists()
 
 
 def test_la_riga_scritta_dal_runner_e_quella_che_attese_legge_dal_ramo_su_origin(
