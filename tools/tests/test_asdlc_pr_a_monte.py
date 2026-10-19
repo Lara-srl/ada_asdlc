@@ -207,3 +207,19 @@ def test_il_limite_apre_un_ramo_sul_fork_e_una_pr_verso_main_col_pbi_successivo(
     assert creazione[creazione.index("--head") + 1].endswith("pbi/pbi-513")
     assert "PBI-513" in creazione[creazione.index("--title") + 1]
     assert not mondo.comandi("gh", "pr", "merge")
+
+
+def test_una_causa_gia_a_monte_nel_backlog_non_apre_un_secondo_pbi(a_monte):
+    """R6 (criterio 3): se `backlog/` di `asdlc` ha già un PBI con la stessa causa, non nasce
+    né un ramo né una PR, e il risultato cita quel PBI."""
+    mondo = a_monte()
+    (mondo.clone / "backlog" / "PBI-511-uno.md").write_text(
+        "# PBI-511: uno\n\n**Causa:** runner-x\n", encoding="utf-8")
+    git(mondo.clone, "commit", "-qam", "il PBI 511 ha la causa")
+    git(mondo.clone, "push", "-q", "origin", "main")
+
+    pbi, url = runner.apri_pr_a_monte(dichiarato_del_limite())
+
+    assert pbi == "PBI-511"
+    assert not mondo.comandi("gh", "pr", "create")
+    assert mondo.rami(mondo.fork) == ["main"], "sul fork non nasce nessun ramo"
