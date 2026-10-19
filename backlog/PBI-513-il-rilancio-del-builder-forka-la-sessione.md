@@ -1,6 +1,6 @@
 # PBI-513: il rilancio del Builder forka la sessione
 
-**Stato:** in coda; giro 1 fermato il 19/10 (hotfix di `v0.4.0`, da tagliare `v0.4.1`)
+**Stato:** in coda; giri 1 e 2 fermati il 19/10 (hotfix di `v0.4.0`, da tagliare `v0.4.1`)
 
 ## Direttiva
 
@@ -64,16 +64,19 @@ registro e `copia_la_traccia` continuano a vedere un uuid per invocazione, come 
 
 ## Verifica
 
-Su `main` il rilancio non porta `--fork-session`, quindi ogni criterio è un **rosso atteso**.
+Su `main` il rilancio non porta `--fork-session`, quindi ognuno dei criteri qui sotto è un **rosso
+atteso**.
 
 - [ ] **Il rilancio del Builder porta `-c`, `--fork-session` e `--session-id`.** Con `esegui()`
       finto, al secondo lancio dello stesso giro il comando contiene `-c`, `--fork-session` e
       `--session-id <uuid>` (pytest).
 - [ ] **La prima invocazione non porta `--fork-session` né `-c`.** Primo lancio del giro: il
       comando ha `--session-id` e nessuno dei due (pytest).
-- [ ] **Il registro del rilancio porta il uuid del fork.** `sessione` nel registro del secondo
-      lancio è l'uuid nuovo e differisce da quello del primo; la traccia si copia da quel uuid
-      (pytest, `esegui()` finto che scrive il file della sessione).
+- ~~**Il registro del rilancio porta il uuid del fork.**~~ **Uscito dal PBI (19/10, giro 2).** Il
+      criterio è vero anche su `main`: `PBI-511` (decisione 1) scrive già un uuid nuovo per ogni
+      invocazione, quindi non può nascere rosso, e il test del giro 1 (`763b668`) è nato verde e
+      non morde (22 mutanti non lo fanno fallire per asserzione). Il gate del rosso ha fermato il
+      giro 2 per quel commit. La proprietà resta garantita da `PBI-511`.
 - [ ] **Guardia: `--session-id` con `-c` o `--resume` senza `--fork-session` non esce mai.** Su
       ogni comando costruito da `invoca_agente` per Builder e Critic, in primo lancio e in
       rilancio (pytest, parametrizzato).
@@ -124,3 +127,40 @@ rispuntati**: sono già fatti, i commit lo provano.
 **Non si fa:** non si rifanno i passi del giro 1, non si riscrive la storia del tag, non si
 tocca `tools/tests/test_asdlc_runner.py` (la cura del finto è di un PBI suo) e non si committa
 nessun JSON.
+
+## Il giro 3, e cosa si riprende
+
+Il giro 2 (19/10, run `20261019-233508`, 4 minuti e 45) ha applicato la strada B del giro 1 (la riga
+`--*.json` in `.gitignore`, `cd247e4`) e ha portato il gate `asdlc` a verde. Si è fermato
+`rosso-mai-visto`: il gate del rosso ha trovato il test del **criterio 3**, commit `763b668`,
+nato verde e senza morso. Il difetto era del PBI, che chiamava «rosso atteso» un criterio vero
+anche su `main`, e del Builder del giro 1, che lo ha committato dichiarando nel messaggio «nasce
+verde» invece di fermarsi. Il Critic non è girato.
+
+**Decisione di Francesco (19/10): il criterio 3 esce dal PBI** e il suo test esce dal ramo. Il
+test non può nascere rosso e `PBI-511` garantisce già la proprietà.
+
+**Si riprende il tag `giro-fermato/pbi-513-giro2-20261019`** (`63bdd08`): ramo da quel tag, niente
+cherry-pick e niente rebase. Il file di questo PBI si prende da `main` (`git checkout
+origin/main -- backlog/PBI-513-il-rilancio-del-builder-forka-la-sessione.md`), un commit; i criteri
+1, 2 e 4 **vanno rispuntati** (sono già fatti, i commit lo provano) e il 3 resta barrato, non spuntato.
+
+**Da fare, in quest'ordine:**
+
+1. **Togliere il test del criterio 3.** Un commit `revert(runner): …` (o `test(runner): …`) che
+   toglie da `tools/tests/test_asdlc_traccia.py` **solo** la funzione
+   `test_il_registro_del_rilancio_porta_il_uuid_del_fork_e_ne_copia_la_traccia` (commit `763b668`).
+   `git revert 763b668` è la strada; se dà un conflitto perché dopo di lui lo stesso file è cambiato
+   (`677dfc9`), si risolve tenendo tutto il resto e togliendo quella funzione. **Verifica:**
+   `grep -c test_il_registro_del_rilancio_porta_il_uuid tools/tests/test_asdlc_traccia.py` dà 0, e
+   `grep -c "def test_" tools/tests/test_asdlc_traccia.py` è il numero di prima meno uno. Nessun
+   altro test cambia. Non è codice di produzione e non ha un rosso da osservare: toglie un
+   test che non può nascere rosso.
+2. **Il gate** sul ramo: verde, e `git status --porcelain` vuoto dopo averlo girato.
+3. **`fatto`**, perché il gate del rosso giri sui commit rimasti e poi il Critic legga il lavoro dei
+   giri 1 e 2. Se il gate del rosso segnala un altro commit nato verde, è un fatto nuovo:
+   `fermati` con la domanda, senza tentare di farlo mordere a forza.
+
+**Non si fa:** non si riscrive la storia dei tag, non si rifanno i passi dei giri 1 e 2, non si
+riscrive il criterio 3 in un'altra forma, non si committa nessun JSON e non si tocca
+`tools/tests/test_asdlc_runner.py`.
