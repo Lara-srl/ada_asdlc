@@ -541,8 +541,48 @@ def test_attese_legge_la_riga_che_sta_solo_sul_ramo_pbi_di_origin(tmp_path):
     assert coda.attese(repo) == [("PBI-700-il-pbi-fermo.md", A_MONTE, "PBI-505")]
 
 
-
 def test_attese_conta_una_volta_sola_il_pbi_con_la_riga_in_main_e_sul_ramo(progetto):
     m = progetto()
 
     assert coda.attese(m.repo) == [("PBI-700-il-pbi-fermo.md", A_MONTE, "PBI-505")]
+
+
+def test_attese_non_legge_i_rami_gia_in_main_ne_le_copie_vecchie_di_altri_pbi(tmp_path):
+    """Giro 3, rilievo 2 (decisione (d): i rami `pbi/*` «non ancora in `main`»). Un ramo già
+    mergiato, con la riga di un PBI poi cambiata in `main`, e un ramo vivo che parte da prima
+    del cambio e tocca solo il suo file, non riportano il bersaglio superato."""
+    origin, repo = tmp_path / "vecchi-origin.git", tmp_path / "vecchi"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    git(tmp_path, "clone", "-q", str(origin), str(repo))
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    scrivi = lambda nome, riga: (repo / "backlog" / nome).write_text(  # noqa: E731
+        f"# {nome}\n\n{riga}\n\n## Direttiva\n\nAspetta.\n")
+    (repo / "backlog").mkdir()
+    scrivi("PBI-700-fermo.md", f"attende: {A_MONTE}#PBI-501")
+    scrivi("PBI-701-mergiato.md", "")
+    scrivi("PBI-702-vivo.md", "")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "checkout", "-q", "-b", "pbi/pbi-702")
+    scrivi("PBI-702-vivo.md", f"attende: {A_MONTE}#PBI-502")
+    git(repo, "commit", "-qam", "il vivo attende")
+    git(repo, "push", "-q", "origin", "pbi/pbi-702")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "checkout", "-q", "-b", "pbi/pbi-701")
+    scrivi("PBI-701-mergiato.md", f"attende: {A_MONTE}#PBI-503")
+    git(repo, "commit", "-qam", "il mergiato attende")
+    git(repo, "push", "-q", "origin", "pbi/pbi-701")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--ff-only", "pbi/pbi-701")
+    scrivi("PBI-701-mergiato.md", "")
+    scrivi("PBI-700-fermo.md", f"attende: {A_MONTE}#PBI-601")
+    git(repo, "commit", "-qam", "main cambia i bersagli")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin")
+
+    assert sorted(coda.attese(repo)) == [
+        ("PBI-700-fermo.md", A_MONTE, "PBI-601"),
+        ("PBI-702-vivo.md", A_MONTE, "PBI-502"),
+    ]
