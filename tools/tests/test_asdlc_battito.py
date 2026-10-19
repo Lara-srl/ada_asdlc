@@ -12,6 +12,7 @@ Il modulo si carica per nome, `asdlc.coda`: `conftest.py` mette `tools/` sul
 
 import datetime
 import importlib
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -134,3 +135,34 @@ def test_un_battito_che_manca_non_e_un_avviso_e_il_primo_passaggio_lo_scrive(
     assert "battito" not in (repo / coda.LOG).read_text(encoding="utf-8")
     assert "battito" not in capsys.readouterr().out
     assert (mondo_finto / "asdlc-tick.battito").read_text(encoding="utf-8") == "2026-10-19T12:00:00\n"
+
+
+def configurazione(sezione: str = ""):
+    """La configurazione del progetto di prova con sopra la sezione data."""
+    testo = (PROGETTO / "asdlc.toml").read_text(encoding="utf-8") + "\n" + sezione
+    return coda.asdlc_config.interpreta(tomllib.loads(testo), "asdlc.toml")
+
+
+@pytest.fixture
+def soglia_da_toml():
+    """Il tick con la configurazione data, e quella di prova rimessa alla fine."""
+    def configura(sezione):
+        coda.configura(configurazione(sezione))
+    yield configura
+    coda.configura(coda.asdlc_config.carica(PROGETTO))
+
+
+def test_la_soglia_si_legge_da_tick_nel_file_di_configurazione(
+    mondo_finto, tmp_path, monkeypatch, soglia_da_toml
+):
+    """Criterio 5. Con `[tick].soglia_battito_minuti = 10`, 11 minuti di distacco
+    avvisano: con la soglia fissa di 30 non succederebbe."""
+    soglia_da_toml("[tick]\nsoglia_battito_minuti = 10\n")
+    battito_di(mondo_finto, MEZZOGIORNO - datetime.timedelta(minutes=11))
+    alle(monkeypatch, MEZZOGIORNO)
+
+    _, repo = passaggio(tmp_path, monkeypatch)
+
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    avvisi = [r for r in righe if "avviso" in r and "battito" in r]
+    assert len(avvisi) == 1 and "11 minuti" in avvisi[0], righe
