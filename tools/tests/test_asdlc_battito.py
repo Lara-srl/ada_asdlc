@@ -107,3 +107,14 @@ def test_un_distacco_di_31_minuti_scrive_l_avviso_nel_log_e_a_schermo(
     assert avvisi[0].split("  ", 1)[1] in capsys.readouterr().out
     assert righe.index(avvisi[0]) == 0, righe
 
+
+
+def test_un_distacco_di_29_minuti_non_avvisa(mondo_finto, tmp_path, monkeypatch):
+    """Criterio 3, l'altro lato: 29 minuti sono sotto la soglia, il log non ha avvisi."""
+    battito_di(mondo_finto, MEZZOGIORNO - datetime.timedelta(minutes=29))
+    alle(monkeypatch, MEZZOGIORNO)
+
+    _, repo = passaggio(tmp_path, monkeypatch)
+
+    righe = (repo / coda.LOG).read_text(encoding="utf-8").splitlines()
+    assert not [r for r in righe if "battito" in r], righe
