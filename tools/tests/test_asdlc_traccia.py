@@ -133,3 +133,13 @@ def r4(tmp_path, righe, **registro):
 
 def test_r4_e_ok_se_asdlc_toml_e_letto_prima_di_segnala_limite_runner(tmp_path):
     assert r4(tmp_path, [*RIGHE, LETTURA, SEGNALA]) == "R4: ok"
+
+
+def test_r4_e_violata_se_la_lettura_di_asdlc_toml_manca(tmp_path):
+    altra = chiamata("Read", file_path="/progetto/AGENTS.md")
+
+    assert r4(tmp_path, [*RIGHE, altra, SEGNALA]).startswith("R4: violata")
+
+
+def test_r4_e_violata_se_la_lettura_viene_dopo_la_segnalazione(tmp_path):
+    assert r4(tmp_path, [*RIGHE, SEGNALA, LETTURA]).startswith("R4: violata")
