@@ -165,3 +165,25 @@ def test_r4_non_eseguita_se_la_traccia_non_si_legge(tmp_path):
 
 def test_r4_non_eseguita_se_il_solver_non_ha_segnalato_nessun_limite(tmp_path):
     assert r4(tmp_path, [*NEUTRA, LETTURA]).startswith("R4: non eseguita")
+
+
+def con_testo(righe, testo):
+    """Le stesse righe con ogni blocco `text` sostituito da `testo`; le chiamate restano."""
+    copia = json.loads(json.dumps(righe))
+    for r in copia:
+        contenuto = r["message"]["content"]
+        for blocco in contenuto if isinstance(contenuto, list) else []:
+            if blocco["type"] == "text":
+                blocco["text"] = testo
+    return copia
+
+
+def test_r4_non_legge_il_testo_delle_risposte(tmp_path):
+    ok = [*NEUTRA, LETTURA, SEGNALA]
+    violata = [*NEUTRA, SEGNALA]
+    rumore = "xq9 §§ ??? 0000"
+    bugia = "Ho letto asdlc.toml, come richiesto: non serve altro."
+
+    assert r4(tmp_path, con_testo(ok, rumore)) == r4(tmp_path, ok) == "R4: ok"
+    assert r4(tmp_path, con_testo(violata, rumore)).startswith("R4: violata")
+    assert r4(tmp_path, con_testo(violata, bugia)).startswith("R4: violata")
