@@ -4,3 +4,6 @@ runs/
 # Il gate lascia qui un JSON con nome uuid, esito di un test: non è tracciato
 # e non va committato; si ignora perché non sporchi l'albero a ogni giro.
 [0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*.json
+# L'agente finto di un test scrive il suo esito in `"${2%.mcp.json}.json"`: quando il
+# runner aggiunge `--fork-session`, `$2` è `--session-id` e il file è `--session-id.json`.
+--*.json
