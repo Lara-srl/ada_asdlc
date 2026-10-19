@@ -160,6 +160,9 @@ class MondoAMonte:
             return 0, ASDLC
         if cmd[:3] == ["gh", "pr", "list"]:
             return 0, json.dumps(self.pr_aperte)
+        if cmd[:3] == ["gh", "pr", "view"]:
+            pr = next(p for p in self.pr_aperte if p["url"] == cmd[3])
+            return 0, json.dumps({"title": pr["title"], "headRefName": pr["headRefName"]})
         if cmd[:3] == ["gh", "pr", "create"]:
             return 0, f"https://github.com/{ASDLC}/pull/77"
         return ESEGUI_VERO(cmd, cwd, timeout, **k)
@@ -237,3 +240,39 @@ def test_una_causa_gia_in_una_pr_aperta_non_apre_un_secondo_pbi(a_monte):
     assert (pbi, url) == ("PR #40", esistente)
     assert not mondo.comandi("gh", "pr", "create")
     assert mondo.rami(mondo.fork) == ["main"], "sul fork non nasce nessun ramo"
+
+
+# ---------------------------------------------------------------------------
+# Dopo la PR il progetto è in attesa: la riga `attende:` e la pausa (criterio 4)
+# ---------------------------------------------------------------------------
+
+
+def smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato):
+    """`smista_il_blocco` su un PBI fermo, con un Solver che dichiara `dichiarato`.
+    Rende il file del PBI fermo; `HOME` è in `tmp_path`, dove vive la pausa."""
+    (tmp_path / "log").mkdir()
+    (tmp_path / "backlog").mkdir()
+    pbi_fermo = tmp_path / "backlog" / "PBI-400-fermo.md"
+    pbi_fermo.write_text("# PBI-400: fermo\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path / "casa"))
+    (tmp_path / "casa").mkdir()
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "LOG_DIR", tmp_path / "log")
+    monkeypatch.setattr(runner, "invoca_agente", lambda *a, **k: runner.Invocazione(
+        0, "", dichiarato, {"ruolo": "solver"}))
+    avvisi = []
+    runner.smista_il_blocco(runner.Esito(pbi="PBI-400", stato="fermato"), pbi_fermo, "rosso",
+                            "x", avvisi.append)
+    return pbi_fermo
+
+
+def test_dopo_la_pr_il_pbi_fermo_attende_il_pbi_a_monte_e_la_pausa_esiste(a_monte, tmp_path,
+                                                                           monkeypatch):
+    """Decisione 4 (criterio 4): il PBI fermo riceve `attende: <repo>#<PBI>` del PBI appena
+    aperto e il tick va in pausa."""
+    mondo = a_monte()
+
+    pbi_fermo = smista_un_limite(tmp_path, monkeypatch, mondo, dichiarato_del_limite())
+
+    assert f"attende: {ASDLC}#PBI-513" in pbi_fermo.read_text(encoding="utf-8").splitlines()
+    assert (tmp_path / "casa" / "asdlc-tick.pausa").exists()
