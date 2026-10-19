@@ -18,14 +18,14 @@ def righe_della_guardia(e):
     return e.guardia.splitlines()
 
 
-def test_la_riga_r4_e_non_eseguita_con_il_rinvio_a_pbi_511():
-    """R4: la traccia delle letture è di `PBI-511`; fin lì la riga è sempre `non eseguita`."""
+def test_la_riga_r4_e_non_eseguita_senza_la_traccia_del_solver():
+    """R4 legge la traccia della sessione (`PBI-511`): senza, la riga è `non eseguita`."""
     e = runner.Esito("PBI-102", "fermato", solver=[{"esito": "senza esito", "uscita": ""}])
 
     runner.guardia_del_solver(e)
 
     assert righe_della_guardia(e)[0] == INTESTAZIONE
-    assert "R4: non eseguita (PBI-511)" in righe_della_guardia(e)
+    assert "R4: non eseguita (nessuna traccia utile del Solver)" in righe_della_guardia(e)
 
 
 def test_un_giro_fermato_con_il_solver_porta_la_sezione_e_chiude_come_prima(giro_fermato):  # noqa: F811
@@ -33,7 +33,7 @@ def test_un_giro_fermato_con_il_solver_porta_la_sezione_e_chiude_come_prima(giro
     esito, _ = giro_fermato({}, {"solver": "boh"})
 
     assert esito.stato == "fermato"
-    assert "R4: non eseguita (PBI-511)" in esito.guardia.splitlines()
+    assert "R4: non eseguita (nessuna traccia utile del Solver)" in esito.guardia.splitlines()
 
 
 def test_un_giro_senza_solver_non_ha_la_sezione():
@@ -263,7 +263,7 @@ def test_la_sezione_non_cambia_con_l_uscita_grezza_del_solver(tmp_path, monkeypa
         sezioni.append(e.guardia)
 
     assert sezioni[0] == sezioni[1]
-    assert sezioni[0].splitlines() == [INTESTAZIONE, "R4: non eseguita (PBI-511)", "R5: ok",
+    assert sezioni[0].splitlines() == [INTESTAZIONE, "R4: non eseguita (nessuna traccia utile del Solver)", "R5: ok",
                                        "R6: ok", "R7: ok"]
 
 
