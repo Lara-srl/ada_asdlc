@@ -223,3 +223,17 @@ def test_una_causa_gia_a_monte_nel_backlog_non_apre_un_secondo_pbi(a_monte):
     assert pbi == "PBI-511"
     assert not mondo.comandi("gh", "pr", "create")
     assert mondo.rami(mondo.fork) == ["main"], "sul fork non nasce nessun ramo"
+
+
+def test_una_causa_gia_in_una_pr_aperta_non_apre_un_secondo_pbi(a_monte):
+    """R6 (criterio 3): se una PR aperta di `asdlc` cita la stessa causa, non nasce né un
+    ramo né una PR, e il risultato cita quella PR con il suo URL."""
+    esistente = f"https://github.com/{ASDLC}/pull/40"
+    mondo = a_monte(pr_aperte=[{"number": 40, "title": "PBI-600: altro", "url": esistente,
+                                "body": "**Causa:** runner-x\n", "headRefName": "pbi/pbi-600"}])
+
+    pbi, url = runner.apri_pr_a_monte(dichiarato_del_limite())
+
+    assert (pbi, url) == ("PR #40", esistente)
+    assert not mondo.comandi("gh", "pr", "create")
+    assert mondo.rami(mondo.fork) == ["main"], "sul fork non nasce nessun ramo"
