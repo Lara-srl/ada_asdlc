@@ -151,6 +151,7 @@ class MondoAMonte:
         git(self.clone, "commit", "-qm", "base")
         git(self.clone, "push", "-q", "origin", "main")
         git(self.clone, "remote", "add", "fork", str(self.fork))
+        git(self.clone, "push", "-q", "fork", "main")
         self.pr_aperte, self.chiamate = list(pr_aperte), []
 
     def esegui(self, cmd, cwd, timeout=7200, **k):
