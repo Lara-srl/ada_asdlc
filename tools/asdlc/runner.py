@@ -4552,7 +4552,7 @@ def controllo_r4(e: Esito) -> str:
             return "R4: ok" if letto else "R4: violata (asdlc.toml non letto prima della segnalazione)"
         if blocco["name"] == "Read":
             letto = letto or Path(blocco["input"].get("file_path", "")).name == "asdlc.toml"
-    return "R4: non eseguita (PBI-511)"
+    return "R4: non eseguita (nessuna traccia utile del Solver)"
 
 
 def controlla_r4(e: Esito) -> str:
@@ -4561,7 +4561,7 @@ def controlla_r4(e: Esito) -> str:
     try:
         return controllo_r4(e)
     except Exception:  # noqa: BLE001 — la riga resta quella di prima, non si tace il resto
-        return "R4: non eseguita (PBI-511)"
+        return "R4: non eseguita (nessuna traccia utile del Solver)"
 
 
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,

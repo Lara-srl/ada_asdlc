@@ -62,8 +62,11 @@ salvo dove è scritto che il giro chiude `senza esito`.
 - **Cosa:** che il blocco non venga da una chiave sbagliata del progetto (per esempio
   `[gate_del_rosso]` o `[ambiente].eseguibili`).
 - **Quando:** prima di `segnala_limite_runner`; l'ordine è `risolto`, poi `limite-del-runner`.
-- **Prova:** il rapporto del Solver riporta la lettura di `asdlc.toml` del progetto.
-- **Se manca:** il Critic lo segnala nella rilettura.
+- **Prova:** la traccia della sessione del Solver (`PBI-511`) ha un `Read` su `asdlc.toml` prima
+  della chiamata a `segnala_limite_runner`. La legge la guardia dalle chiamate a strumento, non
+  dal testo delle risposte.
+- **Se manca:** la guardia lo segnala (`R4: violata`); senza traccia leggibile o senza
+  segnalazione la riga è `non eseguita`. Il Critic lo vede nella rilettura.
 
 ### R5 — A monte si scrive solo con una PR
 
@@ -192,7 +195,9 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
   sulla diagnosi del Solver non è nella guardia: lo dà il Critic.
 - **Dove sta:** `guardia_del_solver()` scrive in `Esito.guardia` la sezione `## Guardia di
   processo`, una riga per regola (`ok`, `violata`, `non eseguita`). Un giro senza Solver non
-  ha la sezione. R4 è `non eseguita (PBI-511)` finché non c'è la traccia delle letture; R5-R7
+  ha la sezione. R4 legge la traccia della sessione del Solver: `ok` se `asdlc.toml` è letto prima di
+  `segnala_limite_runner`, `violata` se la lettura manca o viene dopo, `non eseguita` se la
+  traccia non c'è, non si legge o il Solver non ha segnalato alcun limite; R5-R7
   leggono la PR a monte (git e `gh`) e sono `non eseguita` senza PR o se `gh` o git non
   rispondono, scadono o rendono un'uscita illeggibile. R5 vuole anche che la testa della PR
   stia su un fork: se sta in `asdlc` è `violata`, se il fatto manca è `non eseguita`. R5 non
@@ -232,3 +237,12 @@ Le cinque domande aperte dell'ADR sono chiuse così.
 5. **Cause `runner-*`:** l'elenco unico vive in `backlog/README.md` di `asdlc`, che possiede
    il runner. I progetti lo citano (URL pinnato al tag) e tengono solo le proprie cause. Si
    allarga con un ADR (`ADR-0030` §2).
+
+### La traccia delle sessioni (`PBI-511`)
+
+Ogni invocazione di agente (Builder, Critic, Solver) parte con `claude -p --session-id <uuid>`:
+l'uuid sta nella voce del rapporto del giro (`sessione`). A fine invocazione il runner copia il
+`jsonl` che Claude Code scrive in `~/.claude/projects/` accanto ai file del giro
+(`<esito>.sessione.jsonl`, in `runs/`) e riporta `traccia` e `contenuto` (numero di
+`chiamate`, `risposte`, blocchi `thinking`). Se la sessione manca, `traccia` è `None` con una
+`traccia_nota` e il giro prosegue (`ADR-0008`).
