@@ -49,6 +49,7 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-510
 - PBI-511
 - PBI-513
+- PBI-518
 - PBI-517
 - PBI-514
 - PBI-515
