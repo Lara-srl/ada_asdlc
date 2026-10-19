@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path
 
-from test_asdlc_runner import agente_finto
+from test_asdlc_runner import TestLaSessioneRuotaFraLeRevisioni, agente_finto, git_finto  # noqa: F401
 
 runner = importlib.import_module("asdlc.runner")
 
@@ -34,6 +34,23 @@ def test_ogni_ruolo_riceve_un_session_id_e_il_registro_lo_riporta(monkeypatch, t
         dato = cmd[cmd.index("--session-id") + 1]
         assert UUID.match(dato), ruolo
         assert invocazione.registro["sessione"] == dato, ruolo
+
+
+def lanci_del_builder(monkeypatch):
+    """I comandi del Builder in un giro con un gate rosso e poi verde (`PBI-513`): il primo
+    lancio, il rilancio dopo il rosso con `-c`, e il primo della revisione dopo un NON PRONTO."""
+    comandi: list[list[str]] = []
+    TestLaSessioneRuotaFraLeRevisioni().scenario(monkeypatch, comandi)
+    runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+    return comandi
+
+
+def test_il_rilancio_del_builder_porta_c_fork_session_e_session_id(monkeypatch, git_finto):
+    rilancio = lanci_del_builder(monkeypatch)[1]
+
+    assert "-c" in rilancio
+    assert "--fork-session" in rilancio
+    assert UUID.match(rilancio[rilancio.index("--session-id") + 1])
 
 
 def sessione_finta(righe):
