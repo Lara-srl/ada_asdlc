@@ -145,3 +145,16 @@ def test_r4_e_violata_se_la_lettura_di_asdlc_toml_manca(tmp_path):
 
 def test_r4_e_violata_se_la_lettura_viene_dopo_la_segnalazione(tmp_path):
     assert r4(tmp_path, [*NEUTRA, SEGNALA, LETTURA]).startswith("R4: violata")
+
+
+def test_r4_e_non_eseguita_se_la_traccia_non_si_legge_e_le_altre_righe_ci_sono(tmp_path):
+    traccia = tmp_path / "solver.sessione.jsonl"
+    traccia.write_text("questo non è JSON\n", encoding="utf-8")
+    e = runner.Esito("PBI-102", "fermato", solver=[{"esito": "limite-del-runner"}],
+                     invocazioni=[{"ruolo": "solver", "traccia": str(traccia)}])
+
+    runner.guardia_del_solver(e)
+
+    righe = e.guardia.splitlines()
+    assert next(r for r in righe if r.startswith("R4:")).startswith("R4: non eseguita")
+    assert [r[:2] for r in righe[1:]] == ["R4", "R5", "R6", "R7"]
