@@ -61,8 +61,10 @@ STRUMENTI_DEL_SOLVER = [
                         "properties": {"causa": _testo("La causa `runner-*`."),
                                        "comando": _testo("Il comando che riproduce."),
                                        "output": _testo("L'output sbagliato."),
-                                       "commit": _testo("Il commit in cui si vede.")},
-                        "required": ["causa", "comando", "output", "commit"]},
+                                       "commit": _testo("Il commit in cui si vede."),
+                                       "pbi": _testo("Il testo completo del PBI a monte: "
+                                                     "titolo, Direttiva con Scope, Verifica.")},
+                        "required": ["causa", "comando", "output", "commit", "pbi"]},
     },
     {
         "name": "chiedi_a_francesco",
@@ -228,12 +230,16 @@ def _segnala_limite(argomenti: dict, esito: str) -> dict:
     """`segnala_limite_runner`: registra il limite del runner con la sua
     riproduzione (`PBI-507`, R3)."""
     dichiarato = {"esito": "limite-del-runner"}
-    for campo in ("causa", "comando", "output", "commit"):
+    for campo in ("causa", "comando", "output", "commit", "pbi"):
         valore = argomenti.get(campo)
         if not isinstance(valore, str) or not valore.strip():
             return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
                               "richiama segnala_limite_runner.", errore=True)
         dichiarato[campo] = valore
+    if not os.environ.get("ASDLC_CLONE", "").strip():
+        return _contenuto("Il progetto non dichiara `[rilascio].clone`: la PR a monte non si "
+                          "può aprire. Non richiamare segnala_limite_runner; usa "
+                          "chiedi_a_francesco.", errore=True)
     cause = [c.strip() for c in os.environ.get("ASDLC_CAUSE", "").split(",") if c.strip()]
     if dichiarato["causa"].strip() not in cause:
         return _contenuto(f"La causa {dichiarato['causa']!r} non è nell'elenco "

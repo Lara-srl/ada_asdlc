@@ -1053,6 +1053,10 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
         # Le cause `runner-*` che il server accetta: la lista del progetto, senza
         # rete (`PBI-507`, decisione 8).
         ambiente["ASDLC_CAUSE"] = ",".join(CFG.solver.cause)
+        # Il clone di `asdlc` da cui si apre la PR a monte (`PBI-512`): senza chiave la
+        # variabile manca e lo strumento rifiuta la chiamata.
+        if CFG.rilascio.clone:
+            ambiente["ASDLC_CLONE"] = CFG.rilascio.clone
     config.write_text(json.dumps({"mcpServers": {"asdlc": {
         "command": str(comando_del_pacchetto(SERVER_DELL_ESITO)),
         "args": [],
