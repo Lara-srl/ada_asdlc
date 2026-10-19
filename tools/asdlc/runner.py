@@ -4560,7 +4560,10 @@ def controllo_r4(e: Esito) -> str:
 def controlla_r4(e: Esito) -> str:
     """R4 con la stessa rete di `controlla`: una traccia assente o illeggibile non ferma la
     guardia."""
-    return controllo_r4(e)
+    try:
+        return controllo_r4(e)
+    except Exception as guasto:  # noqa: BLE001 — si registra come riga, non si tace
+        return f"R4: non eseguita ({type(guasto).__name__}: {una_riga(str(guasto))[:100]})"
 
 
 def guardia_del_solver(e: Esito, a_monte: AMonte | None = None,
