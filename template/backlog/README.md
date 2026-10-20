@@ -16,7 +16,7 @@ giro che li chiude. Il Builder resta dentro lo Scope, e un PBI che non si nomina
 hook) lo dichiara nella *Direttiva*, e dice come il giro ci sopravvive.
 **La risposta a un giro fermato nomina sempre il tag e i commit da riprendere**: il tag
 `giro-fermato/…` del giro chiuso, e gli sha da riprendere in ordine con `git cherry-pick`, con
-quelli da lasciare e perché. Il runner non riprende niente (dopo il limite d'uso il tick riprende il PBI: `PBI-519`): crea un ramo nuovo dalla base, e
+quelli da lasciare e perché. Il runner non riprende niente (fra un giro e l'altro; dentro il giro, dopo `risolto`, il Builder riprende: `PBI-517`) (dopo il limite d'uso il tick riprende il PBI: `PBI-519`): crea un ramo nuovo dalla base, e
 il Builder legge la ripresa nel PBI, nella sezione *Il giro N, e cosa si riprende*.
 **Una decisione non chiede mai di cambiare un test nel GREEN.** In `IMPL` i test sono in sola
 lettura (la guardia di fase di `ADR-0021`), quindi un test cambia nel commit RED, dichiarato

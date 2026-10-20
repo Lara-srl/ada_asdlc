@@ -5,7 +5,8 @@ Lo **stato** voluto del sistema (come funziona). Le decisioni e le alternative s
 cambia, PBI per PBI, sta in `backlog/`.
 
 > **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`, la traccia di R4 in `PBI-511`); R8-R11 esistono
-> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`).** La spec descrive il
+> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`); la ripresa del
+> Builder dopo `risolto` esiste (`PBI-517`).** La spec descrive il
 > comportamento a cui i PBI devono arrivare. Oggi la catena è manuale (v. l'ADR, Contesto).
 
 ## Il ciclo
@@ -25,6 +26,48 @@ giro fermato / domanda bloccante del Critic
         │                                                  pausa tolta, il PBI fermo riparte
         └─intento──────────────► avviso a Francesco; il giro resta fermo
 ```
+
+### La ripresa dopo `risolto` (`PBI-517`)
+
+Il `fermati` del Builder va al Solver dentro il giro, non alla sua chiusura. Se il Solver
+risponde `risolto` il Builder riprende nello stesso giro, e il giro prosegue fino al suo esito
+(gate, Critic, `fatto` o un'altra uscita); un secondo `fermati` torna al Solver. Ogni altro
+esito del Solver (`limite-del-runner`, `intento`, nessuna chiamata) e un Solver che non parte
+o si guasta chiudono il giro `fermato` come prima.
+
+Il Builder riprende dalla **sua** sessione: `--resume <sessione>` con la sessione
+dell'invocazione che ha chiamato `fermati` (il campo `sessione` del rapporto), e non `-c`, che
+continuerebbe l'ultima sessione dell'albero, cioè quella del Solver. `--fork-session` e il
+`--session-id` nuovo li aggiunge il runner a ogni invocazione (`PBI-511`, `PBI-513`). La ripresa
+non conta come tentativo sui gate; i rilanci dopo un gate rosso tornano a `-c`.
+
+Il prompt della ripresa è `tools/asdlc/prompt/ripresa-dopo-risolto.md`: la domanda del Builder,
+la risposta del Solver con la sua `evidenza` in un blocco **da valutare**, e la frase «riprendi
+da dove ti sei fermato, nella fase in cui sei» (la fase sta su disco e la ripresa non la
+cambia). Domanda e risposta entrano come valori di `.format()`, mai nel template. La risposta
+non annulla lo Scope né i gate.
+
+Si riprende con `--resume` solo se la traccia della sessione c'è (`traccia` non `None` nel
+rapporto): `sessione` c'è sempre, e un `--resume` su una sessione assente fallirebbe. Senza
+traccia il Builder riparte da una sessione nuova (né `--resume` né `-c`) con un prompt che porta
+il PBI, la domanda e la risposta, e il giro lo dichiara con un avviso nella nota (`ADR-0008`). Il
+prompt dice dove rileggere il lavoro fatto e i rilievi del Critic: `git log` e il rapporto del
+Critic in `runs/`.
+
+La guardia di processo (R13) gira alla chiusura di ogni giro in cui il Solver ha scritto, qualunque
+sia il motivo finale: dopo una ripresa può essere `fatto`, `gate-rossi` o `revisioni-esaurite`.
+
+Il tetto delle riprese è quello dei giri del Solver (R12, `[solver].giri_massimi`). Il contatore
+`giri_solver` si legge dai rapporti su disco alla prima chiamata del Solver nel giro e da lì
+cresce in memoria a ogni invocazione: il rapporto del giro in corso non ha esiti, e rileggerlo
+non vedrebbe i giri appena fatti. Conta le invocazioni del Solver, non le riprese: un Solver
+senza esito o `intento` consuma un giro senza riprendere. Raggiunto il tetto il Solver non
+parte e il giro chiude `fermato` con l'avviso.
+
+Il rapporto del giro porta `riprese_solver`, le riprese del Builder dopo un `risolto`, accanto a
+`giri_solver`; le invocazioni di ogni ripresa stanno in `invocazioni` come le altre. Gli altri blocchi (`builder-senza-esito`,
+`domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
+riprendono.
 
 Fa eccezione il `senza esito` per il limite d'uso con l'ora del reset leggibile: non passa
 dal Solver. Il tick aspetta `riprendi_dopo` e rilancia il PBI con `--riprendi`, fino a tre

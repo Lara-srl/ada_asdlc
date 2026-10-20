@@ -451,6 +451,9 @@ class Esito:
     # I giri Solver↔Builder di questo PBI, contando quelli dei rapporti di prima
     # (`PBI-507`, decisione 10): il tetto è `[solver].giri_massimi`.
     giri_solver: int = 0
+    # Le riprese del Builder dopo un `risolto` del Solver in questo giro (`PBI-517`,
+    # decisione 11); le loro invocazioni stanno in `invocazioni`.
+    riprese_solver: int = 0
     # La sezione `## Guardia di processo` (`PBI-508`): una riga per regola, `ok`, `violata`
     # o `non eseguita`. Vuota se il Solver non ha girato.
     guardia: str = ""
@@ -4073,6 +4076,25 @@ def esegui_pbi(
               f"critic {hms(e.tempi['critic'])})")
         return e
 
+    contatore_letto = False
+
+    def smista(motivo: str, dettaglio: str) -> dict | None:
+        """Il blocco al Solver, e l'esito che il Solver ha scritto in questa chiamata; `None`
+        se non è partito (il tetto) o non ha scritto niente. Un suo guasto è un avviso
+        (`ADR-0008`) e non salta `chiudi()`, che è la strada d'uscita di ogni giro fermato
+        (difetto 37)."""
+        nonlocal contatore_letto
+        prima = len(e.solver)
+        try:
+            # Il contatore si legge da disco una volta per giro (PBI-517, decisione 9).
+            rileggi, contatore_letto = not contatore_letto, True
+            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara, rileggi=rileggi)
+        except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
+        return e.solver[-1] if len(e.solver) > prima else None
+
     def giro() -> tuple[str, str]:
         """Builder, gate e Critic. Torna il motivo d'uscita e il dettaglio, e non
         chiude: la chiusura è di chi lo chiama, una volta sola (PBI-375)."""
@@ -4103,13 +4125,16 @@ def esegui_pbi(
             # valere il tetto dei gate **fra** le revisioni, e alla terza il Builder non avrebbe
             # più un giro. È lo stesso equivoco che ADR-0015 ha già tolto una volta.
             gate_falliti = igiene = 0
+            # Il comando della ripresa dopo un `risolto` del Solver, per la sola invocazione
+            # che segue: poi i rilanci tornano a `-c` (PBI-517, decisione 6).
+            ripresa: list[str] | None = None
             while gate_falliti < MAX_TENTATIVI:
                 print(f"  builder — giro {e.tentativi + igiene + 1}")
                 # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
                 prompt_file, file_esito = file_dell_invocazione("builder")
                 prompt_file.write_text(prompt, encoding="utf-8")
-                cmd = BUILDER + ([] if primo_del_giro else ["-c"])
-                primo_del_giro = False
+                cmd = ripresa or BUILDER + ([] if primo_del_giro else ["-c"])
+                primo_del_giro, ripresa = False, None
                 with misura(e, "builder"):
                     invocazione = invoca_agente("builder", cmd, prompt_file, file_esito)
                 e.invocazioni.append(invocazione.registro)
@@ -4125,7 +4150,32 @@ def esegui_pbi(
                                                                     invocazione.uscita)
                 if dichiarato["esito"] == "fermati":
                     e.domanda = dichiarato["domanda"]
-                    return "domanda-del-builder", una_riga(e.domanda)
+                    # La domanda va al Solver qui, dentro il giro: con `risolto` il
+                    # Builder riprende, con ogni altro esito il giro si ferma (PBI-517).
+                    risposta = smista("domanda-del-builder", una_riga(e.domanda))
+                    if risposta is None or risposta["esito"] != "risolto":
+                        return "domanda-del-builder", una_riga(e.domanda)
+                    e.riprese_solver += 1
+                    # Domanda e risposta entrano come valori di `.format()`: le loro graffe
+                    # non si interpretano (decisione 8).
+                    prompt = prompt_del_pacchetto("ripresa-dopo-risolto").format(
+                        domanda=e.domanda, risposta=risposta["risposta"],
+                        evidenza=risposta["evidenza"])
+                    if invocazione.registro.get("traccia"):
+                        # La sessione del Builder che ha chiamato `fermati`, e non `-c`:
+                        # l'ultima sessione dell'albero è quella del Solver. `--session-id`
+                        # e `--fork-session` li aggiunge `invoca_agente()`.
+                        ripresa = BUILDER + ["--resume", invocazione.registro["sessione"]]
+                    else:
+                        # Senza traccia la sessione non c'è, e `--resume` fallirebbe: si
+                        # riparte da una sessione nuova, col PBI davanti (decisione 7).
+                        ripresa = list(BUILDER)
+                        prompt = (PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
+                                  + "\n\n" + prompt)
+                        dichiara("avviso: la ripresa dopo risolto riparte da una sessione "
+                                 "nuova, senza la traccia del Builder "
+                                 f"({invocazione.registro.get('traccia_nota', '')})"[:300])
+                    continue
 
                 # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
                 # il registro non si scrive più dal branch (`ADR-0020`).
@@ -4306,17 +4356,15 @@ def esegui_pbi(
     # Un `senza esito` per il limite d'uso con l'ora del reset leggibile non ha niente
     # da decidere: il tick aspetta il reset e riprende, e il Solver non parte
     # (PBI-519, decisione 4).
-    if motivo in BLOCCHI and not e.riprendi_dopo:
-        # Il Solver è invocato e registrato, non seguito (`PBI-507`, decisione 11): un
-        # suo guasto è un avviso (`ADR-0008`) e non salta `chiudi()`, che è la strada
-        # d'uscita di ogni giro fermato (difetto 37).
-        try:
-            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
-        except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
-            traceback.print_exc()
-            e.file_traceback = str(salva_il_traceback(pbi))
-            dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
-        guardia_del_solver(e, dichiara=dichiara)
+    # Il `fermati` del Builder il Solver lo ha già smistato dentro `giro()`, e una
+    # seconda chiamata qui lo farebbe girare due volte (PBI-517, decisione 2). Gli
+    # altri blocchi si smistano qui, una volta, e non riprendono.
+    if motivo in BLOCCHI and motivo != "domanda-del-builder" and not e.riprendi_dopo:
+        smista(motivo, dettaglio)
+    # La guardia gira ogni volta che il Solver ha scritto, qualunque sia il motivo
+    # finale: dopo una ripresa può essere `fatto` (PBI-517, decisione 3). Senza
+    # Solver `guardia_del_solver()` non scrive niente.
+    guardia_del_solver(e, dichiara=dichiara)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001
@@ -4466,12 +4514,17 @@ def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
 
 
 def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
-                     dichiara) -> None:
+                     dichiara, rileggi: bool = True) -> None:
     """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
     `e.solver` (`PBI-507`, decisione 11). Oltre `[solver].giri_massimi` giri per lo
     stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`). A un limite del
-    runner apre il PBI a monte e mette il progetto in attesa (`PBI-512`)."""
-    e.giri_solver = giri_solver_fatti(e.pbi)
+    runner apre il PBI a monte e mette il progetto in attesa (`PBI-512`).
+
+    Il contatore si legge dai rapporti su disco con `rileggi`, cioè alla prima chiamata
+    del giro; dalle successive cresce in `e.giri_solver`, perché il rapporto del giro in
+    corso non ha esiti e non le vedrebbe (`PBI-517`, decisione 9)."""
+    if rileggi:
+        e.giri_solver = giri_solver_fatti(e.pbi)
     if e.giri_solver >= CFG.solver.giri_massimi:
         dichiara(f"avviso: tetto dei giri del Solver raggiunto ({e.giri_solver} di "
                  f"{CFG.solver.giri_massimi}), il Solver non parte")

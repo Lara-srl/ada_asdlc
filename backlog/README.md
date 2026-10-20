@@ -14,7 +14,7 @@ hook) lo dichiara nella *Direttiva*, e dice come il giro ci sopravvive (difetto 
 `PBI-102`, su 383).
 **La risposta a un giro fermato nomina sempre il tag e i commit da riprendere**: il tag
 `giro-fermato/…` del giro chiuso, e gli sha da riprendere in ordine con `git cherry-pick`, con
-quelli da lasciare e perché. Il runner non riprende niente (dopo il limite d'uso il tick riprende il PBI: `PBI-519`): crea un ramo nuovo da
+quelli da lasciare e perché. Il runner non riprende niente (fra un giro e l'altro; dentro il giro, dopo `risolto`, il Builder riprende: `PBI-517`) (dopo il limite d'uso il tick riprende il PBI: `PBI-519`): crea un ramo nuovo da
 `origin/main` (`nome_libero()`). L'unica ripresa che si è vista è quella del Builder che legge
 il tag nel PBI (382 al giro 2; 388, che non lo nominava, è ripartito da zero). Vale finché il
 repository `asdlc` non avrà una ripresa vera (`SCAFFOLDING.md`, §I PBI che si spostano).
