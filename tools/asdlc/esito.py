@@ -2,14 +2,14 @@
 """Il server dell'esito: l'esito di un agente è una chiamata a strumento (`ADR-0027`).
 
 Un server MCP su stdio, in sola libreria standard, con due strumenti: `fatto` e
-`fermati` (il Solver ne ha tre, `PBI-507`). Il modello li chiama, il server valida e scrive l'esito nel file che il
+`fermati` (il Solver ne ha tre, `PBI-507`, e il Lettore tre, `PBI-521`). Il modello li chiama, il server valida e scrive l'esito nel file che il
 runner gli ha nominato. Il runner legge quel file, e non più il testo libero
 dell'agente (`backlog/PBI-366`; lo collega `PBI-367`).
 
 Il trasporto è quello stdio di MCP: un messaggio JSON-RPC per riga, in entrata
 su stdin e in uscita su stdout. Il runner lo configura con due variabili:
 
-    ASDLC_RUOLO   `builder`, `critic` o `solver`: cambia lo schema di `fatto`, o gli strumenti
+    ASDLC_RUOLO   `builder`, `critic`, `solver` o `lettore`: cambia lo schema di `fatto`, o gli strumenti
     ASDLC_ESITO   il file in cui scrivere l'esito; accanto, `<esito>.chiamate.jsonl`
                   registra ogni chiamata, valida o rifiutata
 
@@ -34,7 +34,7 @@ from pathlib import Path
 NOME = "asdlc"
 VERSIONE = "1"
 
-RUOLI = ["builder", "critic", "solver"]
+RUOLI = ["builder", "critic", "solver", "lettore"]
 VERDETTI = ["pass", "non pronto"]
 
 
@@ -76,14 +76,59 @@ STRUMENTI_DEL_SOLVER = [
     },
 ]
 
+# Le sette domande del Lettore (`ADR-0031`, decisione 1): rosso sulla base, GREEN
+# scrivibile, test che contraddice, albero sporcato, esecuzione, decisione lasciata,
+# nomi veri.
+DOMANDE_DEL_LETTORE = ["R", "F", "T", "A", "E", "D", "N"]
+
+STRUMENTI_DEL_LETTORE = [
+    {
+        "name": "rilievo",
+        "description": ("Registra un rilievo: solo ciò che fermerebbe il giro, con la "
+                        "prova. Si può chiamare più volte."),
+        "inputSchema": {"type": "object",
+                        "properties": {"domanda": {"type": "string",
+                                                   "enum": DOMANDE_DEL_LETTORE,
+                                                   "description": "La domanda a cui risponde."},
+                                       "criterio": {"type": "integer", "minimum": 0,
+                                                    "description": "Il criterio della Verifica, "
+                                                                   "0 per il PBI intero."},
+                                       "testo": _testo("Il rilievo, per intero."),
+                                       "evidenza": _testo("Il file che lo prova, "
+                                                          "`percorso` o `percorso:riga`.")},
+                        "required": ["domanda", "criterio", "testo", "evidenza"]},
+    },
+    {
+        "name": "sonda",
+        "description": ("Propone il test RED di un criterio, già scritto nell'albero: lo "
+                        "esegue il runner. Si può chiamare più volte."),
+        "inputSchema": {"type": "object",
+                        "properties": {"criterio": {"type": "integer", "minimum": 1,
+                                                    "description": "Il criterio della Verifica."},
+                                       "file": _testo("Il file del test, dalla radice."),
+                                       "nome": _testo("Il nome del test nel file.")},
+                        "required": ["criterio", "file", "nome"]},
+    },
+    {
+        "name": "letto",
+        "description": ("Chiude la lettura con il riepilogo. È definitiva: dopo, rilievo "
+                        "e sonda si rifiutano."),
+        "inputSchema": {"type": "object",
+                        "properties": {"riepilogo": _testo("Il riepilogo della lettura.")},
+                        "required": ["riepilogo"]},
+    },
+]
+
 
 def strumenti(ruolo: str) -> list[dict]:
     """Gli strumenti con lo schema del ruolo: `fatto` e `fermati` per Builder e
-    Critic, i tre esiti del Solver per il Solver (`PBI-507`). Lo schema è per il
-    modello: la CLI non lo fa rispettare, e le regole le applica il server
-    (`ADR-0027`, decisione 3)."""
+    Critic, i tre esiti del Solver per il Solver (`PBI-507`), i tre del Lettore per il
+    Lettore (`PBI-521`). Lo schema è per il modello: la CLI non lo fa rispettare, e le
+    regole le applica il server (`ADR-0027`, decisione 3)."""
     if ruolo == "solver":
         return STRUMENTI_DEL_SOLVER
+    if ruolo == "lettore":
+        return STRUMENTI_DEL_LETTORE
     proprieta_fatto = {"riepilogo": _testo("Il riepilogo del lavoro fatto.")}
     descrizione_fatto = "Dichiara che il lavoro è finito."
     if ruolo == "critic":
@@ -144,6 +189,10 @@ def chiama(nome, argomenti, ruolo: str, esito: str) -> dict:
                               f"{nome} con i campi per nome.", errore=True)
         return {"risolvi": _risolvi, "segnala_limite_runner": _segnala_limite,
                 "chiedi_a_francesco": _chiedi_a_francesco}[nome](argomenti, esito)
+    if ruolo == "lettore":
+        if nome == "letto":
+            return _letto(argomenti, esito)
+        return _accumula(nome, argomenti, esito)
     if nome not in ("fatto", "fermati"):
         return _contenuto(f"Lo strumento {nome!r} non esiste: chiama fatto o fermati.",
                           errore=True)
@@ -252,6 +301,38 @@ def _segnala_limite(argomenti: dict, esito: str) -> dict:
                           "nomina quello in cui il limite si vede e richiama "
                           "segnala_limite_runner.", errore=True)
     return _scrivi(dichiarato, "segnala_limite_runner", esito)
+
+
+# I campi di `rilievo` e `sonda` che finiscono nella lettura, nell'ordine dello schema.
+CAMPI_DEL_LETTORE = {"rilievo": ("domanda", "criterio", "testo", "evidenza"),
+                     "sonda": ("criterio", "file", "nome")}
+
+
+def _accumula(nome: str, argomenti: dict, esito: str) -> dict:
+    """`rilievo` e `sonda`: una riga JSON per chiamata in `<esito>.lettura.jsonl`,
+    `{"strumento", ...argomenti}` (`PBI-521`, decisione 2). Non chiudono la lettura."""
+    riga = {"strumento": nome, **{c: argomenti.get(c) for c in CAMPI_DEL_LETTORE[nome]}}
+    with open(f"{esito}.lettura.jsonl", "a", encoding="utf-8") as lettura:
+        lettura.write(json.dumps(riga, ensure_ascii=False) + "\n")
+    return _contenuto(f"Registrato: {nome}.", errore=False)
+
+
+def _letto(argomenti: dict, esito: str) -> dict:
+    """`letto`: l'esito definitivo della lettura, con i rilievi e le sonde letti dal
+    `.jsonl` in questo momento (`PBI-521`, decisione 2)."""
+    rilievi: list[dict] = []
+    sonde: list[dict] = []
+    try:
+        with open(f"{esito}.lettura.jsonl", encoding="utf-8") as lettura:
+            for riga in lettura:
+                if riga.strip():
+                    voce = json.loads(riga)
+                    strumento = voce.pop("strumento")
+                    (rilievi if strumento == "rilievo" else sonde).append(voce)
+    except FileNotFoundError:
+        pass
+    return _scrivi({"esito": "letto", "riepilogo": argomenti.get("riepilogo"),
+                    "rilievi": rilievi, "sonde": sonde}, "letto", esito)
 
 
 def registra(nome, argomenti, esito: str) -> None:
