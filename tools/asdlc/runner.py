@@ -56,7 +56,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from fnmatch import fnmatch
 import importlib.metadata
 from importlib import resources
@@ -1257,6 +1257,24 @@ def limite_d_uso(uscita: str) -> str:
     # Un'ora inventata è peggio di un'ora mancante: chi legge `runs/tempi.csv`
     # la userebbe (decisione 4).
     return "limite d'uso dell'account, ora del reset non leggibile"
+
+
+# Il margine dopo l'ora del reset: la CLI la scrive al minuto, e un rilancio
+# sull'ora esatta troverebbe il limite ancora chiuso (PBI-519, decisione 3).
+MARGINE_DEL_RESET = timedelta(minutes=5)
+
+
+def ora_di_ripresa(ora: str, scritta: datetime) -> datetime:
+    """Quando si può riprendere: la prima occorrenza di `ora` («7:50pm», «3am»)
+    successiva a `scritta`, l'istante in cui l'uscita è stata scritta, più
+    `MARGINE_DEL_RESET`. Il fuso è quello del runner (PBI-519, decisione 3)."""
+    lettura = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s?([ap]m)", ora.strip(), re.IGNORECASE)
+    ore, minuti, meridiano = int(lettura.group(1)), int(lettura.group(2) or 0), lettura.group(3)
+    ore = ore % 12 + (12 if meridiano.lower() == "pm" else 0)
+    reset = scritta.replace(hour=ore, minute=minuti, second=0, microsecond=0)
+    if reset <= scritta:
+        reset += timedelta(days=1)
+    return reset + MARGINE_DEL_RESET
 
 
 def nota_senza_esito(registro: dict, uscita: str = "") -> str:
