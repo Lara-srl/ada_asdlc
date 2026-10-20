@@ -100,3 +100,25 @@ def test_dopo_risolto_il_builder_e_ripreso_e_il_giro_non_chiude_fermato(giro):
 
     assert len(comandi_di(agente, "builder")) == 2
     assert esito.stato != "fermato"
+
+
+def test_la_ripresa_continua_la_sessione_dell_ultima_invocazione_del_builder(giro, monkeypatch):
+    """Criterio 2: `--resume` con la sessione del Builder che ha chiamato `fermati`, e non
+    `-c`, che continuerebbe l'ultima sessione dell'albero (quella del Solver). Un gate rosso
+    prima del `fermati` fa sì che l'ultima invocazione del Builder non sia la prima."""
+    gate = iter([[("pytest", "1 failed")]])
+    monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: next(gate, []))
+
+    esito, agente = giro({"builder": [FATTO, fermati("quale funzione?"), FATTO],
+                          "solver": [RISOLTO]})
+
+    builder = comandi_di(agente, "builder")
+    assert len(builder) == 3
+    ripresa = builder[2]
+    sessioni = [i["sessione"] for i in esito.invocazioni if i["ruolo"] == "builder"]
+    assert ripresa.count("--resume") == 1
+    assert ripresa[ripresa.index("--resume") + 1] == sessioni[1]
+    assert ripresa.count("--fork-session") == 1
+    assert ripresa.count("--session-id") == 1
+    assert ripresa[ripresa.index("--session-id") + 1] == sessioni[2]
+    assert "-c" not in ripresa
