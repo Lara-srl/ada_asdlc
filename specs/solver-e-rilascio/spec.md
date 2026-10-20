@@ -26,6 +26,10 @@ giro fermato / domanda bloccante del Critic
         └─intento──────────────► avviso a Francesco; il giro resta fermo
 ```
 
+Fa eccezione il `senza esito` per il limite d'uso con l'ora del reset leggibile: non passa
+dal Solver. Il tick aspetta `riprendi_dopo` e rilancia il PBI con `--riprendi`, fino a tre
+riprese; dopo la terza il PBI attende una persona (`PBI-519`).
+
 ## Regole
 
 Ogni regola risponde alle quattro domande: **cosa si controlla · quando · cosa conta come
