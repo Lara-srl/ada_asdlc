@@ -14,7 +14,12 @@ import importlib
 import json
 from pathlib import Path
 
+import pytest
+from test_asdlc_preverifica import clone_con_la_base, lancia, sh
+from test_asdlc_runner import ruolo_ed_esito
+
 esito = importlib.import_module("asdlc.esito")
+runner = importlib.import_module("asdlc.runner")
 
 
 def nomi(ruolo):
@@ -97,3 +102,104 @@ def test_il_server_rifiuta_le_chiamate_del_lettore_che_non_reggono_e_quelle_dopo
         assert esito.chiama(nome, argomenti, "lettore", str(file))["isError"], nome
     assert file.read_text(encoding="utf-8") == chiuso
     assert righe_della_lettura(file) == [{"strumento": "rilievo", **RILIEVO_R}]
+
+
+# --- Criterio 2: una sonda verde sulla base è un rilievo R --------------------
+
+MODULO = "def somma(a, b):\n    return a + b\n"
+
+SONDE = """import modulo
+
+
+def test_la_somma_c_e_gia():
+    assert modulo.somma(2, 3) == 5
+
+
+def test_la_differenza():
+    assert modulo.differenza(5, 3) == 2
+"""
+
+
+def pbi_con_criteri(*criteri: str) -> str:
+    """PBI-610 con lo Scope che nomina il suo file e i `criteri` nella Verifica."""
+    return ("# PBI-610: una prova\n\n**Scope**\n\n"
+            "- `backlog/PBI-610-una-prova.md` — questo file.\n- `modulo.py`\n\n"
+            "## Dipendenze\n\n- Bloccato da: nessuno.\n\n## Verifica\n\n"
+            + "".join(f"{c}\n" for c in criteri))
+
+
+DUE_CRITERI = pbi_con_criteri("- [ ] **La somma.** (pytest)", "- [ ] **La differenza.** (pytest)")
+
+
+def lettore_finto(monkeypatch, file: dict[str, str], chiamate: list[dict], letto: bool = True):
+    """Un `esegui` che fa il Lettore: scrive `file` nel suo `cwd`, le `chiamate` valide in
+    `<esito>.lettura.jsonl` e, con `letto`, l'esito che il server scriverebbe. Ogni altro
+    comando (git, pytest) va all'`esegui` vero. I lanci del Lettore restano in `.lanci`,
+    come `(comando, cwd, timeout)`."""
+    vero = runner.esegui
+    lanci: list[tuple[list[str], Path, float]] = []
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        ruolo, file_esito = ruolo_ed_esito(cmd)
+        if ruolo != "lettore":
+            return vero(cmd, cwd, timeout, **k)
+        lanci.append((cmd, Path(cwd), timeout))
+        for nome, testo in file.items():
+            (Path(cwd) / nome).write_text(testo, encoding="utf-8")
+        Path(f"{file_esito}.lettura.jsonl").write_text(
+            "".join(json.dumps(c, ensure_ascii=False) + "\n" for c in chiamate), encoding="utf-8")
+        if letto:
+            voci = [{k: v for k, v in c.items() if k != "strumento"} for c in chiamate]
+            file_esito.write_text(json.dumps({
+                "esito": "letto", "riepilogo": "letto",
+                "rilievi": [v for v, c in zip(voci, chiamate) if c["strumento"] == "rilievo"],
+                "sonde": [v for v, c in zip(voci, chiamate) if c["strumento"] == "sonda"],
+            }, ensure_ascii=False), encoding="utf-8")
+        return 0, "letto"
+
+    _esegui.lanci = lanci
+    monkeypatch.setattr(runner, "esegui", _esegui)
+    return _esegui
+
+
+def preverifica_col_lettore(tmp_path, monkeypatch, testo_del_pbi: str, file: dict[str, str],
+                            chiamate: list[dict], letto: bool = True):
+    """`asdlc-runner PBI-610 --preverifica --lettore` su un clone con `modulo.py` alla base:
+    il codice d'uscita, il rapporto, il clone, il Lettore finto, e i rami e lo stato del
+    clone com'erano prima del lancio."""
+    clone, _ = clone_con_la_base(tmp_path, {"modulo.py": MODULO,
+                                            "backlog/PBI-610-una-prova.md": testo_del_pbi})
+    prima = sh(clone, "branch"), sh(clone, "status", "--porcelain")
+    monkeypatch.setattr(runner, "REPO", clone)
+    for nome in ("stacca", "lucchetto", "esegui_pbi"):
+        monkeypatch.setattr(runner, nome, lambda *a, _n=nome, **k: pytest.fail(f"{_n} non si chiama"))
+    agente = lettore_finto(monkeypatch, file, chiamate, letto)
+
+    codice = lancia(["PBI-610", "--preverifica", "--lettore"], monkeypatch)
+
+    rapporti = sorted(runner.LOG_DIR.glob("*-PBI-610-preverifica.json"))
+    assert len(rapporti) == 1, list(runner.LOG_DIR.iterdir())
+    return codice, json.loads(rapporti[0].read_text(encoding="utf-8")), clone, agente, prima
+
+
+def test_una_sonda_verde_sulla_base_e_un_rilievo_r_e_il_lettore_lavora_fuori_dal_checkout(
+        tmp_path, monkeypatch):
+    montati = runner.USA_E_GETTA["montati"]
+    sonde = [{"strumento": "sonda", "criterio": 1, "file": "test_sonde.py",
+              "nome": "test_la_somma_c_e_gia"},
+             {"strumento": "sonda", "criterio": 2, "file": "test_sonde.py",
+              "nome": "test_la_differenza"}]
+
+    codice, rapporto, clone, agente, (rami, stato) = preverifica_col_lettore(
+        tmp_path, monkeypatch, DUE_CRITERI, {"test_sonde.py": SONDE}, sonde)
+
+    assert codice == 1
+    assert rapporto["lettore"] == "letto"
+    assert [(s["criterio"], s["esito"]) for s in rapporto["sonde"]] == [(1, "verde"), (2, "rosso")]
+    assert [(r["domanda"], r["criterio"]) for r in rapporto["rilievi"]] == [("R", 1)]
+    assert "nato verde" in rapporto["rilievi"][0]["testo"]
+    assert len(agente.lanci) == 1 and agente.lanci[0][1] != clone
+    assert sh(clone, "branch") == rami and sh(clone, "status", "--porcelain") == stato
+    assert not (clone / "test_sonde.py").exists()
+    assert runner.USA_E_GETTA["montati"] == montati + 1
+    assert runner.USA_E_GETTA["montati"] == runner.USA_E_GETTA["smontati"]

@@ -185,7 +185,10 @@ def test_preverifica_scrive_il_rapporto_e_non_tocca_l_albero(pbi, file, codice,
     rapporti = sorted(runner.LOG_DIR.glob(f"*-{pbi}-preverifica.json"))
     assert len(rapporti) == 1, list(runner.LOG_DIR.iterdir())
     rapporto = json.loads(rapporti[0].read_text(encoding="utf-8"))
-    assert set(rapporto) == {"pbi", "base", "sha_pbi", "criteri", "rilievi", "avvisi"}, rapporto
+    assert set(rapporto) == {"pbi", "base", "sha_pbi", "criteri", "rilievi", "avvisi",
+                             "lettore", "sonde"}, rapporto
+    # Senza `--lettore` il Lettore non legge e nessuna sonda gira (PBI-521, decisione 7).
+    assert rapporto["lettore"] is None and rapporto["sonde"] == []
     assert rapporto["pbi"] == pbi and rapporto["base"] == base
     assert rapporto["sha_pbi"] == sh(clone, "rev-parse", f"{base}:{file}")
     assert rapporto["criteri"] == (1 if codice == 0 else 0)
