@@ -5213,10 +5213,12 @@ def chiudi_la_fase() -> None:
 
 def contenuto_in_stage(percorso: str) -> str | None:
     """Il file com'è **in stage** (`git show :percorso`), o `None` se lì non c'è:
-    il lato vecchio di un rename, una cancellazione."""
+    il lato vecchio di un rename, una cancellazione — o se non è testo: una fixture
+    binaria alzava `UnicodeDecodeError` e piantava il `pre-commit` (PBI-515,
+    decisione 6). Senza contenuto la produzione resta chiusa, il resto passa."""
     try:
         return git("show", f":{percorso}")
-    except RuntimeError:
+    except (RuntimeError, UnicodeDecodeError):
         return None
 
 
