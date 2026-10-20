@@ -451,6 +451,9 @@ class Esito:
     # I giri Solver↔Builder di questo PBI, contando quelli dei rapporti di prima
     # (`PBI-507`, decisione 10): il tetto è `[solver].giri_massimi`.
     giri_solver: int = 0
+    # Le riprese del Builder dopo un `risolto` del Solver in questo giro (`PBI-517`,
+    # decisione 11); le loro invocazioni stanno in `invocazioni`.
+    riprese_solver: int = 0
     # La sezione `## Guardia di processo` (`PBI-508`): una riga per regola, `ok`, `violata`
     # o `non eseguita`. Vuota se il Solver non ha girato.
     guardia: str = ""
@@ -4152,6 +4155,7 @@ def esegui_pbi(
                     risposta = smista("domanda-del-builder", una_riga(e.domanda))
                     if risposta is None or risposta["esito"] != "risolto":
                         return "domanda-del-builder", una_riga(e.domanda)
+                    e.riprese_solver += 1
                     # Domanda e risposta entrano come valori di `.format()`: le loro graffe
                     # non si interpretano (decisione 8).
                     prompt = prompt_del_pacchetto("ripresa-dopo-risolto").format(

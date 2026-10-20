@@ -103,7 +103,8 @@ Il Solver legge `asdlc.toml` prima di segnalare un limite e `backlog/PRECEDENTI.
 chiedere. Il tetto è `[solver].giri_massimi` (3) giri per PBI, contati nel rapporto
 `runs/<run>.json` (`giri_solver`): oltre, o a `chiedi_a_francesco`, il giro si ferma con un
 avviso nella nota. Il modello è `[solver].modello` (`opus`). Dopo un `fermati` del Builder il
-Solver parte dentro il giro, e con `risolto` il Builder riprende nello stesso giro (`PBI-517`);
+Solver parte dentro il giro, e con `risolto` il Builder riprende nello stesso giro (`PBI-517`,
+quante volte lo dice `riprese_solver` nel rapporto);
 gli altri blocchi il Solver li smista alla chiusura, senza riprese. A `segnala_limite_runner` (che porta anche `pbi`, il testo
 del PBI a monte scritto dal Solver) apre un ramo su un fork di `asdlc` e una PR da lì verso
 `main` (mai una scrittura su `main`), col PBI numerato al successivo libero di `backlog/` del
