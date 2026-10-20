@@ -9,7 +9,9 @@ import json
 import re
 from pathlib import Path
 
-from test_asdlc_runner import agente_finto
+import pytest
+
+from test_asdlc_runner import TestLaSessioneRuotaFraLeRevisioni, agente_finto, git_finto  # noqa: F401
 
 runner = importlib.import_module("asdlc.runner")
 
@@ -34,6 +36,23 @@ def test_ogni_ruolo_riceve_un_session_id_e_il_registro_lo_riporta(monkeypatch, t
         dato = cmd[cmd.index("--session-id") + 1]
         assert UUID.match(dato), ruolo
         assert invocazione.registro["sessione"] == dato, ruolo
+
+
+def lanci_del_builder(monkeypatch):
+    """I comandi del Builder in un giro con un gate rosso e poi verde (`PBI-513`): il primo
+    lancio, il rilancio dopo il rosso con `-c`, e il primo della revisione dopo un NON PRONTO."""
+    comandi: list[list[str]] = []
+    TestLaSessioneRuotaFraLeRevisioni().scenario(monkeypatch, comandi)
+    runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+    return comandi
+
+
+def test_il_rilancio_del_builder_porta_c_fork_session_e_session_id(monkeypatch, git_finto):
+    rilancio = lanci_del_builder(monkeypatch)[1]
+
+    assert "-c" in rilancio
+    assert "--fork-session" in rilancio
+    assert UUID.match(rilancio[rilancio.index("--session-id") + 1])
 
 
 def sessione_finta(righe):
@@ -185,3 +204,25 @@ def test_r4_non_legge_il_testo_delle_risposte_ma_solo_le_chiamate(tmp_path):
 
     assert r4(tmp_path, con_testo("zxq kjh 123", corretta)) == "R4: ok"
     assert r4(tmp_path, con_testo("ho letto asdlc.toml", scorretta)).startswith("R4: violata")
+
+
+def test_la_prima_invocazione_del_giro_non_porta_fork_session_ne_c(monkeypatch, git_finto):
+    primo = lanci_del_builder(monkeypatch)[0]
+
+    assert "--session-id" in primo
+    assert "-c" not in primo
+    assert "--fork-session" not in primo
+
+
+@pytest.mark.parametrize("ruolo", ["builder", "critic"])
+@pytest.mark.parametrize("continua", [[], ["-c"], ["--resume", "abc"]],
+                         ids=["primo", "rilancio-c", "rilancio-resume"])
+def test_session_id_con_c_o_resume_esce_sempre_con_fork_session(monkeypatch, tmp_path,
+                                                                 ruolo, continua):
+    comando = {"builder": runner.BUILDER, "critic": runner.CRITIC}[ruolo] + continua
+
+    _, cmd = lancia(monkeypatch, tmp_path, ruolo, comando)
+
+    assert "--session-id" in cmd
+    if "-c" in cmd or "--resume" in cmd:
+        assert "--fork-session" in cmd
