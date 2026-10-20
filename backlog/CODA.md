@@ -54,6 +54,10 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-517
 - PBI-514
 - PBI-515
+- PBI-520
+- PBI-521
+- PBI-522
+- ‖ tag v0.6.0, pin nei quattro repository e `[preverifica] attiva = true` nei loro `asdlc.toml`
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
@@ -83,3 +87,9 @@ dei test di D3, prima del tag `v0.2.0`.
 `ada_planning`, che ha fermato il PBI-002 al primo criterio. Dopo il merge servono il tag, il
 pin in `ada_planning` e la sezione `[junit]` del suo `asdlc.toml`: sono gesti umani e non
 stanno in coda.
+
+**`PBI-520`–`PBI-522`, la pre-verifica dei PBI prima del giro** (`ADR-0031`, Francesco, 20/10).
+Vanno in fila: il 521 usa il comando, il rapporto e i testi dei criteri del 520, e il 522 mette
+nel giro le funzioni di tutti e due. Ognuno è passato da una lettura avversariale prima di
+entrare qui (la sezione in fondo al PBI). La barriera dopo il 522 è il rilascio: finché il tag
+e il pin non ci sono, il tick lavora con la `v0.5.0` e la pre-verifica non è accesa.
