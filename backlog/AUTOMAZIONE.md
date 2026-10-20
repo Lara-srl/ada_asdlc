@@ -27,7 +27,8 @@ sbagliare prima.
 
 **Prima del Builder, la pre-verifica** (`PBI-522`, `ADR-0031`). Con `[preverifica] attiva =
 true` il giro, dopo il controllo dell'albero pulito e prima di creare il ramo, legge il PBI alla
-base con i controlli di `--preverifica`. Con un rilievo chiude `fermato`, motivo `preverifica`:
+base con i controlli di `--preverifica` e, con `[preverifica].lettore` (il default), col
+Lettore. Con un rilievo chiude `fermato`, motivo `preverifica`:
 niente ramo, commit, PR né Solver, e il rimedio è correggere il PBI. `--riprendi` non la rifà.
 
 Sono **tre gate diversi** perché rispondono a tre domande diverse
