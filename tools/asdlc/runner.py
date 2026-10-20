@@ -4151,6 +4151,11 @@ def esegui_pbi(
                     # sessione dell'albero è quella del Solver. `--session-id` e
                     # `--fork-session` li aggiunge `invoca_agente()`.
                     ripresa = BUILDER + ["--resume", invocazione.registro["sessione"]]
+                    # Domanda e risposta entrano come valori di `.format()`: le loro graffe
+                    # non si interpretano (decisione 8).
+                    prompt = prompt_del_pacchetto("ripresa-dopo-risolto").format(
+                        domanda=e.domanda, risposta=risposta["risposta"],
+                        evidenza=risposta["evidenza"])
                     continue
 
                 # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando

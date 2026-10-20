@@ -39,7 +39,13 @@ Il Builder riprende dalla **sua** sessione: `--resume <sessione>` con la session
 dell'invocazione che ha chiamato `fermati` (il campo `sessione` del rapporto), e non `-c`, che
 continuerebbe l'ultima sessione dell'albero, cioè quella del Solver. `--fork-session` e il
 `--session-id` nuovo li aggiunge il runner a ogni invocazione (`PBI-511`, `PBI-513`). La ripresa
-non conta come tentativo sui gate; i rilanci dopo un gate rosso tornano a `-c`. Gli altri blocchi (`builder-senza-esito`,
+non conta come tentativo sui gate; i rilanci dopo un gate rosso tornano a `-c`.
+
+Il prompt della ripresa è `tools/asdlc/prompt/ripresa-dopo-risolto.md`: la domanda del Builder,
+la risposta del Solver con la sua `evidenza` in un blocco **da valutare**, e la frase «riprendi
+da dove ti sei fermato, nella fase in cui sei» (la fase sta su disco e la ripresa non la
+cambia). Domanda e risposta entrano come valori di `.format()`, mai nel template. La risposta
+non annulla lo Scope né i gate. Gli altri blocchi (`builder-senza-esito`,
 `domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
 riprendono.
 
