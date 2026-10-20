@@ -135,8 +135,10 @@ comunque vada. Dichiara ciò che trova con tre strumenti, che il server dell'esi
 
 Dopo `letto` il **runner** esegue le sonde sulla base con gli strumenti di `--chiedi-impl`:
 una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («nato verde»). Il
-rapporto aggiunge `lettore` (`letto`, oppure `null` senza `--lettore`) e `sonde` (criterio,
-file, nome, esito); i rilievi del Lettore e delle sonde stanno nella stessa lista `rilievi`.
+rapporto aggiunge `lettore` (`letto`, `senza esito`, oppure `null` senza `--lettore`) e
+`sonde` (criterio, file, nome, esito); i rilievi del Lettore e delle sonde stanno nella stessa
+lista `rilievi`. Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano
+nel rapporto marcati `"lettore": "senza esito"`, e le sonde non si eseguono.
 
 ### Il rilascio a tick
 

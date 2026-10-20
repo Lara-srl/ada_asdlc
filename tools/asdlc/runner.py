@@ -4003,6 +4003,14 @@ class Rilievo:
     criterio: int | None
     testo: str
     evidenza: str = ""
+    # `senza esito` per un rilievo di una lettura che non ha chiamato `letto`
+    # (PBI-521, decisione 2); negli altri il campo non va nel rapporto.
+    lettore: str | None = None
+
+
+def voce_del_rilievo(r: Rilievo) -> dict:
+    """Il rilievo come va nel rapporto: `lettore` solo quando c'è."""
+    return {k: v for k, v in vars(r).items() if k != "lettore" or v is not None}
 
 
 RE_CRITERIO = re.compile(r"^\s*- \[[ x]\]")
@@ -4110,12 +4118,25 @@ def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[R
     return eseguite, rilievi
 
 
+def rilievi_senza_esito(file_esito: Path) -> list[Rilievo]:
+    """I rilievi che il server ha accumulato in `<esito>.lettura.jsonl` per una lettura
+    che non ha chiamato `letto`, marcati `senza esito` (PBI-521, decisione 2)."""
+    try:
+        righe = Path(f"{file_esito}.lettura.jsonl").read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    voci = [json.loads(r) for r in righe if r.strip()]
+    return [Rilievo(v["domanda"], v["criterio"], v["testo"], v["evidenza"],
+                    lettore="senza esito") for v in voci if v.get("strumento") == "rilievo"]
+
+
 def lettura_del_lettore(percorso: str, base: str,
                         avvisi: list[str]) -> tuple[str, list[Rilievo], list[dict]]:
     """Il Lettore sul PBI `percorso` (`PBI-521`, `ADR-0031` decisioni 1-3): lo lancia in un
     albero usa e getta alla `base`, che è il suo `cwd` e si smonta comunque vada, e dopo
     `letto` ne esegue le sonde lì dentro. Torna lo stato della lettura, i rilievi del
-    Lettore e delle sonde, e le sonde col loro esito."""
+    Lettore e delle sonde, e le sonde col loro esito. Senza `letto` la lettura è
+    `senza esito`: i rilievi accumulati entrano lo stesso, le sonde non si eseguono."""
     prompt, file_esito = file_dell_invocazione("lettore")
     prompt.write_text(prompt_del_pacchetto("lettore").format(
         pbi_path=percorso, avvisi="\n".join(f"- {a}" for a in avvisi) or "- nessuno"),
@@ -4124,6 +4145,8 @@ def lettura_del_lettore(percorso: str, base: str,
         invocazione = invoca_agente("lettore", comando_del_lettore(), prompt, file_esito,
                                     cwd=albero)
         dichiarato = invocazione.dichiarato
+        if dichiarato is None:
+            return "senza esito", rilievi_senza_esito(file_esito), []
         rilievi = [Rilievo(**r) for r in dichiarato["rilievi"]]
         sonde, dalle_sonde = esegui_le_sonde(albero, dichiarato["sonde"])
     return "letto", rilievi + dalle_sonde, sonde
@@ -4160,7 +4183,7 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
         "base": base,
         "sha_pbi": git("rev-parse", f"{base}:{percorso}"),
         "criteri": len(criteri_del_pbi(testo)),
-        "rilievi": [vars(r) for r in rilievi],
+        "rilievi": [voce_del_rilievo(r) for r in rilievi],
         "avvisi": avvisi,
         "lettore": stato_della_lettura,
         "sonde": sonde,
