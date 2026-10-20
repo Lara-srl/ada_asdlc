@@ -95,8 +95,9 @@ attivo = true
 
 [preverifica]
 # La pre-verifica nel giro, prima del ramo: con un rilievo il giro chiude `fermato`
-# col motivo `preverifica`, senza ramo né Solver. `lettore` (default `true`) aggiunge
-# il Lettore. Senza la sezione è spenta.
+# col motivo `preverifica`, senza ramo né Solver, e il tick non rilancia il PBI finché
+# il suo file non cambia su `main`. `lettore` (default `true`) aggiunge il Lettore.
+# Senza la sezione è spenta.
 attiva = true
 
 # I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.

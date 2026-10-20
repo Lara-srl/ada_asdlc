@@ -134,6 +134,17 @@ class AttendeIlReset:
 
 
 @dataclass(frozen=True)
+class AttendeLaPreverifica:
+    """Il giro di questo PBI si è fermato in pre-verifica, prima del ramo, con
+    `rilievi` rilievi: tocca a chi corregge il PBI, e il tick lo rilancia quando il
+    file del PBI cambia su `main` (PBI-522, decisione 6). Non è un blocco: la coda
+    resta su questo PBI, e il tick dopo rilegge (`ADR-0008`)."""
+
+    pbi: str
+    rilievi: int
+
+
+@dataclass(frozen=True)
 class Lancia:
     """C'è un PBI pronto da far partire, ed è questo. Con `riprendi` il giro riparte
     dalla punta del suo ramo, dopo il reset del limite d'uso (PBI-519)."""
@@ -142,7 +153,8 @@ class Lancia:
     riprendi: bool = False
 
 
-Decisione = Occupato | Finita | Barriera | Attende | AttendeIlReset | Lancia
+Decisione = (Occupato | Finita | Barriera | Attende | AttendeIlReset | AttendeLaPreverifica
+             | Lancia)
 
 # Le due sole forme che sono una voce, e nient'altro della pagina lo è. Le regole
 # sono ancorate a tutta la riga di proposito: `backlog/CODA.md` è insieme il
@@ -501,16 +513,37 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
             return Lancia(decisione.pbi, riprendi=True)
         return Attende(decisione.pbi, pr)
     # Un giro chiuso prima del ramo non lascia niente su `origin`, e la coda direbbe
-    # `Lancia`: lo trattiene l'ultimo rapporto. Un Lettore fermo sul limite d'uso si
-    # riprende dopo il reset, senza `--riprendi` perché il ramo non c'è (PBI-522,
-    # decisione 6).
+    # `Lancia`: lo trattiene l'ultimo rapporto (PBI-522, decisione 6). Un PBI fermo in
+    # pre-verifica aspetta che il suo file cambi nel checkout del tick, che `allinea()`
+    # ha portato su `main`; lo sha si chiede solo allora. Un Lettore fermo sul limite
+    # d'uso si riprende dopo il reset, senza `--riprendi` perché il ramo non c'è.
     if isinstance(decisione, Lancia):
         esito = ultimo_esito(worktree, decisione.pbi)
+        if (esito is not None and esito.get("motivo") == "preverifica"
+                and esito.get("sha_pbi")
+                and sha_del_pbi(repo, decisione.pbi) == esito["sha_pbi"]):
+            return AttendeLaPreverifica(decisione.pbi, esito.get("rilievi_preverifica", 0))
         if esito is not None and esito.get("motivo") == "lettore-senza-esito":
             ripresa = riprendi_dopo(worktree, decisione.pbi)
             if ripresa is not None and adesso() < ripresa:
                 return AttendeIlReset(decisione.pbi, ripresa.strftime("%H:%M"))
     return decisione
+
+
+def sha_del_pbi(repo: Path, pbi: str) -> str | None:
+    """Lo sha del blob del file di `pbi` in `HEAD` del checkout `repo`, con `git
+    rev-parse HEAD:<file>`, o `None` se il file non c'è o `git` non risponde. `HEAD` e
+    non l'albero: una modifica non committata non fa rilanciare il PBI (PBI-522,
+    decisione 6)."""
+    numero = CFG.backlog.numero(pbi)
+    if numero is None:
+        return None
+    file = next(iter(sorted((repo / BACKLOG).glob(CFG.backlog.glob_del_file(numero)))), None)
+    if file is None:
+        return None
+    codice, uscita = esegui(["git", "-C", str(repo), "rev-parse",
+                             f"HEAD:{file.relative_to(repo).as_posix()}"], repo)
+    return uscita.strip() if codice == 0 else None
 
 
 def ultimo_esito(worktree: Path, pbi: str) -> dict | None:
@@ -813,6 +846,8 @@ def racconta(decisione: Decisione) -> str:
             return f"attende: {pbi} ha un ramo su origin e non è in main — {sul_ramo}"
         case AttendeIlReset(pbi, ora):
             return f"attende il reset del limite d'uso: {pbi} riprende dopo {ora}"
+        case AttendeLaPreverifica(pbi, rilievi):
+            return f"attende: preverifica {pbi} — {rilievi} rilievi, correggi il PBI"
         case Lancia(pbi, riprendi=True):
             return f"lancia: {pbi} --riprendi, dopo il reset del limite d'uso"
         case Lancia(pbi):
