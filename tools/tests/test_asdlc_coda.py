@@ -1274,11 +1274,23 @@ def tick_dal_checkout(tmp_path, monkeypatch):
     prima, perché `monkeypatch` li restituisca ai test dopo. Il worktree è una
     cartella vuota: quello di `asdlc.toml` è quest'albero stesso, quando la
     suite gira nel worktree del runner, e il tick si rifiuterebbe. Torna le
-    cartelle da cui il tick ha interrogato il mondo, e il `--worktree`."""
+    cartelle da cui il tick ha interrogato il mondo, e il `--worktree`.
+
+    Il lucchetto del tick va in `tmp_path` e non in `PROGETTO/runs/`, dopo ogni
+    `configura()` come il `LOG` di `log_dir_temporanea`: un percorso assoluto
+    vince sul `repo` davanti. In un clone fresco `runs/` non c'è, e il tick la
+    creava nel progetto di prova, dentro il repository (PBI-518)."""
     for nome in ("REPO", "CFG", "WORKTREE_DEL_RUNNER", "LOG", "LUCCHETTO", "BACKLOG",
                  "CODA", "BASE", "REMOTO", "PREFISSO_RAMO", "RE_PBI", "RE_TITOLO_PR",
-                 "RE_RAMO_PR", "RE_RAMO_PBI"):
+                 "RE_RAMO_PR", "RE_RAMO_PBI", "LUCCHETTO_DEL_TICK"):
         monkeypatch.setattr(coda, nome, getattr(coda, nome))
+    configura = coda.configura
+
+    def configura_col_lucchetto_temporaneo(cfg):
+        configura(cfg)
+        coda.LUCCHETTO_DEL_TICK = tmp_path / "runs" / ".tick.lock"
+
+    monkeypatch.setattr(coda, "configura", configura_col_lucchetto_temporaneo)
     cartelle = []
     _, rispondi = mondo_registrato()
 
