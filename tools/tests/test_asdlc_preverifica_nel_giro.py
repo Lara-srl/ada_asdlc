@@ -15,6 +15,7 @@ import dataclasses
 import importlib
 import json
 import tomllib
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -42,14 +43,18 @@ def accendi(monkeypatch, lettore: bool) -> None:
 
 
 LETTO = {"esito": "letto", "riepilogo": "letto", "rilievi": [], "sonde": []}
+LIMITE = "You've hit your session limit · resets 7:50pm\n"
 
 
-def giro_sul_clone(tmp_path, monkeypatch, testo_del_pbi: str, esiti: dict | None = None):
+def giro_sul_clone(tmp_path, monkeypatch, testo_del_pbi: str, esiti: dict | None = None,
+                   uscite: dict | None = None):
     """Un clone con `testo_del_pbi` come PBI-610 alla base, e il giro pronto a partire:
     gli agenti e il Solver finti, che si ricordano di essere stati chiamati, e la
     pubblicazione e la fase sostituite. Un agente scrive nel suo file d'esito ciò che
     `esiti` dà al suo ruolo, come il server dopo una chiamata valida; un ruolo assente
-    non chiama niente. Rende il clone e l'elenco dei ruoli invocati, nell'ordine."""
+    non chiama niente. `uscite` dà a un ruolo il codice d'uscita e lo stderr della CLI,
+    scritto nel file dei flussi; senza, esce 0 e muto. Rende il clone e l'elenco dei
+    ruoli invocati, nell'ordine."""
     clone, _ = clone_con_la_base(tmp_path, {"modulo.py": "def somma(a, b):\n    return a + b\n",
                                             FILE_DEL_PBI: testo_del_pbi})
     monkeypatch.setattr(runner, "REPO", clone)
@@ -60,14 +65,18 @@ def giro_sul_clone(tmp_path, monkeypatch, testo_del_pbi: str, esiti: dict | None
     vero = runner.esegui
     ruoli: list[str] = []
 
-    def _esegui(cmd, cwd, timeout=7200, **k):
+    def _esegui(cmd, cwd, timeout=7200, flussi=None, **k):
         if cmd[:1] == ["git"]:
-            return vero(cmd, cwd, timeout, **k)
+            return vero(cmd, cwd, timeout, flussi=flussi, **k)
         ruolo, file_esito = ruolo_ed_esito(cmd)
         ruoli.append(ruolo)
         if (esiti or {}).get(ruolo) is not None:
             file_esito.write_text(json.dumps(esiti[ruolo]), encoding="utf-8")
-        return 0, ""
+        codice, dentro = (uscite or {}).get(ruolo, (0, ""))
+        if flussi is not None:
+            flussi[0].write_text("", encoding="utf-8")
+            flussi[1].write_text(dentro, encoding="utf-8")
+        return codice, dentro
 
     monkeypatch.setattr(runner, "esegui", _esegui)
     return clone, ruoli
@@ -129,3 +138,23 @@ def test_col_lettore_acceso_il_lettore_gira_una_volta_prima_del_builder(tmp_path
 
     assert ruoli.count("lettore") == 1, ruoli
     assert ruoli[:2] == ["lettore", "builder"], ruoli
+
+
+# --- Criterio 3: un Lettore senza esito non è un PBI da correggere ------------
+
+
+def test_un_lettore_fermo_sul_limite_d_uso_chiude_lettore_senza_esito_con_riprendi_dopo(
+        tmp_path, monkeypatch):
+    clone, ruoli = giro_sul_clone(tmp_path, monkeypatch, pbi_610(),
+                                  uscite={"lettore": (1, LIMITE)})
+    accendi(monkeypatch, lettore=True)
+    rami = sh(clone, "branch")
+
+    e = runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run="giro")
+
+    assert (e.motivo, e.stato) == ("lettore-senza-esito", "senza esito"), e.nota
+    assert e.riprendi_dopo, "il limite d'uso con l'ora leggibile porta riprendi_dopo"
+    assert datetime.fromisoformat(e.riprendi_dopo) > datetime.now()
+    assert ruoli == ["lettore"], "senza la lettura il Builder non parte"
+    assert sh(clone, "branch") == rami, "il ramo non nasce"
+    assert e.solver == [], "il Solver non parte"
