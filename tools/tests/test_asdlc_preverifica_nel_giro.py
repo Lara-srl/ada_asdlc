@@ -258,3 +258,21 @@ def test_il_tick_non_rilancia_un_pbi_da_correggere_finche_il_file_non_cambia(
     assert coda.decidi(repo, albero) == coda.Lancia("PBI-610"), (
         "la correzione arrivata nel checkout del tick fa rilanciare il PBI"
     )
+
+
+# --- Criterio 6: `--riprendi` non lancia la pre-verifica (guardia) ------------
+
+
+def test_riprendi_non_lancia_la_preverifica(tmp_path, monkeypatch):
+    """Una ripresa dopo il limite d'uso riparte dal ramo di un giro che la
+    pre-verifica l'ha già passata: un PBI che oggi darebbe un rilievo non la ferma."""
+    _, ruoli = giro_sul_clone(tmp_path, monkeypatch, pbi_610().replace("## Verifica", "## Altro"))
+    accendi(monkeypatch, lettore=False)
+    monkeypatch.setattr(runner, "riprendi_il_ramo", lambda pbi: "pbi/pbi-610")
+
+    e = runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run="giro",
+                          riprendi=True)
+
+    assert e.motivo != "preverifica", e.nota
+    assert not list(runner.LOG_DIR.glob("*-preverifica.json")), "la pre-verifica non gira"
+    assert ruoli[:1] == ["builder"], ruoli
