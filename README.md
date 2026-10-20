@@ -134,7 +134,8 @@ comunque vada. Dichiara ciò che trova con tre strumenti, che il server dell'esi
 - `letto(riepilogo)` — chiude la lettura.
 
 Dopo `letto` il **runner** esegue le sonde sulla base con gli strumenti di `--chiedi-impl`:
-una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («nato verde»). Il
+una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («nato verde»). Un
+criterio senza sonda è un avviso, `criterio N senza sonda`, non un rilievo. Il
 rapporto aggiunge `lettore` (`letto`, `senza esito`, oppure `null` senza `--lettore`) e
 `sonde` (criterio, file, nome, esito); i rilievi del Lettore e delle sonde stanno nella stessa
 lista `rilievi`. Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano

@@ -4118,6 +4118,15 @@ def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[R
     return eseguite, rilievi
 
 
+def criteri_senza_sonda(testo: str, sonde: list[dict]) -> list[str]:
+    """Un avviso per ogni criterio della `Verifica` che non ha una sonda (PBI-521,
+    decisione 5): non è un rilievo, perché il rosso di quel criterio non è stato
+    provato, non smentito."""
+    provati = {s["criterio"] for s in sonde}
+    return [f"criterio {numero} senza sonda"
+            for numero in range(1, len(criteri_del_pbi(testo)) + 1) if numero not in provati]
+
+
 def rilievi_senza_esito(file_esito: Path) -> list[Rilievo]:
     """I rilievi che il server ha accumulato in `<esito>.lettura.jsonl` per una lettura
     che non ha chiamato `letto`, marcati `senza esito` (PBI-521, decisione 2)."""
@@ -4176,6 +4185,7 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
     if lettore:
         stato_della_lettura, dal_lettore, sonde = lettura_del_lettore(percorso, base, avvisi)
         rilievi += dal_lettore
+        avvisi += criteri_senza_sonda(testo, sonde)
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
     LOG_DIR.mkdir(exist_ok=True)
     rapporto = LOG_DIR / f"{run}-{pbi}-preverifica.json"
