@@ -6,7 +6,7 @@ scrivere produzione dato dal rosso osservato. Comandi installati:
 
 | Comando | Cosa fa |
 |---|---|
-| `asdlc-runner` | un giro su un PBI, la guardia di fase (`--guardia-fase`) per l'hook `PreToolUse`, e la pre-verifica di un PBI prima della coda (`PBI-N --preverifica`: rapporto in `runs/<run>-<PBI>-preverifica.json`, esce 1 con un rilievo di forma, gli avvisi non contano; `PBI-520`) |
+| `asdlc-runner` | un giro su un PBI, la guardia di fase (`--guardia-fase`) per l'hook `PreToolUse`, e la pre-verifica di un PBI prima della coda (`PBI-N --preverifica`: rapporto in `runs/<run>-<PBI>-preverifica.json`, esce 1 con un rilievo di forma, gli avvisi non contano; `PBI-520`; con `--lettore` legge anche il Lettore, `PBI-521`) |
 | `asdlc-coda` | il tick: legge `backlog/CODA.md` e lancia il PBI successivo quando il precedente è in `main` |
 | `asdlc-chiudi-giro` | chiude un giro fermato: tag `giro-fermato/…`, ramo tolto |
 | `asdlc-esito` | il server MCP dell'esito, da cui gli agenti dichiarano com'è andata (`ADR-0027`) |
@@ -119,6 +119,39 @@ giri_massimi = 3
 cause = ["runner-non-legge-junit"]   # allineate a backlog/README.md di asdlc
 modello = "opus"
 ```
+
+### Il Lettore, il quarto ruolo
+
+`asdlc-runner PBI-N --preverifica --lettore` aggiunge al controllo di `PBI-520` il
+**Lettore** (`PBI-521`, `ADR-0031`): un agente che legge il PBI contro la base e risponde alle
+sette domande (`R F T A E D N`). Lavora in un albero usa e getta alla base, fuori dal
+checkout, con `Read`, `Grep`, `Glob`, `Write` ed `Edit` e senza `Bash`; l'albero si smonta
+comunque vada. Dichiara ciò che trova con tre strumenti, che il server dell'esito valida:
+
+- `rilievo(domanda, criterio, testo, evidenza)` — solo ciò che fermerebbe il giro, con la
+  prova: `evidenza` è un file dell'albero, `percorso` o `percorso:riga`;
+- `sonda(criterio, file, nome)` — il test RED di un criterio, scritto nell'albero;
+- `letto(riepilogo)` — chiude la lettura.
+
+Dopo `letto` il **runner** esegue le sonde sulla base con gli strumenti di `--chiedi-impl`:
+una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («nato verde»;
+`nessuno` per un file che non è un test o un nome che il file non ha), mentre un gate guasto è
+l'avviso `sonda del criterio N: gate guasto` e la sonda ha esito `guasto`. Un
+criterio senza sonda è un avviso, `criterio N senza sonda`, non un rilievo; un criterio che
+si dichiara guardia (il suo testo dice «guardia» o «nato verde») non ha sonda né avviso. Il
+rapporto aggiunge `lettore` (`letto`, `senza esito`, oppure `null` senza `--lettore`) e
+`sonde` (criterio, file, nome, esito); i rilievi del Lettore e delle sonde stanno nella stessa
+lista `rilievi`. Il modello e il tetto della chiamata stanno nella sezione `[lettore]`:
+
+```toml
+[lettore]
+modello = "opus"   # il default, come [solver]
+minuti = 30        # il tetto della chiamata del Lettore
+```
+
+Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano
+nel rapporto marcati `"lettore": "senza esito"`, e le sonde non si eseguono. Il comando esce 1
+con un rilievo, oppure con `senza esito`.
 
 ### Il rilascio a tick
 

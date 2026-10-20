@@ -141,6 +141,15 @@ def comando_del_solver() -> list[str]:
             "mcp__asdlc__chiedi_a_francesco", "--model", CFG.solver.modello]
 
 
+# Il Lettore (`PBI-521`, decisione 3) legge il PBI e scrive le sonde nel suo albero usa e
+# getta: `Write` ed `Edit` sì, `Bash` no, perché le sonde le esegue il runner. Il modello
+# è `[lettore].modello`.
+def comando_del_lettore() -> list[str]:
+    return ["claude", "-p", "--allowedTools",
+            "Read,Grep,Glob,Write,Edit,mcp__asdlc__rilievo,mcp__asdlc__sonda,mcp__asdlc__letto",
+            "--model", CFG.lettore.modello]
+
+
 # I motivi d'uscita di un giro fermato che il Solver smista: il `fermati` del Builder, il
 # `sospeso` del Critic, e un agente dell'uno o dell'altro senza nessuna chiamata valida.
 BLOCCHI = ("domanda-del-builder", "builder-senza-esito", "domanda-del-critic",
@@ -150,7 +159,7 @@ BLOCCHI = ("domanda-del-builder", "builder-senza-esito", "domanda-del-critic",
 # al runner, `<pacchetto>/bin/asdlc-esito` (PBI-384). I ruoli sono i suoi: un
 # altro valore lo ferma all'avvio.
 SERVER_DELL_ESITO = "asdlc-esito"
-RUOLI = ("builder", "critic", "solver")
+RUOLI = ("builder", "critic", "solver", "lettore")
 
 # Le tre soglie: sezione `[soglie]` di `asdlc.toml`, in `configura()`. Il TOML porta
 # il numero; la ragione di ognuno sta lì accanto, dove chi lo cambia la legge.
@@ -1051,7 +1060,7 @@ def config_del_server(ruolo: str | None, esito: Path | None) -> Path:
     """Scrive la config MCP che fa partire il server dell'esito per questa
     invocazione, accanto al suo file d'esito, e ne torna il percorso.
 
-    Un ruolo che non è `builder`, `critic` o `solver`, o un file d'esito mancante,
+    Un ruolo che non è `builder`, `critic`, `solver` o `lettore`, o un file d'esito mancante,
     sollevano `ValueError` **prima** del lancio. Il server si fermerebbe da sé
     all'avvio, ma dentro un giro quella fermata arriverebbe come un agente
     senza esito, dopo i minuti del Builder (PBI-367, decisione 4).
@@ -1139,18 +1148,25 @@ def una_riga(testo: str) -> str:
     return " / ".join(r.strip() for r in testo.splitlines() if r.strip())
 
 
-def cartella_delle_sessioni() -> Path:
-    """Dove Claude Code scrive le sessioni di `REPO`: `~/.claude/projects/<percorso>`, col
-    percorso della cartella di lavoro in cui ogni carattere non alfanumerico è un `-`."""
-    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(REPO))
+def cartella_delle_sessioni(cwd: Path | None = None) -> Path:
+    """Dove Claude Code scrive le sessioni lanciate da `cwd`, e senza da `REPO`:
+    `~/.claude/projects/<percorso>`, col percorso della cartella di lavoro in cui ogni
+    carattere non alfanumerico è un `-`. Il Lettore parte dal suo albero usa e getta, e la
+    sua sessione sta sotto il percorso di quello (PBI-521)."""
+    cartella = cwd or REPO
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cartella))
 
 
-def copia_la_traccia(sessione: str, destinazione: Path, registro: dict) -> None:
+def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
+                     cwd: Path | None = None) -> None:
     """Copia il `jsonl` della sessione accanto ai file del giro e ne scrive il percorso in
     `registro["traccia"]`. La cartella di Claude Code è fuori dal repository e può essere
     ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
-    `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`)."""
-    sorgente = cartella_delle_sessioni() / f"{sessione}.jsonl"
+    `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`). La sessione si cerca fra
+    quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`."""
+    # Senza `cwd` la chiamata resta senza argomenti, com'era prima di PBI-521.
+    sessioni = cartella_delle_sessioni() if cwd is None else cartella_delle_sessioni(cwd)
+    sorgente = sessioni / f"{sessione}.jsonl"
     try:
         shutil.copyfile(sorgente, destinazione)
     except OSError as guasto:
@@ -1200,7 +1216,7 @@ def contenuto_della_traccia(percorso: Path) -> dict[str, int]:
 
 
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
-                  esito: Path | None) -> Invocazione:
+                  esito: Path | None, cwd: Path | None = None) -> Invocazione:
     """Lancia un agente con il server dell'esito accanto, e legge l'esito.
 
     `--mcp-config` è variadico come `--allowedTools`: lo chiude
@@ -1208,7 +1224,8 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     prima prova il prompt in coda a `--mcp-config` è stato preso per un'altra
     config, e `-p` è partito senza input.
 
-    La chiamata ha un tetto per ruolo, `MINUTI_BUILDER` o `MINUTI_CRITIC`.
+    La chiamata ha un tetto per ruolo: `MINUTI_BUILDER`, `[lettore].minuti` per il
+    Lettore (PBI-521), `MINUTI_CRITIC` per gli altri.
     Scaduto, l'esito è `None` anche se l'agente ne aveva dichiarato uno: non ha
     finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
     porta allora `tetto_minuti`, che è ciò che la nota dice.
@@ -1221,6 +1238,10 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
 
     Il Builder riceve con `--settings` la guardia di fase del giro, e
     `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
+
+    L'agente parte da `cwd`, e senza da `REPO`: il Lettore lavora nel suo albero usa e
+    getta (`PBI-521`, decisione 3), e il server dell'esito lo eredita. La traccia si cerca
+    fra le sessioni di quella cartella.
     """
     config = config_del_server(ruolo, esito)
     della_sessione: list[str] = []
@@ -1232,13 +1253,13 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     if "-c" in comando or "--resume" in comando:
         della_sessione.append("--fork-session")
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
-    minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
+    minuti = {"builder": MINUTI_BUILDER, "lettore": CFG.lettore.minuti}.get(ruolo, MINUTI_CRITIC)
     scaduto = False
     t0 = time.monotonic()
     try:
         codice, uscita = esegui(comando + della_sessione + ["--session-id", sessione]
                                 + ["--mcp-config", str(config), "--strict-mcp-config",
-                                   f"@{prompt}"], REPO, timeout=minuti * 60,
+                                   f"@{prompt}"], cwd or REPO, timeout=minuti * 60,
                                 flussi=(fuori, dentro), ambiente=ambiente)
     except TettoSuperato as tetto:
         codice, uscita, scaduto = tetto.codice, tetto.uscita, True
@@ -1248,7 +1269,7 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
                 "sessione": sessione}
     if scaduto:
         registro["tetto_minuti"] = minuti
-    copia_la_traccia(sessione, Path(f"{esito}.sessione.jsonl"), registro)
+    copia_la_traccia(sessione, Path(f"{esito}.sessione.jsonl"), registro, cwd)
     dichiarato = None if scaduto else esito_dichiarato(esito)
     return Invocazione(codice, uscita, dichiarato, registro)
 
@@ -3992,6 +4013,14 @@ class Rilievo:
     criterio: int | None
     testo: str
     evidenza: str = ""
+    # `senza esito` per un rilievo di una lettura che non ha chiamato `letto`
+    # (PBI-521, decisione 2); negli altri il campo non va nel rapporto.
+    lettore: str | None = None
+
+
+def voce_del_rilievo(r: Rilievo) -> dict:
+    """Il rilievo come va nel rapporto: `lettore` solo quando c'è."""
+    return {k: v for k, v in vars(r).items() if k != "lettore" or v is not None}
 
 
 RE_CRITERIO = re.compile(r"^\s*- \[[ x]\]")
@@ -4076,11 +4105,109 @@ def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
     return avvisi
 
 
-def preverifica(pbi: str) -> int:
+def esegui_le_sonde(albero: Path,
+                    sonde: list[dict]) -> tuple[list[dict], list[Rilievo], list[str]]:
+    """Esegue le sonde del Lettore nell'albero alla base, con gli strumenti di
+    `--chiedi-impl` (`PBI-521`, decisione 4): ogni sonda col suo esito, e un rilievo `R`
+    col testo di `ESITI_MANCATI` per ogni sonda che non è rossa.
+
+    Una sonda su un file che non è un test non si esegue, e il suo esito è `nessuno`: il
+    server non lo può sapere, perché non importa il runner. Un orfano di
+    `comandi_dei_test()`, il test che non si isola, torna alla sua sonda dal file: la sua
+    etichetta comincia col percorso da cui il test gira (per JUnit è il nome).
+
+    Un `GuastoDelGate` dice che lo strumento non ha guardato, non che il criterio nasce
+    verde: le sonde di quel comando hanno esito `guasto`, nessun rilievo, e un avviso
+    `sonda del criterio N: gate guasto`, che torna al terzo posto."""
+    nuovi = [TestNuovo(s["file"], s["nome"], linguaggio_del_test(s["file"])) for s in sonde]
+    esiti: dict[TestNuovo, str] = {t: "nessuno" for t in nuovi if t.linguaggio is None}
+    eseguibili = [t for t in nuovi if t.linguaggio is not None]
+    comandi, orfani = comandi_dei_test(albero, eseguibili)
+    for etichetta in orfani:
+        for test in eseguibili:
+            if etichetta.startswith(f"{dove_gira(test.file)[1]} ") or etichetta == test.nome:
+                esiti[test] = "nessuno"
+    for comando in comandi:
+        try:
+            letti, _ = esiti_del_comando(comando)
+        except GuastoDelGate:
+            letti = {chiave: "guasto" for chiave in comando.origine}
+        for chiave, esito in letti.items():
+            esiti[comando.origine[chiave]] = esito
+    eseguite: list[dict] = []
+    rilievi: list[Rilievo] = []
+    avvisi: list[str] = []
+    for sonda, test in zip(sonde, nuovi):
+        esito = esiti[test]
+        eseguite.append({"criterio": sonda["criterio"], "file": sonda["file"],
+                         "nome": sonda["nome"], "esito": esito})
+        if esito == "guasto":
+            avvisi.append(f"sonda del criterio {sonda['criterio']}: gate guasto")
+        elif esito != "rosso":
+            rilievi.append(Rilievo("R", sonda["criterio"], ESITI_MANCATI[esito],
+                                   f"{sonda['file']}::{sonda['nome']}"))
+    return eseguite, rilievi, avvisi
+
+
+RE_GUARDIA = re.compile(r"guardia|nato\s+verde", re.IGNORECASE)
+
+
+def criteri_senza_sonda(testo: str, sonde: list[dict]) -> list[str]:
+    """Un avviso per ogni criterio della `Verifica` che non ha una sonda (PBI-521,
+    decisione 5): non è un rilievo, perché il rosso di quel criterio non è stato
+    provato, non smentito. Un criterio guardia non ha sonda, e non ha l'avviso: è
+    guardia se il suo testo intero, righe rientrate comprese, dice «guardia» o «nato
+    verde», senza distinguere maiuscole e minuscole."""
+    provati = {s["criterio"] for s in sonde}
+    return [f"criterio {numero} senza sonda"
+            for numero, criterio in enumerate(criteri_del_pbi(testo), start=1)
+            if numero not in provati and not RE_GUARDIA.search(criterio)]
+
+
+def rilievi_senza_esito(file_esito: Path) -> list[Rilievo]:
+    """I rilievi che il server ha accumulato in `<esito>.lettura.jsonl` per una lettura
+    che non ha chiamato `letto`, marcati `senza esito` (PBI-521, decisione 2)."""
+    try:
+        righe = Path(f"{file_esito}.lettura.jsonl").read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    voci = [json.loads(r) for r in righe if r.strip()]
+    return [Rilievo(v["domanda"], v["criterio"], v["testo"], v["evidenza"],
+                    lettore="senza esito") for v in voci if v.get("strumento") == "rilievo"]
+
+
+def lettura_del_lettore(percorso: str, base: str,
+                        avvisi: list[str]) -> tuple[str, list[Rilievo], list[dict], list[str]]:
+    """Il Lettore sul PBI `percorso` (`PBI-521`, `ADR-0031` decisioni 1-3): lo lancia in un
+    albero usa e getta alla `base`, che è il suo `cwd` e si smonta comunque vada, e dopo
+    `letto` ne esegue le sonde lì dentro. Torna lo stato della lettura, i rilievi del
+    Lettore e delle sonde, le sonde col loro esito e gli avvisi dei gate guasti. Senza `letto` la lettura è
+    `senza esito`: i rilievi accumulati entrano lo stesso, le sonde non si eseguono."""
+    prompt, file_esito = file_dell_invocazione("lettore")
+    prompt.write_text(prompt_del_pacchetto("lettore").format(
+        pbi_path=percorso, avvisi="\n".join(f"- {a}" for a in avvisi) or "- nessuno"),
+        encoding="utf-8")
+    with worktree_usa_e_getta(base) as albero:
+        invocazione = invoca_agente("lettore", comando_del_lettore(), prompt, file_esito,
+                                    cwd=albero)
+        dichiarato = invocazione.dichiarato
+        if dichiarato is None:
+            return "senza esito", rilievi_senza_esito(file_esito), [], []
+        rilievi = [Rilievo(**r) for r in dichiarato["rilievi"]]
+        sonde, dalle_sonde, guasti = esegui_le_sonde(albero, dichiarato["sonde"])
+    return "letto", rilievi + dalle_sonde, sonde, guasti
+
+
+def preverifica(pbi: str, lettore: bool = False) -> int:
     """`asdlc-runner PBI-N --preverifica` (PBI-520, decisioni 1, 7 e 8): legge il PBI
     alla base del giro e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`. Esce 1 se c'è
     un rilievo, 0 altrimenti: gli avvisi non contano. Non crea rami né commit e non
-    cambia la fase. Il rapporto non ha `esiti`, e i lettori dei rapporti lo ignorano."""
+    cambia la fase. Il rapporto non ha `esiti`, e i lettori dei rapporti lo ignorano.
+
+    Con `lettore` (`--lettore`, PBI-521) legge anche il Lettore e ne esegue le sonde: i
+    suoi rilievi e quelli delle sonde vanno nella stessa lista, e il rapporto dice in
+    `lettore` come è finita la lettura (`null` senza `--lettore`) e in `sonde` gli esiti.
+    Una lettura `senza esito` esce 1 anche senza rilievi."""
     base, _ = base_del_giro()
     file = trova_pbi(pbi, base)
     if file is None:
@@ -4090,6 +4217,13 @@ def preverifica(pbi: str) -> int:
     testo = git("show", f"{base}:{percorso}")
     rilievi = forma_del_pbi(testo, pbi)
     avvisi = avvisi_della_base(testo, pbi, base)
+    stato_della_lettura: str | None = None
+    sonde: list[dict] = []
+    if lettore:
+        stato_della_lettura, dal_lettore, sonde, guasti = lettura_del_lettore(percorso, base,
+                                                                             avvisi)
+        rilievi += dal_lettore
+        avvisi += guasti + criteri_senza_sonda(testo, sonde)
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
     LOG_DIR.mkdir(exist_ok=True)
     rapporto = LOG_DIR / f"{run}-{pbi}-preverifica.json"
@@ -4098,15 +4232,21 @@ def preverifica(pbi: str) -> int:
         "base": base,
         "sha_pbi": git("rev-parse", f"{base}:{percorso}"),
         "criteri": len(criteri_del_pbi(testo)),
-        "rilievi": [vars(r) for r in rilievi],
+        "rilievi": [voce_del_rilievo(r) for r in rilievi],
         "avvisi": avvisi,
+        "lettore": stato_della_lettura,
+        "sonde": sonde,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+    for s in sonde:
+        print(f"  sonda del criterio {s['criterio']}: {s['file']}::{s['nome']} → {s['esito']}")
     for r in rilievi:
         print(f"  rilievo ({r.domanda}): {r.testo}")
     for a in avvisi:
         print(f"  avviso: {a}")
+    if stato_della_lettura == "senza esito":
+        print("  il Lettore non ha chiamato letto: la lettura è senza esito")
     print(f"{pbi}: {len(rilievi)} rilievi, {len(avvisi)} avvisi. Rapporto: {rapporto}")
-    return 1 if rilievi else 0
+    return 1 if rilievi or stato_della_lettura == "senza esito" else 0
 
 
 def salva_il_traceback(pbi: str) -> Path:
@@ -5464,6 +5604,10 @@ def costruisci_parser() -> argparse.ArgumentParser:
                     help="non esegue il PBI: ne legge il file alla base e scrive in "
                          f"{log_dir} i rilievi di forma e gli avvisi. Esce 1 con un "
                          "rilievo (PBI-520)")
+    ap.add_argument("--lettore", action="store_true",
+                    help="con --preverifica: lancia anche il Lettore, che risponde alle sette "
+                         "domande in un albero usa e getta alla base e scrive le sonde, i "
+                         "test RED dei criteri. Una sonda verde è un rilievo R (PBI-521)")
     ap.add_argument("--guardia-commit", action="store_true",
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
                          "deve stare nella fase corrente")
@@ -5535,7 +5679,7 @@ def smista() -> int:
     if a.preverifica:
         # Prima dell'ambiente, del distacco e del lucchetto, come `--gate-rosso`: non
         # tocca l'albero, e il codice d'uscita resta a chi lo lancia (decisione 7).
-        return max(preverifica(pbi) for pbi in a.pbi)
+        return max(preverifica(pbi, lettore=a.lettore) for pbi in a.pbi)
 
     if a.e2e:
         # Il flag resta, e si ferma qui: cancellarlo darebbe un «unrecognized

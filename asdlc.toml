@@ -102,6 +102,12 @@ attivo = true
 # Il default del runner è `opus`; qui si chiede il modello più capace.
 modello = "fable"
 
+[lettore]
+# Il Lettore di `--preverifica --lettore` (PBI-521): il modello e il tetto della sua
+# chiamata, in minuti. Sono i default del runner, scritti per chi li cerca qui.
+modello = "opus"
+minuti = 30
+
 # I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.
 # Un gate con `solo_se_tocca` si accende solo se il diff del branch tocca uno di
 # quei percorsi; senza il campo è sempre acceso.

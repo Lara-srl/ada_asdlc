@@ -182,6 +182,15 @@ class Solver:
 
 
 @dataclass(frozen=True)
+class Lettore:
+    # Il modello del Lettore, come lo vuole `claude --model` (`PBI-521`): il default è
+    # quello del Solver.
+    modello: str = "opus"
+    # Il tetto della sua chiamata, in minuti, come `[soglie].minuti_*` (PBI-369).
+    minuti: int = 30
+
+
+@dataclass(frozen=True)
 class Rilascio:
     # Il remote git che punta al fork di `asdlc` da cui il Solver apre la PR a monte
     # (`PBI-509`, R5), e il prefisso del tag di rilascio (`ADR-0026`: `vX.Y.Z`).
@@ -212,6 +221,7 @@ class Config:
     prompt: Prompt = Prompt()
     junit: Junit = Junit()
     solver: Solver = Solver()
+    lettore: Lettore = Lettore()
     rilascio: Rilascio = Rilascio()
     tick: Tick = Tick()
 
@@ -397,6 +407,14 @@ def interpreta(dati: dict, file: str) -> Config:
         solver = Solver(giri_massimi=dichiarato.positivo("giri_massimi", default=3),
                         cause=dichiarato.testi("cause", default=()),
                         modello=dichiarato.testo("modello", default="opus"))
+    # Facoltativa: i default valgono per un progetto che non la scrive (`PBI-521`).
+    lettore = Lettore()
+    if "lettore" in sezione.dati:
+        dichiarato = sezione.dentro("lettore")
+        dichiarato.solo("modello", "minuti",
+                        perche="la sezione dice il modello e il tetto in minuti del Lettore")
+        lettore = Lettore(modello=dichiarato.testo("modello", default="opus"),
+                          minuti=dichiarato.positivo("minuti", default=30))
     # Facoltativa: i default valgono per un progetto che non la scrive (`PBI-509`).
     rilascio = Rilascio()
     if "rilascio" in sezione.dati:
@@ -444,6 +462,7 @@ def interpreta(dati: dict, file: str) -> Config:
         prompt=Prompt(aggiunte=_percorso(prompt.testo("aggiunte", default=None))),
         junit=junit,
         solver=solver,
+        lettore=lettore,
         rilascio=rilascio,
         tick=tick,
     )
