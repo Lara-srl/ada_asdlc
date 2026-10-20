@@ -5187,6 +5187,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--senza-critic", action="store_true",
                     help="salta il Review Gate: restano i gate deterministici e la PR. "
                          "Il giro lo dichiara in runs/tempi.csv")
+    ap.add_argument("--riprendi", action="store_true",
+                    help="riprendi il PBI dopo il limite d'uso: il giro riparte dalla punta "
+                         "del ramo dell'ultimo rapporto, non da origin/main (PBI-519)")
     ap.add_argument("--continua-sui-rossi", action="store_true",
                     help="prosegui col PBI successivo anche se questo è rimasto rosso")
     ap.add_argument("--in-primo-piano", action="store_true",
@@ -5342,7 +5345,8 @@ def smista() -> int:
         for pbi in a.pbi:
             try:
                 e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
-                               con_critic=not a.senza_critic, run=run)
+                               con_critic=not a.senza_critic, run=run,
+                               riprendi=a.riprendi)
             except Exception as exc:  # noqa: BLE001 — qui si cattura per non perdere il resto
                 # Un guasto dentro un PBI è un esito di **quel** PBI. Prima usciva
                 # da `main()` col traceback e si portava via la sequenza intera, e

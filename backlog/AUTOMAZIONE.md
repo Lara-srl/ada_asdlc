@@ -254,7 +254,13 @@ cd ~/ada-run && git fetch -q origin && git switch -q --detach origin/main
 
 ~/ada_controller/.venv-asdlc/bin/asdlc-runner PBI-201 --no-pr            # solo il branch locale
 ~/ada_controller/.venv-asdlc/bin/asdlc-runner PBI-201 PBI-203 PBI-207    # una tratta, in sequenza
+~/ada_controller/.venv-asdlc/bin/asdlc-runner PBI-201 --riprendi         # dopo il limite d'uso
 ```
+
+Con `--riprendi` il giro non nasce da `origin/main`: riparte dalla punta di `origin/<ramo>`,
+il ramo dell'esito più recente del PBI nei rapporti di `runs/` (il campo `ramo`), e continua su
+quello stesso ramo — niente `-giro2`, i commit nuovi avanzano di fast-forward. L'esito conta
+`riprese_limite`, il massimo dei rapporti del PBI più uno (`PBI-519`).
 
 Il runner è quello **installato** (sotto, *Il runner installato*): lanciato come
 `python3 tools/asdlc/runner.py` su un PBI esce con «ambiente mancante», perché girerebbe
