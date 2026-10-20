@@ -13,6 +13,7 @@ clone vero con un remoto bare, perché «`git branch` invariato» si misura solo
 
 import dataclasses
 import importlib
+import json
 import tomllib
 from pathlib import Path
 
@@ -40,11 +41,15 @@ def accendi(monkeypatch, lettore: bool) -> None:
             f"[preverifica]\nattiva = true\nlettore = {'true' if lettore else 'false'}\n")))
 
 
-def giro_sul_clone(tmp_path, monkeypatch, testo_del_pbi: str):
+LETTO = {"esito": "letto", "riepilogo": "letto", "rilievi": [], "sonde": []}
+
+
+def giro_sul_clone(tmp_path, monkeypatch, testo_del_pbi: str, esiti: dict | None = None):
     """Un clone con `testo_del_pbi` come PBI-610 alla base, e il giro pronto a partire:
-    il Builder e il Solver finti, che si ricordano di essere stati chiamati, e la
-    pubblicazione e la fase sostituite. Rende il clone e l'elenco dei ruoli invocati,
-    nell'ordine."""
+    gli agenti e il Solver finti, che si ricordano di essere stati chiamati, e la
+    pubblicazione e la fase sostituite. Un agente scrive nel suo file d'esito ciò che
+    `esiti` dà al suo ruolo, come il server dopo una chiamata valida; un ruolo assente
+    non chiama niente. Rende il clone e l'elenco dei ruoli invocati, nell'ordine."""
     clone, _ = clone_con_la_base(tmp_path, {"modulo.py": "def somma(a, b):\n    return a + b\n",
                                             FILE_DEL_PBI: testo_del_pbi})
     monkeypatch.setattr(runner, "REPO", clone)
@@ -58,7 +63,10 @@ def giro_sul_clone(tmp_path, monkeypatch, testo_del_pbi: str):
     def _esegui(cmd, cwd, timeout=7200, **k):
         if cmd[:1] == ["git"]:
             return vero(cmd, cwd, timeout, **k)
-        ruoli.append(ruolo_ed_esito(cmd)[0])
+        ruolo, file_esito = ruolo_ed_esito(cmd)
+        ruoli.append(ruolo)
+        if (esiti or {}).get(ruolo) is not None:
+            file_esito.write_text(json.dumps(esiti[ruolo]), encoding="utf-8")
         return 0, ""
 
     monkeypatch.setattr(runner, "esegui", _esegui)
@@ -108,3 +116,16 @@ def test_con_un_rilievo_il_giro_si_ferma_prima_del_ramo(tmp_path, monkeypatch):
     rapporto = runner.LOG_DIR / "giro-PBI-610-preverifica.json"
     assert rapporto.exists(), list(runner.LOG_DIR.iterdir())
     assert "rilievi: 1" in e.nota and str(rapporto) in e.nota, e.nota
+
+
+# --- Criterio 2: col Lettore acceso, il Lettore gira prima del Builder --------
+
+
+def test_col_lettore_acceso_il_lettore_gira_una_volta_prima_del_builder(tmp_path, monkeypatch):
+    _, ruoli = giro_sul_clone(tmp_path, monkeypatch, pbi_610(), {"lettore": LETTO})
+    accendi(monkeypatch, lettore=True)
+
+    runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run="giro")
+
+    assert ruoli.count("lettore") == 1, ruoli
+    assert ruoli[:2] == ["lettore", "builder"], ruoli
