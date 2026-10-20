@@ -9,6 +9,8 @@ import importlib
 
 import pytest
 
+from test_asdlc_runner import RepoDiProva
+
 # `conftest.py` mette `tools/` sul `sys.path`: il runner è `asdlc.runner`.
 runner = importlib.import_module("asdlc.runner")
 
@@ -41,3 +43,42 @@ class TestInTestOnlyIlFileDiSupportoSiScrive:
         ragione = runner.guardia_di_fase(runner.FASE_TEST_ONLY, percorso)
 
         assert (ragione is not None) is bloccato
+
+
+@pytest.fixture
+def repo_in_test_only(tmp_path, monkeypatch):
+    """Un repository vero con la fase `TEST_ONLY` scritta: il `pre-commit` legge lo
+    stage con `git`, e lo stage non si finge."""
+    radice = tmp_path / "repo"
+    radice.mkdir()
+    repo = RepoDiProva(radice)
+    monkeypatch.setattr(runner, "REPO", radice)
+    runner.percorso_della_fase(radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
+    return repo
+
+
+def metti_in_stage(repo, percorso, contenuto):
+    f = repo.radice / percorso
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(contenuto, encoding="utf-8")
+    repo._git("add", percorso)
+
+
+class TestUnoScheletroVuotoPassaDalPreCommit:
+    """Criterio 6: in `TEST_ONLY` il `pre-commit` lascia passare uno scheletro di
+    produzione fatto di righe bianche e commenti, e chiude il file che ha una riga
+    di codice."""
+
+    @pytest.mark.parametrize("percorso, contenuto, uscita", [
+        (MIGRAZIONE, "#!/bin/sh\n# riconcilia le pratiche\n\n# da scrivere\n", 0),
+        ("db/V9__x.sql", "", 0),
+        ("db/V9__x.sql", "-- ricalcola tutti\n\n-- da scrivere\n", 0),
+        (MIGRAZIONE, "#!/bin/sh\n# riconcilia le pratiche\necho riconcilia\n", 1),
+        ("db/V9__x.sql", "-- ricalcola tutti\nSELECT 1;\n", 1),
+    ], ids=["sh-di-commenti", "sql-vuoto", "sql-di-commenti", "sh-con-codice", "sql-con-codice"])
+    def test_lo_scheletro_passa_e_il_codice_resta_chiuso(
+            self, repo_in_test_only, capsys, percorso, contenuto, uscita):
+        metti_in_stage(repo_in_test_only, percorso, contenuto)
+
+        assert runner.guardia_del_commit() == uscita
+        assert (percorso in capsys.readouterr().out) is bool(uscita)
