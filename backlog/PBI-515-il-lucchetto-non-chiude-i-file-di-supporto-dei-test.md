@@ -93,7 +93,7 @@ Su `main` `src/test/resources/genera.sh` è produzione, e i criteri 1, 4, 6, 8 e
 «non è un test», «un file con del codice resta chiuso») sta come caso nel test parametrico di
 un criterio rosso: come test a sé nascerebbe verde (`rosso-mai-visto`).
 
-- [ ] **Un `.sh` sotto `src/test/` non è produzione, e non è un test.** Per
+- [x] **Un `.sh` sotto `src/test/` non è produzione, e non è un test.** Per
       `app/src/test/resources/genera.sh` e per un `.sql` sotto `src/test/`:
       `not e_file_di_produzione(p) and not e_file_di_test(p)`. Casi dello stesso test
       parametrico: `tools/migrazione/riconcilia.sh`, `db/V9__x.sql` e
@@ -102,13 +102,13 @@ un criterio rosso: come test a sé nascerebbe verde (`rosso-mai-visto`).
       (lettura del 20/10): è vero su `main`.
 - ~~**`src/main/…/test/Foo.java` resta produzione.**~~ **Diventato un caso del criterio 1**
       (lettura del 20/10): è vero su `main`.
-- [ ] **In `TEST_ONLY` la scrittura di quel `.sh` passa dalla guardia.** La guardia di fase
+- [x] **In `TEST_ONLY` la scrittura di quel `.sh` passa dalla guardia.** La guardia di fase
       con fase `TEST_ONLY` non blocca `app/src/test/resources/genera.sh` e blocca
       `tools/migrazione/riconcilia.sh` (pytest).
 - ~~**Quel file non è un test.**~~ **Fuso nel criterio 1** (lettura del 20/10): è vero su `main`,
       e `e_file_di_test()` non cambia (decisione 2), quindi nessun mutante lo farebbe fallire.
 
-- [ ] **Uno scheletro vuoto passa dal `pre-commit` in `TEST_ONLY`.** Con in stage `tools/migrazione/
+- [x] **Uno scheletro vuoto passa dal `pre-commit` in `TEST_ONLY`.** Con in stage `tools/migrazione/
       riconcilia.sh` fatto di una riga `#!/bin/sh` e commenti, e `db/V9__x.sql` vuoto o di
       soli commenti `--`, `guardia_del_commit()` torna 0. Casi dello stesso test parametrico:
       lo stesso `riconcilia.sh` con una riga di codice in stage fa tornare 1 e nomina il file, e
@@ -116,11 +116,11 @@ un criterio rosso: come test a sé nascerebbe verde (`rosso-mai-visto`).
       con `--no-verify`).
 - ~~**Un file con del codice resta chiuso.**~~ **Diventato un caso del criterio 6** (lettura del
       20/10): è vero su `main`.
-- [ ] **L'hook lascia passare un `Write` di scheletro e blocca un `Edit`.** Con la fase
+- [x] **L'hook lascia passare un `Write` di scheletro e blocca un `Edit`.** Con la fase
       `TEST_ONLY`, `stampa_la_guardia_di_fase()` esce 0 per un `Write` con `content` fatto di
       commenti, ed esce 2 per un `Write` con codice e per ogni `Edit` su un file di produzione
       (pytest, stdin finto).
-- [ ] **Il commento dipende dall'estensione.** Un `.py` fatto di `# x` passa, un `.sql` fatto di
+- [x] **Il commento dipende dall'estensione.** Un `.py` fatto di `# x` passa, un `.sql` fatto di
       `# x` resta chiuso: per SQL `#` non è un commento (pytest). ~~Un `.rb` con `# x` no~~: `.rb`
       non è in `ESTENSIONI_CODICE`, non è mai produzione e il caso passava sempre.
 
