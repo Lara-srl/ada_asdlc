@@ -4185,13 +4185,14 @@ def rilievi_senza_esito(file_esito: Path) -> list[Rilievo]:
                     lettore="senza esito") for v in voci if v.get("strumento") == "rilievo"]
 
 
-def lettura_del_lettore(percorso: str, base: str,
-                        avvisi: list[str]) -> tuple[str, list[Rilievo], list[dict], list[str]]:
+def lettura_del_lettore(percorso: str, base: str, avvisi: list[str]
+                        ) -> tuple[str, list[Rilievo], list[dict], list[str], dict]:
     """Il Lettore sul PBI `percorso` (`PBI-521`, `ADR-0031` decisioni 1-3): lo lancia in un
     albero usa e getta alla `base`, che è il suo `cwd` e si smonta comunque vada, e dopo
     `letto` ne esegue le sonde lì dentro. Torna lo stato della lettura, i rilievi del
-    Lettore e delle sonde, le sonde col loro esito e gli avvisi dei gate guasti. Senza `letto` la lettura è
-    `senza esito`: i rilievi accumulati entrano lo stesso, le sonde non si eseguono."""
+    Lettore e delle sonde, le sonde col loro esito, gli avvisi dei gate guasti e la voce
+    dell'invocazione, `Invocazione.registro`. Senza `letto` la lettura è `senza esito`: i
+    rilievi accumulati entrano lo stesso, le sonde non si eseguono."""
     prompt, file_esito = file_dell_invocazione("lettore")
     prompt.write_text(prompt_del_pacchetto("lettore").format(
         pbi_path=percorso, avvisi="\n".join(f"- {a}" for a in avvisi) or "- nessuno"),
@@ -4201,18 +4202,19 @@ def lettura_del_lettore(percorso: str, base: str,
                                     cwd=albero)
         dichiarato = invocazione.dichiarato
         if dichiarato is None:
-            return "senza esito", rilievi_senza_esito(file_esito), [], []
+            return ("senza esito", rilievi_senza_esito(file_esito), [], [],
+                    invocazione.registro)
         rilievi = [Rilievo(**r) for r in dichiarato["rilievi"]]
         sonde, dalle_sonde, guasti = esegui_le_sonde(albero, dichiarato["sonde"])
-    return "letto", rilievi + dalle_sonde, sonde, guasti
+    return "letto", rilievi + dalle_sonde, sonde, guasti, invocazione.registro
 
 
 def scrivi_la_preverifica(pbi: str, base: str, percorso: str, run: str,
-                          lettore: bool) -> tuple[Path, dict, list[Rilievo]]:
+                          lettore: bool) -> tuple[Path, dict, list[Rilievo], dict | None]:
     """Legge il PBI `percorso` alla `base` e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`
-    (PBI-520, decisioni 1, 7 e 8): rende il rapporto, il suo contenuto e i rilievi. La
-    usano `--preverifica` e il giro (PBI-522). Il rapporto non ha `esiti`, e i lettori
-    dei rapporti lo ignorano.
+    (PBI-520, decisioni 1, 7 e 8): rende il rapporto, il suo contenuto, i rilievi e la
+    voce dell'invocazione del Lettore, `None` senza Lettore. La usano `--preverifica` e il
+    giro (PBI-522). Il rapporto non ha `esiti`, e i lettori dei rapporti lo ignorano.
 
     Con `lettore` (PBI-521) legge anche il Lettore e ne esegue le sonde: i suoi rilievi e
     quelli delle sonde vanno nella stessa lista, e il rapporto dice in `lettore` come è
@@ -4222,9 +4224,10 @@ def scrivi_la_preverifica(pbi: str, base: str, percorso: str, run: str,
     avvisi = avvisi_della_base(testo, pbi, base)
     stato_della_lettura: str | None = None
     sonde: list[dict] = []
+    invocazione: dict | None = None
     if lettore:
-        stato_della_lettura, dal_lettore, sonde, guasti = lettura_del_lettore(percorso, base,
-                                                                             avvisi)
+        stato_della_lettura, dal_lettore, sonde, guasti, invocazione = lettura_del_lettore(
+            percorso, base, avvisi)
         rilievi += dal_lettore
         avvisi += guasti + criteri_senza_sonda(testo, sonde)
     LOG_DIR.mkdir(exist_ok=True)
@@ -4240,7 +4243,7 @@ def scrivi_la_preverifica(pbi: str, base: str, percorso: str, run: str,
         "sonde": sonde,
     }
     rapporto.write_text(json.dumps(contenuto, ensure_ascii=False, indent=2), encoding="utf-8")
-    return rapporto, contenuto, rilievi
+    return rapporto, contenuto, rilievi, invocazione
 
 
 def preverifica(pbi: str, lettore: bool = False) -> int:
@@ -4257,7 +4260,7 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
         print(f"{pbi}: alla base {base[:10]} non c'è il file del PBI.")
         return 2
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
-    rapporto, contenuto, rilievi = scrivi_la_preverifica(
+    rapporto, contenuto, rilievi, _ = scrivi_la_preverifica(
         pbi, base, file.relative_to(REPO).as_posix(), run, lettore)
     sonde, avvisi = contenuto["sonde"], contenuto["avvisi"]
     stato_della_lettura = contenuto["lettore"]
@@ -4349,12 +4352,21 @@ def esegui_pbi(
     # La pre-verifica (PBI-522, `ADR-0031` decisione 4): prima dell'inventario e del
     # ramo, sul PBI alla base, col Lettore se `[preverifica].lettore` lo chiede. Con un
     # rilievo il giro chiude qui, senza ramo, commit, PR né Solver: il rimedio è
-    # correggere il PBI. Una ripresa non la rifà: il PBI è già passato da qui, e il suo
-    # ramo c'è già.
+    # correggere il PBI. Un Lettore senza `letto` — un tetto, il limite d'uso — chiude
+    # `senza esito` anche coi rilievi accumulati: non è un PBI da correggere, e col
+    # limite d'uso il tick lo riprende dopo il reset, come il Builder (PBI-519). Una
+    # ripresa non la rifà: il PBI è già passato da qui, e il suo ramo c'è già.
     if CFG.preverifica.attiva and not riprendi:
-        rapporto, letto, rilievi = scrivi_la_preverifica(
+        rapporto, letto, rilievi, lettura = scrivi_la_preverifica(
             pbi, base, pbi_path.relative_to(REPO).as_posix(), run,
             lettore=CFG.preverifica.lettore)
+        if letto["lettore"] == "senza esito":
+            return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
+                                invocazioni=[lettura],
+                                riprendi_dopo=riprendi_dopo_il_limite(lettura)),
+                          "lettore-senza-esito",
+                          f"codice d'uscita {lettura['codice']} · stderr {lettura['stderr']}"
+                          f" · nel rapporto {rapporto}")
         if rilievi:
             return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
                                 rilievi_preverifica=len(rilievi)),

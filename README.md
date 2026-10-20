@@ -162,7 +162,11 @@ ramo, sul PBI alla base. Scrive lo stesso rapporto di `--preverifica`,
 prima del Builder. Con almeno un rilievo, del codice, del Lettore o delle sue sonde, il giro
 chiude `fermato` col motivo `preverifica`, e la nota dice quanti rilievi e dove sta il
 rapporto: non nascono ramo, commit né PR, e il Solver non parte. L'esito porta `sha_pbi`, lo sha del blob del file del PBI letto,
-e `rilievi_preverifica`. Senza rilievi il giro va avanti come prima. `--riprendi` non la
+e `rilievi_preverifica`. Un Lettore che non chiama `letto`, per un tetto scaduto o per il
+limite d'uso, chiude invece `senza esito` col motivo `lettore-senza-esito`, anche coi rilievi
+accumulati: non è un PBI da correggere, il Solver non parte e, col limite d'uso e l'ora del
+reset leggibile, l'esito porta `riprendi_dopo` come il Builder (`PBI-519`). Senza rilievi il
+giro va avanti come prima. `--riprendi` non la
 rifà. Senza la sezione la pre-verifica è spenta.
 
 ```toml
