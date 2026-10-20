@@ -256,3 +256,13 @@ def test_un_criterio_senza_sonda_e_un_avviso_e_non_un_rilievo(tmp_path, monkeypa
     assert "criterio 3 senza sonda" in rapporto["avvisi"]
     assert rapporto["rilievi"] == []
     assert codice == 0
+
+
+def test_un_criterio_dichiarato_guardia_non_ha_l_avviso_senza_sonda(tmp_path, monkeypatch):
+    """Decisione 5: è guardia un criterio il cui testo intero, righe rientrate comprese,
+    contiene «guardia» o «nato verde», senza distinguere maiuscole e minuscole. Il
+    secondo criterio lo dice su una riga rientrata, con la maiuscola."""
+    _, rapporto, _, _, _ = preverifica_col_lettore(
+        tmp_path, monkeypatch, TRE_CRITERI, {"test_sonde.py": SONDE}, UNA_SONDA)
+
+    assert [a for a in rapporto["avvisi"] if "senza sonda" in a] == ["criterio 3 senza sonda"]
