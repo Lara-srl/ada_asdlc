@@ -9288,12 +9288,41 @@ def _head_non_su_origin(mp):
     return {"con_pr": True}
 
 
+def accendi_la_preverifica(mp, lettore: bool) -> None:
+    """`[preverifica]` accesa per questo test soltanto (PBI-522, decisione 5): `Config`
+    è `frozen`, quindi si sostituisce la configurazione e non il campo."""
+    mp.setattr(runner, "CFG", dataclasses.replace(
+        runner.CFG, preverifica=runner.asdlc_config.Preverifica(attiva=True, lettore=lettore)))
+
+
+def _preverifica(mp):
+    # Il `git show` finto rende "": un PBI senza Verifica né Scope, cioè due rilievi di forma.
+    accendi_la_preverifica(mp, lettore=False)
+    return {}
+
+
+PBI_102_IN_FORMA = (
+    "# PBI-102: una prova\n\n**Scope**\n\n"
+    "- `backlog/PBI-102-soglia-di-revisione-del-runner.md` — questo file.\n\n"
+    "## Verifica\n\n- [ ] **Un criterio.** (pytest)\n"
+)
+
+
+def _lettore_senza_esito(mp):
+    # Il PBI è in forma, e il Lettore dell'agente finto non chiama niente.
+    accendi_la_preverifica(mp, lettore=True)
+    git_delle_uscite(mp, {("show",): PBI_102_IN_FORMA})
+    return {}
+
+
 # Una via d'uscita per motivo: lo stato che la tabella deve dargli, e come la
 # si percorre davvero.
 USCITE_DEL_GIRO = {
     "pbi-inesistente": ("saltato", _pbi_inesistente),
     "dry-run": ("saltato", _dry_run),
     "albero-sporco-all-ingresso": ("fermato", _albero_sporco_all_ingresso),
+    "preverifica": ("fermato", _preverifica),
+    "lettore-senza-esito": ("senza esito", _lettore_senza_esito),
     "origin-muto": ("fermato", _origin_muto),
     "builder-senza-esito": ("senza esito", _builder_senza_esito),
     "domanda-del-builder": ("fermato", _domanda_del_builder),
