@@ -66,3 +66,34 @@ def test_il_server_accetta_e_accumula_gli_strumenti_del_lettore(tmp_path, monkey
     assert json.loads(file.read_text(encoding="utf-8")) == {
         "esito": "letto", "riepilogo": "due rilievi e una sonda",
         "rilievi": [RILIEVO_R, RILIEVO_N], "sonde": [SONDA]}
+
+
+def test_il_server_rifiuta_le_chiamate_del_lettore_che_non_reggono_e_quelle_dopo_letto(
+        tmp_path, monkeypatch):
+    """Decisione 1: la domanda è una fra `R F T A E D N`, l'evidenza e il file della
+    sonda sono file dell'albero (la regola di `_risolvi()`), il criterio della sonda è
+    almeno 1; dopo `letto` la lettura è chiusa. Un rifiuto non scrive niente."""
+    file = albero_del_lettore(tmp_path, monkeypatch)
+    rifiutate = [
+        ("rilievo", {**RILIEVO_R, "domanda": "X"}),
+        ("rilievo", {**RILIEVO_R, "evidenza": "non-c-e.py:3"}),
+        ("rilievo", {**RILIEVO_R, "evidenza": str(tmp_path / "modulo.py")}),
+        ("rilievo", {**RILIEVO_R, "criterio": -1}),
+        ("rilievo", {**RILIEVO_R, "testo": "  "}),
+        ("sonda", {**SONDA, "criterio": 0}),
+        ("sonda", {**SONDA, "file": "test_che_non_c_e.py"}),
+        ("sonda", {**SONDA, "nome": ""}),
+    ]
+    for nome, argomenti in rifiutate:
+        assert esito.chiama(nome, argomenti, "lettore", str(file))["isError"], argomenti
+    assert righe_della_lettura(file) == []
+
+    assert not esito.chiama("rilievo", RILIEVO_R, "lettore", str(file))["isError"]
+    assert not esito.chiama("letto", {"riepilogo": "un rilievo"}, "lettore", str(file))["isError"]
+    chiuso = file.read_text(encoding="utf-8")
+
+    for nome, argomenti in (("rilievo", RILIEVO_N), ("sonda", SONDA),
+                            ("letto", {"riepilogo": "un altro"})):
+        assert esito.chiama(nome, argomenti, "lettore", str(file))["isError"], nome
+    assert file.read_text(encoding="utf-8") == chiuso
+    assert righe_della_lettura(file) == [{"strumento": "rilievo", **RILIEVO_R}]
