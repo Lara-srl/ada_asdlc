@@ -170,3 +170,17 @@ class TestSenzaOraLeggibileNonSiRiprende:
         assert "limite d'uso dell'account, ora del reset non leggibile" in voce["nota"], (
             f"la nota «{voce['nota']}» non dice che l'ora del reset non si legge"
         )
+
+
+class TestSulLimiteIlSolverNonParte:
+    """Criterio 9, decisione 4: con `riprendi_dopo` nel rapporto il giro chiude
+    `senza esito` come prima, ma il Solver non parte. Non c'è niente da
+    decidere: il tick aspetta il reset e riprende."""
+
+    def test_il_solver_non_parte(self, monkeypatch, tmp_path):
+        agente = agente_che_scrive_i_flussi({}, stderr={"builder": LIMITE})
+        voce = giro_col_limite(monkeypatch, tmp_path, agente)
+
+        assert voce["solver"] == [], "sul limite d'uso con l'ora leggibile il Solver non parte"
+        assert voce["giri_solver"] == 0, "un Solver che non parte non conta un giro"
+        assert [ruolo_ed_esito(c)[0] for c in agente.comandi] == ["builder"]
