@@ -328,3 +328,25 @@ def test_il_lettore_usa_il_suo_tetto_e_cerca_la_traccia_nelle_sessioni_del_suo_a
     assert timeout == 7 * 60
     assert cmd[cmd.index("--model") + 1] == "sonnet"
     assert invocazione.registro["traccia"] is not None, invocazione.registro.get("traccia_nota")
+
+
+# --- Decisione 4: le sonde che non si eseguono --------------------------------
+
+
+def test_una_sonda_che_non_e_un_test_o_non_si_trova_nel_file_e_un_rilievo_r(tmp_path, monkeypatch):
+    """Decisione 4: un file che `linguaggio_del_test()` non riconosce, e un nome che nel
+    file non c'è (l'orfano di `comandi_dei_test`, che torna al criterio dal file della
+    sonda), danno tutti e due un rilievo `R` con `ESITI_MANCATI["nessuno"]`."""
+    sonde = [{"strumento": "sonda", "criterio": 1, "file": "note.txt", "nome": "test_nota"},
+             {"strumento": "sonda", "criterio": 2, "file": "test_sonde.py",
+              "nome": "test_che_non_c_e"}]
+
+    codice, rapporto, _, _, _ = preverifica_col_lettore(
+        tmp_path, monkeypatch, DUE_CRITERI, {"note.txt": "una nota\n", "test_sonde.py": SONDE},
+        sonde)
+
+    assert [(s["criterio"], s["esito"]) for s in rapporto["sonde"]] == [(1, "nessuno"),
+                                                                       (2, "nessuno")]
+    assert [(r["domanda"], r["criterio"], r["testo"]) for r in rapporto["rilievi"]] == [
+        ("R", 1, runner.ESITI_MANCATI["nessuno"]), ("R", 2, runner.ESITI_MANCATI["nessuno"])]
+    assert codice == 1
