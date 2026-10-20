@@ -89,7 +89,7 @@ Su `main` il metodo con l'annotazione nel contesto non si vede, quindi i criteri
 sono un **rosso atteso**, in un commit RED solo (decisione 6). Il caso «metodo non toccato» è
 vero anche su `main` e sta nel test parametrico del criterio 3.
 
-- [ ] **Un metodo rinominato sotto un'annotazione di contesto nasce.** Col diff vero di
+- [x] **Un metodo rinominato sotto un'annotazione di contesto nasce.** Col diff vero di
       `d11525c` come fixture, `nomi_dei_test_junit(diff, "TriggerGuastiIT")` restituisce
       aggiunti, in quest'ordine, `TriggerGuastiIT#unSitoConSoliStatiSospesiNonEGuastoMaESospeso`,
       `TriggerGuastiIT#unSitoApertoChePerdeIlSuoUnicoGuastoDiventaSospesoEChiudeLEpisodio`,
@@ -98,9 +98,9 @@ vero anche su `main` e sta nel test parametrico del criterio 3.
       `TriggerGuastiIT#unSitoApertoChePerdeIlSuoUnicoGuastoPianificabileDiventaSospeso`,
       `TriggerGuastiIT#unSitoSospesoCuiSiAggiungeUnGuastoPianificabileDiventaApertoNellStessoEpisodio`
       (pytest).
-- [ ] **`test_nuovi_del_commit` vede quel commit.** In un repository temporaneo con il file
+- [x] **`test_nuovi_del_commit` vede quel commit.** In un repository temporaneo con il file
       prima e dopo, restituisce i test nuovi invece di `[]` (pytest).
-- [ ] **Annotazione sul `+`, annotazione sul contesto e annotazione sulla stessa riga del
+- [x] **Annotazione sul `+`, annotazione sul contesto e annotazione sulla stessa riga del
       metodo danno lo stesso nome; un metodo non toccato non nasce.** Tre forme dello stesso
       metodo (`@Test`; `@ParameterizedTest` con `@ValueSource` in contesto; annotazione e metodo
       sulla stessa riga), più il caso id `non-toccato`: un'annotazione in contesto seguita da un
@@ -108,7 +108,7 @@ vero anche su `main` e sta nel test parametrico del criterio 3.
 - ~~**Un metodo non toccato non nasce.**~~ **Diventato il caso `non-toccato` del criterio 3**
       (lettura del 20/10): su `main` `nomi_dei_test_junit` restituisce già `([], set())`, quindi
       come test a sé nascerebbe verde e senza mutante da uccidere.
-- [ ] **`--chiedi-impl` apre `IMPL` su quel RED.** Con il rapporto finto rosso, `chiedi_impl()`
+- [x] **`--chiedi-impl` apre `IMPL` su quel RED.** Con il rapporto finto rosso, `chiedi_impl()`
       torna 0 e scrive `IMPL` (pytest).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde e i test di `PBI-505`
