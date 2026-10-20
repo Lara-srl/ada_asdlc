@@ -125,3 +125,13 @@ class TestIlSenzaEsitoDelLimitePortaRiprendiDopo:
         assert datetime.fromisoformat(voce["riprendi_dopo"]) > datetime.now(), (
             "l'ora di ripresa è la prossima occorrenza del reset, nel futuro"
         )
+
+    def test_la_frase_solo_nello_stdout_non_porta_riprendi_dopo(self, monkeypatch, tmp_path):
+        """Lo stdout è testo del modello (`ADR-0027`): un agente che cita la frase
+        senza chiamare lo strumento non fa ripartire il giro."""
+        voce = giro_col_limite(monkeypatch, tmp_path,
+                               agente_che_scrive_i_flussi({}, stdout={"builder": LIMITE}))
+
+        assert not voce.get("riprendi_dopo"), (
+            "la frase del limite si cerca solo nello stderr della CLI"
+        )
