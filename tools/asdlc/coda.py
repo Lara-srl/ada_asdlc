@@ -519,12 +519,21 @@ def ultimo_esito(worktree: Path, pbi: str) -> dict | None:
     return max(trovati, key=lambda r: r[0])[1] if trovati else None
 
 
+# Quante riprese dopo il limite d'uso il tick fa per un PBI: il runner le conta in
+# `riprese_limite`, e alla terza il PBI torna ad aspettare una persona (PBI-519,
+# decisione 8). Il giro non sa del tetto: lo sa il tick, che è chi rilancia.
+RIPRESE_MASSIME = 3
+
+
 def riprendi_dopo(worktree: Path, pbi: str) -> datetime | None:
-    """`riprendi_dopo` dell'ultimo esito di `pbi`, o `None` se non c'è o non si
-    legge: senza, il PBI attende una persona come prima."""
+    """`riprendi_dopo` dell'ultimo esito di `pbi`, o `None` se non c'è, non si
+    legge o le riprese hanno raggiunto `RIPRESE_MASSIME`: senza, il PBI attende
+    una persona come prima."""
     esito = ultimo_esito(worktree, pbi)
     try:
-        return datetime.fromisoformat(esito["riprendi_dopo"]) if esito else None
+        if esito is None or esito.get("riprese_limite", 0) >= RIPRESE_MASSIME:
+            return None
+        return datetime.fromisoformat(esito["riprendi_dopo"])
     except (KeyError, TypeError, ValueError):
         return None
 

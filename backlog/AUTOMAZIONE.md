@@ -481,7 +481,9 @@ ripartenza sono una ricetta, in `README.md`, che si installa a mano come il cron
 `runs/*.json` del worktree del runner col `run` più recente — porta `riprendi_dopo`, prima di
 quell'ora il tick scrive `attende il reset del limite d'uso: PBI-N riprende dopo HH:MM` e non
 lancia: non è un blocco (`ADR-0008`). Dopo quell'ora lancia `asdlc-runner PBI-N --riprendi`, e
-la riga è `lancia: PBI-N --riprendi, dopo il reset del limite d'uso`.
+la riga è `lancia: PBI-N --riprendi, dopo il reset del limite d'uso`. Le riprese hanno un
+tetto di tre per PBI: il runner le conta in `riprese_limite`, e con `riprese_limite` ≥ 3 il
+tick non riprende e scrive `attende: …` come per ogni giro fermato.
 
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:
