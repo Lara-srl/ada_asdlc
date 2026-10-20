@@ -127,3 +127,20 @@ class TestIlCommentoDipendeDallEstensione:
         ragione = runner.guardia_di_fase(runner.FASE_TEST_ONLY, percorso, contenuto)
 
         assert (ragione is None) is passa
+
+
+class TestUnFileBinarioInStageNonBloccaIlCommit:
+    """Rilievo 1 del Critic: il `pre-commit` legge il contenuto in stage di ogni
+    file, e un blob che non è UTF-8 — la fixture `.gpkg` che `genera.sh` produce —
+    non deve piantarlo. Un guasto nel leggere il contenuto non blocca (decisione 6,
+    `ADR-0008`)."""
+
+    @pytest.mark.parametrize("fase", [runner.FASE_TEST_ONLY, runner.FASE_IMPL])
+    def test_una_fixture_binaria_in_stage_passa(self, repo_in_test_only, fase):
+        runner.percorso_della_fase(repo_in_test_only.radice).write_text(f"{fase}\n")
+        fixture = repo_in_test_only.radice / "app/src/test/resources/prova.gpkg"
+        fixture.parent.mkdir(parents=True)
+        fixture.write_bytes(b"SQLite format 3\x00\xff\xfe\x80\x81")
+        repo_in_test_only._git("add", "app/src/test/resources/prova.gpkg")
+
+        assert runner.guardia_del_commit() == 0
