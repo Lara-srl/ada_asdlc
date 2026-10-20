@@ -35,6 +35,15 @@ quelli da lasciare e perché: il runner non riprende niente (fra un giro e l'alt
 - `specs/[dominio]/spec.md` — lo stato che questo PBI cambia.
 - `decisions/ADR-XXXX-…` — le decisioni che vincolano il lavoro.
 
+**Prima di accodare, rileggi:**
+- **R** — ogni criterio può nascere rosso su `main`?
+- **F** — il GREEN è scrivibile nella fase?
+- **T** — un test esistente contraddice una decisione?
+- **A** — qualcosa sporca l'albero o scrive fuori?
+- **E** — un RED che non termina, flag doppi, nomi in conflitto?
+- **D** — una decisione è lasciata al Builder, o manca una dipendenza?
+- **N** — i nomi e i fatti citati sono veri nel codice?
+
 ## Verifica
 - [ ] **Un comportamento osservabile, in grassetto.** Come lo si verifica, e perché fallisce
       sulla base prima del lavoro. Criteri che la stessa modifica minima rende verdi sono un
