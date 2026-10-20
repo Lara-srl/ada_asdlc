@@ -4108,10 +4108,20 @@ def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
 def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[Rilievo]]:
     """Esegue le sonde del Lettore nell'albero alla base, con gli strumenti di
     `--chiedi-impl` (`PBI-521`, decisione 4): ogni sonda col suo esito, e un rilievo `R`
-    col testo di `ESITI_MANCATI` per ogni sonda che non è rossa."""
+    col testo di `ESITI_MANCATI` per ogni sonda che non è rossa.
+
+    Una sonda su un file che non è un test non si esegue, e il suo esito è `nessuno`: il
+    server non lo può sapere, perché non importa il runner. Un orfano di
+    `comandi_dei_test()`, il test che non si isola, torna alla sua sonda dal file: la sua
+    etichetta comincia col percorso da cui il test gira (per JUnit è il nome)."""
     nuovi = [TestNuovo(s["file"], s["nome"], linguaggio_del_test(s["file"])) for s in sonde]
-    comandi, _ = comandi_dei_test(albero, nuovi)
-    esiti: dict[TestNuovo, str] = {}
+    esiti: dict[TestNuovo, str] = {t: "nessuno" for t in nuovi if t.linguaggio is None}
+    eseguibili = [t for t in nuovi if t.linguaggio is not None]
+    comandi, orfani = comandi_dei_test(albero, eseguibili)
+    for etichetta in orfani:
+        for test in eseguibili:
+            if etichetta.startswith(f"{dove_gira(test.file)[1]} ") or etichetta == test.nome:
+                esiti[test] = "nessuno"
     for comando in comandi:
         letti, _ = esiti_del_comando(comando)
         for chiave, esito in letti.items():
