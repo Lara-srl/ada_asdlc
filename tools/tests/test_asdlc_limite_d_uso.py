@@ -376,3 +376,49 @@ class TestIlTickAspettaIlReset:
         assert coda.racconta(decisione) == (
             "attende il reset del limite d'uso: PBI-519 riprende dopo 19:55"
         )
+
+
+class TestIlTickRiprendeDopoIlReset:
+    """Criterio 5, decisione 5: passata l'ora di `riprendi_dopo` il tick lancia
+    `asdlc-runner PBI-N --riprendi`, senza una persona."""
+
+    def test_dopo_l_ora_decide_di_riprendere(self, monkeypatch, tmp_path):
+        repo, albero = tick_col_rapporto(monkeypatch, tmp_path, "PBI-519",
+                                         datetime(2026, 10, 16, 20, 0),
+                                         riprendi_dopo="2026-10-16T19:55")
+
+        assert coda.decidi(repo, albero) == coda.Lancia("PBI-519", riprendi=True)
+
+    def test_il_lancio_di_ripresa_passa_riprendi_al_runner(self, monkeypatch, tmp_path):
+        albero = tmp_path / "albero"
+        albero.mkdir()
+        visti: list[list[str]] = []
+        monkeypatch.setattr(coda, "preflight", lambda: [])
+        monkeypatch.setattr(coda, "runner_installato", lambda: Path("/venv/bin/asdlc-runner"))
+        monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (visti.append(cmd), (0, ""))[1])
+        monkeypatch.setattr(coda, "ATTESA_DEL_DISTACCO", 0)
+        monkeypatch.setattr(coda, "giro_in_corso", lambda worktree: True)
+
+        coda.lancia("PBI-519", albero, riprendi=True)
+
+        assert visti == [["/venv/bin/asdlc-runner", "PBI-519", "--riprendi"]]
+
+    def test_il_passaggio_del_tick_lancia_la_ripresa(self, monkeypatch, tmp_path, capsys):
+        repo, albero = tmp_path / "repo", tmp_path / "albero"
+        repo.mkdir()
+        albero.mkdir()
+        lanciati: list[tuple] = []
+        for nome, finto in (("batti", lambda r: None), ("pin", lambda r: []),
+                            ("fermo_in_pausa", lambda r: False), ("allinea", lambda r: None),
+                            ("rilascia", lambda r: []), ("reinstalla", lambda r, w: None),
+                            ("mancanze_dell_ambiente", lambda w: []),
+                            ("decidi", lambda r, w: coda.Lancia("PBI-519", riprendi=True)),
+                            ("lancia", lambda pbi, w, **k: lanciati.append((pbi, k)))):
+            monkeypatch.setattr(coda, nome, finto)
+
+        coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+        assert lanciati == [("PBI-519", {"riprendi": True})]
+        assert "PBI-519 --riprendi" in capsys.readouterr().out, (
+            "la riga del log dice che il lancio è una ripresa"
+        )
