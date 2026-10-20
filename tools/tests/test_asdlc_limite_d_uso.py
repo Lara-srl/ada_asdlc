@@ -273,10 +273,13 @@ class TestRiprendiParteDallaPuntaDelRamo:
         assert esito.commit == 3, "il giro conta anche i due commit di prima"
         assert esito.riprese_limite == 1, "la prima ripresa per limite d'uso conta 1"
 
-    def test_la_riga_di_comando_passa_riprendi_al_giro(self, monkeypatch, tmp_path):
+    def test_asdlc_runner_con_riprendi_chiama_il_giro_di_ripresa(self, monkeypatch, tmp_path):
         monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
         monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
         monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        # La verifica dell'ambiente all'avvio guarda il venv e il `PATH` veri: qui si
+        # sostituisce, come fa la fixture `ambiente_presente` di `test_asdlc_runner.py`.
+        monkeypatch.setattr(runner, "mancanze_dell_ambiente", lambda: [])
         chiamate: list[dict] = []
 
         def esegui_pbi_finto(pbi, *a, **k):
