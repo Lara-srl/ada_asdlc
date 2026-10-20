@@ -48,7 +48,8 @@ controlli di processo verificabili stanno meglio nel codice.
    `rilascia: patch|minor`** e la CI di `main` è verde. Il progetto che aspetta lo dice nel
    PBI fermo (`attende:`); il suo tick, quando il tag c'è, apre la PR del nuovo pin e, a
    merge verificato con `gh pr view`, toglie la pausa. I merge restano sempre di Francesco.
-4. **Niente quarto agente.** La conformità del Solver alle direttive si controlla con una
+4. ~~**Niente quarto agente.**~~ (ristretta da `ADR-0031`, 20/10: il Lettore della
+   pre-verifica è un quarto agente; la decisione resta per ciò che dice del Solver.) La conformità del Solver alle direttive si controlla con una
    guardia di codice (le righe «cosa conta come prova» della spec). Il giudizio sulla diagnosi
    resta al Critic, che rilegge anche l'output del Solver.
 5. **Il tick è sempre attivo per quanto può esserlo un cron su un PC.** Un timer che recupera

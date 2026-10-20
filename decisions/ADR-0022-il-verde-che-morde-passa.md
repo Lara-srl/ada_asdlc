@@ -152,7 +152,9 @@ opposti, visti tutti e due sullo stesso giro:
 
 Il controllo che li distingue è uno solo, ed è **sulla base**: il test, caso per caso, gira
 contro `main`. Rosso su `main` è un criterio; verde su `main` è una guardia, e si dichiara.
-Oggi quel controllo lo fa chi scrive il PBI, prima di accodarlo (`backlog/README.md`, formato).
+~~Oggi quel controllo lo fa chi scrive il PBI, prima di accodarlo (`backlog/README.md`, formato).~~
+Ristretta da `ADR-0031` (20/10): il controllo lo fa anche la pre-verifica, con la sonda sulla
+base. Chi scrive il PBI continua a farlo, ma non è più l'unico. *Si rivede se* la sonda non trova i criteri già veri che una persona trova.
 
 **«Nato verde e non morde» è un esito inconclusivo.** Dice che nessun mutante provato ha
 fatto fallire il test, e da solo non dice di chi è il difetto. Le cause possibili sono tre:
