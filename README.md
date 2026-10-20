@@ -237,7 +237,7 @@ solo un backend Python. Quello che il runner **riconosce davvero** è questo:
 | Test per il gate del rosso | `pytest` (Python) e `vitest` (JS/TS) |
 | Test per il lucchetto di fase | `pytest`, `vitest` e JUnit (Java, Maven): il comando che lancia JUnit lo dichiara il progetto in `[junit]` (vedi sotto) |
 | File di test | cartelle `tests/` e `__tests__/`, `test_*.py`, `*_test.py`, `*.test.*` e `*.spec.*` con estensione `ts` `tsx` `js` `jsx`, e la sequenza `src/test/` di Maven (`.java`) |
-| File di produzione | estensioni `.py` `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.sql` `.sh` `.java` |
+| File di produzione | estensioni `.py` `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.sql` `.sh` `.java`, fuori da `src/test/`: lì sotto un file che non è un test è supporto dei test, e si scrive in `TEST_ONLY` (`PBI-515`) |
 | E2E | fuori dal runner: stanno nella CI (`ADR-0009`, l'esempio è Playwright) |
 
 Il gate del rosso e il lucchetto di fase (`TEST_ONLY` / `IMPL`) usano proprio queste regole.

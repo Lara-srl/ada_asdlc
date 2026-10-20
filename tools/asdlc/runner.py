@@ -1441,14 +1441,28 @@ def e_file_di_test(percorso: str) -> bool:
         return True
     # JUnit: la sequenza `src/test/` di Maven, e non una cartella `test` qualunque
     # (PBI-505, decisione 1): `src/main/java/.../test/Foo.java` è produzione. Solo
-    # i `.java`: un `src/test/setup.ts` o `helpers.py` resta com'era (non regressione).
-    if nome.endswith(".java") and any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1)):
+    # i `.java` sono test: un `src/test/setup.ts` o `helpers.py` non nasce come test
+    # (non regressione), e non è nemmeno produzione (PBI-515).
+    if nome.endswith(".java") and sotto_src_test(percorso):
         return True
     return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
 
+def sotto_src_test(percorso: str) -> bool:
+    """Il percorso sta sotto la sequenza `src/test/` di Maven (PBI-505, decisione 1)."""
+    parti = Path(percorso).parts
+    return any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1))
+
+
 def e_file_di_produzione(percorso: str) -> bool:
-    """Codice che non è un test. È la metà del criterio che ferma PBI-328."""
+    """Codice che non è un test. È la metà del criterio che ferma PBI-328.
+
+    Sotto `src/test/` nessun file è produzione, qualunque estensione (PBI-515,
+    decisione 1): uno script che rigenera le fixture è supporto dei test, e il
+    lucchetto lo lascia scrivere in `TEST_ONLY` come scrive i test.
+    """
+    if sotto_src_test(percorso):
+        return False
     return not e_file_di_test(percorso) and Path(percorso).suffix in ESTENSIONI_CODICE
 
 
