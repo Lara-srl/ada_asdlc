@@ -194,3 +194,26 @@ def test_il_tick_aspetta_il_reset_di_un_lettore_senza_esito(tmp_path, monkeypatc
     assert isinstance(decisione, coda.AttendeIlReset), (
         f"{decisione}: un Lettore fermo sul limite d'uso si riprende dopo il reset"
     )
+
+
+# --- Criterio 4: la stessa versione non si rilegge ----------------------------
+
+
+def test_la_stessa_versione_del_pbi_non_si_rilegge(tmp_path, monkeypatch):
+    clone, ruoli = giro_sul_clone(tmp_path, monkeypatch, pbi_610(), {"lettore": LETTO})
+    accendi(monkeypatch, lettore=True)
+
+    def giro(run: str) -> int:
+        runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run=run)
+        return ruoli.count("lettore")
+
+    assert giro("giro1") == 1
+    assert giro("giro2") == 1, "la stessa versione del PBI, già letta pronta, non si rilegge"
+
+    altri = tmp_path / "altri"
+    sh(tmp_path, "clone", "-q", str(tmp_path / "remoto.git"), str(altri))
+    (altri / FILE_DEL_PBI).write_text(pbi_610() + "\nUna riga in più.\n", encoding="utf-8")
+    sh(altri, "commit", "-q", "--no-verify", "-am", "docs: il PBI corretto")
+    sh(altri, "push", "-q", "origin", "main")
+
+    assert giro("giro3") == 2, "una versione nuova del PBI sulla base si rilegge"
