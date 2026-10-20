@@ -144,7 +144,8 @@ agente `senza esito`, in sola lettura, e il server dell'esito gli lascia tre str
 segnalare un limite del runner legge `asdlc.toml`; prima di chiedere legge
 `backlog/PRECEDENTI.md`. Il tetto è di 3 giri per PBI (`[solver].giri_massimi`), contati in
 `giri_solver` nel rapporto: al quarto, o a `chiedi_a_francesco`, il giro si ferma con un
-avviso e non con un blocco (`ADR-0008`). Il Solver non rilancia il Builder; a un limite del
+avviso e non con un blocco (`ADR-0008`). Dopo un `fermati` del Builder, con `risolto` il Builder riprende nello stesso giro
+(`PBI-517`); a un limite del
 runner apre la PR a monte da un fork di `asdlc` (`[rilascio].clone`, numero successivo libero,
 mai due PBI per la stessa causa), scrive `attende:` nel PBI fermo (in un commit del suo ramo) e crea la pausa (`PBI-512`).
 

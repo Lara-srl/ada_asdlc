@@ -5,7 +5,8 @@ Lo **stato** voluto del sistema (come funziona). Le decisioni e le alternative s
 cambia, PBI per PBI, sta in `backlog/`.
 
 > **Stato di costruzione: R1-R4 e R13 esistono (`PBI-506`–`PBI-508`, la traccia di R4 in `PBI-511`); R8-R11 esistono
-> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`).** La spec descrive il
+> (`PBI-509`); la PR a monte del Solver (R5-R6, la sua apertura) esiste (`PBI-512`); la ripresa del
+> Builder dopo `risolto` esiste (`PBI-517`).** La spec descrive il
 > comportamento a cui i PBI devono arrivare. Oggi la catena è manuale (v. l'ADR, Contesto).
 
 ## Il ciclo
@@ -25,6 +26,16 @@ giro fermato / domanda bloccante del Critic
         │                                                  pausa tolta, il PBI fermo riparte
         └─intento──────────────► avviso a Francesco; il giro resta fermo
 ```
+
+### La ripresa dopo `risolto` (`PBI-517`)
+
+Il `fermati` del Builder va al Solver dentro il giro, non alla sua chiusura. Se il Solver
+risponde `risolto` il Builder riprende nello stesso giro, e il giro prosegue fino al suo esito
+(gate, Critic, `fatto` o un'altra uscita); un secondo `fermati` torna al Solver. Ogni altro
+esito del Solver (`limite-del-runner`, `intento`, nessuna chiamata) e un Solver che non parte
+o si guasta chiudono il giro `fermato` come prima. Gli altri blocchi (`builder-senza-esito`,
+`domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
+riprendono.
 
 Fa eccezione il `senza esito` per il limite d'uso con l'ora del reset leggibile: non passa
 dal Solver. Il tick aspetta `riprendi_dopo` e rilancia il PBI con `--riprendi`, fino a tre

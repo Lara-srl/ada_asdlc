@@ -4073,6 +4073,20 @@ def esegui_pbi(
               f"critic {hms(e.tempi['critic'])})")
         return e
 
+    def smista(motivo: str, dettaglio: str) -> dict | None:
+        """Il blocco al Solver, e l'esito che il Solver ha scritto in questa chiamata; `None`
+        se non è partito (il tetto) o non ha scritto niente. Un suo guasto è un avviso
+        (`ADR-0008`) e non salta `chiudi()`, che è la strada d'uscita di ogni giro fermato
+        (difetto 37)."""
+        prima = len(e.solver)
+        try:
+            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
+        except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
+            traceback.print_exc()
+            e.file_traceback = str(salva_il_traceback(pbi))
+            dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
+        return e.solver[-1] if len(e.solver) > prima else None
+
     def giro() -> tuple[str, str]:
         """Builder, gate e Critic. Torna il motivo d'uscita e il dettaglio, e non
         chiude: la chiusura è di chi lo chiama, una volta sola (PBI-375)."""
@@ -4125,7 +4139,12 @@ def esegui_pbi(
                                                                     invocazione.uscita)
                 if dichiarato["esito"] == "fermati":
                     e.domanda = dichiarato["domanda"]
-                    return "domanda-del-builder", una_riga(e.domanda)
+                    # La domanda va al Solver qui, dentro il giro: con `risolto` il
+                    # Builder riprende, con ogni altro esito il giro si ferma (PBI-517).
+                    risposta = smista("domanda-del-builder", una_riga(e.domanda))
+                    if risposta is None or risposta["esito"] != "risolto":
+                        return "domanda-del-builder", una_riga(e.domanda)
+                    continue
 
                 # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
                 # il registro non si scrive più dal branch (`ADR-0020`).
@@ -4307,15 +4326,11 @@ def esegui_pbi(
     # da decidere: il tick aspetta il reset e riprende, e il Solver non parte
     # (PBI-519, decisione 4).
     if motivo in BLOCCHI and not e.riprendi_dopo:
-        # Il Solver è invocato e registrato, non seguito (`PBI-507`, decisione 11): un
-        # suo guasto è un avviso (`ADR-0008`) e non salta `chiudi()`, che è la strada
-        # d'uscita di ogni giro fermato (difetto 37).
-        try:
-            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
-        except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
-            traceback.print_exc()
-            e.file_traceback = str(salva_il_traceback(pbi))
-            dichiara(f"avviso: il Solver è fallito: {type(guasto).__name__}: {guasto}"[:300])
+        # Il `fermati` del Builder il Solver lo ha già smistato dentro `giro()`, e una
+        # seconda chiamata qui lo farebbe girare due volte (PBI-517, decisione 2). Gli
+        # altri blocchi si smistano qui, una volta, e non riprendono.
+        if motivo != "domanda-del-builder":
+            smista(motivo, dettaglio)
         guardia_del_solver(e, dichiara=dichiara)
     try:
         chiudi(motivo, dettaglio)

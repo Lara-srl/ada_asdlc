@@ -64,10 +64,11 @@ rilascio; qui basta che l'esito esista e sia valido.
     riletto dal giro successivo dello stesso PBI. «Lo stesso blocco» è il **PBI**. Al quarto
     giro (con `giri_massimi = 3`) o a `chiedi_a_francesco` il runner scrive l'avviso con
     `dichiara(...)` e non lancia il Solver.
-11. **Il Solver è invocato e registrato, non ancora seguito.** Dopo un giro fermato il runner
+11. ~~**Il Solver è invocato e registrato, non ancora seguito.** Dopo un giro fermato il runner
     lancia il Solver e salva l'esito nel rapporto; con `risolto` **non rilancia il Builder**
     (la ripresa non ha un meccanismo, `backlog/README.md`: «Il runner non riprende niente»).
-    Riprendere dopo `risolto` è di un PBI successivo.
+    Riprendere dopo `risolto` è di un PBI successivo.~~ *Superata da `PBI-517`*: dopo il
+    `fermati` del Builder il Solver parte dentro il giro, e con `risolto` il Builder riprende.
 12. **Il modello e gli strumenti:** la chiave è `[solver].modello`, default `"opus"` come il
     Builder (la misura sui primi casi resta `soglia-non-misurata`). Gli strumenti consentiti
     sono di sola lettura: `Read`, `Grep`, `Glob` e i tre `mcp__asdlc__*`. `RUOLI`,
