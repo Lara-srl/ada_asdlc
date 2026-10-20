@@ -25,6 +25,7 @@ rename, o per ciò che non aveva alternative.
 | [0028](ADR-0028-lo-scope-template.md) | I commit su `template/` hanno lo scope `template` (aggiunge uno scope ad `AGENTS.md`) | Accettata |
 | [0029](ADR-0029-la-ratifica-e-del-proprietario.md) | La ratifica dei cambi di costituzione è del proprietario del progetto, non di una persona (cambia `## Metodo` di `AGENTS.md`) | Accettata |
 | [0030](ADR-0030-il-solver-smista-i-blocchi-e-il-rilascio-corre-da-solo.md) | Il Solver smista i blocchi (`risolto`, `limite-del-runner`, `intento`) e il rilascio del runner corre da solo fino al merge; niente quarto agente | Proposta |
+| [0031](ADR-0031-la-lettura-prima-della-coda.md) | Un PBI si legge prima del lancio: controlli in codice, un Lettore con sette domande, il rosso provato sulla base dal runner; con un rilievo il giro si ferma prima del ramo | Proposta |
 
 **Nuovo ADR:** prossimo numero libero, nome `ADR-NNNN-titolo-in-kebab.md`, sezioni
 Contesto · Decisione · Conseguenze (positive/negative/neutre) · Alternative considerate.
