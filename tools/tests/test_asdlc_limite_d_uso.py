@@ -295,3 +295,34 @@ class TestRiprendiParteDallaPuntaDelRamo:
         assert [k.get("riprendi") for k in chiamate] == [True], (
             "asdlc-runner PBI-N --riprendi deve far ripartire il giro dalla punta del ramo"
         )
+
+
+class TestIlPromptDiRipresa:
+    """Criterio 7, decisione 7: il Builder in ripresa riceve `PROMPT_BUILDER` e
+    dopo il testo di ripresa, che dice di continuare dal primo criterio non
+    spuntato senza rifare ciò che è già committato. Si legge il prompt che il
+    runner costruisce, non il file: un `.md` non è produzione."""
+
+    def test_il_builder_in_ripresa_non_rifa_il_lavoro(self, monkeypatch, tmp_path):
+        rapporto_fermo_sul_limite(tmp_path, "PBI-102", "pbi/pbi-102")
+        agente = agente_che_scrive_i_flussi({})
+        prompt: list[str] = []
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if ruolo_ed_esito(cmd)[0] == "builder":
+                prompt.append(Path(cmd[-1].lstrip("@")).read_text(encoding="utf-8"))
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+        monkeypatch.setattr(runner, "git", git_del_senza_esito)
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False, riprendi=True)
+
+        pbi_path = runner.trova_pbi("PBI-102", "").relative_to(runner.REPO)
+        assert prompt[0].startswith(runner.PROMPT_BUILDER.format(pbi_path=pbi_path)), (
+            "il prompt di ripresa si aggiunge a quello del Builder, non lo sostituisce"
+        )
+        ripresa = prompt[0].removeprefix(runner.PROMPT_BUILDER.format(pbi_path=pbi_path))
+        for voce in ("limite d'uso", "git log", "spunte", "senza rifare"):
+            assert voce in ripresa, f"il testo di ripresa non dice «{voce}»"
