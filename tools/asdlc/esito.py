@@ -245,6 +245,17 @@ def _scrivi(dichiarato: dict, nome: str, esito: str) -> dict:
     return _contenuto(f"Esito registrato: {nome}.", errore=False)
 
 
+def _file_dell_albero(evidenza: str) -> bool:
+    """Se `evidenza`, `percorso` o `percorso:riga`, nomina un file dell'albero: la
+    cartella da cui parte il server (`PBI-507`, R2)."""
+    percorso = re.sub(r":\d+$", "", evidenza.strip())
+    # Relativo alla radice del progetto (decisione 3): un assoluto, o un `../` che esce
+    # dall'albero, esiste ma non è una fonte del repository.
+    radice = Path.cwd().resolve()
+    return (not os.path.isabs(percorso) and Path(percorso).resolve().is_relative_to(radice)
+            and os.path.isfile(percorso))
+
+
 def _risolvi(argomenti: dict, esito: str) -> dict:
     """`risolvi`: la risposta porta come `evidenza` un file che esiste nell'albero
     del giro, con un eventuale `:riga` (`PBI-507`, R2). L'albero è la cartella da
@@ -254,12 +265,7 @@ def _risolvi(argomenti: dict, esito: str) -> dict:
         if not isinstance(valore, str) or not valore.strip():
             return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
                               "richiama risolvi.", errore=True)
-    percorso = re.sub(r":\d+$", "", evidenza.strip())
-    # Relativo alla radice del progetto (decisione 3): un assoluto, o un `../` che esce
-    # dall'albero, esiste ma non è una fonte del repository.
-    radice = Path.cwd().resolve()
-    if (os.path.isabs(percorso) or not Path(percorso).resolve().is_relative_to(radice)
-            or not os.path.isfile(percorso)):
+    if not _file_dell_albero(evidenza):
         return _contenuto(f"L'evidenza {evidenza!r} non è un file dell'albero: nomina "
                           "il file che prova la risposta e richiama risolvi.", errore=True)
     return _scrivi({"esito": "risolto", "risposta": risposta, "evidenza": evidenza},
@@ -310,8 +316,35 @@ CAMPI_DEL_LETTORE = {"rilievo": ("domanda", "criterio", "testo", "evidenza"),
 
 def _accumula(nome: str, argomenti: dict, esito: str) -> dict:
     """`rilievo` e `sonda`: una riga JSON per chiamata in `<esito>.lettura.jsonl`,
-    `{"strumento", ...argomenti}` (`PBI-521`, decisione 2). Non chiudono la lettura."""
-    riga = {"strumento": nome, **{c: argomenti.get(c) for c in CAMPI_DEL_LETTORE[nome]}}
+    `{"strumento", ...argomenti}` (`PBI-521`, decisione 2). Non chiudono la lettura.
+
+    Le regole sono quelle della decisione 1: la domanda è una delle sette, il criterio
+    un intero (almeno 0 per un rilievo, che con 0 vale per il PBI intero; almeno 1 per
+    una sonda), i testi pieni, l'evidenza e il file della sonda file dell'albero. Se il
+    file sia un test lo decide il runner. Dopo `letto` la lettura è chiusa."""
+    if os.path.exists(esito):
+        return _contenuto(f"La lettura è già chiusa con letto: {nome} non cambia niente.",
+                          errore=True)
+    for campo in CAMPI_DEL_LETTORE[nome]:
+        valore = argomenti.get(campo)
+        if campo == "criterio":
+            minimo = 1 if nome == "sonda" else 0
+            if not isinstance(valore, int) or isinstance(valore, bool) or valore < minimo:
+                return _contenuto(f"Il campo «criterio» vale {valore!r}: deve essere un "
+                                  f"intero, almeno {minimo}. Richiama {nome}.", errore=True)
+        elif not isinstance(valore, str) or not valore.strip():
+            return _contenuto(f"Il campo «{campo}» è vuoto o non è testo: scrivilo e "
+                              f"richiama {nome}.", errore=True)
+    if nome == "rilievo" and argomenti["domanda"] not in DOMANDE_DEL_LETTORE:
+        return _contenuto(f"La domanda {argomenti['domanda']!r} non è una fra "
+                          f"{DOMANDE_DEL_LETTORE}: scegline una e richiama rilievo.",
+                          errore=True)
+    campo = "evidenza" if nome == "rilievo" else "file"
+    if not _file_dell_albero(argomenti[campo]):
+        return _contenuto(f"Il campo «{campo}» vale {argomenti[campo]!r}, che non è un file "
+                          f"dell'albero: nomina un file che c'è e richiama {nome}.",
+                          errore=True)
+    riga ={"strumento": nome, **{c: argomenti.get(c) for c in CAMPI_DEL_LETTORE[nome]}}
     with open(f"{esito}.lettura.jsonl", "a", encoding="utf-8") as lettura:
         lettura.write(json.dumps(riga, ensure_ascii=False) + "\n")
     return _contenuto(f"Registrato: {nome}.", errore=False)
