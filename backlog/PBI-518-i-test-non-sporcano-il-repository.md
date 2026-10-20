@@ -1,6 +1,7 @@
 # PBI-518: i test non sporcano il repository
 
-**Stato:** in coda (Francesco, 19/10: subito dopo il 513, in forma ridotta)
+**Stato:** in coda (Francesco, 19/10: subito dopo il 513, in forma ridotta); corretto dopo la lettura
+avversariale del 20/10
 
 ## Direttiva
 
@@ -27,6 +28,14 @@ guardia che mostra il prossimo test che sporca prima che fermi un giro. Non rif�
   config MCP dell'invocazione dice, non in `$2`, e in una cartella temporanea.
 - `tools/tests/conftest.py` (o un modulo accanto) — la guardia di fine suite.
 - `tools/tests/` — un test della guardia.
+- `tools/tests/test_asdlc_coda.py` —
+  `test_guardia_il_dry_run_lanciato_dal_checkout_decide_come_col_repo_esplicito` (~1296): il
+  lucchetto del tick (`runs/.tick.lock`) va in una cartella temporanea e non in
+  `tools/tests/dati/progetto/runs/`. In un clone fresco la suite lo crea lì (`coda.main` con
+  `--repo PROGETTO`), e la guardia lo vedrebbe: la CI, che parte da un checkout pulito, uscirebbe
+  rossa, mentre nell'albero del giro, dove `runs/` c'è già, la guardia tace. Deroga allo Scope
+  dichiarata (`ADR-0015`). Se la guardia nomina un altro test che prende il lucchetto in
+  `PROGETTO`, si fa lo stesso.
 - `backlog/README.md` — la riga della causa `test-senza-isolamento`, con il PBI che la copre.
 - `backlog/PBI-518-i-test-non-sporcano-il-repository.md` — questo file, per la spunta.
 
@@ -53,6 +62,13 @@ guardia che mostra il prossimo test che sporca prima che fermi un giro. Non rif�
 4. **La guardia non cancella niente.** Se trova un file lo nomina e basta: il file lo cancella o lo
    ignora chi corregge il test (`ADR-0008`: si segnala, non si ripara in silenzio).
 5. **Lo scope dei commit è `runner`.**
+6. **Tutto lo Scope è sotto `tools/tests/`, cioè test per `e_file_di_test`.** Non c'è produzione da
+   aprire: niente `--chiedi-impl`. Ogni GREEN si scrive in `TEST_ONLY`, in un commit suo
+   (`test(runner): …`) dopo il commit `test(runner): … (RED)`. In `IMPL` quei file sarebbero
+   bloccati (`guardia_di_fase`, `tools/asdlc/runner.py`): chiamare `--chiedi-impl` qui ferma il giro.
+7. **La funzione della guardia nasce scheletro** (torna `[]`) in un commit suo, prima del RED del
+   criterio 3, e il test la chiama come attributo del modulo: un modulo che non c'è dà un errore di
+   import, che non è un rosso.
 
 ## Dipendenze
 
@@ -70,21 +86,38 @@ guardia che mostra il prossimo test che sporca prima che fermi un giro. Non rif�
 ## Verifica
 
 Su `main` il finto scrive in `tools/tests/dati/progetto/` e nessuna guardia lo dice, quindi ogni
-criterio è un **rosso atteso**.
+criterio è un **rosso atteso**. I criteri 1 e 2 di prima li rendeva verdi la stessa modifica (cercare
+`--mcp-config` per nome): il secondo sarebbe nato verde e il gate del rosso avrebbe fermato il giro.
+Ora sono un criterio solo.
 
-- [ ] **Il test del tetto scaduto non lascia nessun file in `tools/tests/dati/`.** Si lancia
-      `TestIlTimeoutDiUnAgenteChiudeSenzaEsito` in un sottoprocesso e si confronta l'elenco di
-      `tools/tests/dati/` prima e dopo: è uguale (pytest, sottoprocesso).
-- [ ] **Il finto trova la config MCP per nome.** Il finto scrive il suo esito accanto al percorso
-      che segue `--mcp-config`, anche se prima di quell'argomento ce ne sono di più o di meno
-      (pytest, due posizioni diverse).
+- [ ] **Il finto trova la config MCP per nome, e il test del tetto non lascia file in
+      `tools/tests/dati/`.** Un test parametrico con id espliciti: `critic` (`--session-id U
+      --mcp-config P`), `builder` (`--settings S --session-id U --mcp-config P`) e `rilancio` (`-c
+      --fork-session --session-id U --mcp-config P`). Ogni caso è rosso su `main` per asserzione: il
+      file nasce accanto a `U` o a `S`, non a `P`. Il finto si lancia senza `sleep` (pytest).
+- ~~**Il finto trova la config MCP per nome.**~~ **Fuso nel criterio 1 (20/10, lettura
+      avversariale).** Diventava verde con la stessa modifica del criterio 1, e un caso
+      (`--mcp-config P` in testa, dove `$2` è già `P`) era verde anche su `main`.
 - [ ] **La guardia segnala un file nato in `tools/tests/dati/`.** Con una funzione che confronta
       due elenchi, un file nuovo (anche ignorato da git) è nominato nell'errore; elenchi uguali
       non danno errore (pytest).
 - [ ] **La suite esce rossa se un test sporca.** In un sottoprocesso con un test che scrive un
       file in `tools/tests/dati/`, `pytest` esce con un codice diverso da 0 e il file è nominato
-      (pytest, sottoprocesso).
+      (pytest, sottoprocesso). Il test sporco sta in `tmp_path` e il sottoprocesso carica la guardia
+      con `-p`; il file che scrive in `tools/tests/dati/` il test esterno lo cancella in `finally`,
+      perché la guardia non cancella niente (decisione 4) e il file resterebbe nell'albero vero.
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde su un albero pulito e ne esce
-pulito (`git status --porcelain` vuoto, anche per i file ignorati in `tools/tests/dati/`); il tempo
+pulito: `git status --porcelain --ignored tools/tests/dati/` è uguale prima e dopo (`git status
+--porcelain` da solo non mostra i file ignorati, e nell'albero del giro ce ne sono già). Il tempo
 della suite non raddoppia.
+
+## La lettura avversariale del 20/10
+
+Un lettore in sola lettura ha cercato i fermi meccanici prima del giro; ogni rilievo è verificato nel
+codice o in un clone fresco. Cambiati: la decisione 6 (niente `--chiedi-impl`, perché in `IMPL` i test
+sono chiusi e il GREEN qui è tutto sotto `tools/tests/`); la 7 (lo scheletro); i criteri 1 e 2 fusi,
+perché il secondo sarebbe nato verde; il criterio 4 col test sporco in `tmp_path`; la non regressione
+con `--ignored`; lo Scope col lucchetto del tick, che in un clone fresco nasce in
+`tools/tests/dati/progetto/runs/` (verificato il 20/10). Non cambiata la dipendenza dal 513: il 518
+resta dopo.
