@@ -242,7 +242,9 @@ solo un backend Python. Quello che il runner **riconosce davvero** è questo:
 
 Il gate del rosso e il lucchetto di fase (`TEST_ONLY` / `IMPL`) usano proprio queste regole.
 In `TEST_ONLY` il `pre-commit` lascia passare uno **scheletro vuoto** di produzione, un file
-fatto solo di righe bianche e commenti: si committa da solo, prima del RED (`PBI-515`).
+fatto solo di righe bianche e commenti: si committa da solo, prima del RED (`PBI-515`). Il
+commento è quello del linguaggio: `#` per `.sh` e `.py`, `--` per `.sql`, `//` e `/* … */` per
+`.java` e JS/TS; un `#` in un `.sql` è codice.
 Un progetto in un altro linguaggio (Go, Rust, PHP…) ha comunque i suoi gate
 deterministici, il Critic, la coda e la PR. Per quel progetto il gate del rosso non sa leggere i test:
 si spegne con `[gate_del_rosso].attivo = false`, e il giro lo dichiara nel rapporto. Non l'ho

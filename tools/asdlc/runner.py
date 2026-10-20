@@ -1542,11 +1542,21 @@ def fase_corrente(cartella: Path) -> str | None:
     return file.read_text(encoding="utf-8").strip()
 
 
-def e_scheletro_vuoto(contenuto: str) -> bool:
+# Il segno del commento di riga per estensione (PBI-515, decisione 5): un `#` in
+# un `.sql` non è un commento. Le estensioni con `//` hanno anche i blocchi `/* … */`.
+COMMENTO_DI_RIGA = {".sh": "#", ".py": "#", ".sql": "--",
+                    **dict.fromkeys((".java", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"), "//")}
+RE_BLOCCO_DI_COMMENTO = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def e_scheletro_vuoto(percorso: str, contenuto: str) -> bool:
     """Il contenuto è fatto solo di righe bianche e commenti (PBI-515, decisione 4):
     uno scheletro così non anticipa nessun comportamento, e il rosso resta quello
-    del test."""
-    return all(not riga.strip() or riga.strip().startswith(("#", "--"))
+    del test. Il commento è quello del linguaggio del file (decisione 5)."""
+    segno = COMMENTO_DI_RIGA.get(Path(percorso).suffix)
+    if segno == "//":
+        contenuto = RE_BLOCCO_DI_COMMENTO.sub("", contenuto)
+    return all(not riga.strip() or (segno is not None and riga.strip().startswith(segno))
                for riga in contenuto.splitlines())
 
 
@@ -1569,7 +1579,7 @@ def guardia_di_fase(fase: str | None, percorso: str,
                 f"falliscono davvero.")
     if fase == FASE_TEST_ONLY:
         if e_file_di_produzione(percorso) and not (
-                contenuto is not None and e_scheletro_vuoto(contenuto)):
+                contenuto is not None and e_scheletro_vuoto(percorso, contenuto)):
             return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
                     f"qui si scrivono solo i test. Scrivi il test del comportamento che "
                     f"ti serve, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
