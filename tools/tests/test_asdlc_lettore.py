@@ -235,3 +235,24 @@ def test_senza_letto_e_senza_rilievi_il_comando_esce_1(tmp_path, monkeypatch):
 
     assert (rapporto["lettore"], rapporto["rilievi"]) == ("senza esito", [])
     assert codice == 1
+
+
+# --- Criterio 4: un criterio senza sonda è un avviso --------------------------
+
+TRE_CRITERI = pbi_con_criteri(
+    "- [ ] **La differenza.** (pytest)",
+    "- [ ] **La somma resta com'è.** Il comportamento c'è già:\n"
+    "      è una Guardia, e non ha un test nuovo.",
+    "- [ ] **Il prodotto.** (pytest)")
+
+UNA_SONDA = [{"strumento": "sonda", "criterio": 1, "file": "test_sonde.py",
+              "nome": "test_la_differenza"}]
+
+
+def test_un_criterio_senza_sonda_e_un_avviso_e_non_un_rilievo(tmp_path, monkeypatch):
+    codice, rapporto, _, _, _ = preverifica_col_lettore(
+        tmp_path, monkeypatch, TRE_CRITERI, {"test_sonde.py": SONDE}, UNA_SONDA)
+
+    assert "criterio 3 senza sonda" in rapporto["avvisi"]
+    assert rapporto["rilievi"] == []
+    assert codice == 0
