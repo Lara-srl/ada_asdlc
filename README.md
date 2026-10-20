@@ -158,9 +158,10 @@ con un rilievo, oppure con `senza esito`.
 Con `[preverifica] attiva = true` la pre-verifica gira anche dentro il giro (`PBI-522`,
 `ADR-0031` decisione 4): dopo il controllo dell'albero pulito, e prima dell'inventario e del
 ramo, sul PBI alla base. Scrive lo stesso rapporto di `--preverifica`,
-`runs/<run>-<PBI>-preverifica.json`. Con almeno un rilievo il giro chiude `fermato` col motivo
-`preverifica`, e la nota dice quanti rilievi e dove sta il rapporto: non nascono ramo, commit
-né PR, e il Solver non parte. L'esito porta `sha_pbi`, lo sha del blob del file del PBI letto,
+`runs/<run>-<PBI>-preverifica.json`, e con `lettore` (il default) legge anche il Lettore,
+prima del Builder. Con almeno un rilievo, del codice, del Lettore o delle sue sonde, il giro
+chiude `fermato` col motivo `preverifica`, e la nota dice quanti rilievi e dove sta il
+rapporto: non nascono ramo, commit né PR, e il Solver non parte. L'esito porta `sha_pbi`, lo sha del blob del file del PBI letto,
 e `rilievi_preverifica`. Senza rilievi il giro va avanti come prima. `--riprendi` non la
 rifà. Senza la sezione la pre-verifica è spenta.
 

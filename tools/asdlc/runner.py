@@ -4347,12 +4347,14 @@ def esegui_pbi(
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
 
     # La pre-verifica (PBI-522, `ADR-0031` decisione 4): prima dell'inventario e del
-    # ramo, sul PBI alla base. Con un rilievo il giro chiude qui, senza ramo, commit, PR
-    # né Solver: il rimedio è correggere il PBI. Una ripresa non la rifà: il PBI è già
-    # passato da qui, e il suo ramo c'è già.
+    # ramo, sul PBI alla base, col Lettore se `[preverifica].lettore` lo chiede. Con un
+    # rilievo il giro chiude qui, senza ramo, commit, PR né Solver: il rimedio è
+    # correggere il PBI. Una ripresa non la rifà: il PBI è già passato da qui, e il suo
+    # ramo c'è già.
     if CFG.preverifica.attiva and not riprendi:
         rapporto, letto, rilievi = scrivi_la_preverifica(
-            pbi, base, pbi_path.relative_to(REPO).as_posix(), run, lettore=False)
+            pbi, base, pbi_path.relative_to(REPO).as_posix(), run,
+            lettore=CFG.preverifica.lettore)
         if rilievi:
             return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
                                 rilievi_preverifica=len(rilievi)),
