@@ -8448,13 +8448,46 @@ class TestITettiDelleChiamateVengonoDaAsdlcToml:
         assert (runner.MINUTI_BUILDER, runner.MINUTI_CRITIC) == (45, 12)
 
 
-# Un agente vero che scrive sui due flussi, dichiara `fatto` nel suo file d'esito
-# — accanto alla config MCP, che arriva in `$2` — e poi dorme oltre il tetto.
-AGENTE_CHE_DORME = (
+# Un agente vero che scrive sui due flussi e dichiara `fatto` nel suo file d'esito,
+# accanto alla config MCP. La config si cerca per nome, dopo `--mcp-config`, e mai
+# per posizione: i flag che il runner aggiunge davanti la spostano (PBI-518). La
+# config del giro sta nella `LOG_DIR` temporanea di `log_dir_temporanea`.
+AGENTE_CHE_DICHIARA = (
     'echo "uscita parziale"; echo "errore parziale" >&2; '
+    'while [ "$#" -gt 0 ] && [ "$1" != --mcp-config ]; do shift; done; '
     'echo \'{"esito": "fatto", "verdetto": "pass", "riepilogo": "fatto"}\' '
-    '> "${2%.mcp.json}.json"; exec sleep 30'
+    '> "${2%.mcp.json}.json"'
 )
+# Lo stesso, che poi dorme oltre il tetto.
+AGENTE_CHE_DORME = AGENTE_CHE_DICHIARA + "; exec sleep 30"
+
+
+class TestIlFintoScriveLEsitoAccantoAllaConfigMcp:
+    """PBI-518, decisione 1: il finto leggeva la config MCP in `$2`, e con
+    `--session-id` e `--fork-session` davanti `$2` era un altro argomento. Il file
+    d'esito finiva nella cartella di lavoro, cioè nel progetto di prova dentro il
+    repository (`<uuid>.json`, `--session-id.json`), e l'albero restava sporco."""
+
+    @pytest.mark.parametrize("argomenti", [
+        pytest.param(["--session-id", "U", "--mcp-config", "P"], id="critic"),
+        pytest.param(["--settings", "S", "--session-id", "U", "--mcp-config", "P"],
+                     id="builder"),
+        pytest.param(["-c", "--fork-session", "--session-id", "U", "--mcp-config", "P"],
+                     id="rilancio"),
+    ])
+    def test_il_file_d_esito_nasce_accanto_alla_config_mcp(self, tmp_path, argomenti):
+        cwd, accanto = tmp_path / "cwd", tmp_path / "giro"
+        cwd.mkdir()
+        accanto.mkdir()
+        percorsi = {"S": str(accanto / "sessione.settings.json"),
+                    "P": str(accanto / "esito.mcp.json")}
+        argomenti = [percorsi.get(a, a) for a in argomenti]
+
+        subprocess.run(["sh", "-c", AGENTE_CHE_DICHIARA, "agente", *argomenti],
+                       cwd=cwd, capture_output=True, check=True, timeout=10)
+
+        assert sorted(p.name for p in accanto.iterdir()) == ["esito.json"]
+        assert list(cwd.iterdir()) == []
 
 
 class TestIlTimeoutDiUnAgenteChiudeSenzaEsito:

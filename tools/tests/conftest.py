@@ -29,6 +29,9 @@ USATI_DAI_TEST = ("git", "pytest")
 
 
 def pytest_configure(config):
+    # La guardia di fine suite su `dati/` (PBI-518), per ogni `pytest` che
+    # raccoglie questa cartella: il gate e la CI compresi.
+    config.pluginmanager.import_plugin("guardia_dei_dati")
     config.addinivalue_line(
         "markers",
         "progetto_ospite: il test legge apposta un file del progetto che ospita la "
