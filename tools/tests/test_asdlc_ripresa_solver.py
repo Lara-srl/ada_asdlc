@@ -158,3 +158,22 @@ def test_senza_traccia_la_ripresa_riparte_pulita_col_pbi_e_lo_avvisa(giro):
     rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
     assert "avviso: la ripresa dopo risolto riparte da una sessione nuova" in (
         rapporto["esiti"][0]["nota"])
+
+
+def test_dopo_la_ripresa_il_giro_arriva_a_fatto_e_la_guardia_del_solver_gira(giro, monkeypatch):
+    """Criterio 5: dopo la ripresa il Builder chiama `fatto`, gate e Critic girano, il giro
+    chiude `fatto` con una sola chiusura, e la guardia di processo è scritta anche se il
+    motivo finale non è un blocco."""
+    gate: list[str] = []
+    chiusure: list[str] = []
+    monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: gate.append("gate") or [])
+    monkeypatch.setattr(runner, "chiudi_la_fase", lambda: chiusure.append("chiusa"))
+
+    esito, agente = giro({"builder": [fermati("quale funzione?"), FATTO],
+                          "solver": [RISOLTO]})
+
+    assert esito.stato == "fatto"
+    assert gate == ["gate"]
+    assert agente.critic == ["pass"]
+    assert chiusure == ["chiusa"]
+    assert esito.guardia.startswith("## Guardia di processo")
