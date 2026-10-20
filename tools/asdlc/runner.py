@@ -4287,7 +4287,10 @@ def esegui_pbi(
     # nell'`except`, che richiudeva `rosso` — e la seconda chiusura, riuscita,
     # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
     # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
-    if motivo in BLOCCHI:
+    # Un `senza esito` per il limite d'uso con l'ora del reset leggibile non ha niente
+    # da decidere: il tick aspetta il reset e riprende, e il Solver non parte
+    # (PBI-519, decisione 4).
+    if motivo in BLOCCHI and not e.riprendi_dopo:
         # Il Solver è invocato e registrato, non seguito (`PBI-507`, decisione 11): un
         # suo guasto è un avviso (`ADR-0008`) e non salta `chiudi()`, che è la strada
         # d'uscita di ogni giro fermato (difetto 37).
