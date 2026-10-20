@@ -191,6 +191,16 @@ class Lettore:
 
 
 @dataclass(frozen=True)
+class Preverifica:
+    # La pre-verifica nel giro, prima del ramo (`PBI-522`, `ADR-0031` decisione 4). Spenta
+    # se la sezione manca: i giri dei test, con PBI finti di poche righe, si fermerebbero
+    # tutti. Si accende nell'`asdlc.toml` di ogni progetto, come `[junit]`.
+    attiva: bool = False
+    # Con la pre-verifica accesa, legge anche il Lettore (`PBI-521`).
+    lettore: bool = True
+
+
+@dataclass(frozen=True)
 class Rilascio:
     # Il remote git che punta al fork di `asdlc` da cui il Solver apre la PR a monte
     # (`PBI-509`, R5), e il prefisso del tag di rilascio (`ADR-0026`: `vX.Y.Z`).
@@ -222,6 +232,7 @@ class Config:
     junit: Junit = Junit()
     solver: Solver = Solver()
     lettore: Lettore = Lettore()
+    preverifica: Preverifica = Preverifica()
     rilascio: Rilascio = Rilascio()
     tick: Tick = Tick()
 
@@ -415,6 +426,15 @@ def interpreta(dati: dict, file: str) -> Config:
                         perche="la sezione dice il modello e il tetto in minuti del Lettore")
         lettore = Lettore(modello=dichiarato.testo("modello", default="opus"),
                           minuti=dichiarato.positivo("minuti", default=30))
+    # Facoltativa: senza, la pre-verifica nel giro è spenta (`PBI-522`, decisione 1).
+    preverifica = Preverifica()
+    if "preverifica" in sezione.dati:
+        dichiarato = sezione.dentro("preverifica")
+        dichiarato.solo("attiva", "lettore",
+                        perche="la sezione dice se il giro fa la pre-verifica e se legge "
+                        "anche il Lettore")
+        preverifica = Preverifica(attiva=dichiarato.booleano("attiva", default=False),
+                                  lettore=dichiarato.booleano("lettore", default=True))
     # Facoltativa: i default valgono per un progetto che non la scrive (`PBI-509`).
     rilascio = Rilascio()
     if "rilascio" in sezione.dati:
@@ -463,6 +483,7 @@ def interpreta(dati: dict, file: str) -> Config:
         junit=junit,
         solver=solver,
         lettore=lettore,
+        preverifica=preverifica,
         rilascio=rilascio,
         tick=tick,
     )
@@ -579,5 +600,5 @@ class _Sezione:
                 f"{self.file}: `{self._chiave(chiave)}` deve essere positivo, non {valore!r}")
         return valore
 
-    def booleano(self, chiave: str) -> bool:
-        return self._valore(chiave, bool, "`true` o `false`")
+    def booleano(self, chiave: str, default=_MANCA) -> bool:
+        return self._valore(chiave, bool, "`true` o `false`", default)

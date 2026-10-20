@@ -108,6 +108,13 @@ modello = "fable"
 modello = "opus"
 minuti = 30
 
+[preverifica]
+# La pre-verifica nel giro, prima del ramo (PBI-522): con un rilievo il giro chiude
+# `fermato` col motivo `preverifica`, senza ramo né Solver. `lettore` (default `true`)
+# aggiunge il Lettore di `[lettore]`. Senza la sezione è spenta. Qui conta dal tag che
+# la contiene: il tick gira col pacchetto installato (`ADR-0026`).
+attiva = true
+
 # I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.
 # Un gate con `solo_se_tocca` si accende solo se il diff del branch tocca uno di
 # quei percorsi; senza il campo è sempre acceso.

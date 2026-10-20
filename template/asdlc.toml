@@ -93,6 +93,12 @@ aggiunte = "asdlc-aggiunte"
 # di test il gate non sa leggere: sa leggere pytest e vitest.
 attivo = true
 
+[preverifica]
+# La pre-verifica nel giro, prima del ramo: con un rilievo il giro chiude `fermato`
+# col motivo `preverifica`, senza ramo né Solver. `lettore` (default `true`) aggiunge
+# il Lettore. Senza la sezione è spenta.
+attiva = true
+
 # I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.
 # Un gate con `solo_se_tocca` si accende solo se il diff del branch tocca uno di
 # quei percorsi; senza il campo è sempre acceso. La CI

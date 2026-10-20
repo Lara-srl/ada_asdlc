@@ -200,6 +200,10 @@ USCITE: dict[str, tuple[str, str]] = {
     "dry-run": ("saltato", "dry-run: il prompt a schermo, nessun giro"),
     "albero-sporco-all-ingresso": ("fermato",
                                    "albero di lavoro sporco: committa o pulisci prima"),
+    # La pre-verifica (PBI-522): un rilievo si corregge nel PBI; un Lettore senza
+    # `letto` no, e il tick lo riprende come un limite d'uso. Nessuno dei due va al Solver.
+    "preverifica": ("fermato", "pre-verifica: il PBI ha dei rilievi prima del ramo"),
+    "lettore-senza-esito": ("senza esito", "il lettore non ha fatto nessuna chiamata valida"),
     "origin-muto": ("fermato", "il ramo non è nato"),
     # Il Builder.
     "builder-senza-esito": ("senza esito", "il builder non ha fatto nessuna chiamata valida"),
@@ -514,6 +518,11 @@ class Esito:
     # Le riprese dopo il limite d'uso fatte per questo PBI, contando quelle dei
     # rapporti di prima: il tetto lo applica il tick (PBI-519, decisione 8).
     riprese_limite: int = 0
+    # Dopo un `preverifica`: lo sha del blob del file del PBI che la pre-verifica ha
+    # letto, e quanti rilievi ha trovato. Il tick non rilancia il PBI finché su `main`
+    # lo sha è lo stesso (PBI-522, decisioni 4 e 6).
+    sha_pbi: str = ""
+    rilievi_preverifica: int = 0
 
 
 def distribuzione_del_runner() -> importlib.metadata.Distribution:
@@ -4198,22 +4207,16 @@ def lettura_del_lettore(percorso: str, base: str,
     return "letto", rilievi + dalle_sonde, sonde, guasti
 
 
-def preverifica(pbi: str, lettore: bool = False) -> int:
-    """`asdlc-runner PBI-N --preverifica` (PBI-520, decisioni 1, 7 e 8): legge il PBI
-    alla base del giro e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`. Esce 1 se c'è
-    un rilievo, 0 altrimenti: gli avvisi non contano. Non crea rami né commit e non
-    cambia la fase. Il rapporto non ha `esiti`, e i lettori dei rapporti lo ignorano.
+def scrivi_la_preverifica(pbi: str, base: str, percorso: str, run: str,
+                          lettore: bool) -> tuple[Path, dict, list[Rilievo]]:
+    """Legge il PBI `percorso` alla `base` e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`
+    (PBI-520, decisioni 1, 7 e 8): rende il rapporto, il suo contenuto e i rilievi. La
+    usano `--preverifica` e il giro (PBI-522). Il rapporto non ha `esiti`, e i lettori
+    dei rapporti lo ignorano.
 
-    Con `lettore` (`--lettore`, PBI-521) legge anche il Lettore e ne esegue le sonde: i
-    suoi rilievi e quelli delle sonde vanno nella stessa lista, e il rapporto dice in
-    `lettore` come è finita la lettura (`null` senza `--lettore`) e in `sonde` gli esiti.
-    Una lettura `senza esito` esce 1 anche senza rilievi."""
-    base, _ = base_del_giro()
-    file = trova_pbi(pbi, base)
-    if file is None:
-        print(f"{pbi}: alla base {base[:10]} non c'è il file del PBI.")
-        return 2
-    percorso = file.relative_to(REPO).as_posix()
+    Con `lettore` (PBI-521) legge anche il Lettore e ne esegue le sonde: i suoi rilievi e
+    quelli delle sonde vanno nella stessa lista, e il rapporto dice in `lettore` come è
+    finita la lettura (`null` senza Lettore) e in `sonde` gli esiti."""
     testo = git("show", f"{base}:{percorso}")
     rilievi = forma_del_pbi(testo, pbi)
     avvisi = avvisi_della_base(testo, pbi, base)
@@ -4224,10 +4227,9 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
                                                                              avvisi)
         rilievi += dal_lettore
         avvisi += guasti + criteri_senza_sonda(testo, sonde)
-    run = datetime.now().strftime("%Y%m%d-%H%M%S")
     LOG_DIR.mkdir(exist_ok=True)
     rapporto = LOG_DIR / f"{run}-{pbi}-preverifica.json"
-    rapporto.write_text(json.dumps({
+    contenuto = {
         "pbi": pbi,
         "base": base,
         "sha_pbi": git("rev-parse", f"{base}:{percorso}"),
@@ -4236,7 +4238,29 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
         "avvisi": avvisi,
         "lettore": stato_della_lettura,
         "sonde": sonde,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }
+    rapporto.write_text(json.dumps(contenuto, ensure_ascii=False, indent=2), encoding="utf-8")
+    return rapporto, contenuto, rilievi
+
+
+def preverifica(pbi: str, lettore: bool = False) -> int:
+    """`asdlc-runner PBI-N --preverifica` (PBI-520, decisioni 1, 7 e 8): legge il PBI
+    alla base del giro e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`. Esce 1 se c'è
+    un rilievo, 0 altrimenti: gli avvisi non contano. Non crea rami né commit e non
+    cambia la fase.
+
+    Con `lettore` (`--lettore`, PBI-521) legge anche il Lettore e ne esegue le sonde.
+    Una lettura `senza esito` esce 1 anche senza rilievi."""
+    base, _ = base_del_giro()
+    file = trova_pbi(pbi, base)
+    if file is None:
+        print(f"{pbi}: alla base {base[:10]} non c'è il file del PBI.")
+        return 2
+    run = datetime.now().strftime("%Y%m%d-%H%M%S")
+    rapporto, contenuto, rilievi = scrivi_la_preverifica(
+        pbi, base, file.relative_to(REPO).as_posix(), run, lettore)
+    sonde, avvisi = contenuto["sonde"], contenuto["avvisi"]
+    stato_della_lettura = contenuto["lettore"]
     for s in sonde:
         print(f"  sonda del criterio {s['criterio']}: {s['file']}::{s['nome']} → {s['esito']}")
     for r in rilievi:
@@ -4321,6 +4345,19 @@ def esegui_pbi(
     # l'eccezione era la toppa. `ADR-0020` ha tolto la causa — il registro esce
     # dai branch — quindi torna a valere la regola intera: ciò che non è
     # committato non esiste, e non si parte sopra al lavoro di qualcun altro.
+
+    # La pre-verifica (PBI-522, `ADR-0031` decisione 4): prima dell'inventario e del
+    # ramo, sul PBI alla base. Con un rilievo il giro chiude qui, senza ramo, commit, PR
+    # né Solver: il rimedio è correggere il PBI. Una ripresa non la rifà: il PBI è già
+    # passato da qui, e il suo ramo c'è già.
+    if CFG.preverifica.attiva and not riprendi:
+        rapporto, letto, rilievi = scrivi_la_preverifica(
+            pbi, base, pbi_path.relative_to(REPO).as_posix(), run, lettore=False)
+        if rilievi:
+            return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
+                                rilievi_preverifica=len(rilievi)),
+                          "preverifica", f"rilievi: {len(rilievi)}, nel rapporto {rapporto}")
+
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
               base=base)
     t0 = time.monotonic()
