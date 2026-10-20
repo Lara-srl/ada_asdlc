@@ -138,7 +138,8 @@ una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («n
 rapporto aggiunge `lettore` (`letto`, `senza esito`, oppure `null` senza `--lettore`) e
 `sonde` (criterio, file, nome, esito); i rilievi del Lettore e delle sonde stanno nella stessa
 lista `rilievi`. Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano
-nel rapporto marcati `"lettore": "senza esito"`, e le sonde non si eseguono.
+nel rapporto marcati `"lettore": "senza esito"`, e le sonde non si eseguono. Il comando esce 1
+con un rilievo, oppure con `senza esito`.
 
 ### Il rilascio a tick
 

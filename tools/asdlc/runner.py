@@ -4160,7 +4160,8 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
 
     Con `lettore` (`--lettore`, PBI-521) legge anche il Lettore e ne esegue le sonde: i
     suoi rilievi e quelli delle sonde vanno nella stessa lista, e il rapporto dice in
-    `lettore` come è finita la lettura (`null` senza `--lettore`) e in `sonde` gli esiti."""
+    `lettore` come è finita la lettura (`null` senza `--lettore`) e in `sonde` gli esiti.
+    Una lettura `senza esito` esce 1 anche senza rilievi."""
     base, _ = base_del_giro()
     file = trova_pbi(pbi, base)
     if file is None:
@@ -4194,8 +4195,10 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
         print(f"  rilievo ({r.domanda}): {r.testo}")
     for a in avvisi:
         print(f"  avviso: {a}")
+    if stato_della_lettura == "senza esito":
+        print("  il Lettore non ha chiamato letto: la lettura è senza esito")
     print(f"{pbi}: {len(rilievi)} rilievi, {len(avvisi)} avvisi. Rapporto: {rapporto}")
-    return 1 if rilievi else 0
+    return 1 if rilievi or stato_della_lettura == "senza esito" else 0
 
 
 def salva_il_traceback(pbi: str) -> Path:
