@@ -225,3 +225,13 @@ def test_senza_letto_la_lettura_e_senza_esito_coi_rilievi_e_senza_sonde(tmp_path
     assert rapporto["lettore"] == "senza esito"
     assert rapporto["rilievi"] == [{**rilievo, "lettore": "senza esito"}]
     assert rapporto["sonde"] == []
+
+
+def test_senza_letto_e_senza_rilievi_il_comando_esce_1(tmp_path, monkeypatch):
+    """Decisione 7: il comando esce 1 con un rilievo, oppure con `senza esito`. Una
+    lettura che non ha chiamato niente non dice che il PBI è pronto."""
+    codice, rapporto, _, _, _ = preverifica_col_lettore(
+        tmp_path, monkeypatch, DUE_CRITERI, {}, [], letto=False)
+
+    assert (rapporto["lettore"], rapporto["rilievi"]) == ("senza esito", [])
+    assert codice == 1
