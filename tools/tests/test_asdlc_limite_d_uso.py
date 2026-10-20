@@ -422,3 +422,19 @@ class TestIlTickRiprendeDopoIlReset:
         assert "PBI-519 --riprendi" in capsys.readouterr().out, (
             "la riga del log dice che il lancio è una ripresa"
         )
+
+
+class TestIlTettoDelleRiprese:
+    """Criterio 8, decisione 8: il runner conta le riprese, il tick decide. Con
+    `riprese_limite` a 3 nell'ultimo rapporto il tick non riprende, e il PBI
+    attende una persona come prima."""
+
+    def test_alla_terza_ripresa_il_tick_attende_una_persona(self, monkeypatch, tmp_path):
+        repo, albero = tick_col_rapporto(monkeypatch, tmp_path, "PBI-519",
+                                         datetime(2026, 10, 16, 20, 0),
+                                         riprendi_dopo="2026-10-16T19:55", riprese_limite=3)
+
+        decisione = coda.decidi(repo, albero)
+
+        assert decisione == coda.Attende("PBI-519"), "oltre tre riprese interviene una persona"
+        assert coda.racconta(decisione).startswith("attende: PBI-519 ha un ramo su origin")
