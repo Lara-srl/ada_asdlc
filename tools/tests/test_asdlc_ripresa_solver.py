@@ -177,3 +177,20 @@ def test_dopo_la_ripresa_il_giro_arriva_a_fatto_e_la_guardia_del_solver_gira(gir
     assert agente.critic == ["pass"]
     assert chiusure == ["chiusa"]
     assert esito.guardia.startswith("## Guardia di processo")
+
+
+def test_il_tetto_dei_giri_solver_ferma_il_ciclo_dentro_lo_stesso_giro(giro, monkeypatch):
+    """Criterio 6: con `giri_massimi = 2` il Solver parte due volte e il Builder è ripreso
+    due volte; al terzo `fermati` il Solver non parte e il giro chiude `fermato` con
+    l'avviso del tetto. Il Solver finto smette di rispondere dopo quattro chiamate, così che
+    senza il contatore in memoria il test finisca e fallisca per asserzione."""
+    import dataclasses
+    monkeypatch.setattr(runner, "CFG", dataclasses.replace(
+        runner.CFG, solver=dataclasses.replace(runner.CFG.solver, giri_massimi=2)))
+
+    esito, agente = giro({"builder": [fermati("e adesso?")] * 10, "solver": [RISOLTO] * 4})
+
+    assert len(comandi_di(agente, "solver")) == 2
+    assert len(comandi_di(agente, "builder")) == 3
+    assert esito.stato == "fermato"
+    assert "tetto dei giri del Solver" in esito.nota
