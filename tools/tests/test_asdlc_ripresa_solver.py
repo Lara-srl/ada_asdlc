@@ -122,3 +122,20 @@ def test_la_ripresa_continua_la_sessione_dell_ultima_invocazione_del_builder(gir
     assert ripresa.count("--session-id") == 1
     assert ripresa[ripresa.index("--session-id") + 1] == sessioni[2]
     assert "-c" not in ripresa
+
+
+def test_il_prompt_della_ripresa_porta_domanda_e_risposta_da_valutare(giro):
+    """Criterio 3: il prompt della ripresa ha la domanda del Builder, la risposta del Solver
+    con la sua evidenza nel blocco «da valutare», e le graffe della risposta restano com'erano
+    (la risposta è un valore di `.format()`, non il template)."""
+    risposta = {"esito": "risolto", "risposta": "scrivi {\"chiave\": {valore}} nel dict",
+                "evidenza": "specs/solver-e-rilascio/spec.md"}
+
+    giro({"builder": [fermati("che forma ha {la voce}?"), FATTO], "solver": [risposta]})
+
+    prompt = sorted(runner.LOG_DIR.glob("*_builder_prompt.txt"))[1].read_text(encoding="utf-8")
+    assert "che forma ha {la voce}?" in prompt
+    da_valutare = prompt[prompt.index("da valutare"):]
+    assert "scrivi {\"chiave\": {valore}} nel dict" in da_valutare
+    assert "specs/solver-e-rilascio/spec.md" in da_valutare
+    assert "riprendi da dove ti sei fermato, nella fase in cui sei" in prompt
