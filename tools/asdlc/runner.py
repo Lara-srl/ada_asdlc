@@ -4117,13 +4117,16 @@ def esegui_pbi(
             # valere il tetto dei gate **fra** le revisioni, e alla terza il Builder non avrebbe
             # più un giro. È lo stesso equivoco che ADR-0015 ha già tolto una volta.
             gate_falliti = igiene = 0
+            # Il comando della ripresa dopo un `risolto` del Solver, per la sola invocazione
+            # che segue: poi i rilanci tornano a `-c` (PBI-517, decisione 6).
+            ripresa: list[str] | None = None
             while gate_falliti < MAX_TENTATIVI:
                 print(f"  builder — giro {e.tentativi + igiene + 1}")
                 # Scrive il prompt su file per evitare limiti di lunghezza degli argomenti CLI
                 prompt_file, file_esito = file_dell_invocazione("builder")
                 prompt_file.write_text(prompt, encoding="utf-8")
-                cmd = BUILDER + ([] if primo_del_giro else ["-c"])
-                primo_del_giro = False
+                cmd = ripresa or BUILDER + ([] if primo_del_giro else ["-c"])
+                primo_del_giro, ripresa = False, None
                 with misura(e, "builder"):
                     invocazione = invoca_agente("builder", cmd, prompt_file, file_esito)
                 e.invocazioni.append(invocazione.registro)
@@ -4144,6 +4147,10 @@ def esegui_pbi(
                     risposta = smista("domanda-del-builder", una_riga(e.domanda))
                     if risposta is None or risposta["esito"] != "risolto":
                         return "domanda-del-builder", una_riga(e.domanda)
+                    # La sessione del Builder che ha chiamato `fermati`, e non `-c`: l'ultima
+                    # sessione dell'albero è quella del Solver. `--session-id` e
+                    # `--fork-session` li aggiunge `invoca_agente()`.
+                    ripresa = BUILDER + ["--resume", invocazione.registro["sessione"]]
                     continue
 
                 # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando

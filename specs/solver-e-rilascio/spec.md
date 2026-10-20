@@ -33,7 +33,13 @@ Il `fermati` del Builder va al Solver dentro il giro, non alla sua chiusura. Se 
 risponde `risolto` il Builder riprende nello stesso giro, e il giro prosegue fino al suo esito
 (gate, Critic, `fatto` o un'altra uscita); un secondo `fermati` torna al Solver. Ogni altro
 esito del Solver (`limite-del-runner`, `intento`, nessuna chiamata) e un Solver che non parte
-o si guasta chiudono il giro `fermato` come prima. Gli altri blocchi (`builder-senza-esito`,
+o si guasta chiudono il giro `fermato` come prima.
+
+Il Builder riprende dalla **sua** sessione: `--resume <sessione>` con la sessione
+dell'invocazione che ha chiamato `fermati` (il campo `sessione` del rapporto), e non `-c`, che
+continuerebbe l'ultima sessione dell'albero, cioè quella del Solver. `--fork-session` e il
+`--session-id` nuovo li aggiunge il runner a ogni invocazione (`PBI-511`, `PBI-513`). La ripresa
+non conta come tentativo sui gate; i rilanci dopo un gate rosso tornano a `-c`. Gli altri blocchi (`builder-senza-esito`,
 `domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
 riprendono.
 
