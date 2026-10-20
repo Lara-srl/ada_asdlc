@@ -107,3 +107,23 @@ class TestLHookLasciaPassareIlWriteDiUnoScheletro:
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(dato)))
 
         assert runner.stampa_la_guardia_di_fase() == uscita
+
+
+class TestIlCommentoDipendeDallEstensione:
+    """Criterio 9: il segno del commento è quello del linguaggio del file (decisione
+    5). Un commento col segno sbagliato non è un commento, e il file resta chiuso."""
+
+    @pytest.mark.parametrize("percorso, contenuto, passa", [
+        ("tools/migrazione/x.py", "# x\n", True),
+        ("db/V9__x.sql", "# x\n", False),
+        (MIGRAZIONE, "-- x\n", False),
+        ("web/src/x.ts", "// x\n\n// y\n", True),
+        ("web/src/x.ts", "# x\n", False),
+        ("app/src/main/java/it/x/Foo.java", "/*\n * x\n */\n// y\n", True),
+        ("app/src/main/java/it/x/Foo.java", "/* x */ class Foo {}\n", False),
+    ], ids=["py-cancelletto", "sql-cancelletto", "sh-trattini", "ts-barre",
+            "ts-cancelletto", "java-blocco", "java-blocco-con-codice"])
+    def test_il_segno_del_commento_e_del_linguaggio(self, percorso, contenuto, passa):
+        ragione = runner.guardia_di_fase(runner.FASE_TEST_ONLY, percorso, contenuto)
+
+        assert (ragione is None) is passa
