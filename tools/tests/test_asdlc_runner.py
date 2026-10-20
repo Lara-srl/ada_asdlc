@@ -8449,9 +8449,12 @@ class TestITettiDelleChiamateVengonoDaAsdlcToml:
 
 
 # Un agente vero che scrive sui due flussi e dichiara `fatto` nel suo file d'esito,
-# accanto alla config MCP, che arriva in `$2`.
+# accanto alla config MCP. La config si cerca per nome, dopo `--mcp-config`, e mai
+# per posizione: i flag che il runner aggiunge davanti la spostano (PBI-518). La
+# config del giro sta nella `LOG_DIR` temporanea di `log_dir_temporanea`.
 AGENTE_CHE_DICHIARA = (
     'echo "uscita parziale"; echo "errore parziale" >&2; '
+    'while [ "$#" -gt 0 ] && [ "$1" != --mcp-config ]; do shift; done; '
     'echo \'{"esito": "fatto", "verdetto": "pass", "riepilogo": "fatto"}\' '
     '> "${2%.mcp.json}.json"'
 )
