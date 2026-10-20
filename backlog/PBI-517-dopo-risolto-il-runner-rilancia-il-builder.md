@@ -135,26 +135,26 @@ si passerebbe sempre dal percorso «riparti pulito». Serve un agente finto **co
 la guardia per ogni motivo finale al 5, il contatore in memoria della decisione 9 al 6. Nel criterio 5 il
 rosso atteso è solo `e.guardia`.
 
-- [ ] **Dopo `risolto` il Builder è ripreso.** Il Builder finto chiama `fermati`, il Solver finto
+- [x] **Dopo `risolto` il Builder è ripreso.** Il Builder finto chiama `fermati`, il Solver finto
       `risolto`: `esegui_pbi()` lancia il Builder una seconda volta e non chiude `fermato` (pytest).
-- [ ] **Il comando della ripresa usa la sessione dell'ultima invocazione del Builder, non `-c`.**
+- [x] **Il comando della ripresa usa la sessione dell'ultima invocazione del Builder, non `-c`.**
       Contiene `--resume <sessione dell'ultima invocazione builder>`, `--fork-session` e un
       `--session-id` nuovo, **ognuno una volta sola**, e **non** `-c`. Provato con un gate rosso prima del `fermati`, in modo che
       l'ultima invocazione non sia la prima (pytest).
-- [ ] **Il prompt della ripresa porta domanda e risposta**, anche con graffe nel testo della risposta,
+- [x] **Il prompt della ripresa porta domanda e risposta**, anche con graffe nel testo della risposta,
       nel blocco «da valutare» (pytest).
-- [ ] **Senza traccia si riparte pulito e si avvisa.** Con `traccia` `None` la seconda invocazione non ha
+- [x] **Senza traccia si riparte pulito e si avvisa.** Con `traccia` `None` la seconda invocazione non ha
       `--resume`, il prompt ha il PBI, e l'avviso è nel rapporto (pytest).
-- [ ] **Il giro prosegue fino al suo esito e la guardia gira.** Dopo la ripresa il Builder finto
+- [x] **Il giro prosegue fino al suo esito e la guardia gira.** Dopo la ripresa il Builder finto
       chiama `fatto`: gate e Critic girano, il giro chiude `fatto` con una sola chiusura, e `e.guardia` è
       valorizzata (pytest).
-- [ ] **Il tetto ferma il ciclo dentro lo stesso giro.** Con `giri_massimi = 2`, un Builder che chiama
+- [x] **Il tetto ferma il ciclo dentro lo stesso giro.** Con `giri_massimi = 2`, un Builder che chiama
       sempre `fermati` e un Solver che risponde `risolto` solo alle prime quattro chiamate e poi non
       chiama niente, il Solver è chiamato due volte, il Builder due volte ripreso, poi il giro chiude
       `fermato` con l'avviso del tetto (pytest). Così al RED il test termina e fallisce per asserzione
       (cinque chiamate al Solver invece di due) e non gira fino al tetto dei test: nei test `LOG_DIR`
       non ha rapporti, e senza il contatore in memoria il ciclo non finisce.
-- [ ] **Gli altri esiti non riprendono.** Con `limite-del-runner`, `intento`, `builder-senza-esito` e
+- [x] **Gli altri esiti non riprendono.** Con `limite-del-runner`, `intento`, `builder-senza-esito` e
       `domanda-del-critic` il Builder non è rilanciato. **Nato verde su `main`, per costruzione**: la
       guardia si committa da sola, senza `--chiedi-impl`, con `Guardia-su: tools/asdlc/runner.py::esegui_pbi`
       (la regola di `tools/asdlc/prompt/builder.md`), e deve mordere (pytest, parametrizzato). Nel caso
@@ -168,8 +168,8 @@ rosso atteso è solo `e.guardia`.
       l'asserzione del test esistente, che resta).~~ **Senza test nuovo (20/10):** è già vero su `main`
       (il `try` attorno a `smista_il_blocco()` in `esegui_pbi`) e un test nuovo nascerebbe verde,
       `rosso-mai-visto`. Lo copre `test_un_guasto_del_solver_non_salta_la_chiusura_del_giro`, che dopo
-      questo PBI attraversa il ciclo dentro `giro()`: si spunta quando la suite è verde.
-- [ ] **Il rapporto conta le riprese.** `riprese_solver` e `giri_solver` sono nel JSON del giro, e le
+      questo PBI attraversa il ciclo dentro `giro()`: si spunta quando la suite è verde. **Spuntato (20/10):** la suite è verde e il test passa dal ciclo dentro `giro()`.
+- [x] **Il rapporto conta le riprese.** `riprese_solver` e `giri_solver` sono nel JSON del giro, e le
       invocazioni delle riprese sono in `invocazioni` (pytest).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde; un giro che non si ferma, e un
