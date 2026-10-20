@@ -4347,13 +4347,15 @@ def esegui_pbi(
     # Un `senza esito` per il limite d'uso con l'ora del reset leggibile non ha niente
     # da decidere: il tick aspetta il reset e riprende, e il Solver non parte
     # (PBI-519, decisione 4).
-    if motivo in BLOCCHI and not e.riprendi_dopo:
-        # Il `fermati` del Builder il Solver lo ha già smistato dentro `giro()`, e una
-        # seconda chiamata qui lo farebbe girare due volte (PBI-517, decisione 2). Gli
-        # altri blocchi si smistano qui, una volta, e non riprendono.
-        if motivo != "domanda-del-builder":
-            smista(motivo, dettaglio)
-        guardia_del_solver(e, dichiara=dichiara)
+    # Il `fermati` del Builder il Solver lo ha già smistato dentro `giro()`, e una
+    # seconda chiamata qui lo farebbe girare due volte (PBI-517, decisione 2). Gli
+    # altri blocchi si smistano qui, una volta, e non riprendono.
+    if motivo in BLOCCHI and motivo != "domanda-del-builder" and not e.riprendi_dopo:
+        smista(motivo, dettaglio)
+    # La guardia gira ogni volta che il Solver ha scritto, qualunque sia il motivo
+    # finale: dopo una ripresa può essere `fatto` (PBI-517, decisione 3). Senza
+    # Solver `guardia_del_solver()` non scrive niente.
+    guardia_del_solver(e, dichiara=dichiara)
     try:
         chiudi(motivo, dettaglio)
     except Exception as guasto:  # noqa: BLE001

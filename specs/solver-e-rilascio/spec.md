@@ -52,7 +52,10 @@ rapporto): `sessione` c'è sempre, e un `--resume` su una sessione assente falli
 traccia il Builder riparte da una sessione nuova (né `--resume` né `-c`) con un prompt che porta
 il PBI, la domanda e la risposta, e il giro lo dichiara con un avviso nella nota (`ADR-0008`). Il
 prompt dice dove rileggere il lavoro fatto e i rilievi del Critic: `git log` e il rapporto del
-Critic in `runs/`. Gli altri blocchi (`builder-senza-esito`,
+Critic in `runs/`.
+
+La guardia di processo (R13) gira alla chiusura di ogni giro in cui il Solver ha scritto, qualunque
+sia il motivo finale: dopo una ripresa può essere `fatto`, `gate-rossi` o `revisioni-esaurite`. Gli altri blocchi (`builder-senza-esito`,
 `domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
 riprendono.
 
