@@ -1,0 +1,307 @@
+package it.lais.interventi.db;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+/**
+ * Il trigger dei guasti di specs/database §2: ogni modifica di un componente ricalcola il suo sito.
+ * I test committano davvero (il caso della concorrenza lo richiede) e ripuliscono i propri dati.
+ */
+@Testcontainers
+@SpringBootTest(webEnvironment = WebEnvironment.NONE,
+        properties = "spring.flyway.locations=filesystem:../db")
+class TriggerGuastiIT {
+
+    @Container
+    @ServiceConnection
+    static final PostgreSQLContainer<?> postgis = new PostgreSQLContainer<>(
+            DockerImageName.parse("postgis/postgis:16-3.4").asCompatibleSubstituteFor("postgres"));
+
+    @Autowired
+    JdbcClient jdbc;
+
+    @Autowired
+    DataSource dataSource;
+
+    @AfterEach
+    void pulisci() {
+        jdbc.sql("DELETE FROM interventi.sito_priorita_log").update();
+        jdbc.sql("DELETE FROM interventi.episodio_guasto").update();
+        jdbc.sql("DELETE FROM interventi.componente").update();
+        jdbc.sql("DELETE FROM interventi.sito").update();
+    }
+
+    long creaSito(String codice) {
+        return jdbc.sql("INSERT INTO interventi.sito (codice, comune, tipo_intervento, geom) "
+                + "VALUES (:codice, 'Rezzato', 'LT', ST_SetSRID(ST_MakePoint(10, 45), 4326)) RETURNING id")
+                .param("codice", codice).query(Long.class).single();
+    }
+
+    long creaComponente(String codice, long sitoId, String stato) {
+        return jdbc.sql("INSERT INTO interventi.componente (codice, sito_id, tipo_apparato, stato) "
+                + "VALUES (:codice, :sito, 'ONT', :stato) RETURNING id")
+                .param("codice", codice).param("sito", sitoId).param("stato", stato)
+                .query(Long.class).single();
+    }
+
+    void impostaStato(long componenteId, String stato) {
+        jdbc.sql("UPDATE interventi.componente SET stato = :stato WHERE id = :id")
+                .param("stato", stato).param("id", componenteId).update();
+    }
+
+    Map<String, Object> sito(long sitoId) {
+        return jdbc.sql("SELECT guasto, stato_intervento, priorita FROM interventi.sito WHERE id = :id")
+                .param("id", sitoId).query().singleRow();
+    }
+
+    int episodiAperti(long sitoId) {
+        return jdbc.sql("SELECT count(*) FROM interventi.episodio_guasto "
+                + "WHERE sito_id = :id AND chiuso_il IS NULL")
+                .param("id", sitoId).query(Integer.class).single();
+    }
+
+    @Test
+    void unComponentePianificabileGuastoApreIlSitoEUnEpisodio() {
+        long sito = creaSito("T1");
+        long c1 = creaComponente("T1-A", sito, "RISOLTO");
+        creaComponente("T1-B", sito, "RISOLTO");
+
+        impostaStato(c1, "GUASTO");
+
+        assertThat(sito(sito)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "APERTO");
+        assertThat(episodiAperti(sito)).isEqualTo(1);
+    }
+
+    /** D2: l'ultimo componente riparato chiude l'episodio, ne registra la priorità e azzera il sito. */
+    @Test
+    void lUltimoComponenteRiparatoChiudeIlSito() {
+        long sito = creaSito("T3");
+        long c1 = creaComponente("T3-A", sito, "GUASTO");
+        creaComponente("T3-B", sito, "RISOLTO");
+        jdbc.sql("UPDATE interventi.sito SET priorita = 2 WHERE id = :id").param("id", sito).update();
+
+        impostaStato(c1, "RISOLTO");
+
+        assertThat(sito(sito)).containsEntry("guasto", 0)
+                .containsEntry("stato_intervento", "NESSUNO")
+                .containsEntry("priorita", 0);
+        assertThat(episodiAperti(sito)).isZero();
+        assertThat(jdbc.sql("SELECT priorita_finale FROM interventi.episodio_guasto WHERE sito_id = :id")
+                .param("id", sito).query(Integer.class).single()).isEqualTo(2);
+    }
+
+    @Test
+    void unComponenteSpostatoSuUnAltroSitoRicalcolaEntrambiISiti() {
+        long origine = creaSito("T4-A");
+        long destinazione = creaSito("T4-B");
+        long guasto = creaComponente("T4-1", origine, "GUASTO");
+        creaComponente("T4-2", destinazione, "RISOLTO");
+
+        jdbc.sql("UPDATE interventi.componente SET sito_id = :sito WHERE id = :id")
+                .param("sito", destinazione).param("id", guasto).update();
+
+        assertThat(sito(origine)).containsEntry("guasto", 0);
+        assertThat(episodiAperti(origine)).isZero();
+        assertThat(sito(destinazione)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "APERTO");
+        assertThat(episodiAperti(destinazione)).isEqualTo(1);
+    }
+
+    @Test
+    void unComponenteCancellatoRicalcolaIlSuoSito() {
+        long sito = creaSito("T5");
+        long guasto = creaComponente("T5-A", sito, "GUASTO");
+        creaComponente("T5-B", sito, "RISOLTO");
+
+        jdbc.sql("DELETE FROM interventi.componente WHERE id = :id").param("id", guasto).update();
+
+        assertThat(sito(sito)).containsEntry("guasto", 0)
+                .containsEntry("stato_intervento", "NESSUNO");
+        assertThat(episodiAperti(sito)).isZero();
+    }
+
+    /** D1: un sito con soli componenti guasti non pianificabili è guasto ma SOSPESO. */
+    @ParameterizedTest
+    @ValueSource(strings = {"SCALATO", "SOSPESO_MISTO", "PREVENTIVO"})
+    void unSitoConSoliGuastiNonPianificabiliESospeso(String stato) {
+        long sito = creaSito("T2");
+        long c1 = creaComponente("T2-A", sito, "RISOLTO");
+        creaComponente("T2-B", sito, "RISOLTO");
+
+        impostaStato(c1, stato);
+
+        assertThat(sito(sito)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "SOSPESO");
+    }
+
+    /** Il sito resta guasto ma cambia cosa il solver può fare: APERTO → SOSPESO senza chiudere l'episodio. */
+    @Test
+    void unSitoApertoChePerdeIlSuoUnicoGuastoPianificabileDiventaSospeso() {
+        long sito = creaSito("T7");
+        long c1 = creaComponente("T7-A", sito, "GUASTO");
+        creaComponente("T7-B", sito, "RISOLTO");
+
+        impostaStato(c1, "PREVENTIVO");
+
+        assertThat(sito(sito)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "SOSPESO");
+        assertThat(episodiAperti(sito)).isEqualTo(1);
+    }
+
+    /** SOSPESO → APERTO: lo stesso episodio e lo stesso guasto_dal, non un nuovo guasto. */
+    @Test
+    void unSitoSospesoCuiSiAggiungeUnGuastoPianificabileDiventaApertoNellStessoEpisodio() {
+        long sito = creaSito("T8");
+        creaComponente("T8-A", sito, "PREVENTIVO");
+        long c2 = creaComponente("T8-B", sito, "RISOLTO");
+        jdbc.sql("UPDATE interventi.sito SET guasto_dal = current_date - 5 WHERE id = :id")
+                .param("id", sito).update();
+        long episodio = jdbc.sql("SELECT id FROM interventi.episodio_guasto WHERE sito_id = :id")
+                .param("id", sito).query(Long.class).single();
+
+        impostaStato(c2, "GUASTO");
+
+        assertThat(sito(sito)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "APERTO");
+        assertThat(jdbc.sql("SELECT guasto_dal = current_date - 5 FROM interventi.sito WHERE id = :id")
+                .param("id", sito).query(Boolean.class).single()).isTrue();
+        assertThat(jdbc.sql("SELECT id FROM interventi.episodio_guasto WHERE sito_id = :id")
+                .param("id", sito).query(Long.class).list()).containsExactly(episodio);
+    }
+
+    /** §2.1, terza riga: la sospensione decisa dall'ufficio rende SOSPESO anche un sito con guasti pianificabili. */
+    @Test
+    void laSospensioneManualeRendeSospesoUnSitoGuastoEToltaLoRiapre() {
+        long sito = creaSito("T9");
+        creaComponente("T9-A", sito, "GUASTO");
+
+        jdbc.sql("UPDATE interventi.sito SET sospeso_manuale = true, "
+                + "motivo_sospensione = 'accesso negato' WHERE id = :id").param("id", sito).update();
+
+        assertThat(sito(sito)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "SOSPESO");
+        assertThat(episodiAperti(sito)).isEqualTo(1);
+
+        jdbc.sql("UPDATE interventi.sito SET sospeso_manuale = false WHERE id = :id")
+                .param("id", sito).update();
+
+        assertThat(sito(sito)).containsEntry("guasto", 1)
+                .containsEntry("stato_intervento", "APERTO");
+        assertThat(episodiAperti(sito)).isEqualTo(1);
+    }
+
+    /** QFieldCloud e la vista dei siti da verificare leggono componente.aggiornato_il: ogni UPDATE lo avanza. */
+    @Test
+    void unaModificaDelComponenteAvanzaIlSuoAggiornatoIl() {
+        long sito = creaSito("T10");
+        // aggiornato_il = -1 giorno si imposta in INSERT: un UPDATE di preparazione farebbe scattare il trigger
+        long c1 = jdbc.sql("INSERT INTO interventi.componente (codice, sito_id, tipo_apparato, stato, aggiornato_il) "
+                + "VALUES ('T10-A', :sito, 'ONT', 'RISOLTO', now() - interval '1 day') RETURNING id")
+                .param("sito", sito).query(Long.class).single();
+
+        jdbc.sql("UPDATE interventi.componente SET tecnico = 'Rossi' WHERE id = :id")
+                .param("id", c1).update();
+
+        assertThat(jdbc.sql("SELECT aggiornato_il > now() - interval '1 hour' "
+                + "FROM interventi.componente WHERE id = :id").param("id", c1)
+                .query(Boolean.class).single()).isTrue();
+    }
+
+    /** Il registro delle priorità: una riga a ogni cambio, anche quello azzerato da D2 alla chiusura del guasto. */
+    @Test
+    void ogniCambioDiPrioritaScriveUnaRigaNelRegistroAncheQuelloAzzeratoDaD2() {
+        long sito = creaSito("T11");
+        long c1 = creaComponente("T11-A", sito, "GUASTO");
+
+        jdbc.sql("UPDATE interventi.sito SET priorita = 2 WHERE id = :id").param("id", sito).update();
+        impostaStato(c1, "RISOLTO");
+
+        assertThat(jdbc.sql("SELECT priorita_da || '>' || priorita_a FROM interventi.sito_priorita_log "
+                + "WHERE sito_id = :id ORDER BY id").param("id", sito).query(String.class).list())
+                .containsExactly("0>2", "2>0");
+    }
+
+    /**
+     * Due transazioni chiudono i due componenti guasti dello stesso sito. La seconda deve aspettare il
+     * lock del sito preso dalla prima: il test lo verifica da pg_stat_activity, senza sleep, e solo
+     * dopo conferma la prima. A commit avvenuti il sito deve essere guasto = 0 (specs/database §2.3).
+     */
+    @Test
+    void dueTransazioniCheChiudonoIDueComponentiLascianoIlSitoFunzionante() throws Exception {
+        long sito = creaSito("T6");
+        long a = creaComponente("T6-A", sito, "GUASTO");
+        long b = creaComponente("T6-B", sito, "GUASTO");
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try (Connection t1 = dataSource.getConnection(); Connection t2 = dataSource.getConnection()) {
+            t1.setAutoCommit(false);
+            t2.setAutoCommit(false);
+            int pidT2 = pidDi(t2);
+            chiudi(t1, a);
+
+            Future<?> seconda = executor.submit(() -> {
+                chiudi(t2, b);
+                t2.commit();
+                return null;
+            });
+            long limite = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (!seconda.isDone() && !inAttessaDiLock(pidT2)) {
+                assertThat(System.nanoTime()).as("T2 non è né finita né in attesa del lock").isLessThan(limite);
+                Thread.onSpinWait();
+            }
+            t1.commit();
+            seconda.get(10, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(sito(sito)).containsEntry("guasto", 0)
+                .containsEntry("stato_intervento", "NESSUNO");
+        assertThat(episodiAperti(sito)).isZero();
+    }
+
+    private static void chiudi(Connection connessione, long componenteId) throws SQLException {
+        try (PreparedStatement ps = connessione.prepareStatement(
+                "UPDATE interventi.componente SET stato = 'RISOLTO' WHERE id = ?")) {
+            ps.setLong(1, componenteId);
+            ps.executeUpdate();
+        }
+    }
+
+    private static int pidDi(Connection connessione) throws SQLException {
+        try (PreparedStatement ps = connessione.prepareStatement("SELECT pg_backend_pid()");
+                ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private boolean inAttessaDiLock(int pid) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                + "WHERE pid = :pid AND wait_event_type = 'Lock')")
+                .param("pid", pid).query(Boolean.class).single();
+    }
+}
