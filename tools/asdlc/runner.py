@@ -4073,14 +4073,19 @@ def esegui_pbi(
               f"critic {hms(e.tempi['critic'])})")
         return e
 
+    contatore_letto = False
+
     def smista(motivo: str, dettaglio: str) -> dict | None:
         """Il blocco al Solver, e l'esito che il Solver ha scritto in questa chiamata; `None`
         se non è partito (il tetto) o non ha scritto niente. Un suo guasto è un avviso
         (`ADR-0008`) e non salta `chiudi()`, che è la strada d'uscita di ogni giro fermato
         (difetto 37)."""
+        nonlocal contatore_letto
         prima = len(e.solver)
         try:
-            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara)
+            # Il contatore si legge da disco una volta per giro (PBI-517, decisione 9).
+            rileggi, contatore_letto = not contatore_letto, True
+            smista_il_blocco(e, pbi_path, motivo, dettaglio, dichiara, rileggi=rileggi)
         except Exception as guasto:  # noqa: BLE001 — si registra, non si tace
             traceback.print_exc()
             e.file_traceback = str(salva_il_traceback(pbi))
@@ -4505,12 +4510,17 @@ def apri_pr_a_monte(dichiarato: dict) -> tuple[str, str]:
 
 
 def smista_il_blocco(e: Esito, pbi_path: Path, motivo: str, dettaglio: str,
-                     dichiara) -> None:
+                     dichiara, rileggi: bool = True) -> None:
     """Lancia il Solver sul blocco di un giro fermato e ne registra l'esito in
     `e.solver` (`PBI-507`, decisione 11). Oltre `[solver].giri_massimi` giri per lo
     stesso PBI non parte, e lo dichiara: avviso e non blocco (`ADR-0008`). A un limite del
-    runner apre il PBI a monte e mette il progetto in attesa (`PBI-512`)."""
-    e.giri_solver = giri_solver_fatti(e.pbi)
+    runner apre il PBI a monte e mette il progetto in attesa (`PBI-512`).
+
+    Il contatore si legge dai rapporti su disco con `rileggi`, cioè alla prima chiamata
+    del giro; dalle successive cresce in `e.giri_solver`, perché il rapporto del giro in
+    corso non ha esiti e non le vedrebbe (`PBI-517`, decisione 9)."""
+    if rileggi:
+        e.giri_solver = giri_solver_fatti(e.pbi)
     if e.giri_solver >= CFG.solver.giri_massimi:
         dichiara(f"avviso: tetto dei giri del Solver raggiunto ({e.giri_solver} di "
                  f"{CFG.solver.giri_massimi}), il Solver non parte")

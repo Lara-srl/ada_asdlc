@@ -55,7 +55,14 @@ prompt dice dove rileggere il lavoro fatto e i rilievi del Critic: `git log` e i
 Critic in `runs/`.
 
 La guardia di processo (R13) gira alla chiusura di ogni giro in cui il Solver ha scritto, qualunque
-sia il motivo finale: dopo una ripresa può essere `fatto`, `gate-rossi` o `revisioni-esaurite`. Gli altri blocchi (`builder-senza-esito`,
+sia il motivo finale: dopo una ripresa può essere `fatto`, `gate-rossi` o `revisioni-esaurite`.
+
+Il tetto delle riprese è quello dei giri del Solver (R12, `[solver].giri_massimi`). Il contatore
+`giri_solver` si legge dai rapporti su disco alla prima chiamata del Solver nel giro e da lì
+cresce in memoria a ogni invocazione: il rapporto del giro in corso non ha esiti, e rileggerlo
+non vedrebbe i giri appena fatti. Conta le invocazioni del Solver, non le riprese: un Solver
+senza esito o `intento` consuma un giro senza riprendere. Raggiunto il tetto il Solver non
+parte e il giro chiude `fermato` con l'avviso. Gli altri blocchi (`builder-senza-esito`,
 `domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
 riprendono.
 
