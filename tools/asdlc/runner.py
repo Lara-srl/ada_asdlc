@@ -3984,6 +3984,59 @@ def trova_pbi(pbi: str, base: str) -> Path | None:
     return REPO / nome if nome else None
 
 
+@dataclass
+class Rilievo:
+    """Un difetto del PBI che la pre-verifica trova prima del giro (PBI-520). I
+    rilievi di forma hanno `domanda = "forma"` e nessun criterio."""
+    domanda: str
+    criterio: int | None
+    testo: str
+    evidenza: str = ""
+
+
+RE_CRITERIO = re.compile(r"^\s*- \[[ x]\]")
+
+
+def sezione_della_verifica(testo: str) -> str | None:
+    """Il corpo della `## Verifica`, fino alla `## ` successiva; `None` se manca."""
+    verifica = re.search(r"^## Verifica\b[^\n]*(.*?)(?=^## |\Z)", testo, re.S | re.M)
+    return verifica.group(1) if verifica else None
+
+
+def criteri_del_pbi(testo: str) -> list[str]:
+    """I testi dei criteri della `## Verifica`, ognuno con le sue righe rientrate
+    (PBI-520, decisione 3). Una riga non vuota col rientro del criterio, o meno,
+    lo chiude."""
+    criteri: list[list[str]] = []
+    aperto, rientro = False, 0
+    for riga in (sezione_della_verifica(testo) or "").splitlines():
+        if RE_CRITERIO.match(riga):
+            criteri.append([riga])
+            aperto, rientro = True, len(riga) - len(riga.lstrip())
+        elif aperto and (not riga.strip() or len(riga) - len(riga.lstrip()) > rientro):
+            criteri[-1].append(riga)
+        elif riga.strip():
+            aperto = False
+    return ["\n".join(c).strip() for c in criteri]
+
+
+def forma_del_pbi(testo: str, pbi: str) -> list[Rilievo]:
+    """I rilievi di forma, senza git (PBI-520, decisione 2): la `Verifica` che
+    manca o non ha criteri, lo **Scope** che manca o non nomina il file del PBI."""
+    rilievi: list[Rilievo] = []
+    if sezione_della_verifica(testo) is None:
+        rilievi.append(Rilievo("forma", None, "manca la sezione `## Verifica`"))
+    elif not criteri_del_pbi(testo):
+        rilievi.append(Rilievo("forma", None, "la `## Verifica` non ha criteri `- [ ]`"))
+    scope = blocco_dello_scope(testo)
+    if scope is None:
+        rilievi.append(Rilievo("forma", None, "manca il blocco **Scope**"))
+    elif not re.search(rf"{re.escape(BACKLOG)}/{re.escape(pbi)}(?!\d)", scope):
+        rilievi.append(Rilievo("forma", None,
+                               f"lo **Scope** non nomina `{BACKLOG}/{pbi}`, il file del PBI"))
+    return rilievi
+
+
 def salva_il_traceback(pbi: str) -> Path:
     """Il traceback dell'eccezione in corso in un file di `LOG_DIR`, accanto al
     log del giro. `.log` perché `runs/*.log` è ignorato da git: un file nuovo in
@@ -4698,6 +4751,14 @@ def controllo_r6(a_monte: AMonte) -> str:
     return "R6: ok"
 
 
+def blocco_dello_scope(testo: str) -> str | None:
+    """Le righe del blocco `**Scope**` di un PBI, fino al grassetto o alla `## `
+    successivi; `None` se il blocco non c'è. La leggono `controllo_r7()` e la
+    pre-verifica (PBI-520, decisione 4)."""
+    scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
+    return scope.group(1) if scope else None
+
+
 def controllo_r7(a_monte: AMonte) -> str:
     """R7: lo Scope del PBI a monte non elenca file del progetto. Si legge il PBI sul ramo
     della PR. Ogni percorso fra apici inversi in una riga dello Scope è del progetto se la
@@ -4715,9 +4776,8 @@ def controllo_r7(a_monte: AMonte) -> str:
         return f"R7: non eseguita (git non risponde: {una_riga(albero)[:100]})"
     file_del_runner = set(albero.splitlines())
     cartelle_del_runner = {f.split("/")[0] for f in file_del_runner if "/" in f}
-    scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
     file_del_progetto = []
-    for riga in (scope.group(1) if scope else "").splitlines():
+    for riga in (blocco_dello_scope(testo) or "").splitlines():
         for percorso in re.findall(r"`([^`]+)`", riga):
             fuori_dall_albero = (percorso not in file_del_runner
                                  and percorso.split("/")[0] not in cartelle_del_runner)
