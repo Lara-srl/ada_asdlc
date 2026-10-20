@@ -160,16 +160,27 @@ def giro_col_lettore_sul_limite(tmp_path, monkeypatch):
     return e, clone, ruoli, rami
 
 
-def tick_dopo_il_giro(tmp_path, monkeypatch, e) -> tuple[Path, Path]:
-    """Il checkout del tick con PBI-610 in coda, e il worktree del runner col rapporto del
-    giro `e` nel suo registro. Su `origin` nessun ramo e nessuna PR. Rende i due alberi."""
-    repo, albero = tmp_path / "tick", tmp_path / "albero"
-    (repo / "backlog").mkdir(parents=True)
+def tick_dopo_il_giro(tmp_path, monkeypatch, e, repo: Path | None = None
+                      ) -> tuple[Path, Path]:
+    """Il checkout del tick con PBI-610 in coda, `repo` se c'è, e il worktree del runner
+    col rapporto del giro `e` nel suo registro. Su `origin` nessun ramo e nessuna PR; gli
+    altri comandi di `git` sono veri. Rende i due alberi."""
+    repo, albero = repo or tmp_path / "tick", tmp_path / "albero"
+    (repo / "backlog").mkdir(parents=True, exist_ok=True)
     (repo / "backlog" / "CODA.md").write_text("- PBI-610\n", encoding="utf-8")
     registro = albero / coda.CFG.registro.cartella
     registro.mkdir(parents=True)
     shutil.copy(runner.chiudi_rapporto("giro", [e]), registro)
-    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (0, "[]" if cmd[0] == "gh" else ""))
+    vero = coda.esegui
+
+    def _esegui(cmd, cwd):
+        if cmd[0] == "gh":
+            return 0, "[]"
+        if "ls-remote" in cmd:
+            return 0, ""
+        return vero(cmd, cwd)
+
+    monkeypatch.setattr(coda, "esegui", _esegui)
     return repo, albero
 
 
@@ -217,3 +228,33 @@ def test_la_stessa_versione_del_pbi_non_si_rilegge(tmp_path, monkeypatch):
     sh(altri, "push", "-q", "origin", "main")
 
     assert giro("giro3") == 2, "una versione nuova del PBI sulla base si rilegge"
+
+
+# --- Criterio 5: il tick non rilancia un PBI da correggere --------------------
+
+
+def test_il_tick_non_rilancia_un_pbi_da_correggere_finche_il_file_non_cambia(
+        tmp_path, monkeypatch):
+    clone, _ = giro_sul_clone(tmp_path, monkeypatch,
+                              pbi_610().replace("## Verifica", "## Altro"))
+    accendi(monkeypatch, lettore=False)
+    e = runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run="giro")
+    assert e.motivo == "preverifica", e.nota
+    # Il checkout del tick è il clone, rimasto su `main`: il giro non ha creato il ramo.
+    repo, albero = tick_dopo_il_giro(tmp_path, monkeypatch, e, repo=clone)
+
+    decisione = coda.decidi(repo, albero)
+
+    assert isinstance(decisione, coda.AttendeLaPreverifica), decisione
+    riga = coda.racconta(decisione)
+    assert "attende: preverifica" in riga and "1 rilievi" in riga, riga
+
+    (clone / FILE_DEL_PBI).write_text(pbi_610(), encoding="utf-8")
+    assert isinstance(coda.decidi(repo, albero), coda.AttendeLaPreverifica), (
+        "una modifica non committata al file del PBI non fa rilanciare"
+    )
+
+    sh(clone, "commit", "-q", "--no-verify", "-am", "docs: il PBI corretto")
+    assert coda.decidi(repo, albero) == coda.Lancia("PBI-610"), (
+        "la correzione arrivata nel checkout del tick fa rilanciare il PBI"
+    )
