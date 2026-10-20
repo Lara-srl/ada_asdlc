@@ -350,3 +350,20 @@ def test_una_sonda_che_non_e_un_test_o_non_si_trova_nel_file_e_un_rilievo_r(tmp_
     assert [(r["domanda"], r["criterio"], r["testo"]) for r in rapporto["rilievi"]] == [
         ("R", 1, runner.ESITI_MANCATI["nessuno"]), ("R", 2, runner.ESITI_MANCATI["nessuno"])]
     assert codice == 1
+
+
+def test_un_gate_guasto_sulla_sonda_e_un_avviso_e_non_un_eccezione(tmp_path, monkeypatch):
+    """Decisione 4: un `GuastoDelGate` di `esiti_del_comando()` dice che lo strumento non
+    ha guardato, non che il criterio nasce verde: diventa l'avviso
+    `sonda del criterio N: gate guasto`, e non è un rilievo."""
+    def guasto(comando):
+        raise runner.GuastoDelGate("pytest non parte")
+
+    monkeypatch.setattr(runner, "esiti_del_comando", guasto)
+
+    codice, rapporto, _, _, _ = preverifica_col_lettore(
+        tmp_path, monkeypatch, TRE_CRITERI, {"test_sonde.py": SONDE}, UNA_SONDA)
+
+    assert "sonda del criterio 1: gate guasto" in rapporto["avvisi"]
+    assert rapporto["rilievi"] == []
+    assert codice == 0
