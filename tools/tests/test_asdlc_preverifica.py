@@ -11,7 +11,9 @@ Il runner si carica per nome, `asdlc.runner`: `conftest.py` mette `tools/` sul
 """
 
 import importlib
+import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -98,13 +100,13 @@ FILE_DELLA_BASE = {
 }
 
 
-def clone_con_la_base(tmp_path: Path) -> tuple[Path, str]:
-    """Un remoto bare e un suo clone, con `FILE_DELLA_BASE` in `origin/main`: il
-    clone e lo sha della base."""
+def clone_con_la_base(tmp_path: Path, altri: dict[str, str] | None = None) -> tuple[Path, str]:
+    """Un remoto bare e un suo clone, con `FILE_DELLA_BASE` e `altri` in
+    `origin/main`: il clone e lo sha della base."""
     remoto, clone = tmp_path / "remoto.git", tmp_path / "clone"
     sh(tmp_path, "init", "-q", "--bare", str(remoto))
     sh(tmp_path, "clone", "-q", str(remoto), str(clone))
-    for nome, testo in FILE_DELLA_BASE.items():
+    for nome, testo in (FILE_DELLA_BASE | (altri or {})).items():
         (clone / nome).parent.mkdir(parents=True, exist_ok=True)
         (clone / nome).write_text(testo, encoding="utf-8")
     sh(clone, "add", "-A")
@@ -146,3 +148,47 @@ def test_gli_avvisi_della_base_non_sono_rilievi(testo, attesi, tmp_path, monkeyp
 
     assert len(avvisi) == attesi, avvisi
     assert all(isinstance(a, str) for a in avvisi), avvisi
+
+
+def lancia(argv: list[str], monkeypatch) -> int:
+    """`asdlc-runner <argv>` da `smista()`, col codice d'uscita: anche quello di
+    `argparse`, che esce con `SystemExit`."""
+    monkeypatch.setattr(sys, "argv", ["asdlc-runner", *argv])
+    try:
+        return runner.smista()
+    except SystemExit as uscita:
+        return uscita.code
+
+
+@pytest.mark.parametrize(
+    "pbi, file, codice",
+    [
+        pytest.param("PBI-610", "backlog/PBI-610-una-prova.md", 0, id="senza-rilievi"),
+        pytest.param("PBI-611", "backlog/PBI-611-senza-verifica.md", 1, id="con-un-rilievo"),
+    ],
+)
+def test_preverifica_scrive_il_rapporto_e_non_tocca_l_albero(pbi, file, codice,
+                                                              tmp_path, monkeypatch):
+    clone, base = clone_con_la_base(tmp_path, {
+        "backlog/PBI-610-una-prova.md": pbi_610(),
+        "backlog/PBI-611-senza-verifica.md": pbi_610().replace("PBI-610", "PBI-611")
+        .replace("una-prova", "senza-verifica").replace("## Verifica", "## Altro"),
+    })
+    monkeypatch.setattr(runner, "REPO", clone)
+    for nome in ("stacca", "lucchetto", "esegui_pbi"):
+        monkeypatch.setattr(runner, nome, lambda *a, _n=nome, **k: pytest.fail(f"{_n} non si chiama"))
+    rami, stato = sh(clone, "branch"), sh(clone, "status", "--porcelain")
+
+    assert lancia([pbi, "--preverifica"], monkeypatch) == codice
+
+    rapporti = sorted(runner.LOG_DIR.glob(f"*-{pbi}-preverifica.json"))
+    assert len(rapporti) == 1, list(runner.LOG_DIR.iterdir())
+    rapporto = json.loads(rapporti[0].read_text(encoding="utf-8"))
+    assert set(rapporto) == {"pbi", "base", "sha_pbi", "criteri", "rilievi", "avvisi"}, rapporto
+    assert rapporto["pbi"] == pbi and rapporto["base"] == base
+    assert rapporto["sha_pbi"] == sh(clone, "rev-parse", f"{base}:{file}")
+    assert rapporto["criteri"] == (1 if codice == 0 else 0)
+    assert len(rapporto["rilievi"]) == codice
+    assert all(set(r) == {"domanda", "criterio", "testo", "evidenza"} for r in rapporto["rilievi"])
+    assert rapporto["avvisi"] == []
+    assert sh(clone, "branch") == rami and sh(clone, "status", "--porcelain") == stato
