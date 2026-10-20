@@ -19,15 +19,17 @@ REPO = importlib.import_module("asdlc.config").radice(Path(__file__).resolve().p
 def test_senza_pytest_sul_path_dei_sottoprocessi_la_suite_si_ferma_all_avvio_con_un_messaggio(
     tmp_path,
 ):
-    """Il pacchetto, `conftest.py` e il progetto di prova, il cui `.venv` non c'è:
-    il `PATH` ha solo `git`, e `pytest` si lancia come modulo dell'interprete, come fa il gate
-    `asdlc`. Il test di prova passerebbe, se la suite partisse."""
+    """Il pacchetto, `conftest.py` con la sua guardia e il progetto di prova, il cui
+    `.venv` non c'è: il `PATH` ha solo `git`, e `pytest` si lancia come modulo
+    dell'interprete, come fa il gate `asdlc`. Il test di prova passerebbe, se la
+    suite partisse."""
     progetto = tmp_path / "progetto"
     shutil.copytree(REPO / "tools" / "asdlc", progetto / "tools" / "asdlc",
                     ignore=shutil.ignore_patterns("__pycache__"))
     (progetto / "tools" / "tests").mkdir()
-    shutil.copy(REPO / "tools" / "tests" / "conftest.py",
-                progetto / "tools" / "tests" / "conftest.py")
+    # Con `conftest.py` la guardia dei dati, che carica come plugin (PBI-518).
+    for nome in ("conftest.py", "guardia_dei_dati.py"):
+        shutil.copy(REPO / "tools" / "tests" / nome, progetto / "tools" / "tests" / nome)
     (progetto / "tools" / "tests" / "test_prova.py").write_text(
         "def test_prova():\n    assert True\n", encoding="utf-8")
     # Il progetto di prova, da cui `conftest.py` legge il venv (PBI-394).
