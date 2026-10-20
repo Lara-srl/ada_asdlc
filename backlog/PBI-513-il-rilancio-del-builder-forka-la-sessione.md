@@ -1,6 +1,6 @@
 # PBI-513: il rilancio del Builder forka la sessione
 
-**Stato:** in coda; giri 1 e 2 fermati il 19/10 (hotfix di `v0.4.0`, da tagliare `v0.4.1`)
+**Stato:** in coda; giri 1 e 2 fermati il 19/10, giro 3 il 20/10 (hotfix di `v0.4.0`, da tagliare `v0.4.1`)
 
 ## Direttiva
 
@@ -164,3 +164,38 @@ origin/main -- backlog/PBI-513-il-rilancio-del-builder-forka-la-sessione.md`), u
 **Non si fa:** non si riscrive la storia dei tag, non si rifanno i passi dei giri 1 e 2, non si
 riscrive il criterio 3 in un'altra forma, non si committa nessun JSON e non si tocca
 `tools/tests/test_asdlc_runner.py`.
+
+## Il giro 4, e cosa si riprende
+
+Il giro 3 (20/10, 00:05-00:09) ha fatto il `git revert` di `763b668` come chiedeva la sezione qui
+sopra, e si è fermato `rosso-mai-visto` **sullo stesso commit**: il gate del rosso guarda ogni
+commit del ramo fuori da `origin/main` (`gate_del_rosso`, `tools/asdlc/runner.py`), e un revert
+toglie il test dall'albero ma non il commit dalla storia. Il difetto era della ripresa, non del
+Builder: chiedeva di riprendere un tag che conteneva il commit da togliere. Il giro 3 è chiuso col
+tag `giro-fermato/pbi-513-giro3-20261020` (`a20d1bb`).
+
+**Si riprende il tag `ripresa/pbi-513-giro4`** (`a2f96a7`). Non è un giro: sono i sei commit di
+codice del giro 1, **senza `763b668`**, rimessi con `git cherry-pick -x` sopra `origin/main`
+(`2bad8ad`), in quest'ordine: `d22bdc1`, `c255807`, `ab087e8`, `dbdd1f0`, `677dfc9`, `6dc7eb6`.
+L'unico conflitto, in `677dfc9`, è risolto togliendo la funzione del criterio 3 e tenendo il
+test parametrizzato. Il commit `cd247e4` (la riga `--*.json`) non c'è perché è già in `main`
+(#65). Sul tag, verificato il 20/10: `python3 -m pytest -q tools/tests` dà `1057 passed`,
+`git status --porcelain` è vuoto dopo il gate, e `asdlc-runner --gate-rosso origin/main..HEAD`
+dice «nessun test è nato verde».
+
+**Da fare, in quest'ordine:**
+
+1. **I sei commit sul ramo del giro:** `git cherry-pick 2bad8ad..ripresa/pbi-513-giro4`. I commit
+   non toccano `backlog/`, quindi passano anche se `main` si è mosso dopo `2bad8ad`. **Verifica:**
+   `git log --oneline origin/main..HEAD` mostra sei commit, e `git grep -c
+   test_il_registro_del_rilancio_porta_il_uuid tools/tests/` non trova niente. Se il cherry-pick
+   dà un conflitto è un fatto nuovo: `fermati` con la domanda, senza risolverlo a mano.
+2. **Le spunte:** in questo file i criteri 1, 2 e 4 si spuntano (sono fatti, i commit lo provano),
+   il 3 resta barrato. Un commit `docs(runner): …`.
+3. **Il gate** sul ramo: verde, e `git status --porcelain` vuoto dopo averlo girato.
+4. **`fatto`**, perché il gate del rosso giri sui sei commit e il Critic legga il lavoro. Se il
+   gate del rosso segnala un commit nato verde, è un fatto nuovo: `fermati` con la domanda.
+
+**Non si fa:** non si riprende nessuno dei tag `giro-fermato/pbi-513-*`, non si fa `git revert`,
+non si riscrive la storia di `ripresa/pbi-513-giro4`, non si rifanno i test o le cure, non si
+tocca `tools/tests/test_asdlc_runner.py` (è di `PBI-518`) e non si committa nessun JSON.
