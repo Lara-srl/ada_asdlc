@@ -142,11 +142,12 @@ def comando_del_solver() -> list[str]:
 
 
 # Il Lettore (`PBI-521`, decisione 3) legge il PBI e scrive le sonde nel suo albero usa e
-# getta: `Write` ed `Edit` sì, `Bash` no, perché le sonde le esegue il runner.
+# getta: `Write` ed `Edit` sì, `Bash` no, perché le sonde le esegue il runner. Il modello
+# è `[lettore].modello`.
 def comando_del_lettore() -> list[str]:
     return ["claude", "-p", "--allowedTools",
             "Read,Grep,Glob,Write,Edit,mcp__asdlc__rilievo,mcp__asdlc__sonda,mcp__asdlc__letto",
-            "--model", "opus"]
+            "--model", CFG.lettore.modello]
 
 
 # I motivi d'uscita di un giro fermato che il Solver smista: il `fermati` del Builder, il
@@ -1147,18 +1148,25 @@ def una_riga(testo: str) -> str:
     return " / ".join(r.strip() for r in testo.splitlines() if r.strip())
 
 
-def cartella_delle_sessioni() -> Path:
-    """Dove Claude Code scrive le sessioni di `REPO`: `~/.claude/projects/<percorso>`, col
-    percorso della cartella di lavoro in cui ogni carattere non alfanumerico è un `-`."""
-    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(REPO))
+def cartella_delle_sessioni(cwd: Path | None = None) -> Path:
+    """Dove Claude Code scrive le sessioni lanciate da `cwd`, e senza da `REPO`:
+    `~/.claude/projects/<percorso>`, col percorso della cartella di lavoro in cui ogni
+    carattere non alfanumerico è un `-`. Il Lettore parte dal suo albero usa e getta, e la
+    sua sessione sta sotto il percorso di quello (PBI-521)."""
+    cartella = cwd or REPO
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cartella))
 
 
-def copia_la_traccia(sessione: str, destinazione: Path, registro: dict) -> None:
+def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
+                     cwd: Path | None = None) -> None:
     """Copia il `jsonl` della sessione accanto ai file del giro e ne scrive il percorso in
     `registro["traccia"]`. La cartella di Claude Code è fuori dal repository e può essere
     ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
-    `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`)."""
-    sorgente = cartella_delle_sessioni() / f"{sessione}.jsonl"
+    `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`). La sessione si cerca fra
+    quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`."""
+    # Senza `cwd` la chiamata resta senza argomenti, com'era prima di PBI-521.
+    sessioni = cartella_delle_sessioni() if cwd is None else cartella_delle_sessioni(cwd)
+    sorgente = sessioni / f"{sessione}.jsonl"
     try:
         shutil.copyfile(sorgente, destinazione)
     except OSError as guasto:
@@ -1216,7 +1224,8 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     prima prova il prompt in coda a `--mcp-config` è stato preso per un'altra
     config, e `-p` è partito senza input.
 
-    La chiamata ha un tetto per ruolo, `MINUTI_BUILDER` o `MINUTI_CRITIC`.
+    La chiamata ha un tetto per ruolo: `MINUTI_BUILDER`, `[lettore].minuti` per il
+    Lettore (PBI-521), `MINUTI_CRITIC` per gli altri.
     Scaduto, l'esito è `None` anche se l'agente ne aveva dichiarato uno: non ha
     finito, e il giro chiude `senza esito` (PBI-369, decisione 3). Il registro
     porta allora `tetto_minuti`, che è ciò che la nota dice.
@@ -1231,7 +1240,8 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     `ASDLC_GIRO=1` nell'ambiente (`impostazioni_della_sessione`, PBI-384).
 
     L'agente parte da `cwd`, e senza da `REPO`: il Lettore lavora nel suo albero usa e
-    getta (`PBI-521`, decisione 3), e il server dell'esito lo eredita.
+    getta (`PBI-521`, decisione 3), e il server dell'esito lo eredita. La traccia si cerca
+    fra le sessioni di quella cartella.
     """
     config = config_del_server(ruolo, esito)
     della_sessione: list[str] = []
@@ -1243,7 +1253,7 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
     if "-c" in comando or "--resume" in comando:
         della_sessione.append("--fork-session")
     fuori, dentro = Path(f"{esito}.stdout"), Path(f"{esito}.stderr")
-    minuti = MINUTI_BUILDER if ruolo == "builder" else MINUTI_CRITIC
+    minuti = {"builder": MINUTI_BUILDER, "lettore": CFG.lettore.minuti}.get(ruolo, MINUTI_CRITIC)
     scaduto = False
     t0 = time.monotonic()
     try:
@@ -1259,7 +1269,7 @@ def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
                 "sessione": sessione}
     if scaduto:
         registro["tetto_minuti"] = minuti
-    copia_la_traccia(sessione, Path(f"{esito}.sessione.jsonl"), registro)
+    copia_la_traccia(sessione, Path(f"{esito}.sessione.jsonl"), registro, cwd)
     dichiarato = None if scaduto else esito_dichiarato(esito)
     return Invocazione(codice, uscita, dichiarato, registro)
 

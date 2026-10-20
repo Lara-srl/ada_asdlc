@@ -139,7 +139,15 @@ criterio senza sonda è un avviso, `criterio N senza sonda`, non un rilievo; un 
 si dichiara guardia (il suo testo dice «guardia» o «nato verde») non ha sonda né avviso. Il
 rapporto aggiunge `lettore` (`letto`, `senza esito`, oppure `null` senza `--lettore`) e
 `sonde` (criterio, file, nome, esito); i rilievi del Lettore e delle sonde stanno nella stessa
-lista `rilievi`. Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano
+lista `rilievi`. Il modello e il tetto della chiamata stanno nella sezione `[lettore]`:
+
+```toml
+[lettore]
+modello = "opus"   # il default, come [solver]
+minuti = 30        # il tetto della chiamata del Lettore
+```
+
+Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano
 nel rapporto marcati `"lettore": "senza esito"`, e le sonde non si eseguono. Il comando esce 1
 con un rilievo, oppure con `senza esito`.
 
