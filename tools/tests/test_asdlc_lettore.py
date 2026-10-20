@@ -10,8 +10,11 @@ della decisione 2 ciò che il server scriverebbe. Su `main` il ruolo, gli strume
 e il flag non esistono, quindi i criteri nascono rossi per asserzione.
 """
 
+import dataclasses
 import importlib
 import json
+import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -20,6 +23,9 @@ from test_asdlc_runner import ruolo_ed_esito
 
 esito = importlib.import_module("asdlc.esito")
 runner = importlib.import_module("asdlc.runner")
+config = importlib.import_module("asdlc.config")
+
+PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
 
 
 def nomi(ruolo):
@@ -266,3 +272,59 @@ def test_un_criterio_dichiarato_guardia_non_ha_l_avviso_senza_sonda(tmp_path, mo
         tmp_path, monkeypatch, TRE_CRITERI, {"test_sonde.py": SONDE}, UNA_SONDA)
 
     assert [a for a in rapporto["avvisi"] if "senza sonda" in a] == ["criterio 3 senza sonda"]
+
+
+# --- Criterio 5: il Lettore ha il suo tetto e la sua traccia ------------------
+
+
+def sezione_lettore(testo: str = ""):
+    """La sezione `[lettore]` della configurazione del progetto di prova con sopra `testo`."""
+    toml = (PROGETTO / "asdlc.toml").read_text(encoding="utf-8") + "\n" + testo
+    return config.interpreta(tomllib.loads(toml), "asdlc.toml").lettore
+
+
+def test_la_sezione_lettore_ha_i_default_opus_e_30_minuti():
+    lettore = sezione_lettore()
+
+    assert (lettore.modello, lettore.minuti) == ("opus", 30)
+
+
+def test_il_lettore_usa_il_suo_tetto_e_cerca_la_traccia_nelle_sessioni_del_suo_albero(
+        tmp_path, monkeypatch):
+    """`invoca_agente("lettore", …, cwd=albero)`: il tetto è `[lettore].minuti`, non quello
+    del Critic, il modello è `[lettore].modello`, e la sessione si cerca nella cartella
+    di Claude Code di `albero`, dove `claude` lanciato da lì la scrive."""
+    di_prima = runner.CFG
+    runner.configura(dataclasses.replace(
+        di_prima, lettore=sezione_lettore('[lettore]\nmodello = "sonnet"\nminuti = 7\n')))
+    monkeypatch.setattr(runner, "MINUTI_CRITIC", 3)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    sessioni = (tmp_path / "home" / ".claude" / "projects"
+                / re.sub(r"[^A-Za-z0-9]", "-", str(albero)))
+    sessioni.mkdir(parents=True)
+    lanci = []
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        lanci.append((cmd, Path(cwd), timeout))
+        (sessioni / f"{cmd[cmd.index('--session-id') + 1]}.jsonl").write_text(
+            json.dumps({"type": "user", "message": {"role": "user", "content": "x"}}) + "\n",
+            encoding="utf-8")
+        return 0, ""
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("x", encoding="utf-8")
+    try:
+        invocazione = runner.invoca_agente("lettore", runner.comando_del_lettore(), prompt,
+                                           tmp_path / "esito.json", cwd=albero)
+    finally:
+        runner.configura(di_prima)
+
+    [(cmd, cwd, timeout)] = lanci
+    assert cwd == albero
+    assert timeout == 7 * 60
+    assert cmd[cmd.index("--model") + 1] == "sonnet"
+    assert invocazione.registro["traccia"] is not None, invocazione.registro.get("traccia_nota")
