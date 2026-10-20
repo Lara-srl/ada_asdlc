@@ -206,3 +206,40 @@ def test_il_rapporto_conta_le_riprese_e_porta_le_loro_invocazioni(giro):
     assert voce.get("riprese_solver") == 1
     assert voce.get("giri_solver") == 1
     assert [i["ruolo"] for i in voce["invocazioni"]] == ["builder", "solver", "builder"]
+
+
+LIMITE = {"esito": "limite-del-runner", "causa": "runner-x", "comando": "pytest -q",
+          "output": "0 test", "commit": "abc", "pbi": "# PBI-9: x\n"}
+INTENTO = {"esito": "intento", "domanda": "quale dei due?"}
+
+
+@pytest.mark.parametrize("esiti, critic, stato", [
+    pytest.param({"builder": [fermati("x?")], "solver": [LIMITE]}, "pass", "fermato",
+                 id="limite-del-runner"),
+    pytest.param({"builder": [fermati("x?")], "solver": [INTENTO]}, "pass", "fermato",
+                 id="intento"),
+    pytest.param({"builder": [None], "solver": [RISOLTO]}, "pass", "senza esito",
+                 id="builder-senza-esito"),
+    pytest.param({"builder": [FATTO], "solver": [RISOLTO]}, "sospeso", "sospeso",
+                 id="domanda-del-critic"),
+])
+def test_gli_altri_esiti_e_gli_altri_blocchi_non_riprendono_il_builder(
+        giro, monkeypatch, tmp_path, esiti, critic, stato):
+    """Criterio 7: si riprende solo `domanda-del-builder` con `risolto`. Un limite del
+    runner o un `intento` del Solver, e un `risolto` su un blocco che non è il `fermati`
+    del Builder, chiudono il giro com'era, con una sola invocazione del Builder. Il limite
+    del runner passa da un finto: il vero apre una PR e scrive la pausa in `HOME`."""
+    attese: list[dict] = []
+    monkeypatch.setattr(runner, "metti_in_attesa_del_pbi_a_monte",
+                        lambda pbi_path, dichiarato: attese.append(dichiarato))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(runner, "revisione_critica",
+                        lambda p, **_: runner.Verdetto(critic, "chi decide?", "rapporto"))
+
+    esito, agente = giro(esiti)
+
+    assert len(comandi_di(agente, "builder")) == 1
+    assert len(comandi_di(agente, "solver")) == 1
+    assert esito.riprese_solver == 0
+    assert esito.stato == stato
+    assert attese == ([LIMITE] if esiti["solver"] == [LIMITE] else [])
