@@ -4955,14 +4955,18 @@ def stampa_la_guardia_di_fase() -> int:
     """
     try:
         dato = json.loads(sys.stdin.read())
-        percorso = (dato.get("tool_input") or {}).get("file_path")
+        ingresso = dato.get("tool_input") or {}
+        percorso = ingresso.get("file_path")
+        # Solo un `Write` porta il file intero: un `Edit` ne mostra un pezzo, e su
+        # un pezzo non si sa se il file resta uno scheletro (PBI-515, decisione 6).
+        contenuto = ingresso.get("content") if dato.get("tool_name") == "Write" else None
         cartella = dato.get("cwd") or os.getcwd()
     except (json.JSONDecodeError, AttributeError, TypeError) as guasto:
         print(f"guardia di fase: stdin illeggibile ({guasto}), lascio passare", file=sys.stderr)
         return 0
     if not percorso:
         return 0  # non è una scrittura su un file: non ci riguarda
-    ragione = guardia_di_fase(fase_corrente(Path(cartella)), percorso)
+    ragione = guardia_di_fase(fase_corrente(Path(cartella)), percorso, contenuto)
     if ragione is None:
         return 0
     print(ragione, file=sys.stderr)
