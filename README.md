@@ -153,6 +153,23 @@ Senza `letto` la lettura è `senza esito`: i rilievi già registrati entrano
 nel rapporto marcati `"lettore": "senza esito"`, e le sonde non si eseguono. Il comando esce 1
 con un rilievo, oppure con `senza esito`.
 
+### La pre-verifica nel giro
+
+Con `[preverifica] attiva = true` la pre-verifica gira anche dentro il giro (`PBI-522`,
+`ADR-0031` decisione 4): dopo il controllo dell'albero pulito, e prima dell'inventario e del
+ramo, sul PBI alla base. Scrive lo stesso rapporto di `--preverifica`,
+`runs/<run>-<PBI>-preverifica.json`. Con almeno un rilievo il giro chiude `fermato` col motivo
+`preverifica`, e la nota dice quanti rilievi e dove sta il rapporto: non nascono ramo, commit
+né PR, e il Solver non parte. L'esito porta `sha_pbi`, lo sha del blob del file del PBI letto,
+e `rilievi_preverifica`. Senza rilievi il giro va avanti come prima. `--riprendi` non la
+rifà. Senza la sezione la pre-verifica è spenta.
+
+```toml
+[preverifica]
+attiva = true    # il default è false
+lettore = true   # il default
+```
+
 ### Il rilascio a tick
 
 Dopo il merge di un PBI a monte, due passi del tick sostituiscono i cinque gesti a mano
