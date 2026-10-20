@@ -135,3 +135,16 @@ class TestIlSenzaEsitoDelLimitePortaRiprendiDopo:
         assert not voce.get("riprendi_dopo"), (
             "la frase del limite si cerca solo nello stderr della CLI"
         )
+
+    def test_la_frase_nello_stderr_con_uscita_zero_non_porta_riprendi_dopo(
+        self, monkeypatch, tmp_path
+    ):
+        """La CLI che esce 0 non si è fermata sul limite: la frase vale solo con un
+        codice d'uscita diverso da zero."""
+        voce = giro_col_limite(monkeypatch, tmp_path,
+                               agente_che_scrive_i_flussi({}, stderr={"builder": LIMITE},
+                                                          codice=0))
+
+        assert not voce.get("riprendi_dopo"), (
+            "con uscita 0 la frase del limite non fa riprendere il giro"
+        )
