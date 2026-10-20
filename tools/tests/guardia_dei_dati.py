@@ -10,10 +10,12 @@ DATI = Path(__file__).resolve().parent / "dati"
 
 
 def elenco(cartella: Path) -> set[Path]:
-    """I file e le cartelle sotto `cartella`."""
-    return set()
+    """I file e le cartelle sotto `cartella`, letti dal disco e non da `git
+    status` (decisione 3): anche quelli che git ignora, che sono proprio quelli
+    che le righe di `.gitignore` del progetto di prova nascondevano."""
+    return set(cartella.rglob("*"))
 
 
 def nati(prima: set[Path], dopo: set[Path]) -> list[str]:
-    """I percorsi di `dopo` che in `prima` non c'erano."""
-    return []
+    """I percorsi di `dopo` che in `prima` non c'erano, in ordine."""
+    return sorted(str(p) for p in dopo - prima)
