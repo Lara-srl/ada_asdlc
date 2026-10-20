@@ -12,6 +12,7 @@ Il runner si carica per nome, `asdlc.runner`: `conftest.py` mette `tools/` sul
 
 import importlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -192,3 +193,18 @@ def test_preverifica_scrive_il_rapporto_e_non_tocca_l_albero(pbi, file, codice,
     assert all(set(r) == {"domanda", "criterio", "testo", "evidenza"} for r in rapporto["rilievi"])
     assert rapporto["avvisi"] == []
     assert sh(clone, "branch") == rami and sh(clone, "status", "--porcelain") == stato
+
+
+def pbi_del_backlog_ospite() -> list[Path]:
+    radice = runner.asdlc_config.radice(Path(__file__).resolve().parent)
+    return sorted((radice / "backlog").glob("PBI-5*.md"))
+
+
+@pytest.mark.progetto_ospite
+@pytest.mark.parametrize("file", pbi_del_backlog_ospite(), ids=lambda f: f.name[:7])
+def test_i_pbi_di_main_non_danno_rilievi_di_forma(file):
+    """La misura di `ADR-0031`: se fallisce, una regola di forma è diventata un fermo
+    falso. Legge il disco, senza git e senza rete."""
+    pbi = re.match(r"PBI-\d+", file.name).group(0)
+
+    assert runner.forma_del_pbi(file.read_text(encoding="utf-8"), pbi) == []
