@@ -14,6 +14,7 @@ clone vero con un remoto bare, perché «`git branch` invariato» si misura solo
 import dataclasses
 import importlib
 import json
+import shutil
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -24,8 +25,13 @@ from test_asdlc_runner import ruolo_ed_esito
 
 runner = importlib.import_module("asdlc.runner")
 config = importlib.import_module("asdlc.config")
+coda = importlib.import_module("asdlc.coda")
 
 PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
+# Come in `test_asdlc_coda.py`: la radice e la configurazione del tick sono quelle del
+# progetto di prova.
+coda.REPO = PROGETTO
+coda.configura(coda.asdlc_config.carica(PROGETTO))
 FILE_DEL_PBI = "backlog/PBI-610-una-prova.md"
 
 
@@ -143,14 +149,33 @@ def test_col_lettore_acceso_il_lettore_gira_una_volta_prima_del_builder(tmp_path
 # --- Criterio 3: un Lettore senza esito non è un PBI da correggere ------------
 
 
-def test_un_lettore_fermo_sul_limite_d_uso_chiude_lettore_senza_esito_con_riprendi_dopo(
-        tmp_path, monkeypatch):
+def giro_col_lettore_sul_limite(tmp_path, monkeypatch):
+    """Un giro di PBI-610 il cui Lettore esce 1 col limite d'uso nello stderr e non
+    chiama `letto`: l'esito, il clone, i ruoli invocati e i rami di prima."""
     clone, ruoli = giro_sul_clone(tmp_path, monkeypatch, pbi_610(),
                                   uscite={"lettore": (1, LIMITE)})
     accendi(monkeypatch, lettore=True)
     rami = sh(clone, "branch")
-
     e = runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run="giro")
+    return e, clone, ruoli, rami
+
+
+def tick_dopo_il_giro(tmp_path, monkeypatch, e) -> tuple[Path, Path]:
+    """Il checkout del tick con PBI-610 in coda, e il worktree del runner col rapporto del
+    giro `e` nel suo registro. Su `origin` nessun ramo e nessuna PR. Rende i due alberi."""
+    repo, albero = tmp_path / "tick", tmp_path / "albero"
+    (repo / "backlog").mkdir(parents=True)
+    (repo / "backlog" / "CODA.md").write_text("- PBI-610\n", encoding="utf-8")
+    registro = albero / coda.CFG.registro.cartella
+    registro.mkdir(parents=True)
+    shutil.copy(runner.chiudi_rapporto("giro", [e]), registro)
+    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (0, "[]" if cmd[0] == "gh" else ""))
+    return repo, albero
+
+
+def test_un_lettore_fermo_sul_limite_d_uso_chiude_lettore_senza_esito_con_riprendi_dopo(
+        tmp_path, monkeypatch):
+    e, clone, ruoli, rami = giro_col_lettore_sul_limite(tmp_path, monkeypatch)
 
     assert (e.motivo, e.stato) == ("lettore-senza-esito", "senza esito"), e.nota
     assert e.riprendi_dopo, "il limite d'uso con l'ora leggibile porta riprendi_dopo"
@@ -158,3 +183,14 @@ def test_un_lettore_fermo_sul_limite_d_uso_chiude_lettore_senza_esito_con_ripren
     assert ruoli == ["lettore"], "senza la lettura il Builder non parte"
     assert sh(clone, "branch") == rami, "il ramo non nasce"
     assert e.solver == [], "il Solver non parte"
+
+
+def test_il_tick_aspetta_il_reset_di_un_lettore_senza_esito(tmp_path, monkeypatch):
+    e, _, _, _ = giro_col_lettore_sul_limite(tmp_path, monkeypatch)
+    repo, albero = tick_dopo_il_giro(tmp_path, monkeypatch, e)
+
+    decisione = coda.decidi(repo, albero)
+
+    assert isinstance(decisione, coda.AttendeIlReset), (
+        f"{decisione}: un Lettore fermo sul limite d'uso si riprende dopo il reset"
+    )
