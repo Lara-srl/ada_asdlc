@@ -284,8 +284,9 @@ resta per le persone e non decide niente. Un agente che non chiama nessuno dei d
 limite d'uso, un crash della CLI, un modello che ha scritto e basta — chiude il giro
 **`senza esito`**, senza igiene e senza gate: stdout, stderr e codice d'uscita di
 `claude -p` restano accanto al file d'esito, e il rapporto del giro ne porta i percorsi
-insieme al log delle chiamate al server, dove si vedono anche quelle rifiutate. Se l'uscita
-porta la frase del limite d'uso con l'ora del reset leggibile, l'esito porta anche
+insieme al log delle chiamate al server, dove si vedono anche quelle rifiutate. Se lo stderr
+porta la frase del limite d'uso con l'ora del reset leggibile (lo stdout è testo del modello e
+non conta), l'esito porta anche
 **`riprendi_dopo`**: la prima occorrenza di quell'ora dopo l'istante in cui l'uscita è stata
 scritta, più cinque minuti, in data e ora locali ISO (`PBI-519`).
 

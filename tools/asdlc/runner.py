@@ -1281,16 +1281,19 @@ def ora_di_ripresa(ora: str, scritta: datetime) -> datetime:
     return reset + MARGINE_DEL_RESET
 
 
-def riprendi_dopo_il_limite(registro: dict, uscita: str) -> str:
-    """`riprendi_dopo` di un `senza esito`: l'ora di ripresa in ISO se l'uscita
-    porta la frase del limite con l'ora del reset, o `""` (PBI-519, decisione 1).
+def riprendi_dopo_il_limite(registro: dict) -> str:
+    """`riprendi_dopo` di un `senza esito`: l'ora di ripresa in ISO se il file di
+    stderr dell'invocazione porta la frase del limite con l'ora del reset, o `""`
+    (PBI-519, decisione 1). Lo stdout è testo del modello e non conta (`ADR-0027`).
     L'istante in cui l'uscita è stata scritta è quello del file di stderr, e
     senza quel file non c'è ripresa: il giro chiude come prima."""
-    if not FRASE_DEL_LIMITE.search(uscita) or not (ora := ORA_DEL_RESET.search(uscita)):
-        return ""
+    dentro = Path(registro["stderr"])
     try:
-        scritta = datetime.fromtimestamp(Path(registro["stderr"]).stat().st_mtime)
+        uscita = dentro.read_text(encoding="utf-8", errors="replace")
+        scritta = datetime.fromtimestamp(dentro.stat().st_mtime)
     except OSError:
+        return ""
+    if not FRASE_DEL_LIMITE.search(uscita) or not (ora := ORA_DEL_RESET.search(uscita)):
         return ""
     return ora_di_ripresa(ora.group(1), scritta).isoformat(timespec="minutes")
 
@@ -4103,8 +4106,7 @@ def esegui_pbi(
                 # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
                 # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
                 if dichiarato is None:
-                    e.riprendi_dopo = riprendi_dopo_il_limite(invocazione.registro,
-                                                              invocazione.uscita)
+                    e.riprendi_dopo = riprendi_dopo_il_limite(invocazione.registro)
                     return "builder-senza-esito", nota_senza_esito(invocazione.registro,
                                                                     invocazione.uscita)
                 if dichiarato["esito"] == "fermati":
@@ -4225,7 +4227,7 @@ def esegui_pbi(
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
-                e.riprendi_dopo = riprendi_dopo_il_limite(verdetto.registro, verdetto.rapporto)
+                e.riprendi_dopo = riprendi_dopo_il_limite(verdetto.registro)
                 return "critic-senza-esito", nota_senza_esito(verdetto.registro,
                                                               verdetto.rapporto)
             if verdetto.esito == "sospeso":
