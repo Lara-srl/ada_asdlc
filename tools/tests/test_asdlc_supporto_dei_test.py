@@ -6,6 +6,9 @@ Ogni classe è un criterio della *Verifica* del PBI. Sotto `src/test/` nessun fi
 """
 
 import importlib
+import io
+import json
+import sys
 
 import pytest
 
@@ -82,3 +85,25 @@ class TestUnoScheletroVuotoPassaDalPreCommit:
 
         assert runner.guardia_del_commit() == uscita
         assert (percorso in capsys.readouterr().out) is bool(uscita)
+
+
+class TestLHookLasciaPassareIlWriteDiUnoScheletro:
+    """Criterio 8: in `TEST_ONLY` l'hook `PreToolUse` lascia passare un `Write`
+    il cui `content` è uno scheletro, e blocca un `Write` con del codice e ogni
+    `Edit` su un file di produzione: un `Edit` non mostra il file intero."""
+
+    SCHELETRO = "#!/bin/sh\n# riconcilia le pratiche\n"
+
+    @pytest.mark.parametrize("strumento, ingresso, uscita", [
+        ("Write", {"content": SCHELETRO}, 0),
+        ("Write", {"content": "#!/bin/sh\necho riconcilia\n"}, 2),
+        ("Edit", {"old_string": "", "new_string": SCHELETRO}, 2),
+    ], ids=["write-di-commenti", "write-con-codice", "edit"])
+    def test_il_write_di_scheletro_passa_e_l_edit_no(
+            self, repo_in_test_only, monkeypatch, strumento, ingresso, uscita):
+        radice = repo_in_test_only.radice
+        dato = {"hook_event_name": "PreToolUse", "tool_name": strumento, "cwd": str(radice),
+                "tool_input": {"file_path": str(radice / MIGRAZIONE), **ingresso}}
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(dato)))
+
+        assert runner.stampa_la_guardia_di_fase() == uscita
