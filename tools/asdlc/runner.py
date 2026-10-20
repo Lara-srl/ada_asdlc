@@ -385,6 +385,9 @@ def aggiunte_del_progetto(cartella: Path | None) -> dict[str, str]:
 MODELLO_BUILDER = prompt_del_pacchetto("builder")
 PROMPT_IGIENE = prompt_del_pacchetto("igiene")
 PROMPT_RIPROVA = prompt_del_pacchetto("riprova")
+# Il testo che segue `PROMPT_BUILDER` quando il giro riprende dopo il limite d'uso
+# (`--riprendi`, PBI-519, decisione 7): si aggiunge, non sostituisce.
+PROMPT_RIPRENDI = prompt_del_pacchetto("riprendi")
 # I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
 # `PROMPT_RIMEDIO` nascono in `configura()`, col ramo di `asdlc.toml` al posto di
 # `{base}` e `{pbi_path}` / `{rapporto}` lasciati a chi chiama.
@@ -3986,6 +3989,8 @@ def esegui_pbi(
 
     print(f"\n=== {pbi} — {pbi_path.name}")
     prompt = PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
+    if riprendi:
+        prompt += PROMPT_RIPRENDI
     if dry:
         print(prompt)
         return motiva(Esito(pbi, ""), "dry-run")

@@ -260,7 +260,10 @@ cd ~/ada-run && git fetch -q origin && git switch -q --detach origin/main
 Con `--riprendi` il giro non nasce da `origin/main`: riparte dalla punta di `origin/<ramo>`,
 il ramo dell'esito più recente del PBI nei rapporti di `runs/` (il campo `ramo`), e continua su
 quello stesso ramo — niente `-giro2`, i commit nuovi avanzano di fast-forward. L'esito conta
-`riprese_limite`, il massimo dei rapporti del PBI più uno (`PBI-519`).
+`riprese_limite`, il massimo dei rapporti del PBI più uno (`PBI-519`). Il Builder riparte con
+una sessione nuova, e al suo prompt segue `tools/asdlc/prompt/riprendi.md`: il giro prima si è
+interrotto per il limite d'uso, il lavoro fatto è nel ramo (`git log`, le spunte del PBI), e si
+continua dal primo criterio non spuntato senza rifare ciò che è committato.
 
 Il runner è quello **installato** (sotto, *Il runner installato*): lanciato come
 `python3 tools/asdlc/runner.py` su un PBI esce con «ambiente mancante», perché girerebbe
