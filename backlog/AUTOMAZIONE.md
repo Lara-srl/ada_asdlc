@@ -31,7 +31,8 @@ base con i controlli di `--preverifica` e, con `[preverifica].lettore` (il defau
 Lettore. Con un rilievo chiude `fermato`, motivo `preverifica`:
 niente ramo, commit, PR né Solver, e il rimedio è correggere il PBI. Un Lettore senza `letto`
 chiude `senza esito`, motivo `lettore-senza-esito`, con `riprendi_dopo` se si è fermato sul
-limite d'uso con l'ora del reset leggibile. `--riprendi` non la rifà.
+limite d'uso con l'ora del reset leggibile. `--riprendi` non la rifà, e nemmeno un giro su
+una versione del PBI (lo sha del suo file) che un rapporto di prima ha già letto pronta.
 
 Sono **tre gate diversi** perché rispondono a tre domande diverse
 (`.claude/skills/asdlc/patterns/context-gates.md`):
