@@ -133,7 +133,7 @@ Il Lettore è finto: uno script che scrive un test nel suo `cwd` e i file della 
 test lancia `claude`. Su `main` il ruolo, gli strumenti e il flag non esistono, quindi i criteri
 nascono rossi per asserzione (`getattr` più `assert` dove serve).
 
-- [ ] **Il server accetta e accumula gli strumenti del Lettore.** Sul server, come i test di `risolvi`:
+- [x] **Il server accetta e accumula gli strumenti del Lettore.** Sul server, come i test di `risolvi`:
       - `strumenti("lettore")` dà `rilievo`, `sonda` e `letto`;
       - due `rilievo` validi finiscono tutti e due in `letto`;
       - un `rilievo` con `domanda` fuori da `R F T A E D N`, o con un'evidenza che non è un file
@@ -141,7 +141,7 @@ nascono rossi per asserzione (`getattr` più `assert` dove serve).
       - dopo `letto` un altro `rilievo` è rifiutato.
 
       (pytest)
-- [ ] **Una sonda verde sulla base è un rilievo R, e il Lettore lavora fuori dal checkout.** Un
+- [x] **Una sonda verde sulla base è un rilievo R, e il Lettore lavora fuori dal checkout.** Un
       repository temporaneo con una funzione che esiste già. Il Lettore finto scrive due sonde: una
       passa sulla base, l'altra chiama una funzione che non c'è. Nel rapporto la prima dà un rilievo
       `R` col testo «nato verde», la seconda ha `esito == "rosso"` e nessun rilievo. **Nello stesso
@@ -151,16 +151,16 @@ nascono rossi per asserzione (`getattr` più `assert` dove serve).
       - `USA_E_GETTA["montati"] == USA_E_GETTA["smontati"]`.
 
       (pytest)
-- [ ] **Senza `letto` la lettura è `senza esito`.** Un Lettore finto che scrive solo un `rilievo`
+- [x] **Senza `letto` la lettura è `senza esito`.** Un Lettore finto che scrive solo un `rilievo`
       dà `lettore == "senza esito"`, quel rilievo nel rapporto e nessuna sonda eseguita. Il comando
       esce 1 (pytest).
-- [ ] **Un criterio senza sonda è un avviso.** Un PBI con tre criteri, uno con la parola «Guardia»
+- [x] **Un criterio senza sonda è un avviso.** Un PBI con tre criteri, uno con la parola «Guardia»
       su una riga rientrata, e una sola sonda per il primo. Il risultato è l'avviso
       `criterio 3 senza sonda`, nessun avviso per il criterio 2 e nessun rilievo (pytest).
-- [ ] **Il Lettore ha il suo tetto e la sua traccia.** `invoca_agente("lettore", …, cwd=albero)`
+- [x] **Il Lettore ha il suo tetto e la sua traccia.** `invoca_agente("lettore", …, cwd=albero)`
       usa `[lettore].minuti`, e cerca la traccia nella cartella delle sessioni di `albero`, non di
       `REPO` (pytest, `esegui` finto come nei test del tetto del 369 e della traccia del 511).
-- [ ] **`invoca_agente()` senza `cwd` lancia da `REPO`.** È una **guardia**: i test esistenti degli
+- [x] **`invoca_agente()` senza `cwd` lancia da `REPO`.** È una **guardia**: i test esistenti degli
       agenti restano verdi. Non c'è un test nuovo.
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde. Builder, Critic e Solver lanciano
