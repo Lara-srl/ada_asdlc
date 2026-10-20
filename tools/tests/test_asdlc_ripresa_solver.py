@@ -194,3 +194,15 @@ def test_il_tetto_dei_giri_solver_ferma_il_ciclo_dentro_lo_stesso_giro(giro, mon
     assert len(comandi_di(agente, "builder")) == 3
     assert esito.stato == "fermato"
     assert "tetto dei giri del Solver" in esito.nota
+
+
+def test_il_rapporto_conta_le_riprese_e_porta_le_loro_invocazioni(giro):
+    """Criterio 9: `riprese_solver` (le riprese del Builder dopo un `risolto`) accanto a
+    `giri_solver` nel JSON del giro, e l'invocazione della ripresa in `invocazioni`."""
+    esito, _ = giro({"builder": [fermati("quale funzione?"), FATTO], "solver": [RISOLTO]})
+
+    voce = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(
+        encoding="utf-8"))["esiti"][0]
+    assert voce.get("riprese_solver") == 1
+    assert voce.get("giri_solver") == 1
+    assert [i["ruolo"] for i in voce["invocazioni"]] == ["builder", "solver", "builder"]
