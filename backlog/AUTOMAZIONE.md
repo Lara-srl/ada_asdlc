@@ -29,7 +29,9 @@ sbagliare prima.
 true` il giro, dopo il controllo dell'albero pulito e prima di creare il ramo, legge il PBI alla
 base con i controlli di `--preverifica` e, con `[preverifica].lettore` (il default), col
 Lettore. Con un rilievo chiude `fermato`, motivo `preverifica`:
-niente ramo, commit, PR né Solver, e il rimedio è correggere il PBI. `--riprendi` non la rifà.
+niente ramo, commit, PR né Solver, e il rimedio è correggere il PBI. Un Lettore senza `letto`
+chiude `senza esito`, motivo `lettore-senza-esito`, con `riprendi_dopo` se si è fermato sul
+limite d'uso con l'ora del reset leggibile. `--riprendi` non la rifà.
 
 Sono **tre gate diversi** perché rispondono a tre domande diverse
 (`.claude/skills/asdlc/patterns/context-gates.md`):
