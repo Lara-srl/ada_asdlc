@@ -67,17 +67,17 @@ registro e `copia_la_traccia` continuano a vedere un uuid per invocazione, come 
 Su `main` il rilancio non porta `--fork-session`, quindi ognuno dei criteri qui sotto è un **rosso
 atteso**.
 
-- [ ] **Il rilancio del Builder porta `-c`, `--fork-session` e `--session-id`.** Con `esegui()`
+- [x] **Il rilancio del Builder porta `-c`, `--fork-session` e `--session-id`.** Con `esegui()`
       finto, al secondo lancio dello stesso giro il comando contiene `-c`, `--fork-session` e
       `--session-id <uuid>` (pytest).
-- [ ] **La prima invocazione non porta `--fork-session` né `-c`.** Primo lancio del giro: il
+- [x] **La prima invocazione non porta `--fork-session` né `-c`.** Primo lancio del giro: il
       comando ha `--session-id` e nessuno dei due (pytest).
 - ~~**Il registro del rilancio porta il uuid del fork.**~~ **Uscito dal PBI (19/10, giro 2).** Il
       criterio è vero anche su `main`: `PBI-511` (decisione 1) scrive già un uuid nuovo per ogni
       invocazione, quindi non può nascere rosso, e il test del giro 1 (`763b668`) è nato verde e
       non morde (22 mutanti non lo fanno fallire per asserzione). Il gate del rosso ha fermato il
       giro 2 per quel commit. La proprietà resta garantita da `PBI-511`.
-- [ ] **Guardia: `--session-id` con `-c` o `--resume` senza `--fork-session` non esce mai.** Su
+- [x] **Guardia: `--session-id` con `-c` o `--resume` senza `--fork-session` non esce mai.** Su
       ogni comando costruito da `invoca_agente` per Builder e Critic, in primo lancio e in
       rilancio (pytest, parametrizzato).
 
