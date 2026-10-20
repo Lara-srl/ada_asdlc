@@ -169,7 +169,9 @@ reset leggibile, l'esito porta `riprendi_dopo` come il Builder (`PBI-519`): il t
 quell'ora e poi rilancia il PBI. Senza rilievi il giro va avanti come prima. La lettura si
 paga una volta per versione del PBI: se fra i rapporti `runs/*-<PBI>-preverifica.json` ce n'è
 uno con lo stesso `sha_pbi`, senza rilievi e, col Lettore, con `lettore` uguale a `letto`, il
-giro non la rifà e prosegue. `--riprendi` non la
+giro non la rifà e prosegue. Il tick non rilancia un PBI fermo col motivo `preverifica` finché
+il suo file non cambia su `main`, e intanto scrive `attende: preverifica PBI-N — <n> rilievi,
+correggi il PBI`. `--riprendi` non la
 rifà. Senza la sezione la pre-verifica è spenta.
 
 ```toml

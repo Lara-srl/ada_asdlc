@@ -497,6 +497,14 @@ tick non riprende e scrive `attende: …` come per ogni giro fermato. Vale anche
 chiuso `lettore-senza-esito` (`PBI-522`), che non ha ramo su `origin`: prima dell'ora il tick
 scrive la stessa riga, e dopo lancia `asdlc-runner PBI-N`, senza `--riprendi`.
 
+**Un PBI fermo in pre-verifica aspetta la sua correzione** (`PBI-522`). Se l'ultimo rapporto
+del PBI chiude col motivo `preverifica`, il tick confronta il suo `sha_pbi` con `git rev-parse
+HEAD:<file del PBI>` nel proprio checkout, appena allineato a `main`: finché sono uguali scrive
+`attende: preverifica PBI-N — <n> rilievi, correggi il PBI` e non lancia. Quando la correzione
+del PBI arriva su `main` lo sha cambia, e il tick rilancia da solo. Una modifica non
+committata nel checkout non conta. Non è un blocco (`ADR-0008`): la coda resta su quel PBI e
+il tick dopo rilegge.
+
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:
 
