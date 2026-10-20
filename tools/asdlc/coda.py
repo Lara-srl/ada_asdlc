@@ -500,6 +500,16 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
                 return AttendeIlReset(decisione.pbi, ripresa.strftime("%H:%M"))
             return Lancia(decisione.pbi, riprendi=True)
         return Attende(decisione.pbi, pr)
+    # Un giro chiuso prima del ramo non lascia niente su `origin`, e la coda direbbe
+    # `Lancia`: lo trattiene l'ultimo rapporto. Un Lettore fermo sul limite d'uso si
+    # riprende dopo il reset, senza `--riprendi` perché il ramo non c'è (PBI-522,
+    # decisione 6).
+    if isinstance(decisione, Lancia):
+        esito = ultimo_esito(worktree, decisione.pbi)
+        if esito is not None and esito.get("motivo") == "lettore-senza-esito":
+            ripresa = riprendi_dopo(worktree, decisione.pbi)
+            if ripresa is not None and adesso() < ripresa:
+                return AttendeIlReset(decisione.pbi, ripresa.strftime("%H:%M"))
     return decisione
 
 

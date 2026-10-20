@@ -492,7 +492,9 @@ quell'ora il tick scrive `attende il reset del limite d'uso: PBI-N riprende dopo
 lancia: non è un blocco (`ADR-0008`). Dopo quell'ora lancia `asdlc-runner PBI-N --riprendi`, e
 la riga è `lancia: PBI-N --riprendi, dopo il reset del limite d'uso`. Le riprese hanno un
 tetto di tre per PBI: il runner le conta in `riprese_limite`, e con `riprese_limite` ≥ 3 il
-tick non riprende e scrive `attende: …` come per ogni giro fermato.
+tick non riprende e scrive `attende: …` come per ogni giro fermato. Vale anche per un giro
+chiuso `lettore-senza-esito` (`PBI-522`), che non ha ramo su `origin`: prima dell'ora il tick
+scrive la stessa riga, e dopo lancia `asdlc-runner PBI-N`, senza `--riprendi`.
 
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:
