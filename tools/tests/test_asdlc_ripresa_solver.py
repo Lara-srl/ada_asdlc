@@ -139,3 +139,22 @@ def test_il_prompt_della_ripresa_porta_domanda_e_risposta_da_valutare(giro):
     assert "scrivi {\"chiave\": {valore}} nel dict" in da_valutare
     assert "specs/solver-e-rilascio/spec.md" in da_valutare
     assert "riprendi da dove ti sei fermato, nella fase in cui sei" in prompt
+
+
+def test_senza_traccia_la_ripresa_riparte_pulita_col_pbi_e_lo_avvisa(giro):
+    """Criterio 4: con `traccia` `None` un `--resume` fallirebbe. La ripresa parte da una
+    sessione nuova, senza `--resume` né `-c`, e il prompt porta il PBI oltre a domanda e
+    risposta; l'avviso sta nella nota del rapporto (`ADR-0008`)."""
+    esito, agente = giro({"builder": [fermati("quale funzione?"), FATTO],
+                          "solver": [RISOLTO]}, traccia=False)
+
+    ripresa = comandi_di(agente, "builder")[1]
+    assert "--resume" not in ripresa
+    assert "-c" not in ripresa
+    prompt = sorted(runner.LOG_DIR.glob("*_builder_prompt.txt"))[1].read_text(encoding="utf-8")
+    assert "backlog/PBI-102-soglia-di-revisione-del-runner.md" in prompt
+    assert "quale funzione?" in prompt
+    assert RISOLTO["risposta"] in prompt
+    rapporto = json.loads(runner.chiudi_rapporto("giro", [esito]).read_text(encoding="utf-8"))
+    assert "avviso: la ripresa dopo risolto riparte da una sessione nuova" in (
+        rapporto["esiti"][0]["nota"])
