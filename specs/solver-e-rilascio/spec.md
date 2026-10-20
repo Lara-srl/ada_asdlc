@@ -45,7 +45,14 @@ Il prompt della ripresa è `tools/asdlc/prompt/ripresa-dopo-risolto.md`: la doma
 la risposta del Solver con la sua `evidenza` in un blocco **da valutare**, e la frase «riprendi
 da dove ti sei fermato, nella fase in cui sei» (la fase sta su disco e la ripresa non la
 cambia). Domanda e risposta entrano come valori di `.format()`, mai nel template. La risposta
-non annulla lo Scope né i gate. Gli altri blocchi (`builder-senza-esito`,
+non annulla lo Scope né i gate.
+
+Si riprende con `--resume` solo se la traccia della sessione c'è (`traccia` non `None` nel
+rapporto): `sessione` c'è sempre, e un `--resume` su una sessione assente fallirebbe. Senza
+traccia il Builder riparte da una sessione nuova (né `--resume` né `-c`) con un prompt che porta
+il PBI, la domanda e la risposta, e il giro lo dichiara con un avviso nella nota (`ADR-0008`). Il
+prompt dice dove rileggere il lavoro fatto e i rilievi del Critic: `git log` e il rapporto del
+Critic in `runs/`. Gli altri blocchi (`builder-senza-esito`,
 `domanda-del-critic`, `critic-senza-esito`) si smistano una volta, alla chiusura, e non
 riprendono.
 

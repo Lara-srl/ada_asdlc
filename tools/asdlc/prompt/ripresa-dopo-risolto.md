@@ -5,6 +5,11 @@ giri fermati, ha risposto `risolto`. Il giro non si è chiuso:
 riprendi da dove ti sei fermato, nella fase in cui sei.
 La fase sta su disco e la ripresa non la cambia.
 
+Se la conversazione di prima non ce l'hai davanti, il runner ti ha fatto ripartire da una
+sessione nuova: il lavoro fatto è nei commit del ramo (`git log`), e se il giro è a una
+revisione dopo il Critic i suoi rilievi stanno nel rapporto del Critic in `runs/`. Rileggili
+prima di continuare.
+
 ### La tua domanda
 
 {domanda}

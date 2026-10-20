@@ -4147,15 +4147,25 @@ def esegui_pbi(
                     risposta = smista("domanda-del-builder", una_riga(e.domanda))
                     if risposta is None or risposta["esito"] != "risolto":
                         return "domanda-del-builder", una_riga(e.domanda)
-                    # La sessione del Builder che ha chiamato `fermati`, e non `-c`: l'ultima
-                    # sessione dell'albero è quella del Solver. `--session-id` e
-                    # `--fork-session` li aggiunge `invoca_agente()`.
-                    ripresa = BUILDER + ["--resume", invocazione.registro["sessione"]]
                     # Domanda e risposta entrano come valori di `.format()`: le loro graffe
                     # non si interpretano (decisione 8).
                     prompt = prompt_del_pacchetto("ripresa-dopo-risolto").format(
                         domanda=e.domanda, risposta=risposta["risposta"],
                         evidenza=risposta["evidenza"])
+                    if invocazione.registro.get("traccia"):
+                        # La sessione del Builder che ha chiamato `fermati`, e non `-c`:
+                        # l'ultima sessione dell'albero è quella del Solver. `--session-id`
+                        # e `--fork-session` li aggiunge `invoca_agente()`.
+                        ripresa = BUILDER + ["--resume", invocazione.registro["sessione"]]
+                    else:
+                        # Senza traccia la sessione non c'è, e `--resume` fallirebbe: si
+                        # riparte da una sessione nuova, col PBI davanti (decisione 7).
+                        ripresa = list(BUILDER)
+                        prompt = (PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
+                                  + "\n\n" + prompt)
+                        dichiara("avviso: la ripresa dopo risolto riparte da una sessione "
+                                 "nuova, senza la traccia del Builder "
+                                 f"({invocazione.registro.get('traccia_nota', '')})"[:300])
                     continue
 
                 # Come all'ingresso, e per la stessa ragione: niente eccezioni da quando
