@@ -493,6 +493,12 @@ class Esito:
     # quando il tick può riprendere il PBI, data e ora locali in ISO (PBI-519,
     # decisione 3). Vuoto per ogni altro esito.
     riprendi_dopo: str = ""
+    # Il ramo su cui il giro ha lavorato: `--riprendi` riparte da `origin/<ramo>`
+    # dell'ultimo rapporto, che può essere un `-giroK` (PBI-519, decisione 6).
+    ramo: str = ""
+    # Le riprese dopo il limite d'uso fatte per questo PBI, contando quelle dei
+    # rapporti di prima: il tetto lo applica il tick (PBI-519, decisione 8).
+    riprese_limite: int = 0
 
 
 def distribuzione_del_runner() -> importlib.metadata.Distribution:
@@ -3953,7 +3959,7 @@ def scrivi_rapporto_critic(run: str, pbi: str, revisione: int, verdetto: Verdett
 
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True,
-    run: str = "",
+    run: str = "", riprendi: bool = False,
 ) -> Esito:
     run = run or datetime.now().strftime("%Y%m%d-%H%M%S")
     # La base del giro, una volta: da qui in poi nessuno fa più `fetch`, e ogni
@@ -4263,7 +4269,12 @@ def esegui_pbi(
         return "fatto", ""
 
     try:
-        branch = crea_branch(pbi, base)
+        if riprendi:
+            branch = riprendi_il_ramo(pbi)
+            e.riprese_limite = riprese_limite_fatte(pbi) + 1
+        else:
+            branch = crea_branch(pbi, base)
+        e.ramo = branch
     except OriginMuto as muto:
         print(f"    ⚠️  {muto}")
         motivo, dettaglio = "origin-muto", str(muto)
@@ -4324,6 +4335,41 @@ def esegui_pbi(
         if e.pr:
             print(f"    PR aperta: {e.pr}")
     return e
+
+
+def esiti_dei_rapporti(pbi: str) -> list[tuple[str, dict]]:
+    """Gli esiti di `pbi` nei rapporti di `LOG_DIR`, ognuno col `run` del suo
+    rapporto. Un file che non è un rapporto, o che non si legge, non conta."""
+    trovati: list[tuple[str, dict]] = []
+    for file in LOG_DIR.glob("*.json"):
+        try:
+            rapporto = json.loads(file.read_text(encoding="utf-8"))
+            trovati += [(str(rapporto.get("run", "")), x) for x in rapporto.get("esiti", [])
+                        if x.get("pbi") == pbi]
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return trovati
+
+
+def riprese_limite_fatte(pbi: str) -> int:
+    """Le riprese dopo il limite d'uso già contate per `pbi`: il più alto
+    `riprese_limite` dei suoi esiti nei rapporti (PBI-519, decisione 8)."""
+    return max([0] + [x.get("riprese_limite", 0) for _, x in esiti_dei_rapporti(pbi)])
+
+
+def riprendi_il_ramo(pbi: str) -> str:
+    """Il ramo dell'ultimo giro di `pbi`, estratto alla punta di `origin/<ramo>`:
+    la ripresa continua su quello stesso ramo, e i commit nuovi avanzano di
+    fast-forward (PBI-519, decisione 6). L'ultimo è l'esito col `run` più recente.
+
+    `switch -C` e non `-c`: un ramo locale con quel nome, rimasto da un giro
+    prima, si riallinea alla punta pubblicata invece di far fallire il giro."""
+    esiti = esiti_dei_rapporti(pbi)
+    ramo = max(esiti, key=lambda r: r[0])[1].get("ramo") if esiti else None
+    if not ramo:
+        raise RuntimeError(f"--riprendi: nessun rapporto di {pbi} in {LOG_DIR} porta il ramo")
+    git("switch", "-C", ramo, f"{REMOTO}/{ramo}")
+    return ramo
 
 
 def giri_solver_fatti(pbi: str) -> int:
