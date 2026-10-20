@@ -4037,6 +4037,45 @@ def forma_del_pbi(testo: str, pbi: str) -> list[Rilievo]:
     return rilievi
 
 
+def percorsi_dello_scope(testo: str) -> list[tuple[str, str]]:
+    """I percorsi fra apici inversi dello Scope, con la loro riga: quelli con una
+    `/` e senza spazi, `*`, `<`, `>`, `{`, `}` né `…` (PBI-520, decisione 5)."""
+    return [(percorso, riga)
+            for riga in (blocco_dello_scope(testo) or "").splitlines()
+            for percorso in re.findall(r"`([^`]+)`", riga)
+            if "/" in percorso and not set(percorso) & set(" *<>{}…")]
+
+
+def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
+    """Gli avvisi della pre-verifica, letti alla `base` (PBI-520, decisione 5):
+    non fermano niente, li legge il Lettore. Un percorso dello Scope che alla base
+    non c'è e la cui riga non lo dice nuovo, una dipendenza di `Bloccato da:` che
+    alla base non c'è o ha un `- [ ]` nella sua Verifica, uno Scope di soli test."""
+    avvisi: list[str] = []
+    percorsi = percorsi_dello_scope(testo)
+    for percorso, riga in percorsi:
+        if "nuov" in riga:
+            continue
+        code, _ = esegui(["git", "cat-file", "-e", f"{base}:{percorso.rstrip('/')}"], REPO,
+                         timeout=120)
+        if code != 0:
+            avvisi.append(f"lo Scope nomina `{percorso}`, che alla base non c'è e non è detto nuovo")
+    for riga in re.findall(r"^.*Bloccato da:.*$", testo, re.M):
+        for dipendenza in dict.fromkeys(re.findall(r"PBI-\d+", riga)):
+            file = trova_pbi(dipendenza, base)
+            if file is None:
+                avvisi.append(f"la dipendenza {dipendenza} alla base non c'è")
+                continue
+            sorgente = git("show", f"{base}:{file.relative_to(REPO).as_posix()}")
+            if any(c.startswith("- [ ]") for c in criteri_del_pbi(sorgente)):
+                avvisi.append(f"la dipendenza {dipendenza} ha un criterio non spuntato")
+    pbi_stesso = re.compile(rf"{re.escape(BACKLOG)}/{re.escape(pbi)}(?!\d)")
+    altri = [p for p, _ in percorsi if not pbi_stesso.match(p) and not p.endswith("/")]
+    if altri and all(e_file_di_test(p) for p in altri):
+        avvisi.append("lo Scope nomina solo file di test")
+    return avvisi
+
+
 def salva_il_traceback(pbi: str) -> Path:
     """Il traceback dell'eccezione in corso in un file di `LOG_DIR`, accanto al
     log del giro. `.log` perché `runs/*.log` è ignorato da git: un file nuovo in
