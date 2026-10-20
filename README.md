@@ -166,7 +166,10 @@ e `rilievi_preverifica`. Un Lettore che non chiama `letto`, per un tetto scaduto
 limite d'uso, chiude invece `senza esito` col motivo `lettore-senza-esito`, anche coi rilievi
 accumulati: non è un PBI da correggere, il Solver non parte e, col limite d'uso e l'ora del
 reset leggibile, l'esito porta `riprendi_dopo` come il Builder (`PBI-519`): il tick aspetta
-quell'ora e poi rilancia il PBI. Senza rilievi il giro va avanti come prima. `--riprendi` non la
+quell'ora e poi rilancia il PBI. Senza rilievi il giro va avanti come prima. La lettura si
+paga una volta per versione del PBI: se fra i rapporti `runs/*-<PBI>-preverifica.json` ce n'è
+uno con lo stesso `sha_pbi`, senza rilievi e, col Lettore, con `lettore` uguale a `letto`, il
+giro non la rifà e prosegue. `--riprendi` non la
 rifà. Senza la sezione la pre-verifica è spenta.
 
 ```toml

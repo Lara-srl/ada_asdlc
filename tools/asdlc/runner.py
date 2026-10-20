@@ -4246,6 +4246,23 @@ def scrivi_la_preverifica(pbi: str, base: str, percorso: str, run: str,
     return rapporto, contenuto, rilievi, invocazione
 
 
+def preverifica_gia_letta(pbi: str, sha_pbi: str, lettore: bool) -> bool:
+    """C'è in `LOG_DIR` un rapporto della pre-verifica di `pbi` che ha letto la stessa
+    versione del file, `sha_pbi`, senza rilievi e, col Lettore, con `letto` (PBI-522,
+    decisione 3; `ADR-0031` decisione 7)? Allora la lettura non si rifà: si paga una
+    volta per versione. Un file che non si legge non conta."""
+    for file in LOG_DIR.glob(f"*-{pbi}-preverifica.json"):
+        try:
+            letto = json.loads(file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (isinstance(letto, dict) and letto.get("pbi") == pbi
+                and letto.get("sha_pbi") == sha_pbi and not letto.get("rilievi")
+                and (not lettore or letto.get("lettore") == "letto")):
+            return True
+    return False
+
+
 def preverifica(pbi: str, lettore: bool = False) -> int:
     """`asdlc-runner PBI-N --preverifica` (PBI-520, decisioni 1, 7 e 8): legge il PBI
     alla base del giro e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`. Esce 1 se c'è
@@ -4355,22 +4372,28 @@ def esegui_pbi(
     # correggere il PBI. Un Lettore senza `letto` — un tetto, il limite d'uso — chiude
     # `senza esito` anche coi rilievi accumulati: non è un PBI da correggere, e col
     # limite d'uso il tick lo riprende dopo il reset, come il Builder (PBI-519). Una
-    # ripresa non la rifà: il PBI è già passato da qui, e il suo ramo c'è già.
+    # ripresa non la rifà: il PBI è già passato da qui, e il suo ramo c'è già. Non la
+    # rifà nemmeno una versione del PBI già letta pronta: una lettura per versione.
     if CFG.preverifica.attiva and not riprendi:
-        rapporto, letto, rilievi, lettura = scrivi_la_preverifica(
-            pbi, base, pbi_path.relative_to(REPO).as_posix(), run,
-            lettore=CFG.preverifica.lettore)
-        if letto["lettore"] == "senza esito":
-            return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
-                                invocazioni=[lettura],
-                                riprendi_dopo=riprendi_dopo_il_limite(lettura)),
-                          "lettore-senza-esito",
-                          f"codice d'uscita {lettura['codice']} · stderr {lettura['stderr']}"
-                          f" · nel rapporto {rapporto}")
-        if rilievi:
-            return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
-                                rilievi_preverifica=len(rilievi)),
-                          "preverifica", f"rilievi: {len(rilievi)}, nel rapporto {rapporto}")
+        percorso = pbi_path.relative_to(REPO).as_posix()
+        if preverifica_gia_letta(pbi, git("rev-parse", f"{base}:{percorso}"),
+                                 CFG.preverifica.lettore):
+            print("    pre-verifica: questa versione del PBI è già stata letta pronta")
+        else:
+            rapporto, letto, rilievi, lettura = scrivi_la_preverifica(
+                pbi, base, percorso, run, lettore=CFG.preverifica.lettore)
+            if letto["lettore"] == "senza esito":
+                return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
+                                    invocazioni=[lettura],
+                                    riprendi_dopo=riprendi_dopo_il_limite(lettura)),
+                              "lettore-senza-esito",
+                              f"codice d'uscita {lettura['codice']} · stderr "
+                              f"{lettura['stderr']} · nel rapporto {rapporto}")
+            if rilievi:
+                return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"],
+                                    rilievi_preverifica=len(rilievi)),
+                              "preverifica",
+                              f"rilievi: {len(rilievi)}, nel rapporto {rapporto}")
 
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
               base=base)
