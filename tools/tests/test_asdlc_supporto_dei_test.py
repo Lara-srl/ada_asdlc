@@ -30,3 +30,14 @@ class TestUnFileDiSupportoInSrcTestNonEProduzione:
     def test_sotto_src_test_nessun_file_e_produzione(self, percorso, produzione):
         assert runner.e_file_di_produzione(percorso) is produzione
         assert not runner.e_file_di_test(percorso)
+
+
+class TestInTestOnlyIlFileDiSupportoSiScrive:
+    """Criterio 4: la guardia di fase in `TEST_ONLY` lascia scrivere lo script di
+    supporto sotto `src/test/` e continua a chiudere quello di `tools/migrazione/`."""
+
+    @pytest.mark.parametrize("percorso, bloccato", [(SUPPORTO, False), (MIGRAZIONE, True)])
+    def test_la_guardia_lascia_il_supporto_e_chiude_la_migrazione(self, percorso, bloccato):
+        ragione = runner.guardia_di_fase(runner.FASE_TEST_ONLY, percorso)
+
+        assert (ragione is not None) is bloccato
