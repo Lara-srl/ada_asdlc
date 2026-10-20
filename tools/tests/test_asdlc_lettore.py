@@ -203,3 +203,25 @@ def test_una_sonda_verde_sulla_base_e_un_rilievo_r_e_il_lettore_lavora_fuori_dal
     assert not (clone / "test_sonde.py").exists()
     assert runner.USA_E_GETTA["montati"] == montati + 1
     assert runner.USA_E_GETTA["montati"] == runner.USA_E_GETTA["smontati"]
+
+
+# --- Criterio 3: senza `letto` la lettura è `senza esito` ---------------------
+
+
+def test_senza_letto_la_lettura_e_senza_esito_coi_rilievi_e_senza_sonde(tmp_path, monkeypatch):
+    """Decisione 2: i rilievi del `.jsonl` entrano lo stesso nel rapporto, marcati
+    `"lettore": "senza esito"`, ma le sonde non si eseguono — anche quella che il
+    Lettore ha nominato prima di fermarsi."""
+    rilievo = {"domanda": "D", "criterio": 0, "testo": "manca una decisione",
+               "evidenza": "modulo.py"}
+    chiamate = [{"strumento": "rilievo", **rilievo},
+                {"strumento": "sonda", "criterio": 1, "file": "test_sonde.py",
+                 "nome": "test_la_somma_c_e_gia"}]
+
+    codice, rapporto, _, _, _ = preverifica_col_lettore(
+        tmp_path, monkeypatch, DUE_CRITERI, {"test_sonde.py": SONDE}, chiamate, letto=False)
+
+    assert codice == 1
+    assert rapporto["lettore"] == "senza esito"
+    assert rapporto["rilievi"] == [{**rilievo, "lettore": "senza esito"}]
+    assert rapporto["sonde"] == []
