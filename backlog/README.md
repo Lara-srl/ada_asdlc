@@ -36,6 +36,16 @@ asserzione, contro `main`. Un caso verde su `main` non è un criterio, è una **
 va nella non regressione dichiarata come tale (`ADR-0022`, nota del 23/09; misurato sul
 primo giro di PBI-364).
 
+**Prima di accodare, rileggi** (le sette domande di `ADR-0031`; la forma e lo Scope li
+controlla `asdlc-runner PBI-XXX --preverifica`, `PBI-520`):
+- **R** — ogni criterio può nascere rosso su `main`?
+- **F** — il GREEN è scrivibile nella fase?
+- **T** — un test esistente contraddice una decisione?
+- **A** — qualcosa sporca l'albero o scrive fuori?
+- **E** — un RED che non termina, flag doppi, nomi in conflitto?
+- **D** — una decisione è lasciata al Builder, o manca una dipendenza?
+- **N** — i nomi e i fatti citati sono veri nel codice?
+
 ## Eseguirli con un agente
 
 Il runner (`asdlc-runner`) fa girare i PBI uno per volta con `claude -p`, contesto pulito
