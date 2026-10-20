@@ -148,3 +148,25 @@ class TestIlSenzaEsitoDelLimitePortaRiprendiDopo:
         assert not voce.get("riprendi_dopo"), (
             "con uscita 0 la frase del limite non fa riprendere il giro"
         )
+
+
+class TestSenzaOraLeggibileNonSiRiprende:
+    """Criterio 3, decisione 2: con la frase del limite ma senza un'ora del reset
+    leggibile non c'è `riprendi_dopo`, e la nota lo dichiara. Un'ora inventata è
+    peggio di una mancante (`PBI-363`, decisione 4)."""
+
+    @pytest.mark.parametrize(
+        "testo",
+        [
+            pytest.param("You've hit your session limit\n", id="senza-ora"),
+            pytest.param("You've hit your session limit · resets soon\n", id="ora-illeggibile"),
+        ],
+    )
+    def test_niente_riprendi_dopo_e_la_nota_lo_dice(self, monkeypatch, tmp_path, testo):
+        voce = giro_col_limite(monkeypatch, tmp_path,
+                               agente_che_scrive_i_flussi({}, stderr={"builder": testo}))
+
+        assert not voce.get("riprendi_dopo"), "un'ora del reset che non si legge non si inventa"
+        assert "limite d'uso dell'account, ora del reset non leggibile" in voce["nota"], (
+            f"la nota «{voce['nota']}» non dice che l'ora del reset non si legge"
+        )
