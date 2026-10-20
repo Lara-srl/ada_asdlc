@@ -1284,9 +1284,12 @@ def ora_di_ripresa(ora: str, scritta: datetime) -> datetime:
 def riprendi_dopo_il_limite(registro: dict) -> str:
     """`riprendi_dopo` di un `senza esito`: l'ora di ripresa in ISO se il file di
     stderr dell'invocazione porta la frase del limite con l'ora del reset, o `""`
-    (PBI-519, decisione 1). Lo stdout è testo del modello e non conta (`ADR-0027`).
+    (PBI-519, decisione 1). Lo stdout è testo del modello e non conta (`ADR-0027`),
+    e con codice d'uscita 0 la CLI non si è fermata sul limite.
     L'istante in cui l'uscita è stata scritta è quello del file di stderr, e
     senza quel file non c'è ripresa: il giro chiude come prima."""
+    if registro["codice"] == 0:
+        return ""
     dentro = Path(registro["stderr"])
     try:
         uscita = dentro.read_text(encoding="utf-8", errors="replace")
