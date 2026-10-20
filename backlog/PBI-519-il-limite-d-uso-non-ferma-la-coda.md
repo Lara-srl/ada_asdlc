@@ -132,34 +132,34 @@ Su `main` il rapporto non porta `riprendi_dopo` e il tick non sa riprendere, qui
 `--no-verify` (`backlog/README.md`, `test-senza-isolamento`): `apri_la_fase` installa un pre-commit che
 lancia il runner vero.
 
-- [ ] **Un `senza esito` per il limite con l'ora leggibile porta `riprendi_dopo`.** Un Builder finto
+- [x] **Un `senza esito` per il limite con l'ora leggibile porta `riprendi_dopo`.** Un Builder finto
       che esce 1 con «You've hit your session limit · resets 7:50pm» **nello stderr**: il rapporto ha
       `riprendi_dopo` (pytest). Due casi in più, parametrici: la stessa frase **solo nello stdout**, e
       nello stderr con **uscita 0**: niente `riprendi_dopo` (decisione 1).
-- [ ] **L'ora è la prima occorrenza successiva, con il margine.** «resets 7:50pm» con l'orologio alle
+- [x] **L'ora è la prima occorrenza successiva, con il margine.** «resets 7:50pm» con l'orologio alle
       17:45 dà oggi 19:55; alle 21:00 dà domani 19:55 (pytest, orologio finto, due casi).
-- [ ] **Senza ora leggibile non c'è `riprendi_dopo`.** Nato verde su `main`, per costruzione: è una
+- [x] **Senza ora leggibile non c'è `riprendi_dopo`.** Nato verde su `main`, per costruzione: è una
       guardia, si committa da sola con `Guardia-su: tools/asdlc/runner.py::limite_d_uso` e deve mordere
       (pytest). Controlla **anche che la nota dica «ora del reset non leggibile»**: con la sola assenza di
       `riprendi_dopo` i mutanti di `limite_d_uso` non la toccano. Si committa **dopo il GREEN del
       criterio 2**.
-- [ ] **Il tick aspetta prima dell'ora.** Con un PBI il cui ultimo rapporto ha `riprendi_dopo` nel
+- [x] **Il tick aspetta prima dell'ora.** Con un PBI il cui ultimo rapporto ha `riprendi_dopo` nel
       futuro, `decidi()` non lancia e la riga del log dice `attende il reset del limite d'uso` con l'ora
       (pytest, tick finto).
-- [ ] **Il tick riprende dopo l'ora.** Con `riprendi_dopo` nel passato, `decidi()` lancia il PBI con
+- [x] **Il tick riprende dopo l'ora.** Con `riprendi_dopo` nel passato, `decidi()` lancia il PBI con
       `--riprendi` (pytest).
-- [ ] **`--riprendi` parte dalla punta del ramo.** In un repository temporaneo con `origin/main` e un
+- [x] **`--riprendi` parte dalla punta del ramo.** In un repository temporaneo con `origin/main` e un
       ramo `pbi/pbi-N` con due commit, il giro di ripresa non crea `-giro2`, parte dai due commit e i
       nuovi avanzano di `fast-forward` (pytest).
-- [ ] **Il prompt di ripresa dice di non rifare il lavoro.** Il prompt del Builder in ripresa contiene
+- [x] **Il prompt di ripresa dice di non rifare il lavoro.** Il prompt del Builder in ripresa contiene
       il rimando a `git log` e alle spunte, e «senza rifare» ciò che è committato (pytest). Il test legge
       **il prompt costruito dal runner**, non il file: un `.md` non è produzione, e `riprendi.md`
       scritto nel commit RED lo farebbe nascere verde. `riprendi.md` nasce nel commit GREEN.
-- [ ] **Il tetto di tre riprese.** Con un rapporto che porta `riprese_limite = 3`, `decidi()` non
+- [x] **Il tetto di tre riprese.** Con un rapporto che porta `riprese_limite = 3`, `decidi()` non
       riprende e la riga dice `attende: …` come oggi (pytest). **Rosso solo dopo il GREEN del criterio
       5:** su `main` un PBI con un ramo è sempre `Attende` (`coda.py`, `prossimo()`), quindi il test
       nasce verde. Il suo RED si committa dopo quel GREEN.
-- [ ] **Sul limite con l'ora leggibile il Solver non parte.** `e.solver` è vuoto e `e.giri_solver`
+- [x] **Sul limite con l'ora leggibile il Solver non parte.** `e.solver` è vuoto e `e.giri_solver`
       resta 0 (pytest; rosso su `main`, dove il Solver parte per `builder-senza-esito`).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde; un `senza esito` che non è il

@@ -124,13 +124,25 @@ class Attende:
 
 
 @dataclass(frozen=True)
-class Lancia:
-    """C'è un PBI pronto da far partire, ed è questo."""
+class AttendeIlReset:
+    """Il giro di questo PBI si è fermato sul limite d'uso dell'account, e si
+    riprende dopo `ora` (HH:MM): non è un blocco e non tocca a un umano (PBI-519,
+    decisione 5)."""
 
     pbi: str
+    ora: str
 
 
-Decisione = Occupato | Finita | Barriera | Attende | Lancia
+@dataclass(frozen=True)
+class Lancia:
+    """C'è un PBI pronto da far partire, ed è questo. Con `riprendi` il giro riparte
+    dalla punta del suo ramo, dopo il reset del limite d'uso (PBI-519)."""
+
+    pbi: str
+    riprendi: bool = False
+
+
+Decisione = Occupato | Finita | Barriera | Attende | AttendeIlReset | Lancia
 
 # Le due sole forme che sono una voce, e nient'altro della pagina lo è. Le regole
 # sono ancorate a tutta la riga di proposito: `backlog/CODA.md` è insieme il
@@ -480,8 +492,50 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     # Solo sull'attesa: la riga dice cosa c'è sul ramo, e la PR nata senza URL
     # si ritrova qui senza riscrivere il registro del giro (PBI-381).
     if isinstance(decisione, Attende):
-        return Attende(decisione.pbi, pr_sul_ramo(repo, decisione.pbi))
+        pr = pr_sul_ramo(repo, decisione.pbi)
+        # Senza PR, un giro fermato sul limite d'uso si riprende dopo il reset: lo
+        # dice l'ultimo rapporto del PBI nel worktree del runner (PBI-519, decisione 5).
+        if pr == () and (ripresa := riprendi_dopo(worktree, decisione.pbi)) is not None:
+            if adesso() < ripresa:
+                return AttendeIlReset(decisione.pbi, ripresa.strftime("%H:%M"))
+            return Lancia(decisione.pbi, riprendi=True)
+        return Attende(decisione.pbi, pr)
     return decisione
+
+
+def ultimo_esito(worktree: Path, pbi: str) -> dict | None:
+    """L'esito di `pbi` nel rapporto col `run` più recente fra quelli che il runner
+    ha scritto in `<worktree>/<[registro].cartella>/`, o `None`. I rapporti stanno
+    nel worktree del giro e non nel checkout del tick (PBI-519, decisione 5). Un
+    file che non è un rapporto, o che non si legge, non conta."""
+    trovati: list[tuple[str, dict]] = []
+    for file in (worktree / CFG.registro.cartella).glob("*.json"):
+        try:
+            rapporto = json.loads(file.read_text(encoding="utf-8"))
+            trovati += [(str(rapporto.get("run", "")), x) for x in rapporto.get("esiti", [])
+                        if x.get("pbi") == pbi]
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return max(trovati, key=lambda r: r[0])[1] if trovati else None
+
+
+# Quante riprese dopo il limite d'uso il tick fa per un PBI: il runner le conta in
+# `riprese_limite`, e alla terza il PBI torna ad aspettare una persona (PBI-519,
+# decisione 8). Il giro non sa del tetto: lo sa il tick, che è chi rilancia.
+RIPRESE_MASSIME = 3
+
+
+def riprendi_dopo(worktree: Path, pbi: str) -> datetime | None:
+    """`riprendi_dopo` dell'ultimo esito di `pbi`, o `None` se non c'è, non si
+    legge o le riprese hanno raggiunto `RIPRESE_MASSIME`: senza, il PBI attende
+    una persona come prima."""
+    esito = ultimo_esito(worktree, pbi)
+    try:
+        if esito is None or esito.get("riprese_limite", 0) >= RIPRESE_MASSIME:
+            return None
+        return datetime.fromisoformat(esito["riprendi_dopo"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def allinea(repo: Path) -> str | None:
@@ -679,7 +733,7 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
     return mancanze
 
 
-def lancia(pbi: str, worktree: Path) -> None:
+def lancia(pbi: str, worktree: Path, riprendi: bool = False) -> None:
     """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
 
     È lo stesso lancio che si fa a mano, e le sue tre righe vivevano in una
@@ -716,7 +770,10 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    codice, uscita = esegui([str(runner_installato()), pbi], worktree)
+    # `--riprendi` dopo il reset del limite d'uso: il giro riparte dalla punta del
+    # ramo e non da `origin/main`, su cui il pre-flight ha staccato l'albero (PBI-519).
+    codice, uscita = esegui([str(runner_installato()), pbi]
+                            + (["--riprendi"] if riprendi else []), worktree)
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
@@ -744,6 +801,10 @@ def racconta(decisione: Decisione) -> str:
                         else f"PR {', '.join(pr)}" if pr
                         else "nessuna PR sul ramo: crearla o rilanciare")
             return f"attende: {pbi} ha un ramo su origin e non è in main — {sul_ramo}"
+        case AttendeIlReset(pbi, ora):
+            return f"attende il reset del limite d'uso: {pbi} riprende dopo {ora}"
+        case Lancia(pbi, riprendi=True):
+            return f"lancia: {pbi} --riprendi, dopo il reset del limite d'uso"
         case Lancia(pbi):
             return f"lancia: {pbi}"
     return f"decisione senza nome: {decisione}"
@@ -1182,7 +1243,9 @@ def passaggio(a: argparse.Namespace) -> int:
         if fermo_in_pausa(a.repo):
             return 0
         try:
-            lancia(decisione.pbi, a.worktree)
+            # Il lancio di sempre resta la chiamata di sempre; la ripresa lo dice.
+            lancia(decisione.pbi, a.worktree,
+                   **({"riprendi": True} if decisione.riprendi else {}))
         except Guasto as guasto:
             # Da `cron` un'eccezione non la legge nessuno: nel log resterebbe la
             # riga che dice «lancia», cioè il contrario di quel che è successo.

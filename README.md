@@ -88,8 +88,10 @@ toglie il ramo. Il rapporto e i log dei giri stanno in `runs/`.
 ### Il Solver, il terzo ruolo
 
 Dopo un giro fermato — il `fermati` del Builder, una domanda bloccante del Critic, un agente
-`senza esito` — il runner lancia il **Solver** (sola lettura: `Read`, `Grep`, `Glob`). Smista
-il blocco con uno di tre strumenti, che il server dell'esito valida:
+`senza esito` — il runner lancia il **Solver** (sola lettura: `Read`, `Grep`, `Glob`). Non lo
+lancia su un `senza esito` per il limite d'uso dell'account con l'ora del reset leggibile
+(`riprendi_dopo` nel rapporto): lì non c'è niente da decidere, e dopo il reset il tick
+riprende il PBI con `asdlc-runner PBI-N --riprendi` (`PBI-519`). Smista il blocco con uno di tre strumenti, che il server dell'esito valida:
 
 - `risolvi(risposta, evidenza)` — `evidenza` è un file dell'albero, `percorso` o
   `percorso:riga`;

@@ -254,7 +254,16 @@ cd ~/ada-run && git fetch -q origin && git switch -q --detach origin/main
 
 ~/ada_controller/.venv-asdlc/bin/asdlc-runner PBI-201 --no-pr            # solo il branch locale
 ~/ada_controller/.venv-asdlc/bin/asdlc-runner PBI-201 PBI-203 PBI-207    # una tratta, in sequenza
+~/ada_controller/.venv-asdlc/bin/asdlc-runner PBI-201 --riprendi         # dopo il limite d'uso
 ```
+
+Con `--riprendi` il giro non nasce da `origin/main`: riparte dalla punta di `origin/<ramo>`,
+il ramo dell'esito più recente del PBI nei rapporti di `runs/` (il campo `ramo`), e continua su
+quello stesso ramo — niente `-giro2`, i commit nuovi avanzano di fast-forward. L'esito conta
+`riprese_limite`, il massimo dei rapporti del PBI più uno (`PBI-519`). Il Builder riparte con
+una sessione nuova, e al suo prompt segue `tools/asdlc/prompt/riprendi.md`: il giro prima si è
+interrotto per il limite d'uso, il lavoro fatto è nel ramo (`git log`, le spunte del PBI), e si
+continua dal primo criterio non spuntato senza rifare ciò che è committato.
 
 Il runner è quello **installato** (sotto, *Il runner installato*): lanciato come
 `python3 tools/asdlc/runner.py` su un PBI esce con «ambiente mancante», perché girerebbe
@@ -284,7 +293,11 @@ resta per le persone e non decide niente. Un agente che non chiama nessuno dei d
 limite d'uso, un crash della CLI, un modello che ha scritto e basta — chiude il giro
 **`senza esito`**, senza igiene e senza gate: stdout, stderr e codice d'uscita di
 `claude -p` restano accanto al file d'esito, e il rapporto del giro ne porta i percorsi
-insieme al log delle chiamate al server, dove si vedono anche quelle rifiutate.
+insieme al log delle chiamate al server, dove si vedono anche quelle rifiutate. Se `claude -p`
+esce con un codice diverso da zero e il suo stderr porta la frase del limite d'uso con l'ora
+del reset leggibile (lo stdout è testo del modello e non conta), l'esito porta anche
+**`riprendi_dopo`**: la prima occorrenza di quell'ora dopo l'istante in cui l'uscita è stata
+scritta, più cinque minuti, in data e ora locali ISO (`PBI-519`).
 
 ## Quanto tempo ci mette — e quindi quanto costa
 
@@ -463,6 +476,14 @@ anche in pausa; se il battito precedente è più vecchio di `[tick].soglia_batti
 scrive un avviso in `runs/coda.log` e a schermo, e prosegue (`ADR-0008`). Il file che manca
 non avvisa. Il PC spento ferma la coda: l'unità e il timer di systemd che la rilanciano alla
 ripartenza sono una ricetta, in `README.md`, che si installa a mano come il crontab.
+
+**Il limite d'uso non tocca a una persona** (`PBI-519`). Se l'ultimo rapporto del PBI fermo — il
+`runs/*.json` del worktree del runner col `run` più recente — porta `riprendi_dopo`, prima di
+quell'ora il tick scrive `attende il reset del limite d'uso: PBI-N riprende dopo HH:MM` e non
+lancia: non è un blocco (`ADR-0008`). Dopo quell'ora lancia `asdlc-runner PBI-N --riprendi`, e
+la riga è `lancia: PBI-N --riprendi, dopo il reset del limite d'uso`. Le riprese hanno un
+tetto di tre per PBI: il runner le conta in `riprese_limite`, e con `riprese_limite` ≥ 3 il
+tick non riprende e scrive `attende: …` come per ogni giro fermato.
 
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:

@@ -56,7 +56,7 @@ import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from fnmatch import fnmatch
 import importlib.metadata
 from importlib import resources
@@ -385,6 +385,9 @@ def aggiunte_del_progetto(cartella: Path | None) -> dict[str, str]:
 MODELLO_BUILDER = prompt_del_pacchetto("builder")
 PROMPT_IGIENE = prompt_del_pacchetto("igiene")
 PROMPT_RIPROVA = prompt_del_pacchetto("riprova")
+# Il testo che segue `PROMPT_BUILDER` quando il giro riprende dopo il limite d'uso
+# (`--riprendi`, PBI-519, decisione 7): si aggiunge, non sostituisce.
+PROMPT_RIPRENDI = prompt_del_pacchetto("riprendi")
 # I due prompt che nominano il ramo di base sono **modelli**: `PROMPT_CRITIC` e
 # `PROMPT_RIMEDIO` nascono in `configura()`, col ramo di `asdlc.toml` al posto di
 # `{base}` e `{pbi_path}` / `{rapporto}` lasciati a chi chiama.
@@ -489,6 +492,16 @@ class Esito:
     # è la testa su cui `asdlc-chiudi-giro` mette il tag (PBI-385, decisione 1).
     # Vuoto se il giro non ha pubblicato, o se `origin` non ha risposto.
     testa: str = ""
+    # Dopo un `senza esito` per il limite d'uso con l'ora del reset leggibile: da
+    # quando il tick può riprendere il PBI, data e ora locali in ISO (PBI-519,
+    # decisione 3). Vuoto per ogni altro esito.
+    riprendi_dopo: str = ""
+    # Il ramo su cui il giro ha lavorato: `--riprendi` riparte da `origin/<ramo>`
+    # dell'ultimo rapporto, che può essere un `-giroK` (PBI-519, decisione 6).
+    ramo: str = ""
+    # Le riprese dopo il limite d'uso fatte per questo PBI, contando quelle dei
+    # rapporti di prima: il tetto lo applica il tick (PBI-519, decisione 8).
+    riprese_limite: int = 0
 
 
 def distribuzione_del_runner() -> importlib.metadata.Distribution:
@@ -1257,6 +1270,44 @@ def limite_d_uso(uscita: str) -> str:
     # Un'ora inventata è peggio di un'ora mancante: chi legge `runs/tempi.csv`
     # la userebbe (decisione 4).
     return "limite d'uso dell'account, ora del reset non leggibile"
+
+
+# Il margine dopo l'ora del reset: la CLI la scrive al minuto, e un rilancio
+# sull'ora esatta troverebbe il limite ancora chiuso (PBI-519, decisione 3).
+MARGINE_DEL_RESET = timedelta(minutes=5)
+
+
+def ora_di_ripresa(ora: str, scritta: datetime) -> datetime:
+    """Quando si può riprendere: la prima occorrenza di `ora` («7:50pm», «3am»)
+    successiva a `scritta`, l'istante in cui l'uscita è stata scritta, più
+    `MARGINE_DEL_RESET`. Il fuso è quello del runner (PBI-519, decisione 3)."""
+    lettura = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s?([ap]m)", ora.strip(), re.IGNORECASE)
+    ore, minuti, meridiano = int(lettura.group(1)), int(lettura.group(2) or 0), lettura.group(3)
+    ore = ore % 12 + (12 if meridiano.lower() == "pm" else 0)
+    reset = scritta.replace(hour=ore, minute=minuti, second=0, microsecond=0)
+    if reset <= scritta:
+        reset += timedelta(days=1)
+    return reset + MARGINE_DEL_RESET
+
+
+def riprendi_dopo_il_limite(registro: dict) -> str:
+    """`riprendi_dopo` di un `senza esito`: l'ora di ripresa in ISO se il file di
+    stderr dell'invocazione porta la frase del limite con l'ora del reset, o `""`
+    (PBI-519, decisione 1). Lo stdout è testo del modello e non conta (`ADR-0027`),
+    e con codice d'uscita 0 la CLI non si è fermata sul limite.
+    L'istante in cui l'uscita è stata scritta è quello del file di stderr, e
+    senza quel file non c'è ripresa: il giro chiude come prima."""
+    if registro["codice"] == 0:
+        return ""
+    dentro = Path(registro["stderr"])
+    try:
+        uscita = dentro.read_text(encoding="utf-8", errors="replace")
+        scritta = datetime.fromtimestamp(dentro.stat().st_mtime)
+    except OSError:
+        return ""
+    if not FRASE_DEL_LIMITE.search(uscita) or not (ora := ORA_DEL_RESET.search(uscita)):
+        return ""
+    return ora_di_ripresa(ora.group(1), scritta).isoformat(timespec="minutes")
 
 
 def nota_senza_esito(registro: dict, uscita: str = "") -> str:
@@ -3911,7 +3962,7 @@ def scrivi_rapporto_critic(run: str, pbi: str, revisione: int, verdetto: Verdett
 
 def esegui_pbi(
     pbi: str, attivi: set[str], dry: bool, con_pr: bool, con_critic: bool = True,
-    run: str = "",
+    run: str = "", riprendi: bool = False,
 ) -> Esito:
     run = run or datetime.now().strftime("%Y%m%d-%H%M%S")
     # La base del giro, una volta: da qui in poi nessuno fa più `fetch`, e ogni
@@ -3938,6 +3989,8 @@ def esegui_pbi(
 
     print(f"\n=== {pbi} — {pbi_path.name}")
     prompt = PROMPT_BUILDER.format(pbi_path=pbi_path.relative_to(REPO))
+    if riprendi:
+        prompt += PROMPT_RIPRENDI
     if dry:
         print(prompt)
         return motiva(Esito(pbi, ""), "dry-run")
@@ -4067,6 +4120,7 @@ def esegui_pbi(
                 # igiene e senza gate. Un limite d'uso con l'albero sporco spendeva i
                 # tre giri d'igiene (difetto 27); ora costa un lancio (`ADR-0027`).
                 if dichiarato is None:
+                    e.riprendi_dopo = riprendi_dopo_il_limite(invocazione.registro)
                     return "builder-senza-esito", nota_senza_esito(invocazione.registro,
                                                                     invocazione.uscita)
                 if dichiarato["esito"] == "fermati":
@@ -4187,6 +4241,7 @@ def esegui_pbi(
             if verdetto.esito == "pass":
                 break
             if verdetto.esito == "senza esito":
+                e.riprendi_dopo = riprendi_dopo_il_limite(verdetto.registro)
                 return "critic-senza-esito", nota_senza_esito(verdetto.registro,
                                                               verdetto.rapporto)
             if verdetto.esito == "sospeso":
@@ -4219,7 +4274,12 @@ def esegui_pbi(
         return "fatto", ""
 
     try:
-        branch = crea_branch(pbi, base)
+        if riprendi:
+            branch = riprendi_il_ramo(pbi)
+            e.riprese_limite = riprese_limite_fatte(pbi) + 1
+        else:
+            branch = crea_branch(pbi, base)
+        e.ramo = branch
     except OriginMuto as muto:
         print(f"    ⚠️  {muto}")
         motivo, dettaglio = "origin-muto", str(muto)
@@ -4243,7 +4303,10 @@ def esegui_pbi(
     # nell'`except`, che richiudeva `rosso` — e la seconda chiusura, riuscita,
     # cancellava lo stato vero. Una chiusura che fallisce non si inghiotte e non
     # si riprova: sale alla rete di `main()` con il motivo che stava chiudendo.
-    if motivo in BLOCCHI:
+    # Un `senza esito` per il limite d'uso con l'ora del reset leggibile non ha niente
+    # da decidere: il tick aspetta il reset e riprende, e il Solver non parte
+    # (PBI-519, decisione 4).
+    if motivo in BLOCCHI and not e.riprendi_dopo:
         # Il Solver è invocato e registrato, non seguito (`PBI-507`, decisione 11): un
         # suo guasto è un avviso (`ADR-0008`) e non salta `chiudi()`, che è la strada
         # d'uscita di ogni giro fermato (difetto 37).
@@ -4277,6 +4340,41 @@ def esegui_pbi(
         if e.pr:
             print(f"    PR aperta: {e.pr}")
     return e
+
+
+def esiti_dei_rapporti(pbi: str) -> list[tuple[str, dict]]:
+    """Gli esiti di `pbi` nei rapporti di `LOG_DIR`, ognuno col `run` del suo
+    rapporto. Un file che non è un rapporto, o che non si legge, non conta."""
+    trovati: list[tuple[str, dict]] = []
+    for file in LOG_DIR.glob("*.json"):
+        try:
+            rapporto = json.loads(file.read_text(encoding="utf-8"))
+            trovati += [(str(rapporto.get("run", "")), x) for x in rapporto.get("esiti", [])
+                        if x.get("pbi") == pbi]
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return trovati
+
+
+def riprese_limite_fatte(pbi: str) -> int:
+    """Le riprese dopo il limite d'uso già contate per `pbi`: il più alto
+    `riprese_limite` dei suoi esiti nei rapporti (PBI-519, decisione 8)."""
+    return max([0] + [x.get("riprese_limite", 0) for _, x in esiti_dei_rapporti(pbi)])
+
+
+def riprendi_il_ramo(pbi: str) -> str:
+    """Il ramo dell'ultimo giro di `pbi`, estratto alla punta di `origin/<ramo>`:
+    la ripresa continua su quello stesso ramo, e i commit nuovi avanzano di
+    fast-forward (PBI-519, decisione 6). L'ultimo è l'esito col `run` più recente.
+
+    `switch -C` e non `-c`: un ramo locale con quel nome, rimasto da un giro
+    prima, si riallinea alla punta pubblicata invece di far fallire il giro."""
+    esiti = esiti_dei_rapporti(pbi)
+    ramo = max(esiti, key=lambda r: r[0])[1].get("ramo") if esiti else None
+    if not ramo:
+        raise RuntimeError(f"--riprendi: nessun rapporto di {pbi} in {LOG_DIR} porta il ramo")
+    git("switch", "-C", ramo, f"{REMOTO}/{ramo}")
+    return ramo
 
 
 def giri_solver_fatti(pbi: str) -> int:
@@ -5094,6 +5192,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--senza-critic", action="store_true",
                     help="salta il Review Gate: restano i gate deterministici e la PR. "
                          "Il giro lo dichiara in runs/tempi.csv")
+    ap.add_argument("--riprendi", action="store_true",
+                    help="riprendi il PBI dopo il limite d'uso: il giro riparte dalla punta "
+                         "del ramo dell'ultimo rapporto, non dalla base (PBI-519)")
     ap.add_argument("--continua-sui-rossi", action="store_true",
                     help="prosegui col PBI successivo anche se questo è rimasto rosso")
     ap.add_argument("--in-primo-piano", action="store_true",
@@ -5249,7 +5350,8 @@ def smista() -> int:
         for pbi in a.pbi:
             try:
                 e = esegui_pbi(pbi, attivi, a.dry_run, con_pr=not a.no_pr,
-                               con_critic=not a.senza_critic, run=run)
+                               con_critic=not a.senza_critic, run=run,
+                               riprendi=a.riprendi)
             except Exception as exc:  # noqa: BLE001 — qui si cattura per non perdere il resto
                 # Un guasto dentro un PBI è un esito di **quel** PBI. Prima usciva
                 # da `main()` col traceback e si portava via la sequenza intera, e
