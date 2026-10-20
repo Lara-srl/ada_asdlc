@@ -4076,6 +4076,39 @@ def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
     return avvisi
 
 
+def preverifica(pbi: str) -> int:
+    """`asdlc-runner PBI-N --preverifica` (PBI-520, decisioni 1, 7 e 8): legge il PBI
+    alla base del giro e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`. Esce 1 se c'è
+    un rilievo, 0 altrimenti: gli avvisi non contano. Non crea rami né commit e non
+    cambia la fase. Il rapporto non ha `esiti`, e i lettori dei rapporti lo ignorano."""
+    base, _ = base_del_giro()
+    file = trova_pbi(pbi, base)
+    if file is None:
+        print(f"{pbi}: alla base {base[:10]} non c'è il file del PBI.")
+        return 2
+    percorso = file.relative_to(REPO).as_posix()
+    testo = git("show", f"{base}:{percorso}")
+    rilievi = forma_del_pbi(testo, pbi)
+    avvisi = avvisi_della_base(testo, pbi, base)
+    run = datetime.now().strftime("%Y%m%d-%H%M%S")
+    LOG_DIR.mkdir(exist_ok=True)
+    rapporto = LOG_DIR / f"{run}-{pbi}-preverifica.json"
+    rapporto.write_text(json.dumps({
+        "pbi": pbi,
+        "base": base,
+        "sha_pbi": git("rev-parse", f"{base}:{percorso}"),
+        "criteri": len(criteri_del_pbi(testo)),
+        "rilievi": [vars(r) for r in rilievi],
+        "avvisi": avvisi,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    for r in rilievi:
+        print(f"  rilievo ({r.domanda}): {r.testo}")
+    for a in avvisi:
+        print(f"  avviso: {a}")
+    print(f"{pbi}: {len(rilievi)} rilievi, {len(avvisi)} avvisi. Rapporto: {rapporto}")
+    return 1 if rilievi else 0
+
+
 def salva_il_traceback(pbi: str) -> Path:
     """Il traceback dell'eccezione in corso in un file di `LOG_DIR`, accanto al
     log del giro. `.log` perché `runs/*.log` è ignorato da git: un file nuovo in
@@ -5427,6 +5460,10 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
                     help=f"non esegue niente: cammina {base}..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
+    ap.add_argument("--preverifica", action="store_true",
+                    help="non esegue il PBI: ne legge il file alla base e scrive in "
+                         f"{log_dir} i rilievi di forma e gli avvisi. Esce 1 con un "
+                         "rilievo (PBI-520)")
     ap.add_argument("--guardia-commit", action="store_true",
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
                          "deve stare nella fase corrente")
@@ -5495,6 +5532,10 @@ def smista() -> int:
         return stampa_il_gate_del_rosso(a.gate_rosso)
     if not a.pbi:
         ap.error("indica almeno un PBI, oppure usa --riepilogo")
+    if a.preverifica:
+        # Prima dell'ambiente, del distacco e del lucchetto, come `--gate-rosso`: non
+        # tocca l'albero, e il codice d'uscita resta a chi lo lancia (decisione 7).
+        return max(preverifica(pbi) for pbi in a.pbi)
 
     if a.e2e:
         # Il flag resta, e si ferma qui: cancellarlo darebbe un «unrecognized
