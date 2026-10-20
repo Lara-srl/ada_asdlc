@@ -1441,14 +1441,28 @@ def e_file_di_test(percorso: str) -> bool:
         return True
     # JUnit: la sequenza `src/test/` di Maven, e non una cartella `test` qualunque
     # (PBI-505, decisione 1): `src/main/java/.../test/Foo.java` è produzione. Solo
-    # i `.java`: un `src/test/setup.ts` o `helpers.py` resta com'era (non regressione).
-    if nome.endswith(".java") and any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1)):
+    # i `.java` sono test: un `src/test/setup.ts` o `helpers.py` non nasce come test
+    # (non regressione), e non è nemmeno produzione (PBI-515).
+    if nome.endswith(".java") and sotto_src_test(percorso):
         return True
     return (nome.startswith("test_") and nome.endswith(".py")) or nome.endswith("_test.py")
 
 
+def sotto_src_test(percorso: str) -> bool:
+    """Il percorso sta sotto la sequenza `src/test/` di Maven (PBI-505, decisione 1)."""
+    parti = Path(percorso).parts
+    return any(parti[i:i + 2] == ("src", "test") for i in range(len(parti) - 1))
+
+
 def e_file_di_produzione(percorso: str) -> bool:
-    """Codice che non è un test. È la metà del criterio che ferma PBI-328."""
+    """Codice che non è un test. È la metà del criterio che ferma PBI-328.
+
+    Sotto `src/test/` nessun file è produzione, qualunque estensione (PBI-515,
+    decisione 1): uno script che rigenera le fixture è supporto dei test, e il
+    lucchetto lo lascia scrivere in `TEST_ONLY` come scrive i test.
+    """
+    if sotto_src_test(percorso):
+        return False
     return not e_file_di_test(percorso) and Path(percorso).suffix in ESTENSIONI_CODICE
 
 
@@ -1528,11 +1542,34 @@ def fase_corrente(cartella: Path) -> str | None:
     return file.read_text(encoding="utf-8").strip()
 
 
-def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
+# Il segno del commento di riga per estensione (PBI-515, decisione 5): un `#` in
+# un `.sql` non è un commento. Le estensioni con `//` hanno anche i blocchi `/* … */`.
+COMMENTO_DI_RIGA = {".sh": "#", ".py": "#", ".sql": "--",
+                    **dict.fromkeys((".java", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"), "//")}
+RE_BLOCCO_DI_COMMENTO = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def e_scheletro_vuoto(percorso: str, contenuto: str) -> bool:
+    """Il contenuto è fatto solo di righe bianche e commenti (PBI-515, decisione 4):
+    uno scheletro così non anticipa nessun comportamento, e il rosso resta quello
+    del test. Il commento è quello del linguaggio del file (decisione 5)."""
+    segno = COMMENTO_DI_RIGA.get(Path(percorso).suffix)
+    if segno == "//":
+        contenuto = RE_BLOCCO_DI_COMMENTO.sub("", contenuto)
+    return all(not riga.strip() or (segno is not None and riga.strip().startswith(segno))
+               for riga in contenuto.splitlines())
+
+
+def guardia_di_fase(fase: str | None, percorso: str,
+                    contenuto: str | None = None) -> str | None:
     """Perché questa scrittura non si fa, o `None` se si fa.
 
     Torna una **ragione** e non un booleano perché è ciò che l'agente legge: un
     blocco che non spiega come procedere costa il turno che avrebbe risparmiato.
+
+    `contenuto` è il file intero, quando chi chiede lo conosce: in `TEST_ONLY`
+    uno scheletro vuoto di produzione si scrive (PBI-515, decisione 4). Senza
+    contenuto la produzione resta chiusa.
     """
     if fase is None:
         return None
@@ -1541,7 +1578,8 @@ def guardia_di_fase(fase: str | None, percorso: str) -> str | None:
                 f"apre `tools/asdlc/runner.py --chiedi-impl`, e solo se i test nuovi "
                 f"falliscono davvero.")
     if fase == FASE_TEST_ONLY:
-        if e_file_di_produzione(percorso):
+        if e_file_di_produzione(percorso) and not (
+                contenuto is not None and e_scheletro_vuoto(percorso, contenuto)):
             return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
                     f"qui si scrivono solo i test. Scrivi il test del comportamento che "
                     f"ti serve, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
@@ -4927,14 +4965,18 @@ def stampa_la_guardia_di_fase() -> int:
     """
     try:
         dato = json.loads(sys.stdin.read())
-        percorso = (dato.get("tool_input") or {}).get("file_path")
+        ingresso = dato.get("tool_input") or {}
+        percorso = ingresso.get("file_path")
+        # Solo un `Write` porta il file intero: un `Edit` ne mostra un pezzo, e su
+        # un pezzo non si sa se il file resta uno scheletro (PBI-515, decisione 6).
+        contenuto = ingresso.get("content") if dato.get("tool_name") == "Write" else None
         cartella = dato.get("cwd") or os.getcwd()
     except (json.JSONDecodeError, AttributeError, TypeError) as guasto:
         print(f"guardia di fase: stdin illeggibile ({guasto}), lascio passare", file=sys.stderr)
         return 0
     if not percorso:
         return 0  # non è una scrittura su un file: non ci riguarda
-    ragione = guardia_di_fase(fase_corrente(Path(cartella)), percorso)
+    ragione = guardia_di_fase(fase_corrente(Path(cartella)), percorso, contenuto)
     if ragione is None:
         return 0
     print(ragione, file=sys.stderr)
@@ -5169,6 +5211,17 @@ def chiudi_la_fase() -> None:
             file.unlink(missing_ok=True)
 
 
+def contenuto_in_stage(percorso: str) -> str | None:
+    """Il file com'è **in stage** (`git show :percorso`), o `None` se lì non c'è:
+    il lato vecchio di un rename, una cancellazione — o se non è testo: una fixture
+    binaria alzava `UnicodeDecodeError` e piantava il `pre-commit` (PBI-515,
+    decisione 6). Senza contenuto la produzione resta chiusa, il resto passa."""
+    try:
+        return git("show", f":{percorso}")
+    except (RuntimeError, UnicodeDecodeError):
+        return None
+
+
 def guardia_del_commit() -> int:
     """Il `pre-commit`: ciò che è in stage deve stare nella fase corrente.
 
@@ -5179,13 +5232,18 @@ def guardia_del_commit() -> int:
     Un rename in stage si giudica sui due lati: il vecchio è la cancellazione
     di quel percorso, il nuovo un'aggiunta. `--name-only` dava il solo nuovo, e
     in `IMPL` un test spostato in `nota.txt` passava come un file qualsiasi.
+
+    Il contenuto si legge dallo stage, ed è lì che uno scheletro vuoto si
+    riconosce (PBI-515, decisione 6): se riceve una riga di codice torna
+    produzione, e il commit si ferma come prima (decisione 7).
     """
     fase = fase_corrente(REPO)
     if fase is None:
         return 0
     voci = voci_del_name_status(git("diff", "--cached", "--name-status", "-M"))
     percorsi = [p for voce in voci for p in (voce.vecchio, voce.percorso) if p]
-    ragioni = [r for percorso in percorsi if (r := guardia_di_fase(fase, percorso))]
+    ragioni = [r for percorso in percorsi
+               if (r := guardia_di_fase(fase, percorso, contenuto_in_stage(percorso)))]
     if not ragioni:
         return 0
     print(f"Il commit non si fa: il giro è in {fase}.\n")
