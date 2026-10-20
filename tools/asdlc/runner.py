@@ -4118,13 +4118,19 @@ def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[R
     return eseguite, rilievi
 
 
+RE_GUARDIA = re.compile(r"guardia|nato\s+verde", re.IGNORECASE)
+
+
 def criteri_senza_sonda(testo: str, sonde: list[dict]) -> list[str]:
     """Un avviso per ogni criterio della `Verifica` che non ha una sonda (PBI-521,
     decisione 5): non è un rilievo, perché il rosso di quel criterio non è stato
-    provato, non smentito."""
+    provato, non smentito. Un criterio guardia non ha sonda, e non ha l'avviso: è
+    guardia se il suo testo intero, righe rientrate comprese, dice «guardia» o «nato
+    verde», senza distinguere maiuscole e minuscole."""
     provati = {s["criterio"] for s in sonde}
     return [f"criterio {numero} senza sonda"
-            for numero in range(1, len(criteri_del_pbi(testo)) + 1) if numero not in provati]
+            for numero, criterio in enumerate(criteri_del_pbi(testo), start=1)
+            if numero not in provati and not RE_GUARDIA.search(criterio)]
 
 
 def rilievi_senza_esito(file_esito: Path) -> list[Rilievo]:
