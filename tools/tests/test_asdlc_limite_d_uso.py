@@ -12,6 +12,8 @@ Il runner e il tick si caricano per nome, `asdlc.runner` e `asdlc.coda`:
 
 import importlib
 import json
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -184,3 +186,109 @@ class TestSulLimiteIlSolverNonParte:
         assert voce["solver"] == [], "sul limite d'uso con l'ora leggibile il Solver non parte"
         assert voce["giri_solver"] == 0, "un Solver che non parte non conta un giro"
         assert [ruolo_ed_esito(c)[0] for c in agente.comandi] == ["builder"]
+
+
+def sh(cwd: Path, *args: str) -> str:
+    """`git` vero in `cwd`. I commit di preparazione saltano gli hook (`--no-verify`
+    dove si committa): il pre-commit di `apri_la_fase` lancerebbe il runner vero."""
+    p = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                        "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false",
+                        *args], cwd=cwd, capture_output=True, text=True, check=True)
+    return p.stdout.strip()
+
+
+def committa(albero: Path, nome: str, messaggio: str) -> None:
+    (albero / nome).write_text(f"{nome}\n", encoding="utf-8")
+    sh(albero, "add", "-A")
+    sh(albero, "commit", "-q", "--no-verify", "-m", messaggio)
+
+
+def rapporto_fermo_sul_limite(registro: Path, pbi: str, ramo: str, **campi) -> None:
+    """Il rapporto di un giro chiuso `senza esito` sul limite d'uso, in `registro`."""
+    run = campi.pop("run", "20261016-174510")
+    (registro / f"{run}.json").write_text(json.dumps({
+        "run": run, "stato": "finito",
+        "esiti": [{"pbi": pbi, "stato": "senza esito", "motivo": "builder-senza-esito",
+                   "ramo": ramo, "riprendi_dopo": "2026-10-16T19:55"} | campi],
+    }), encoding="utf-8")
+
+
+class TestRiprendiParteDallaPuntaDelRamo:
+    """Criterio 6, decisione 6: `--riprendi` porta il worktree alla punta di
+    `origin/<ramo>` dell'ultimo rapporto e continua su quel ramo, senza `-giro2`."""
+
+    def test_il_rapporto_porta_il_ramo_del_giro(self, monkeypatch, tmp_path):
+        voce = giro_col_limite(monkeypatch, tmp_path,
+                               agente_che_scrive_i_flussi({}, stderr={"builder": LIMITE}))
+
+        assert voce.get("ramo") == "pbi/pbi-102", (
+            "senza il ramo nel rapporto --riprendi non sa da quale ramo ripartire"
+        )
+
+    def test_riparte_dai_due_commit_e_avanza_di_fast_forward(self, monkeypatch, tmp_path):
+        remoto, noi, altri = tmp_path / "remoto.git", tmp_path / "noi", tmp_path / "altri"
+        sh(tmp_path, "init", "-q", "--bare", str(remoto))
+        sh(tmp_path, "clone", "-q", str(remoto), str(altri))
+        (altri / "backlog").mkdir()
+        committa(altri, "backlog/PBI-102-una-prova.md", "docs: il PBI")
+        sh(altri, "push", "-q", "origin", "main")
+        sh(altri, "switch", "-q", "-c", "pbi/pbi-102")
+        committa(altri, "uno.txt", "test: il primo criterio (RED)")
+        committa(altri, "due.txt", "feat: il primo criterio")
+        sh(altri, "push", "-q", "origin", "pbi/pbi-102")
+        punta = sh(altri, "rev-parse", "HEAD")
+        sh(tmp_path, "clone", "-q", str(remoto), str(noi))
+        # Un ramo locale rimasto indietro con lo stesso nome: si riallinea, non si crea.
+        sh(noi, "branch", "pbi/pbi-102", "origin/main")
+        sh(noi, "switch", "-q", "--detach", "origin/main")  # come dopo il pre-flight del tick
+
+        registro = tmp_path / "runs"
+        registro.mkdir()
+        rapporto_fermo_sul_limite(registro, "PBI-102", "pbi/pbi-102")
+        monkeypatch.setattr(runner, "REPO", noi)
+        monkeypatch.setattr(runner, "LOG_DIR", registro)
+        monkeypatch.setattr(runner, "apri_la_fase", lambda base="": None)
+        monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+        vero_esegui = runner.esegui
+        agente = agente_che_scrive_i_flussi({})
+
+        def _esegui(cmd, cwd, timeout=7200, **k):
+            if cmd[:1] == ["git"]:
+                return vero_esegui(cmd, cwd, timeout, **k)
+            if ruolo_ed_esito(cmd)[0] == "builder":
+                committa(noi, "tre.txt", "test: il secondo criterio (RED)")
+            return agente(cmd, cwd, timeout, **k)
+
+        monkeypatch.setattr(runner, "esegui", _esegui)
+
+        esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False,
+                                  run="giro", riprendi=True)
+
+        assert esito.ramo == "pbi/pbi-102", f"il giro di ripresa è finito su {esito.ramo}"
+        assert "giro2" not in sh(noi, "branch", "--list", "pbi/*"), "la ripresa non crea -giro2"
+        assert "giro2" not in sh(remoto, "branch", "--list", "pbi/*")
+        assert sh(remoto, "rev-parse", "pbi/pbi-102^") == punta, (
+            "il commit nuovo sta sopra ai due del ramo pubblicato, di fast-forward"
+        )
+        assert esito.commit == 3, "il giro conta anche i due commit di prima"
+        assert esito.riprese_limite == 1, "la prima ripresa per limite d'uso conta 1"
+
+    def test_la_riga_di_comando_passa_riprendi_al_giro(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(runner, "CSV_TEMPI", tmp_path / "tempi.csv")
+        monkeypatch.setattr(runner, "agenti_estranei", lambda *a, **k: [])
+        monkeypatch.setattr(runner, "gate_mancanti", lambda attivi: [])
+        chiamate: list[dict] = []
+
+        def esegui_pbi_finto(pbi, *a, **k):
+            chiamate.append(k)
+            return runner.Esito(pbi, "senza esito")
+
+        monkeypatch.setattr(runner, "esegui_pbi", esegui_pbi_finto)
+        monkeypatch.setattr(sys, "argv",
+                            ["asdlc-runner", "PBI-102", "--riprendi", "--in-primo-piano"])
+
+        runner.smista()
+
+        assert [k.get("riprendi") for k in chiamate] == [True], (
+            "asdlc-runner PBI-N --riprendi deve far ripartire il giro dalla punta del ramo"
+        )
