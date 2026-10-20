@@ -42,11 +42,12 @@ class TestUnFileInSrcTestEUnTestJunit:
     def test_una_cartella_test_dentro_src_main_non_fa_un_test(self):
         assert runner.e_file_di_produzione("app/src/main/java/it/x/test/Foo.java")
 
-    def test_un_file_non_java_in_src_test_resta_produzione(self):
-        # Non regressione: senza `.java` nessuna differenza rispetto a prima.
+    def test_un_file_non_java_in_src_test_non_e_un_test_ne_produzione(self):
+        # Non è un test (non regressione sulle nascite), e da PBI-515 non è
+        # nemmeno produzione: sotto `src/test/` nessun file lo è.
         for percorso in ("src/test/helpers.py", "web/src/test/setup.ts"):
             assert not runner.e_file_di_test(percorso)
-            assert runner.e_file_di_produzione(percorso)
+            assert not runner.e_file_di_produzione(percorso)
 
 
 @pytest.fixture
