@@ -31,7 +31,11 @@ reset e riprende il PBI da dove era**, senza una persona.
   come gli altri file di `tools/asdlc/prompt/`; se `pyproject.toml` elenca i prompt, si aggiunge lì).
 - `tools/tests/` — i test dei criteri, in un file nuovo accanto a quelli del tick e del limite d'uso.
 - `README.md`, `backlog/AUTOMAZIONE.md`, `specs/` — dove descrivono il tick e il `senza esito`, nello
-  stesso commit del codice.
+  stesso commit del codice. `README.md` (~91) dice che il Solver parte su ogni `senza esito`: non è più
+  vero per il limite d'uso (decisione 4).
+- `backlog/README.md` (~17), `template/backlog/README.md` (~19), `template/backlog/TEMPLATE.md` (~28)
+  — la frase «Il runner non riprende niente», nello stesso commit del codice: non si cancella, si
+  aggiunge «(dopo il limite d'uso il tick riprende il PBI: `PBI-519`)».
 - `backlog/PBI-519-il-limite-d-uso-non-ferma-la-coda.md` — questo file, per la spunta.
 
 **Fuori scope**
@@ -54,31 +58,52 @@ reset e riprende il PBI da dove era**, senza una persona.
    (`ORA_DEL_RESET`). Ogni altro `senza esito` resta com'è. La lettura dell'ora è un testo letto da
    uno strumento, l'eccezione già dichiarata da `PBI-363`: se la CLI esporrà l'ora in un campo si
    leggerà da lì.
+   **La frase e l'ora si cercano solo nel file di stderr dell'invocazione (`registro["stderr"]`) e
+   solo con codice d'uscita ≠ 0** (Francesco, 20/10). Lo stdout è testo del modello e non conta
+   (`ADR-0027`): oggi `limite_d_uso()` legge stdout e stderr insieme (`uscita`), e un agente che cita
+   la frase senza chiamare lo strumento farebbe ripartire il giro. Senza stderr leggibile, o con
+   uscita 0, non c'è `riprendi_dopo` e il giro chiude come oggi. Il finto dei test scrive lo stderr
+   nel suo file.
 2. **L'ora non leggibile non si inventa.** Con la frase ma senza ora (`PBI-363`, decisione 4) non c'è
    `riprendi_dopo` e il giro resta com'è oggi: una persona lo chiude.
 3. **Il rapporto porta `riprendi_dopo`:** data e ora locali, ISO, la **prima occorrenza di quell'ora
    successiva all'istante in cui l'uscita è stata scritta**, più cinque minuti di margine. «Resets
    7:50pm» letto alle 17:45 è oggi alle 19:55, letto alle 21:00 è domani alle 19:55. Il fuso è quello del
    runner; il messaggio dice «Europe/Rome» e la macchina è la stessa.
-4. **Il giro si chiude come oggi:** `senza esito`, una sola chiusura, il ramo pubblicato (difetto 48).
-   Nessun Solver (non è un blocco da smistare) e nessuna pausa.
+4. **Il giro si chiude come oggi, tranne il Solver:** `senza esito`, una sola chiusura, il ramo
+   pubblicato (difetto 48), nessuna pausa. **Il Solver non parte**: oggi parte, perché
+   `builder-senza-esito` e `critic-senza-esito` stanno in `BLOCCHI` (`runner.py`, ~146), e può mettere
+   in pausa il tick (`metti_in_attesa_del_pbi_a_monte`). Con `riprendi_dopo` nel rapporto il blocco
+   `if motivo in BLOCCHI` di `esegui_pbi()` lo salta; senza, resta com'è.
 5. **Il tick decide, e sa solo questo:** un PBI con un ramo su origin non in `main`, senza PR, il cui
    **ultimo** rapporto porta `riprendi_dopo`. Prima di quell'ora la riga del log dice `attende il reset
    del limite d'uso: PBI-N riprende dopo HH:MM`, e non lancia: non è un blocco e non ferma la coda
    (`ADR-0008`). Dopo quell'ora lancia `asdlc-runner PBI-N --riprendi`. Con un rapporto senza
    `riprendi_dopo` il comportamento è quello di oggi (`attende: …`).
+   **Dove legge:** i rapporti li scrive il runner in `LOG_DIR`, relativo alla sua radice, cioè al
+   worktree del giro (`<worktree>/runs/`), non al checkout del tick. `decidi()` ha già `worktree` fra
+   gli argomenti, e legge `<worktree>/<[registro].cartella>/*.json`; l'ultimo rapporto è quello col
+   `run` più recente fra gli esiti del PBI.
 6. **`--riprendi` parte dalla punta del ramo pubblicato, non da `origin/main`.** Il worktree del giro
    si porta alla punta di `origin/<ramo del PBI>` e il giro continua **su quello stesso ramo** (i commit
    nuovi avanzano di `fast-forward`; niente `-giro2`). I controlli dell'ingresso non cambiano: l'albero
    deve essere pulito.
+   **Quale ramo:** il giro fermato può stare su `pbi/pbi-N-giroK` (`nome_libero`), e `Esito` oggi non
+   porta il ramo. Il rapporto aggiunge il campo `ramo`, e `--riprendi` parte da `origin/<ramo>`
+   dell'ultimo rapporto. Se un ramo locale con quel nome c'è già, lo si riallinea (`git switch -C`),
+   non si crea: `crea_branch` fa `switch -c` e fallirebbe.
 7. **Il Builder riparte con una sessione nuova**, non con `--resume`: la sua sessione può essere
    incompleta, e così il PBI non dipende da `PBI-513` né da `PBI-517`. Il prompt (`riprendi.md`) dice
    che il giro precedente si è interrotto per il limite d'uso dell'account, che il lavoro fatto è nel
    ramo (`git log`, le spunte del PBI), e di continuare dal primo criterio non spuntato **senza rifare**
-   ciò che è già committato.
-8. **Un tetto di tre riprese per PBI** per limite d'uso (`riprese_limite` nel rapporto, contato come
-   `giri_solver_fatti()`, sui rapporti del PBI). Oltre, il giro chiude come oggi e una persona
-   interviene.
+   ciò che è già committato. Il prompt di ripresa è **`PROMPT_BUILDER` seguito da `riprendi.md`**, non
+   lo sostituisce. Il nome resta `riprendi.md` e il campo `riprese_limite`: `PBI-517` usa
+   `ripresa-dopo-risolto.md` e `riprese_solver`, per non confondere le due riprese.
+8. **Un tetto di tre riprese per PBI** per limite d'uso. **Il runner conta, il tick decide:** a ogni
+   `--riprendi` il runner scrive `riprese_limite` = il massimo dei rapporti del PBI + 1 (come
+   `giri_solver_fatti()`), e il tetto lo applica solo `decidi()`: con `riprese_limite` ≥ 3 non riprende
+   e la riga dice `attende: …` come oggi, e una persona interviene. ~~Oltre, il giro chiude come oggi~~
+   (il giro non sa del tetto: lo sa il tick, che è chi rilancia).
 9. **Se la ripresa si ferma per altro**, vale quel motivo e il suo percorso (Solver, domanda, gate):
    la ripresa è un giro come gli altri.
 10. **Lo scope dei commit è `runner` (e `coda` per il tick).**
@@ -102,17 +127,22 @@ reset e riprende il PBI da dove era**, senza una persona.
 ## Verifica
 
 Su `main` il rapporto non porta `riprendi_dopo` e il tick non sa riprendere, quindi i criteri sono un
-**rosso atteso**, salvo il 3 (vedi). Gli agenti e l'orologio sono finti: nessun test lancia `claude` né
-aspetta davvero.
+**rosso atteso**, salvo il 3 e l'8 (vedi). Gli agenti e l'orologio sono finti: nessun test lancia
+`claude` né aspetta davvero. I test con un repository git vero fanno i commit di preparazione con
+`--no-verify` (`backlog/README.md`, `test-senza-isolamento`): `apri_la_fase` installa un pre-commit che
+lancia il runner vero.
 
 - [ ] **Un `senza esito` per il limite con l'ora leggibile porta `riprendi_dopo`.** Un Builder finto
-      che esce 1 con «You've hit your session limit · resets 7:50pm»: il rapporto ha `riprendi_dopo`
-      (pytest).
+      che esce 1 con «You've hit your session limit · resets 7:50pm» **nello stderr**: il rapporto ha
+      `riprendi_dopo` (pytest). Due casi in più, parametrici: la stessa frase **solo nello stdout**, e
+      nello stderr con **uscita 0**: niente `riprendi_dopo` (decisione 1).
 - [ ] **L'ora è la prima occorrenza successiva, con il margine.** «resets 7:50pm» con l'orologio alle
       17:45 dà oggi 19:55; alle 21:00 dà domani 19:55 (pytest, orologio finto, due casi).
 - [ ] **Senza ora leggibile non c'è `riprendi_dopo`.** Nato verde su `main`, per costruzione: è una
       guardia, si committa da sola con `Guardia-su: tools/asdlc/runner.py::limite_d_uso` e deve mordere
-      (pytest).
+      (pytest). Controlla **anche che la nota dica «ora del reset non leggibile»**: con la sola assenza di
+      `riprendi_dopo` i mutanti di `limite_d_uso` non la toccano. Si committa **dopo il GREEN del
+      criterio 2**.
 - [ ] **Il tick aspetta prima dell'ora.** Con un PBI il cui ultimo rapporto ha `riprendi_dopo` nel
       futuro, `decidi()` non lancia e la riga del log dice `attende il reset del limite d'uso` con l'ora
       (pytest, tick finto).
@@ -122,9 +152,24 @@ aspetta davvero.
       ramo `pbi/pbi-N` con due commit, il giro di ripresa non crea `-giro2`, parte dai due commit e i
       nuovi avanzano di `fast-forward` (pytest).
 - [ ] **Il prompt di ripresa dice di non rifare il lavoro.** Il prompt del Builder in ripresa contiene
-      il rimando a `git log` e alle spunte, e «senza rifare» ciò che è committato (pytest).
+      il rimando a `git log` e alle spunte, e «senza rifare» ciò che è committato (pytest). Il test legge
+      **il prompt costruito dal runner**, non il file: un `.md` non è produzione, e `riprendi.md`
+      scritto nel commit RED lo farebbe nascere verde. `riprendi.md` nasce nel commit GREEN.
 - [ ] **Il tetto di tre riprese.** Con un rapporto che porta `riprese_limite = 3`, `decidi()` non
-      riprende e la riga dice `attende: …` come oggi (pytest).
+      riprende e la riga dice `attende: …` come oggi (pytest). **Rosso solo dopo il GREEN del criterio
+      5:** su `main` un PBI con un ramo è sempre `Attende` (`coda.py`, `prossimo()`), quindi il test
+      nasce verde. Il suo RED si committa dopo quel GREEN.
+- [ ] **Sul limite con l'ora leggibile il Solver non parte.** `e.solver` è vuoto e `e.giri_solver`
+      resta 0 (pytest; rosso su `main`, dove il Solver parte per `builder-senza-esito`).
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde; un `senza esito` che non è il
 limite d'uso, e un giro che non incontra il limite, si comportano come prima.
+
+## La lettura avversariale del 20/10
+
+Un lettore in sola lettura ha trovato dieci rilievi; ognuno è verificato nel codice e recepito qui
+sopra. I tre che avrebbero fermato il giro: il criterio 8 nasceva verde su `main` (`rosso-mai-visto`);
+il Solver partiva comunque sul limite (decisione 4, nuovo criterio 9); la frase del limite si leggeva
+anche nello stdout del modello, contro `ADR-0027` (decisione 1, scelta di Francesco: solo stderr con
+uscita ≠ 0). Gli altri: il ramo da riprendere e dove il tick legge i rapporti (decisioni 5 e 6), chi
+applica il tetto (8), il prompt come aggiunta (7), i documenti nello Scope, `--no-verify` nei test.
