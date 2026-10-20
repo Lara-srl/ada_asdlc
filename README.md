@@ -134,7 +134,9 @@ comunque vada. Dichiara ciò che trova con tre strumenti, che il server dell'esi
 - `letto(riepilogo)` — chiude la lettura.
 
 Dopo `letto` il **runner** esegue le sonde sulla base con gli strumenti di `--chiedi-impl`:
-una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («nato verde»). Un
+una sonda che non è rossa diventa un rilievo `R` col testo di quel rifiuto («nato verde»;
+`nessuno` per un file che non è un test o un nome che il file non ha), mentre un gate guasto è
+l'avviso `sonda del criterio N: gate guasto` e la sonda ha esito `guasto`. Un
 criterio senza sonda è un avviso, `criterio N senza sonda`, non un rilievo; un criterio che
 si dichiara guardia (il suo testo dice «guardia» o «nato verde») non ha sonda né avviso. Il
 rapporto aggiunge `lettore` (`letto`, `senza esito`, oppure `null` senza `--lettore`) e

@@ -4105,7 +4105,8 @@ def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
     return avvisi
 
 
-def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[Rilievo]]:
+def esegui_le_sonde(albero: Path,
+                    sonde: list[dict]) -> tuple[list[dict], list[Rilievo], list[str]]:
     """Esegue le sonde del Lettore nell'albero alla base, con gli strumenti di
     `--chiedi-impl` (`PBI-521`, decisione 4): ogni sonda col suo esito, e un rilievo `R`
     col testo di `ESITI_MANCATI` per ogni sonda che non è rossa.
@@ -4113,7 +4114,11 @@ def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[R
     Una sonda su un file che non è un test non si esegue, e il suo esito è `nessuno`: il
     server non lo può sapere, perché non importa il runner. Un orfano di
     `comandi_dei_test()`, il test che non si isola, torna alla sua sonda dal file: la sua
-    etichetta comincia col percorso da cui il test gira (per JUnit è il nome)."""
+    etichetta comincia col percorso da cui il test gira (per JUnit è il nome).
+
+    Un `GuastoDelGate` dice che lo strumento non ha guardato, non che il criterio nasce
+    verde: le sonde di quel comando hanno esito `guasto`, nessun rilievo, e un avviso
+    `sonda del criterio N: gate guasto`, che torna al terzo posto."""
     nuovi = [TestNuovo(s["file"], s["nome"], linguaggio_del_test(s["file"])) for s in sonde]
     esiti: dict[TestNuovo, str] = {t: "nessuno" for t in nuovi if t.linguaggio is None}
     eseguibili = [t for t in nuovi if t.linguaggio is not None]
@@ -4123,19 +4128,25 @@ def esegui_le_sonde(albero: Path, sonde: list[dict]) -> tuple[list[dict], list[R
             if etichetta.startswith(f"{dove_gira(test.file)[1]} ") or etichetta == test.nome:
                 esiti[test] = "nessuno"
     for comando in comandi:
-        letti, _ = esiti_del_comando(comando)
+        try:
+            letti, _ = esiti_del_comando(comando)
+        except GuastoDelGate:
+            letti = {chiave: "guasto" for chiave in comando.origine}
         for chiave, esito in letti.items():
             esiti[comando.origine[chiave]] = esito
     eseguite: list[dict] = []
     rilievi: list[Rilievo] = []
+    avvisi: list[str] = []
     for sonda, test in zip(sonde, nuovi):
         esito = esiti[test]
         eseguite.append({"criterio": sonda["criterio"], "file": sonda["file"],
                          "nome": sonda["nome"], "esito": esito})
-        if esito != "rosso":
+        if esito == "guasto":
+            avvisi.append(f"sonda del criterio {sonda['criterio']}: gate guasto")
+        elif esito != "rosso":
             rilievi.append(Rilievo("R", sonda["criterio"], ESITI_MANCATI[esito],
                                    f"{sonda['file']}::{sonda['nome']}"))
-    return eseguite, rilievi
+    return eseguite, rilievi, avvisi
 
 
 RE_GUARDIA = re.compile(r"guardia|nato\s+verde", re.IGNORECASE)
@@ -4166,11 +4177,11 @@ def rilievi_senza_esito(file_esito: Path) -> list[Rilievo]:
 
 
 def lettura_del_lettore(percorso: str, base: str,
-                        avvisi: list[str]) -> tuple[str, list[Rilievo], list[dict]]:
+                        avvisi: list[str]) -> tuple[str, list[Rilievo], list[dict], list[str]]:
     """Il Lettore sul PBI `percorso` (`PBI-521`, `ADR-0031` decisioni 1-3): lo lancia in un
     albero usa e getta alla `base`, che è il suo `cwd` e si smonta comunque vada, e dopo
     `letto` ne esegue le sonde lì dentro. Torna lo stato della lettura, i rilievi del
-    Lettore e delle sonde, e le sonde col loro esito. Senza `letto` la lettura è
+    Lettore e delle sonde, le sonde col loro esito e gli avvisi dei gate guasti. Senza `letto` la lettura è
     `senza esito`: i rilievi accumulati entrano lo stesso, le sonde non si eseguono."""
     prompt, file_esito = file_dell_invocazione("lettore")
     prompt.write_text(prompt_del_pacchetto("lettore").format(
@@ -4181,10 +4192,10 @@ def lettura_del_lettore(percorso: str, base: str,
                                     cwd=albero)
         dichiarato = invocazione.dichiarato
         if dichiarato is None:
-            return "senza esito", rilievi_senza_esito(file_esito), []
+            return "senza esito", rilievi_senza_esito(file_esito), [], []
         rilievi = [Rilievo(**r) for r in dichiarato["rilievi"]]
-        sonde, dalle_sonde = esegui_le_sonde(albero, dichiarato["sonde"])
-    return "letto", rilievi + dalle_sonde, sonde
+        sonde, dalle_sonde, guasti = esegui_le_sonde(albero, dichiarato["sonde"])
+    return "letto", rilievi + dalle_sonde, sonde, guasti
 
 
 def preverifica(pbi: str, lettore: bool = False) -> int:
@@ -4209,9 +4220,10 @@ def preverifica(pbi: str, lettore: bool = False) -> int:
     stato_della_lettura: str | None = None
     sonde: list[dict] = []
     if lettore:
-        stato_della_lettura, dal_lettore, sonde = lettura_del_lettore(percorso, base, avvisi)
+        stato_della_lettura, dal_lettore, sonde, guasti = lettura_del_lettore(percorso, base,
+                                                                             avvisi)
         rilievi += dal_lettore
-        avvisi += criteri_senza_sonda(testo, sonde)
+        avvisi += guasti + criteri_senza_sonda(testo, sonde)
     run = datetime.now().strftime("%Y%m%d-%H%M%S")
     LOG_DIR.mkdir(exist_ok=True)
     rapporto = LOG_DIR / f"{run}-{pbi}-preverifica.json"
