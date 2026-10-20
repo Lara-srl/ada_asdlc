@@ -248,7 +248,9 @@ provato su uno stack diverso da Python e TypeScript, quindi va verificato sul pr
 
 **Java (JUnit).** Il lucchetto di fase legge i test JUnit (`PBI-505`): un metodo con `@Test`,
 `@ParameterizedTest` o `@RepeatedTest` in un file sotto `src/test/` è un test, e si chiama
-`Classe#metodo`. Il runner non conosce Maven: il comando che lancia i test isolati lo
+`Classe#metodo`. L'annotazione vale anche se il commit non la cambia: un metodo rinominato
+sotto un `@ParameterizedTest` rimasto com'era nasce col nome nuovo (`PBI-514`). Un test
+riscritto con lo stesso nome invece non nasce. Il runner non conosce Maven: il comando che lancia i test isolati lo
 dichiara il progetto, con `{test}` al posto dei test (`Classe#m1+m2,Altra#m3`, la sintassi
 di `-Dtest=`), e l'esito lo legge dai `TEST-*.xml` di `target/surefire-reports` e
 `target/failsafe-reports`:

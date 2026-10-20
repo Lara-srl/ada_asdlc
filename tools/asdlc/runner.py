@@ -1682,42 +1682,49 @@ RE_ANNOTAZIONE_JUNIT = re.compile(r"^\s*@(?:Test|ParameterizedTest|RepeatedTest)
 RE_METODO_JAVA = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(\w+)\s*\(")
 # Un'annotazione in testa a una riga, con gli argomenti fra parentesi se ci sono.
 RE_ANNOTAZIONE_IN_TESTA = re.compile(r"^\s*@\w+(?:\([^)]*\))?")
+# Le righe di contesto del diff di un test JUnit: il file intero, perché
+# l'annotazione di un metodo rinominato è una riga che il diff non cambia, e
+# quante ne stiano sopra il metodo non lo dice nessuno (PBI-514).
+CONTESTO_JUNIT = 1_000_000
 
 
 def nomi_dei_test_junit(diff: str, classe: str) -> tuple[list[str], set[str]]:
     """I nomi `Classe#metodo` dei test JUnit aggiunti e quelli tolti, dalle righe
     del diff (PBI-505, decisione 3): il metodo che segue un'annotazione `@Test`,
     `@ParameterizedTest` o `@RepeatedTest`, anche con argomenti e con altre
-    annotazioni in mezzo, o sulla stessa riga del metodo."""
+    annotazioni in mezzo, o sulla stessa riga del metodo.
+
+    Un'annotazione di una riga di **contesto** vale per tutti e due i lati: il
+    metodo che la segue è un test se la sua riga è `+` o `-`, come nel test
+    rinominato sotto un `@ParameterizedTest` che non cambia (PBI-514, decisione
+    1). Un metodo di contesto chiude l'attesa senza nascere: il diff non lo tocca."""
     aggiunti: list[str] = []
     tolti: set[str] = set()
     attesa = {"+": False, "-": False}
     for riga in diff.splitlines():
-        if riga.startswith(("+++", "---")) or riga[:1] not in attesa:
+        if riga.startswith(("+++", "---")) or riga[:1] not in ("+", "-", " "):
             continue
         segno, testo = riga[0], riga[1:]
+        lati = tuple(attesa) if segno == " " else (segno,)
+        trovato = None
         if RE_ANNOTAZIONE_JUNIT.match(testo):
-            attesa[segno] = True
+            for lato in lati:
+                attesa[lato] = True
             resto = testo
             while (iniziale := RE_ANNOTAZIONE_IN_TESTA.match(resto)) is not None:
                 resto = resto[iniziale.end():]
             trovato = RE_METODO_JAVA.match(resto)
-            if trovato is not None:
-                attesa[segno] = False
-                nome = f"{classe}#{trovato.group(1)}"
-                if segno == "+":
-                    aggiunti.append(nome)
-                else:
-                    tolti.add(nome)
-        elif attesa[segno] and not testo.lstrip().startswith("@"):
+        elif any(attesa[lato] for lato in lati) and not testo.lstrip().startswith("@"):
             trovato = RE_METODO_JAVA.match(testo)
-            if trovato is not None:
-                attesa[segno] = False
-                nome = f"{classe}#{trovato.group(1)}"
-                if segno == "+":
-                    aggiunti.append(nome)
-                else:
-                    tolti.add(nome)
+        if trovato is None:
+            continue
+        for lato in lati:
+            attesa[lato] = False
+        nome = f"{classe}#{trovato.group(1)}"
+        if segno == "+":
+            aggiunti.append(nome)
+        elif segno == "-":
+            tolti.add(nome)
     return aggiunti, tolti
 
 
@@ -1955,7 +1962,8 @@ def test_nuovi_del_commit(sha: str, file: list[VoceDiCommit] | None = None,
         linguaggio = linguaggio_del_test(percorso) if e_file_di_test(percorso) else None
         if linguaggio not in ("vitest", "junit"):
             continue
-        diff = diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce))
+        diff = diff_del_file(voce, "show", "--format=", sha, lati=lati_del_diff(voce),
+                             contesto=CONTESTO_JUNIT if linguaggio == "junit" else 0)
         aggiunti, tolti = (nomi_dei_test_junit(diff, Path(percorso).stem)
                            if linguaggio == "junit" else nomi_dei_test(diff))
         nuovi += [TestNuovo(percorso, n, linguaggio) for n in aggiunti if n not in tolti]
@@ -2660,10 +2668,13 @@ def si_puo_cancellare(testo: str) -> bool:
 RE_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 
 
-def diff_del_file(voce: VoceDiCommit, *dove: str, lati: list[str] | None = None) -> str:
-    """Il diff `--unified=0` di una voce, su `dove` — `("diff", "base...sha")`,
+def diff_del_file(voce: VoceDiCommit, *dove: str, lati: list[str] | None = None,
+                  contesto: int = 0) -> str:
+    """Il diff di una voce, su `dove` — `("diff", "base...sha")`,
     `("show", "--format=", sha)`, `("diff", "HEAD")`. È l'unico posto del runner
-    che chiede a git il diff di un file (PBI-387).
+    che chiede a git il diff di un file (PBI-387). È `--unified=0` se `contesto`
+    non dice altre righe di contesto: JUnit le chiede per leggere le annotazioni che
+    il diff non cambia (PBI-514).
 
     Un rename si chiede nominando **tutti e due** i lati: con il solo percorso
     nuovo git non applica il rename detection, e il file risulta aggiunto per
@@ -2683,7 +2694,7 @@ def diff_del_file(voce: VoceDiCommit, *dove: str, lati: list[str] | None = None)
                  and e_file_di_produzione(voce.percorso))
         if voce.vecchio and not entra:
             lati.insert(0, voce.vecchio)
-    return git(*dove, "--unified=0", "-M", "--", *lati)
+    return git(*dove, f"--unified={contesto}", "-M", "--", *lati)
 
 
 def hunk_di_produzione(base: str, sha: str) -> dict[str, list[tuple[int, int]]]:
