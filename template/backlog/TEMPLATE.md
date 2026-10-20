@@ -25,7 +25,7 @@ lo dice qui, e dice come il giro ci sopravvive.
 
 Si scrive solo dopo un giro fermato, e si riscrive a ogni giro. Nomina sempre il tag
 `giro-fermato/…` del giro chiuso e gli sha da riprendere in ordine con `git cherry-pick`, con
-quelli da lasciare e perché: il runner non riprende niente, e crea un ramo nuovo dalla base.
+quelli da lasciare e perché: il runner non riprende niente (dopo il limite d'uso il tick riprende il PBI: `PBI-519`), e crea un ramo nuovo dalla base.
 
 ## Dipendenze
 - Bloccato da: [PBI-XXX, o nessuno].

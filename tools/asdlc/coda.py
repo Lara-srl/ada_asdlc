@@ -135,9 +135,11 @@ class AttendeIlReset:
 
 @dataclass(frozen=True)
 class Lancia:
-    """C'è un PBI pronto da far partire, ed è questo."""
+    """C'è un PBI pronto da far partire, ed è questo. Con `riprendi` il giro riparte
+    dalla punta del suo ramo, dopo il reset del limite d'uso (PBI-519)."""
 
     pbi: str
+    riprendi: bool = False
 
 
 Decisione = Occupato | Finita | Barriera | Attende | AttendeIlReset | Lancia
@@ -496,6 +498,7 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
         if pr == () and (ripresa := riprendi_dopo(worktree, decisione.pbi)) is not None:
             if adesso() < ripresa:
                 return AttendeIlReset(decisione.pbi, ripresa.strftime("%H:%M"))
+            return Lancia(decisione.pbi, riprendi=True)
         return Attende(decisione.pbi, pr)
     return decisione
 
@@ -721,7 +724,7 @@ def mancanze_dell_ambiente(worktree: Path) -> list[str]:
     return mancanze
 
 
-def lancia(pbi: str, worktree: Path) -> None:
+def lancia(pbi: str, worktree: Path, riprendi: bool = False) -> None:
     """Il pre-flight e poi il runner, tutto dentro il worktree del runner.
 
     È lo stesso lancio che si fa a mano, e le sue tre righe vivevano in una
@@ -758,7 +761,10 @@ def lancia(pbi: str, worktree: Path) -> None:
                 f"il pre-flight si è fermato su `{' '.join(comando)}` "
                 f"(uscita {codice}): {uscita.strip()[:200]}"
             )
-    codice, uscita = esegui([str(runner_installato()), pbi], worktree)
+    # `--riprendi` dopo il reset del limite d'uso: il giro riparte dalla punta del
+    # ramo e non da `origin/main`, su cui il pre-flight ha staccato l'albero (PBI-519).
+    codice, uscita = esegui([str(runner_installato()), pbi]
+                            + (["--riprendi"] if riprendi else []), worktree)
     if codice != 0:
         raise Guasto(
             f"il runner non è partito su {pbi} (uscita {codice}): {uscita.strip()[:200]}"
@@ -788,6 +794,8 @@ def racconta(decisione: Decisione) -> str:
             return f"attende: {pbi} ha un ramo su origin e non è in main — {sul_ramo}"
         case AttendeIlReset(pbi, ora):
             return f"attende il reset del limite d'uso: {pbi} riprende dopo {ora}"
+        case Lancia(pbi, riprendi=True):
+            return f"lancia: {pbi} --riprendi, dopo il reset del limite d'uso"
         case Lancia(pbi):
             return f"lancia: {pbi}"
     return f"decisione senza nome: {decisione}"
@@ -1226,7 +1234,9 @@ def passaggio(a: argparse.Namespace) -> int:
         if fermo_in_pausa(a.repo):
             return 0
         try:
-            lancia(decisione.pbi, a.worktree)
+            # Il lancio di sempre resta la chiamata di sempre; la ripresa lo dice.
+            lancia(decisione.pbi, a.worktree,
+                   **({"riprendi": True} if decisione.riprendi else {}))
         except Guasto as guasto:
             # Da `cron` un'eccezione non la legge nessuno: nel log resterebbe la
             # riga che dice «lancia», cioè il contrario di quel che è successo.

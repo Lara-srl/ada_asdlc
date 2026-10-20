@@ -5194,7 +5194,7 @@ def costruisci_parser() -> argparse.ArgumentParser:
                          "Il giro lo dichiara in runs/tempi.csv")
     ap.add_argument("--riprendi", action="store_true",
                     help="riprendi il PBI dopo il limite d'uso: il giro riparte dalla punta "
-                         "del ramo dell'ultimo rapporto, non da origin/main (PBI-519)")
+                         "del ramo dell'ultimo rapporto, non dalla base (PBI-519)")
     ap.add_argument("--continua-sui-rossi", action="store_true",
                     help="prosegui col PBI successivo anche se questo è rimasto rosso")
     ap.add_argument("--in-primo-piano", action="store_true",
