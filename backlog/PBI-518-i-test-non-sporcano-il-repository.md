@@ -90,7 +90,7 @@ criterio è un **rosso atteso**. I criteri 1 e 2 di prima li rendeva verdi la st
 `--mcp-config` per nome): il secondo sarebbe nato verde e il gate del rosso avrebbe fermato il giro.
 Ora sono un criterio solo.
 
-- [ ] **Il finto trova la config MCP per nome, e il test del tetto non lascia file in
+- [x] **Il finto trova la config MCP per nome, e il test del tetto non lascia file in
       `tools/tests/dati/`.** Un test parametrico con id espliciti: `critic` (`--session-id U
       --mcp-config P`), `builder` (`--settings S --session-id U --mcp-config P`) e `rilancio` (`-c
       --fork-session --session-id U --mcp-config P`). Ogni caso è rosso su `main` per asserzione: il
@@ -98,10 +98,10 @@ Ora sono un criterio solo.
 - ~~**Il finto trova la config MCP per nome.**~~ **Fuso nel criterio 1 (20/10, lettura
       avversariale).** Diventava verde con la stessa modifica del criterio 1, e un caso
       (`--mcp-config P` in testa, dove `$2` è già `P`) era verde anche su `main`.
-- [ ] **La guardia segnala un file nato in `tools/tests/dati/`.** Con una funzione che confronta
+- [x] **La guardia segnala un file nato in `tools/tests/dati/`.** Con una funzione che confronta
       due elenchi, un file nuovo (anche ignorato da git) è nominato nell'errore; elenchi uguali
       non danno errore (pytest).
-- [ ] **La suite esce rossa se un test sporca.** In un sottoprocesso con un test che scrive un
+- [x] **La suite esce rossa se un test sporca.** In un sottoprocesso con un test che scrive un
       file in `tools/tests/dati/`, `pytest` esce con un codice diverso da 0 e il file è nominato
       (pytest, sottoprocesso). Il test sporco sta in `tmp_path` e il sottoprocesso carica la guardia
       con `-p`; il file che scrive in `tools/tests/dati/` il test esterno lo cancella in `finally`,
