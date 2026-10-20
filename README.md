@@ -6,7 +6,7 @@ scrivere produzione dato dal rosso osservato. Comandi installati:
 
 | Comando | Cosa fa |
 |---|---|
-| `asdlc-runner` | un giro su un PBI, e la guardia di fase (`--guardia-fase`) per l'hook `PreToolUse` |
+| `asdlc-runner` | un giro su un PBI, la guardia di fase (`--guardia-fase`) per l'hook `PreToolUse`, e la pre-verifica di un PBI prima della coda (`PBI-N --preverifica`: rapporto in `runs/<run>-<PBI>-preverifica.json`, esce 1 con un rilievo di forma, gli avvisi non contano; `PBI-520`) |
 | `asdlc-coda` | il tick: legge `backlog/CODA.md` e lancia il PBI successivo quando il precedente è in `main` |
 | `asdlc-chiudi-giro` | chiude un giro fermato: tag `giro-fermato/…`, ramo tolto |
 | `asdlc-esito` | il server MCP dell'esito, da cui gli agenti dichiarano com'è andata (`ADR-0027`) |

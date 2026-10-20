@@ -3984,6 +3984,131 @@ def trova_pbi(pbi: str, base: str) -> Path | None:
     return REPO / nome if nome else None
 
 
+@dataclass
+class Rilievo:
+    """Un difetto del PBI che la pre-verifica trova prima del giro (PBI-520). I
+    rilievi di forma hanno `domanda = "forma"` e nessun criterio."""
+    domanda: str
+    criterio: int | None
+    testo: str
+    evidenza: str = ""
+
+
+RE_CRITERIO = re.compile(r"^\s*- \[[ x]\]")
+
+
+def sezione_della_verifica(testo: str) -> str | None:
+    """Il corpo della `## Verifica`, fino alla `## ` successiva; `None` se manca."""
+    verifica = re.search(r"^## Verifica\b[^\n]*(.*?)(?=^## |\Z)", testo, re.S | re.M)
+    return verifica.group(1) if verifica else None
+
+
+def criteri_del_pbi(testo: str) -> list[str]:
+    """I testi dei criteri della `## Verifica`, ognuno con le sue righe rientrate
+    (PBI-520, decisione 3). Una riga non vuota col rientro del criterio, o meno,
+    lo chiude."""
+    criteri: list[list[str]] = []
+    aperto, rientro = False, 0
+    for riga in (sezione_della_verifica(testo) or "").splitlines():
+        if RE_CRITERIO.match(riga):
+            criteri.append([riga])
+            aperto, rientro = True, len(riga) - len(riga.lstrip())
+        elif aperto and (not riga.strip() or len(riga) - len(riga.lstrip()) > rientro):
+            criteri[-1].append(riga)
+        elif riga.strip():
+            aperto = False
+    return ["\n".join(c).strip() for c in criteri]
+
+
+def forma_del_pbi(testo: str, pbi: str) -> list[Rilievo]:
+    """I rilievi di forma, senza git (PBI-520, decisione 2): la `Verifica` che
+    manca o non ha criteri, lo **Scope** che manca o non nomina il file del PBI."""
+    rilievi: list[Rilievo] = []
+    if sezione_della_verifica(testo) is None:
+        rilievi.append(Rilievo("forma", None, "manca la sezione `## Verifica`"))
+    elif not criteri_del_pbi(testo):
+        rilievi.append(Rilievo("forma", None, "la `## Verifica` non ha criteri `- [ ]`"))
+    scope = blocco_dello_scope(testo)
+    if scope is None:
+        rilievi.append(Rilievo("forma", None, "manca il blocco **Scope**"))
+    elif not re.search(rf"{re.escape(BACKLOG)}/{re.escape(pbi)}(?!\d)", scope):
+        rilievi.append(Rilievo("forma", None,
+                               f"lo **Scope** non nomina `{BACKLOG}/{pbi}`, il file del PBI"))
+    return rilievi
+
+
+def percorsi_dello_scope(testo: str) -> list[tuple[str, str]]:
+    """I percorsi fra apici inversi dello Scope, con la loro riga: quelli con una
+    `/` e senza spazi, `*`, `<`, `>`, `{`, `}` né `…` (PBI-520, decisione 5)."""
+    return [(percorso, riga)
+            for riga in (blocco_dello_scope(testo) or "").splitlines()
+            for percorso in re.findall(r"`([^`]+)`", riga)
+            if "/" in percorso and not set(percorso) & set(" *<>{}…")]
+
+
+def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
+    """Gli avvisi della pre-verifica, letti alla `base` (PBI-520, decisione 5):
+    non fermano niente, li legge il Lettore. Un percorso dello Scope che alla base
+    non c'è e la cui riga non lo dice nuovo, una dipendenza di `Bloccato da:` che
+    alla base non c'è o ha un `- [ ]` nella sua Verifica, uno Scope di soli test."""
+    avvisi: list[str] = []
+    percorsi = percorsi_dello_scope(testo)
+    for percorso, riga in percorsi:
+        if "nuov" in riga:
+            continue
+        code, _ = esegui(["git", "cat-file", "-e", f"{base}:{percorso.rstrip('/')}"], REPO,
+                         timeout=120)
+        if code != 0:
+            avvisi.append(f"lo Scope nomina `{percorso}`, che alla base non c'è e non è detto nuovo")
+    for riga in re.findall(r"^.*Bloccato da:.*$", testo, re.M):
+        for dipendenza in dict.fromkeys(re.findall(r"PBI-\d+", riga)):
+            file = trova_pbi(dipendenza, base)
+            if file is None:
+                avvisi.append(f"la dipendenza {dipendenza} alla base non c'è")
+                continue
+            sorgente = git("show", f"{base}:{file.relative_to(REPO).as_posix()}")
+            if any(c.startswith("- [ ]") for c in criteri_del_pbi(sorgente)):
+                avvisi.append(f"la dipendenza {dipendenza} ha un criterio non spuntato")
+    pbi_stesso = re.compile(rf"{re.escape(BACKLOG)}/{re.escape(pbi)}(?!\d)")
+    altri = [p for p, _ in percorsi if not pbi_stesso.match(p) and not p.endswith("/")]
+    if altri and all(e_file_di_test(p) for p in altri):
+        avvisi.append("lo Scope nomina solo file di test")
+    return avvisi
+
+
+def preverifica(pbi: str) -> int:
+    """`asdlc-runner PBI-N --preverifica` (PBI-520, decisioni 1, 7 e 8): legge il PBI
+    alla base del giro e scrive `LOG_DIR/<run>-<PBI>-preverifica.json`. Esce 1 se c'è
+    un rilievo, 0 altrimenti: gli avvisi non contano. Non crea rami né commit e non
+    cambia la fase. Il rapporto non ha `esiti`, e i lettori dei rapporti lo ignorano."""
+    base, _ = base_del_giro()
+    file = trova_pbi(pbi, base)
+    if file is None:
+        print(f"{pbi}: alla base {base[:10]} non c'è il file del PBI.")
+        return 2
+    percorso = file.relative_to(REPO).as_posix()
+    testo = git("show", f"{base}:{percorso}")
+    rilievi = forma_del_pbi(testo, pbi)
+    avvisi = avvisi_della_base(testo, pbi, base)
+    run = datetime.now().strftime("%Y%m%d-%H%M%S")
+    LOG_DIR.mkdir(exist_ok=True)
+    rapporto = LOG_DIR / f"{run}-{pbi}-preverifica.json"
+    rapporto.write_text(json.dumps({
+        "pbi": pbi,
+        "base": base,
+        "sha_pbi": git("rev-parse", f"{base}:{percorso}"),
+        "criteri": len(criteri_del_pbi(testo)),
+        "rilievi": [vars(r) for r in rilievi],
+        "avvisi": avvisi,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    for r in rilievi:
+        print(f"  rilievo ({r.domanda}): {r.testo}")
+    for a in avvisi:
+        print(f"  avviso: {a}")
+    print(f"{pbi}: {len(rilievi)} rilievi, {len(avvisi)} avvisi. Rapporto: {rapporto}")
+    return 1 if rilievi else 0
+
+
 def salva_il_traceback(pbi: str) -> Path:
     """Il traceback dell'eccezione in corso in un file di `LOG_DIR`, accanto al
     log del giro. `.log` perché `runs/*.log` è ignorato da git: un file nuovo in
@@ -4698,6 +4823,14 @@ def controllo_r6(a_monte: AMonte) -> str:
     return "R6: ok"
 
 
+def blocco_dello_scope(testo: str) -> str | None:
+    """Le righe del blocco `**Scope**` di un PBI, fino al grassetto o alla `## `
+    successivi; `None` se il blocco non c'è. La leggono `controllo_r7()` e la
+    pre-verifica (PBI-520, decisione 4)."""
+    scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
+    return scope.group(1) if scope else None
+
+
 def controllo_r7(a_monte: AMonte) -> str:
     """R7: lo Scope del PBI a monte non elenca file del progetto. Si legge il PBI sul ramo
     della PR. Ogni percorso fra apici inversi in una riga dello Scope è del progetto se la
@@ -4715,9 +4848,8 @@ def controllo_r7(a_monte: AMonte) -> str:
         return f"R7: non eseguita (git non risponde: {una_riga(albero)[:100]})"
     file_del_runner = set(albero.splitlines())
     cartelle_del_runner = {f.split("/")[0] for f in file_del_runner if "/" in f}
-    scope = re.search(r"^\*\*Scope\*\*\s*\n(.*?)(?=^\*\*|^## |\Z)", testo, re.S | re.M)
     file_del_progetto = []
-    for riga in (scope.group(1) if scope else "").splitlines():
+    for riga in (blocco_dello_scope(testo) or "").splitlines():
         for percorso in re.findall(r"`([^`]+)`", riga):
             fuori_dall_albero = (percorso not in file_del_runner
                                  and percorso.split("/")[0] not in cartelle_del_runner)
@@ -5328,6 +5460,10 @@ def costruisci_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate-rosso", nargs="?", const="HEAD", metavar="REF",
                     help=f"non esegue niente: cammina {base}..REF e dice in quali "
                          "commit un test è nato senza essere mai stato rosso")
+    ap.add_argument("--preverifica", action="store_true",
+                    help="non esegue il PBI: ne legge il file alla base e scrive in "
+                         f"{log_dir} i rilievi di forma e gli avvisi. Esce 1 con un "
+                         "rilievo (PBI-520)")
     ap.add_argument("--guardia-commit", action="store_true",
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
                          "deve stare nella fase corrente")
@@ -5396,6 +5532,10 @@ def smista() -> int:
         return stampa_il_gate_del_rosso(a.gate_rosso)
     if not a.pbi:
         ap.error("indica almeno un PBI, oppure usa --riepilogo")
+    if a.preverifica:
+        # Prima dell'ambiente, del distacco e del lucchetto, come `--gate-rosso`: non
+        # tocca l'albero, e il codice d'uscita resta a chi lo lancia (decisione 7).
+        return max(preverifica(pbi) for pbi in a.pbi)
 
     if a.e2e:
         # Il flag resta, e si ferma qui: cancellarlo darebbe un «unrecognized

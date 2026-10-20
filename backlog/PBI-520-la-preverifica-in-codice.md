@@ -121,7 +121,7 @@ Su `main` le funzioni e il flag non esistono. I test le prendono con
 `getattr(runner, "…", None)` e un `assert`, così il rosso è **per asserzione**
 (`backlog/README.md`). Ogni criterio nasce rosso, tranne le guardie, che sono dichiarate.
 
-- [ ] **I quattro rilievi di forma.** È un test parametrico su `forma_del_pbi(testo, pbi)`, con un
+- [x] **I quattro rilievi di forma.** È un test parametrico su `forma_del_pbi(testo, pbi)`, con un
       id per caso. Ogni caso dà **un solo** rilievo, con `domanda == "forma"`:
       - un PBI senza `## Verifica`;
       - un PBI con la `Verifica` senza criteri;
@@ -130,7 +130,7 @@ Su `main` le funzioni e il flag non esistono. I test le prendono con
 
       Nello **stesso test**, il caso con `backlog/PBI-<n>-…md` abbreviato non dà rilievi, e
       `backlog/PBI-52` non vale per `PBI-520` (pytest).
-- [ ] **Gli avvisi non sono rilievi.** Un repository con remoto bare e un clone, con i commit fatti
+- [x] **Gli avvisi non sono rilievi.** Un repository con remoto bare e un clone, con i commit fatti
       `--no-verify`. `avvisi_della_base()` dà un avviso per ognuno di questi tre casi:
       - un percorso dello Scope che non c'è e non è detto nuovo;
       - un `Bloccato da: PBI-<m>` con un `- [ ]` nella `Verifica` di `<m>`;
@@ -138,14 +138,14 @@ Su `main` le funzioni e il flag non esistono. I test le prendono con
 
       Nello **stesso test**: la stessa riga di percorso con «— **nuovo**» non dà avvisi, e un
       `- [ ]` di `<m>` fuori dalla sua `Verifica` non conta (pytest).
-- [ ] **`--preverifica` scrive il rapporto e non tocca l'albero.** Lo stesso repository, con
+- [x] **`--preverifica` scrive il rapporto e non tocca l'albero.** Lo stesso repository, con
       `runner.REPO` puntato al clone. `sys.argv` e `runner.smista()` lanciano
       `PBI-<n> --preverifica`. Il codice d'uscita è 1 con un rilievo e 0 senza. Il rapporto in
       `LOG_DIR` ha le chiavi della decisione 8, con `sha_pbi == git rev-parse <base>:<file>` e senza
       `esiti`. `git branch` e `git status --porcelain` del clone sono uguali a prima (pytest).
-- [ ] **`controllo_r7()` non cambia.** È una **guardia**: i suoi test esistenti restano verdi. Non
+- [x] **`controllo_r7()` non cambia.** È una **guardia**: i suoi test esistenti restano verdi. Non
       c'è un test né un commit nuovi, perché l'estrazione sta nel GREEN del primo criterio.
-- [ ] **I PBI di `main` non danno rilievi di forma.** È una **guardia**, e nasce verde dopo il GREEN
+- [x] **I PBI di `main` non danno rilievi di forma.** È una **guardia**, e nasce verde dopo il GREEN
       del primo criterio. Legge dal disco ogni `backlog/PBI-5*.md` del repository e si aspetta zero
       rilievi da `forma_del_pbi()`, senza git e senza rete. Porta
       `@pytest.mark.progetto_ospite`. Si committa da sola con
