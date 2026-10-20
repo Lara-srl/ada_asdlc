@@ -477,6 +477,11 @@ scrive un avviso in `runs/coda.log` e a schermo, e prosegue (`ADR-0008`). Il fil
 non avvisa. Il PC spento ferma la coda: l'unità e il timer di systemd che la rilanciano alla
 ripartenza sono una ricetta, in `README.md`, che si installa a mano come il crontab.
 
+**Il limite d'uso non tocca a una persona** (`PBI-519`). Se l'ultimo rapporto del PBI fermo — il
+`runs/*.json` del worktree del runner col `run` più recente — porta `riprendi_dopo`, prima di
+quell'ora il tick scrive `attende il reset del limite d'uso: PBI-N riprende dopo HH:MM` e non
+lancia: non è un blocco (`ADR-0008`).
+
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:
 

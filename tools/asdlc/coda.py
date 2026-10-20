@@ -124,13 +124,23 @@ class Attende:
 
 
 @dataclass(frozen=True)
+class AttendeIlReset:
+    """Il giro di questo PBI si è fermato sul limite d'uso dell'account, e si
+    riprende dopo `ora` (HH:MM): non è un blocco e non tocca a un umano (PBI-519,
+    decisione 5)."""
+
+    pbi: str
+    ora: str
+
+
+@dataclass(frozen=True)
 class Lancia:
     """C'è un PBI pronto da far partire, ed è questo."""
 
     pbi: str
 
 
-Decisione = Occupato | Finita | Barriera | Attende | Lancia
+Decisione = Occupato | Finita | Barriera | Attende | AttendeIlReset | Lancia
 
 # Le due sole forme che sono una voce, e nient'altro della pagina lo è. Le regole
 # sono ancorate a tutta la riga di proposito: `backlog/CODA.md` è insieme il
@@ -480,8 +490,40 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
     # Solo sull'attesa: la riga dice cosa c'è sul ramo, e la PR nata senza URL
     # si ritrova qui senza riscrivere il registro del giro (PBI-381).
     if isinstance(decisione, Attende):
-        return Attende(decisione.pbi, pr_sul_ramo(repo, decisione.pbi))
+        pr = pr_sul_ramo(repo, decisione.pbi)
+        # Senza PR, un giro fermato sul limite d'uso si riprende dopo il reset: lo
+        # dice l'ultimo rapporto del PBI nel worktree del runner (PBI-519, decisione 5).
+        if pr == () and (ripresa := riprendi_dopo(worktree, decisione.pbi)) is not None:
+            if adesso() < ripresa:
+                return AttendeIlReset(decisione.pbi, ripresa.strftime("%H:%M"))
+        return Attende(decisione.pbi, pr)
     return decisione
+
+
+def ultimo_esito(worktree: Path, pbi: str) -> dict | None:
+    """L'esito di `pbi` nel rapporto col `run` più recente fra quelli che il runner
+    ha scritto in `<worktree>/<[registro].cartella>/`, o `None`. I rapporti stanno
+    nel worktree del giro e non nel checkout del tick (PBI-519, decisione 5). Un
+    file che non è un rapporto, o che non si legge, non conta."""
+    trovati: list[tuple[str, dict]] = []
+    for file in (worktree / CFG.registro.cartella).glob("*.json"):
+        try:
+            rapporto = json.loads(file.read_text(encoding="utf-8"))
+            trovati += [(str(rapporto.get("run", "")), x) for x in rapporto.get("esiti", [])
+                        if x.get("pbi") == pbi]
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    return max(trovati, key=lambda r: r[0])[1] if trovati else None
+
+
+def riprendi_dopo(worktree: Path, pbi: str) -> datetime | None:
+    """`riprendi_dopo` dell'ultimo esito di `pbi`, o `None` se non c'è o non si
+    legge: senza, il PBI attende una persona come prima."""
+    esito = ultimo_esito(worktree, pbi)
+    try:
+        return datetime.fromisoformat(esito["riprendi_dopo"]) if esito else None
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def allinea(repo: Path) -> str | None:
@@ -744,6 +786,8 @@ def racconta(decisione: Decisione) -> str:
                         else f"PR {', '.join(pr)}" if pr
                         else "nessuna PR sul ramo: crearla o rilanciare")
             return f"attende: {pbi} ha un ramo su origin e non è in main — {sul_ramo}"
+        case AttendeIlReset(pbi, ora):
+            return f"attende il reset del limite d'uso: {pbi} riprende dopo {ora}"
         case Lancia(pbi):
             return f"lancia: {pbi}"
     return f"decisione senza nome: {decisione}"
