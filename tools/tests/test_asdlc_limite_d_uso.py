@@ -26,6 +26,9 @@ runner = importlib.import_module("asdlc.runner")
 # progetto di prova, e l'import non legge `asdlc.toml` (PBI-382, PBI-394).
 runner.REPO = PROGETTO
 runner.configura(runner.asdlc_config.carica(PROGETTO))
+coda = importlib.import_module("asdlc.coda")
+coda.REPO = PROGETTO
+coda.configura(coda.asdlc_config.carica(PROGETTO))
 
 FATTO = {"esito": "fatto", "riepilogo": "fatto"}
 LIMITE = "You've hit your session limit · resets 7:50pm\n"
@@ -326,3 +329,50 @@ class TestIlPromptDiRipresa:
         ripresa = prompt[0].removeprefix(runner.PROMPT_BUILDER.format(pbi_path=pbi_path))
         for voce in ("limite d'uso", "git log", "spunte", "senza rifare"):
             assert voce in ripresa, f"il testo di ripresa non dice «{voce}»"
+
+
+def mondo_col_ramo(pbi: str):
+    """Un `esegui()` del tick: nessuna PR mergiata né aperta, e su `origin` il ramo
+    di `pbi`. Un comando non previsto fa fallire il test."""
+    ramo = f"pbi/pbi-{pbi.removeprefix('PBI-')}"
+
+    def esegui(cmd, cwd):
+        if cmd[0] == "gh":
+            return 0, "[]"
+        if cmd[0] == "git" and "ls-remote" in cmd:
+            return 0, f"{'0' * 40}\trefs/heads/{ramo}\n"
+        raise AssertionError(f"comando non previsto: {cmd}")
+
+    return esegui
+
+
+def tick_col_rapporto(monkeypatch, tmp_path, pbi: str, ora: datetime, **campi):
+    """Il checkout del tick con `pbi` in coda e il worktree del runner col rapporto
+    del giro fermato sul limite d'uso, in `<worktree>/runs/`. Rende i due alberi."""
+    repo, albero = tmp_path / "repo", tmp_path / "albero"
+    (repo / "backlog").mkdir(parents=True)
+    (repo / "backlog" / "CODA.md").write_text(f"- {pbi}\n", encoding="utf-8")
+    registro = albero / coda.CFG.registro.cartella
+    registro.mkdir(parents=True)
+    rapporto_fermo_sul_limite(registro, pbi, f"pbi/pbi-{pbi.removeprefix('PBI-')}", **campi)
+    monkeypatch.setattr(coda, "esegui", mondo_col_ramo(pbi))
+    monkeypatch.setattr(coda, "adesso", lambda: ora)
+    return repo, albero
+
+
+class TestIlTickAspettaIlReset:
+    """Criterio 4, decisione 5: un PBI con un ramo su origin, senza PR, il cui
+    ultimo rapporto porta `riprendi_dopo` nel futuro non si lancia, e la riga del
+    log dice fino a quando aspetta. Non è un blocco (`ADR-0008`)."""
+
+    def test_prima_dell_ora_non_lancia_e_la_riga_dice_l_ora(self, monkeypatch, tmp_path):
+        repo, albero = tick_col_rapporto(monkeypatch, tmp_path, "PBI-519",
+                                         datetime(2026, 10, 16, 18, 0),
+                                         riprendi_dopo="2026-10-16T19:55")
+
+        decisione = coda.decidi(repo, albero)
+
+        assert not isinstance(decisione, coda.Lancia), "prima del reset il tick non lancia"
+        assert coda.racconta(decisione) == (
+            "attende il reset del limite d'uso: PBI-519 riprende dopo 19:55"
+        )
