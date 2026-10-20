@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="it.lais.interventi.db.TriggerGuastiIT" time="0.300" tests="5" errors="0" skipped="0" failures="5">
+  <testcase name="unSitoConSoliStatiSospesiNonEGuastoMaESospeso(String)[1]" classname="it.lais.interventi.db.TriggerGuastiIT" time="0.060">
+    <failure message="expected 0 but was 1" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected 0 but was 1
+</failure>
+  </testcase>
+  <testcase name="unSitoConSoliStatiSospesiNonEGuastoMaESospeso(String)[2]" classname="it.lais.interventi.db.TriggerGuastiIT" time="0.060">
+    <failure message="expected 0 but was 1" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected 0 but was 1
+</failure>
+  </testcase>
+  <testcase name="unSitoConSoliStatiSospesiNonEGuastoMaESospeso(String)[3]" classname="it.lais.interventi.db.TriggerGuastiIT" time="0.060">
+    <failure message="expected 0 but was 1" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected 0 but was 1
+</failure>
+  </testcase>
+  <testcase name="unSitoApertoChePerdeIlSuoUnicoGuastoDiventaSospesoEChiudeLEpisodio" classname="it.lais.interventi.db.TriggerGuastiIT" time="0.060">
+    <failure message="expected 0 but was 1" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected 0 but was 1
+</failure>
+  </testcase>
+  <testcase name="unSitoSospesoCuiSiAggiungeUnGuastoDiventaApertoConUnEpisodio" classname="it.lais.interventi.db.TriggerGuastiIT" time="0.060">
+    <failure message="expected 0 but was 1" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected 0 but was 1
+</failure>
+  </testcase>
+</testsuite>

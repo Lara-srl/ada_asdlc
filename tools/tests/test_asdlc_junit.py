@@ -329,3 +329,90 @@ class TestChiediImplApreImplSuUnRedJunit:
         assert self.chiedi(repo_java, monkeypatch, "verde") == 1
         assert self.fase(repo_java) == runner.FASE_TEST_ONLY
         assert "nato verde" in capsys.readouterr().out
+
+
+# PBI-514: il diff vero di `d11525c` di `ada_planning`, e il file prima e dopo.
+# Si salvano come `.diff` e `.txt`, mai come `.java`: sotto `tools/tests/` un
+# `.java` sarebbe un test JUnit orfano (PBI-514, decisione 3).
+TRIGGER_IT = "app/src/test/java/it/lais/interventi/db/TriggerGuastiIT.java"
+TRIGGER_PRIMA = (DATI / "TriggerGuastiIT.prima.txt").read_text(encoding="utf-8")
+TRIGGER_DOPO = (DATI / "TriggerGuastiIT.dopo.txt").read_text(encoding="utf-8")
+TRIGGER_NATI = ["TriggerGuastiIT#unSitoConSoliStatiSospesiNonEGuastoMaESospeso",
+                "TriggerGuastiIT#unSitoApertoChePerdeIlSuoUnicoGuastoDiventaSospesoEChiudeLEpisodio",
+                "TriggerGuastiIT#unSitoSospesoCuiSiAggiungeUnGuastoDiventaApertoConUnEpisodio"]
+TRIGGER_TOLTI = {
+    "TriggerGuastiIT#unSitoConSoliGuastiNonPianificabiliESospeso",
+    "TriggerGuastiIT#unSitoApertoChePerdeIlSuoUnicoGuastoPianificabileDiventaSospeso",
+    "TriggerGuastiIT#unSitoSospesoCuiSiAggiungeUnGuastoPianificabileDiventaApertoNellStessoEpisodio",
+}
+
+
+class TestUnMetodoRinominatoSottoUnAnnotazioneDiContestoNasce:
+    """PBI-514, criterio 1: il diff vero di `d11525c`, dove le annotazioni sono
+    righe di contesto e cambia solo la riga del metodo."""
+
+    def test_i_tre_metodi_rinominati_sono_aggiunti_e_i_tre_vecchi_tolti(self):
+        diff = (DATI / "d11525c.diff").read_text(encoding="utf-8")
+
+        aggiunti, tolti = runner.nomi_dei_test_junit(diff, "TriggerGuastiIT")
+
+        assert aggiunti == TRIGGER_NATI
+        assert tolti == TRIGGER_TOLTI
+
+
+class TestTestNuoviDelCommitVedeIlCommitD11525c:
+    """PBI-514, criterio 2: in un repository vero, col file prima e dopo."""
+
+    def test_restituisce_i_tre_test_rinominati(self, repo_java):
+        repo_java.commit("test(db): i trigger dei guasti", {TRIGGER_IT: TRIGGER_PRIMA})
+        sha = repo_java.commit("test(db): solo GUASTO rende guasto il sito (RED)",
+                               {TRIGGER_IT: TRIGGER_DOPO})
+
+        nuovi = runner.test_nuovi_del_commit(sha)
+
+        assert nuovi == [runner.TestNuovo(TRIGGER_IT, n, "junit") for n in TRIGGER_NATI]
+
+
+class TestLaPosizioneDellAnnotazioneNonCambiaIlNome:
+    """PBI-514, criterio 3: l'annotazione sul `+`, sul contesto o sulla stessa
+    riga del metodo dà lo stesso nome; un metodo che il diff non tocca non nasce."""
+
+    @pytest.mark.parametrize("diff, atteso", [
+        pytest.param("+    @Test\n+    void m() {\n+    }\n",
+                     (["X#m"], set()), id="annotazione-aggiunta"),
+        pytest.param("     @ParameterizedTest\n"
+                     "     @ValueSource(strings = {\"a\", \"b\"})\n"
+                     "-    void vecchio(String s) {\n"
+                     "+    void m(String s) {\n",
+                     (["X#m"], {"X#vecchio"}), id="annotazione-di-contesto"),
+        pytest.param("+    @Test void m() {\n+    }\n",
+                     (["X#m"], set()), id="stessa-riga"),
+        pytest.param("     @Test\n"
+                     "     void m() {\n"
+                     "-        assertEquals(1, valore());\n"
+                     "+        assertEquals(2, valore());\n"
+                     "     }\n",
+                     ([], set()), id="non-toccato"),
+    ])
+    def test_il_nome_del_metodo(self, diff, atteso):
+        assert runner.nomi_dei_test_junit(diff, "X") == atteso
+
+
+class TestChiediImplApreImplSulRedDiD11525c:
+    """PBI-514, criterio 5: il giro di PBI-015 di `ada_planning`, che col
+    rapporto rosso restava in `TEST_ONLY` con «nessun test nuovo»."""
+
+    RAPPORTO = "failsafe-reports/TEST-it.lais.interventi.db.TriggerGuastiIT.xml"
+
+    def test_con_il_rapporto_rosso_apre_impl(self, repo_java, monkeypatch):
+        repo_java.commit("test(db): i trigger dei guasti", {TRIGGER_IT: TRIGGER_PRIMA})
+        repo_java.commit("test(db): solo GUASTO rende guasto il sito (RED)",
+                         {TRIGGER_IT: TRIGGER_DOPO})
+        fase = runner.percorso_della_fase(repo_java.radice)
+        fase.write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(runner, "JUNIT_COMANDO", tuple(COMANDO_MAVEN))
+        scrive_i_rapporti(monkeypatch, (f"target/{self.RAPPORTO}", f"rosso/{self.RAPPORTO}"),
+                          codice=1)
+
+        assert runner.chiedi_impl() == 0
+        assert fase.read_text().strip() == runner.FASE_IMPL

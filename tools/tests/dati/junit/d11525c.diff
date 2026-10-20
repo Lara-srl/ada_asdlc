@@ -1,0 +1,69 @@
+diff --git a/app/src/test/java/it/lais/interventi/db/TriggerGuastiIT.java b/app/src/test/java/it/lais/interventi/db/TriggerGuastiIT.java
+index 59d15be..e8bcbc7 100644
+--- a/app/src/test/java/it/lais/interventi/db/TriggerGuastiIT.java
++++ b/app/src/test/java/it/lais/interventi/db/TriggerGuastiIT.java
+@@ -144,53 +144,47 @@ class TriggerGuastiIT {
+         assertThat(episodiAperti(sito)).isZero();
+     }
+ 
+-    /** D1: un sito con soli componenti guasti non pianificabili è guasto ma SOSPESO. */
++    /** D1: solo GUASTO rende guasto il sito; gli altri tre stati lo mettono in SOSPESO senza aprire un episodio. */
+     @ParameterizedTest
+     @ValueSource(strings = {"SCALATO", "SOSPESO_MISTO", "PREVENTIVO"})
+-    void unSitoConSoliGuastiNonPianificabiliESospeso(String stato) {
++    void unSitoConSoliStatiSospesiNonEGuastoMaESospeso(String stato) {
+         long sito = creaSito("T2");
+         long c1 = creaComponente("T2-A", sito, "RISOLTO");
+         creaComponente("T2-B", sito, "RISOLTO");
+ 
+         impostaStato(c1, stato);
+ 
+-        assertThat(sito(sito)).containsEntry("guasto", 1)
++        assertThat(sito(sito)).containsEntry("guasto", 0)
+                 .containsEntry("stato_intervento", "SOSPESO");
++        assertThat(episodiAperti(sito)).isZero();
+     }
+ 
+-    /** Il sito resta guasto ma cambia cosa il solver può fare: APERTO → SOSPESO senza chiudere l'episodio. */
++    /** L'unico GUASTO passa a PREVENTIVO: il sito non è più guasto, l'episodio si chiude e il sito resta SOSPESO. */
+     @Test
+-    void unSitoApertoChePerdeIlSuoUnicoGuastoPianificabileDiventaSospeso() {
++    void unSitoApertoChePerdeIlSuoUnicoGuastoDiventaSospesoEChiudeLEpisodio() {
+         long sito = creaSito("T7");
+         long c1 = creaComponente("T7-A", sito, "GUASTO");
+         creaComponente("T7-B", sito, "RISOLTO");
+ 
+         impostaStato(c1, "PREVENTIVO");
+ 
+-        assertThat(sito(sito)).containsEntry("guasto", 1)
++        assertThat(sito(sito)).containsEntry("guasto", 0)
+                 .containsEntry("stato_intervento", "SOSPESO");
+-        assertThat(episodiAperti(sito)).isEqualTo(1);
++        assertThat(episodiAperti(sito)).isZero();
+     }
+ 
+-    /** SOSPESO → APERTO: lo stesso episodio e lo stesso guasto_dal, non un nuovo guasto. */
++    /** SOSPESO → APERTO: un nuovo GUASTO è un nuovo guasto, con un episodio suo. */
+     @Test
+-    void unSitoSospesoCuiSiAggiungeUnGuastoPianificabileDiventaApertoNellStessoEpisodio() {
++    void unSitoSospesoCuiSiAggiungeUnGuastoDiventaApertoConUnEpisodio() {
+         long sito = creaSito("T8");
+         creaComponente("T8-A", sito, "PREVENTIVO");
+         long c2 = creaComponente("T8-B", sito, "RISOLTO");
+-        jdbc.sql("UPDATE interventi.sito SET guasto_dal = current_date - 5 WHERE id = :id")
+-                .param("id", sito).update();
+-        long episodio = jdbc.sql("SELECT id FROM interventi.episodio_guasto WHERE sito_id = :id")
+-                .param("id", sito).query(Long.class).single();
+ 
+         impostaStato(c2, "GUASTO");
+ 
+         assertThat(sito(sito)).containsEntry("guasto", 1)
+                 .containsEntry("stato_intervento", "APERTO");
+-        assertThat(jdbc.sql("SELECT guasto_dal = current_date - 5 FROM interventi.sito WHERE id = :id")
+-                .param("id", sito).query(Boolean.class).single()).isTrue();
+-        assertThat(jdbc.sql("SELECT id FROM interventi.episodio_guasto WHERE sito_id = :id")
+-                .param("id", sito).query(Long.class).list()).containsExactly(episodio);
++        assertThat(episodiAperti(sito)).isEqualTo(1);
+     }
+ 
+     /** §2.1, terza riga: la sospensione decisa dall'ufficio rende SOSPESO anche un sito con guasti pianificabili. */
