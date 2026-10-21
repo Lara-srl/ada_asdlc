@@ -121,7 +121,7 @@ una persona lo corregge e la correzione arriva su `main`, il tick rilancia da so
 I test accendono `[preverifica]` solo per sé (decisione 5). Usano il Lettore finto di `PBI-521`,
 oppure `lettore = false`. Su `main` la sezione e le uscite non esistono.
 
-- [ ] **Con un rilievo il giro si ferma prima del ramo.** Con `attiva = true`, `lettore = false` e un
+- [x] **Con un rilievo il giro si ferma prima del ramo.** Con `attiva = true`, `lettore = false` e un
       PBI senza `## Verifica`, `esegui_pbi()` dà:
       - `motivo == "preverifica"` e `stato == "fermato"`;
       - `sha_pbi` valorizzato e `rilievi_preverifica == 1`.
@@ -129,20 +129,20 @@ oppure `lettore = false`. Su `main` la sezione e le uscite non esistono.
       Inoltre il Builder finto non è stato invocato, `git branch` è uguale a prima ed `e.solver` è
       vuoto (pytest, `git` vero). **Il GREEN di questo criterio è solo la parte in codice:** il Lettore
       entra col criterio 2.
-- [ ] **Col Lettore acceso, il Lettore gira prima del Builder.** Con `lettore = true`, un PBI in forma
+- [x] **Col Lettore acceso, il Lettore gira prima del Builder.** Con `lettore = true`, un PBI in forma
       e il Lettore finto che chiama solo `letto`, il Lettore è invocato **una** volta e il Builder
       finto dopo di lui (pytest).
-- [ ] **Un Lettore senza esito non è un PBI da correggere.** Il Lettore finto esce 1 con il limite
+- [x] **Un Lettore senza esito non è un PBI da correggere.** Il Lettore finto esce 1 con il limite
       d'uso nello stderr e non chiama `letto`. Il giro dà `motivo == "lettore-senza-esito"` con
       `riprendi_dopo`, e `decidi()` dà `AttendeIlReset`, non `AttendeLaPreverifica` (pytest).
-- [ ] **La stessa versione non si rilegge.** Due giri di fila sullo stesso PBI pronto: il Lettore
+- [x] **La stessa versione non si rilegge.** Due giri di fila sullo stesso PBI pronto: il Lettore
       finto è invocato una volta. Dopo una modifica al file del PBI, committata e portata sulla base,
       è invocato di nuovo (pytest).
-- [ ] **Il tick non rilancia un PBI da correggere.** Con un ultimo esito `preverifica` e lo stesso
+- [x] **Il tick non rilancia un PBI da correggere.** Con un ultimo esito `preverifica` e lo stesso
       sha di `git rev-parse HEAD:<file>` nel checkout, `decidi()` dà `AttendeLaPreverifica`, e la riga
       di `racconta()` contiene `attende: preverifica`. Con lo sha cambiato dà `Lancia`. Una modifica
       non committata al file del PBI nel checkout non cambia la decisione (pytest).
-- [ ] **`--riprendi` non lancia la pre-verifica.** È una **guardia**: su `main` è vera, perché la
+- [x] **`--riprendi` non lancia la pre-verifica.** È una **guardia**: su `main` è vera, perché la
       pre-verifica non c'è. Nasce verde dopo il GREEN del primo criterio. Si committa da sola con
       `Guardia-su: tools/asdlc/runner.py::esegui_pbi`, e deve mordere (pytest).
 
