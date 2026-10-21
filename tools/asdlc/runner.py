@@ -1172,7 +1172,9 @@ def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
     `registro["traccia"]`. La cartella di Claude Code è fuori dal repository e può essere
     ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
     `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`). La sessione si cerca fra
-    quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`."""
+    quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`.
+    Dalla copia si leggono anche `token` e `modello` (`token_della_traccia`, PBI-516); senza
+    una traccia leggibile sono `None` tutti e due."""
     # Senza una traccia leggibile non c'è un conto da fare (PBI-516, decisione 1).
     registro["token"] = registro["modello"] = None
     # Senza `cwd` la chiamata resta senza argomenti, com'era prima di PBI-521.
@@ -1187,6 +1189,7 @@ def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
     registro["traccia"] = str(destinazione)
     try:
         registro["contenuto"] = contenuto_della_traccia(destinazione)
+        registro["token"], registro["modello"] = token_della_traccia(destinazione)
     except (OSError, ValueError) as guasto:
         registro["traccia_nota"] = f"traccia copiata ma non leggibile ({guasto})"
 
