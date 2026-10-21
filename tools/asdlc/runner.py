@@ -1247,8 +1247,9 @@ def messaggi_con_uso(percorso: Path) -> dict[str, dict]:
     """I messaggi dell'assistente di una traccia che portano `message.usage`, per
     `message.id` (`PBI-516`, decisione 2). Le righe `api-request-blob` non portano uso, e
     restano fuori. Claude Code scrive un messaggio su una riga per blocco, ognuna con lo
-    stesso uso, e vale l'ultima; senza id la chiave è il numero di riga. Una riga che non
-    è JSON alza `ValueError`."""
+    stesso uso, e vale l'ultima; senza id la chiave è il percorso con il numero di riga,
+    perché `token_dell_esito` fonde le tracce di più invocazioni e due messaggi senza id di
+    tracce diverse non devono collidere. Una riga che non è JSON alza `ValueError`."""
     messaggi: dict[str, dict] = {}
     for numero, riga in enumerate(percorso.read_text(encoding="utf-8").splitlines()):
         if not riga.strip():
@@ -1258,7 +1259,7 @@ def messaggi_con_uso(percorso: Path) -> dict[str, dict]:
         if dato.get("type") != "assistant" or not isinstance(messaggio, dict) \
                 or not isinstance(messaggio.get("usage"), dict):
             continue
-        messaggi[messaggio.get("id") or f"riga {numero}"] = messaggio
+        messaggi[messaggio.get("id") or f"{percorso}:{numero}"] = messaggio
     return messaggi
 
 

@@ -262,7 +262,8 @@ Ogni esito del rapporto porta in fondo `token`: una voce `{"ruolo", "modello", "
 "cache_creazione", "cache_lettura"}` per coppia `(ruolo, modello)`, sommata sulle tracce di tutte
 le sue invocazioni. Un messaggio si conta una volta per esito, per `message.id`: il rilancio del
 Builder con `--fork-session` scrive una sessione che ripete la cronologia di quella di prima.
-Non c'è un totale fra modelli diversi, perché non si sommano. Una traccia che non si legge resta
+Un messaggio senza `message.id` si conta per la sua riga nella sua traccia: due tracce non lo
+fanno collidere, e resta sul ruolo che l'ha scritto. Non c'è un totale fra modelli diversi, perché non si sommano. Una traccia che non si legge resta
 fuori dal conto, e il rapporto si scrive lo stesso.
 
 ### R13 — La guardia di processo è codice
