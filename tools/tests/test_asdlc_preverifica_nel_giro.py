@@ -305,3 +305,32 @@ def test_un_albero_del_lettore_non_smontato_entra_nel_conto_del_giro(tmp_path, m
     assert alberi_del_lettore, "il Lettore ha girato nel suo albero"
     assert e.inventario["usa_e_getta"] == {"montati": 1, "smontati": 0}, e.inventario
     assert "1 albero usa e getta montato e non smontato" in e.nota, e.nota
+
+
+# --- PBI-523, criterio 2: un Lettore che sporca l'albero del giro lo ferma ----
+
+
+def test_un_lettore_che_sporca_l_albero_del_giro_ferma_il_giro_prima_del_ramo(
+        tmp_path, monkeypatch):
+    """Il Lettore finto scrive un file non tracciato nel clone, fuori dal suo albero,
+    e chiama `letto` senza rilievi: il secondo controllo dell'albero pulito chiude il
+    giro prima del Builder e del ramo."""
+    clone, ruoli = giro_sul_clone(tmp_path, monkeypatch, pbi_610(),
+                                  {"lettore": LETTO, "builder": fermati("una domanda")})
+    accendi(monkeypatch, lettore=True)
+    finto = runner.esegui
+
+    def _esegui(cmd, cwd, timeout=7200, flussi=None, **k):
+        if cmd[:1] != ["git"] and ruolo_ed_esito(cmd)[0] == "lettore":
+            (clone / "sporco.txt").write_text("scritto dal Lettore\n", encoding="utf-8")
+        return finto(cmd, cwd, timeout, flussi=flussi, **k)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+    rami = sh(clone, "branch")
+
+    e = runner.esegui_pbi("PBI-610", attivi=set(), dry=False, con_pr=False, run="giro")
+
+    assert (e.motivo, e.stato) == ("albero-sporco-all-ingresso", "fermato"), e.nota
+    assert "builder" not in ruoli, ruoli
+    assert sh(clone, "branch") == rami, "il ramo non nasce"
+    assert e.solver == [], "il Solver non parte"
