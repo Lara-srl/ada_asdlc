@@ -76,7 +76,8 @@ RIGHE = [
 
 def con_la_sessione(monkeypatch, tmp_path, righe):
     """`esegui` che, come `claude`, scrive la sessione sotto la cartella di Claude Code
-    (finta) col nome dell'uuid ricevuto; `righe=None` è una sessione che non c'è."""
+    (finta) col nome dell'uuid ricevuto; `righe=None` è una sessione che non c'è, e una
+    stringa si scrive com'è."""
     cartella = tmp_path / "claude" / "progetto"
     cartella.mkdir(parents=True)
     monkeypatch.setattr(runner, "cartella_delle_sessioni", lambda: cartella, raising=False)
@@ -85,7 +86,7 @@ def con_la_sessione(monkeypatch, tmp_path, righe):
     def _esegui(cmd, cwd, timeout=7200, **k):
         if righe is not None:
             (cartella / f"{cmd[cmd.index('--session-id') + 1]}.jsonl").write_text(
-                sessione_finta(righe), encoding="utf-8")
+                righe if isinstance(righe, str) else sessione_finta(righe), encoding="utf-8")
         return interno(cmd, cwd, timeout, **k)
 
     monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
@@ -273,3 +274,13 @@ def test_la_cronologia_del_fork_non_si_conta_due_volte_nel_token_dell_esito(tmp_
     assert runner.token_dell_esito(invocazioni) == [
         {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 10, "output": 100,
          "cache_creazione": 1000, "cache_lettura": 10000}]
+
+
+@pytest.mark.parametrize("righe", [None, "questo non è JSON\n"], ids=["assente", "illeggibile"])
+def test_una_traccia_assente_o_illeggibile_lascia_token_a_none_e_il_giro_non_si_ferma(
+        monkeypatch, tmp_path, righe):
+    invocazione = con_la_sessione(monkeypatch, tmp_path, righe)
+
+    assert invocazione.registro.get("token", "manca") is None
+    assert invocazione.registro.get("modello", "manca") is None
+    assert invocazione.codice == 0
