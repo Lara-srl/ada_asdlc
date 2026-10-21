@@ -4374,6 +4374,9 @@ def esegui_pbi(
     # limite d'uso il tick lo riprende dopo il reset, come il Builder (PBI-519). Una
     # ripresa non la rifà: il PBI è già passato da qui, e il suo ramo c'è già. Non la
     # rifà nemmeno una versione del PBI già letta pronta: una lettura per versione.
+    # Il conto degli alberi usa e getta si fotografa prima (PBI-523, decisione 1): un
+    # albero del Lettore che `git worktree remove` non smonta entra nella nota del giro.
+    contati = Counter(USA_E_GETTA)
     if CFG.preverifica.attiva and not riprendi:
         percorso = pbi_path.relative_to(REPO).as_posix()
         if preverifica_gia_letta(pbi, git("rev-parse", f"{base}:{percorso}"),
@@ -4401,7 +4404,6 @@ def esegui_pbi(
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
     e.inventario["inizio"] = inventario()
-    contati = Counter(USA_E_GETTA)
     # Solo nel log, non nella nota: fra i file ignorati ci sono sempre il venv e
     # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
     if trovati := residui(e.inventario["inizio"], pbi):
