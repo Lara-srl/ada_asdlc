@@ -1224,6 +1224,33 @@ def contenuto_della_traccia(percorso: Path) -> dict[str, int]:
             "thinking": conto["thinking"]}
 
 
+# I contatori di `message.usage` col loro nome nel rapporto del giro (`PBI-516`).
+CONTATORI_DEI_TOKEN = {"input": "input_tokens", "output": "output_tokens",
+                       "cache_creazione": "cache_creation_input_tokens",
+                       "cache_lettura": "cache_read_input_tokens"}
+
+
+def token_della_traccia(percorso: Path) -> tuple[dict[str, int], str | None]:
+    """Quanto ha speso una sessione: la somma dei quattro contatori di `message.usage` dei
+    messaggi dell'assistente, e il modello che li ha scritti (`PBI-516`, decisione 2). Le
+    righe `api-request-blob` non portano uso, e non si contano. Una riga che non è JSON
+    alza `ValueError`."""
+    token = dict.fromkeys(CONTATORI_DEI_TOKEN, 0)
+    modello = None
+    for riga in percorso.read_text(encoding="utf-8").splitlines():
+        if not riga.strip():
+            continue
+        dato = json.loads(riga)
+        messaggio = dato.get("message")
+        if dato.get("type") != "assistant" or not isinstance(messaggio, dict) \
+                or not isinstance(messaggio.get("usage"), dict):
+            continue
+        for nome, chiave in CONTATORI_DEI_TOKEN.items():
+            token[nome] += messaggio["usage"].get(chiave) or 0
+        modello = messaggio.get("model") or modello
+    return token, modello
+
+
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
                   esito: Path | None, cwd: Path | None = None) -> Invocazione:
     """Lancia un agente con il server dell'esito accanto, e legge l'esito.
