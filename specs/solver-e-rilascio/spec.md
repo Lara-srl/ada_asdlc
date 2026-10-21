@@ -258,6 +258,13 @@ dell'ultima riga: Claude Code lo scrive su una riga per blocco. Senza una tracci
 `token` e `modello` sono `None`, e il giro non si ferma. Il dato viene dalla traccia, mai dal
 testo del modello (`ADR-0027`); il prezzo non c'è, perché cambia per modello e per data.
 
+Ogni esito del rapporto porta in fondo `token`: una voce `{"ruolo", "modello", "input", "output",
+"cache_creazione", "cache_lettura"}` per coppia `(ruolo, modello)`, sommata sulle tracce di tutte
+le sue invocazioni. Un messaggio si conta una volta per esito, per `message.id`: il rilancio del
+Builder con `--fork-session` scrive una sessione che ripete la cronologia di quella di prima.
+Non c'è un totale fra modelli diversi, perché non si sommano. Una traccia che non si legge resta
+fuori dal conto, e il rapporto si scrive lo stesso.
+
 ### R13 — La guardia di processo è codice
 
 - **Cosa:** che R1-R12 siano state rispettate.

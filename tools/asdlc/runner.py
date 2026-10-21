@@ -523,6 +523,10 @@ class Esito:
     # lo sha è lo stesso (PBI-522, decisioni 4 e 6).
     sha_pbi: str = ""
     rilievi_preverifica: int = 0
+    # Quanto ha speso l'esito: una voce per coppia `(ruolo, modello)` coi quattro contatori,
+    # letta dalle tracce di `invocazioni` (`token_dell_esito`, PBI-516). Nel JSON viene
+    # dopo `tempi`, in fondo, e lo riscrive `scrivi_rapporto`.
+    token: list[dict] = field(default_factory=list)
 
 
 def distribuzione_del_runner() -> importlib.metadata.Distribution:
@@ -584,7 +588,11 @@ def scrivi_rapporto(run: str, esiti: list[Esito], stato: str) -> Path:
     già chiusi, che vivevano solo in memoria (difetto 17). Riscrivere tutto il
     file ogni volta costa niente — sono kilobyte — e non lascia mai un JSON
     troncato a metà, che è ciò che un append farebbe.
+
+    Il `token` di ogni esito si rilegge qui dalle tracce delle sue invocazioni (PBI-516).
     """
+    for e in esiti:
+        e.token = token_dell_esito(e.invocazioni)
     rapporto = LOG_DIR / f"{run}.json"
     rapporto.parent.mkdir(exist_ok=True)
     rapporto.write_text(
@@ -593,8 +601,8 @@ def scrivi_rapporto(run: str, esiti: list[Esito], stato: str) -> Path:
             ("finito" if stato == "finito" else "aggiornato"):
                 datetime.now().isoformat(timespec="seconds"),
             "asdlc": identita_del_runner(),
-            "esiti": [{k: v for k, v in e.__dict__.items() if k != "tempi"}
-                      | {"tempi": dict(e.tempi)} for e in esiti],
+            "esiti": [{k: v for k, v in e.__dict__.items() if k not in ("tempi", "token")}
+                      | {"tempi": dict(e.tempi), "token": e.token} for e in esiti],
         }, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -1280,9 +1288,16 @@ def token_dell_esito(invocazioni: list[dict]) -> list[dict]:
     un totale, perché non si sommano."""
     messaggi: dict[str, tuple[str, dict]] = {}
     for voce in invocazioni:
-        if voce.get("traccia"):
-            for id_messaggio, messaggio in messaggi_con_uso(Path(voce["traccia"])).items():
-                messaggi[id_messaggio] = (voce.get("ruolo"), messaggio)
+        if not voce.get("traccia"):
+            continue
+        # Una traccia che non si legge ha già la sua `traccia_nota`: il rapporto si scrive lo
+        # stesso, senza i suoi messaggi (decisione 1, `ADR-0008`).
+        try:
+            letti = messaggi_con_uso(Path(voce["traccia"]))
+        except (OSError, ValueError):
+            continue
+        for id_messaggio, messaggio in letti.items():
+            messaggi[id_messaggio] = (voce.get("ruolo"), messaggio)
     gruppi: dict[tuple, list[dict]] = {}
     for ruolo, messaggio in messaggi.values():
         gruppi.setdefault((ruolo, messaggio.get("model")), []).append(messaggio)
