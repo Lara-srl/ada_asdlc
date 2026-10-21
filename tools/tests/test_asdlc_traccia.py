@@ -226,3 +226,16 @@ def test_session_id_con_c_o_resume_esce_sempre_con_fork_session(monkeypatch, tmp
     assert "--session-id" in cmd
     if "-c" in cmd or "--resume" in cmd:
         assert "--fork-session" in cmd
+
+
+# --- I token di ogni giro (`backlog/PBI-516`) ---------------------------------
+
+TRACCIA_CON_TOKEN = Path(__file__).resolve().parent / "dati" / "traccia_con_token.jsonl"
+
+
+def test_una_traccia_si_somma_e_la_riga_api_request_blob_si_salta():
+    token, modello = runner.token_della_traccia(TRACCIA_CON_TOKEN)
+
+    assert token == {"input": 9, "output": 600, "cache_creazione": 6000,
+                     "cache_lettura": 60000}
+    assert modello == "claude-opus-5-5"
