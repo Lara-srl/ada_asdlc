@@ -73,6 +73,12 @@ Fa eccezione il `senza esito` per il limite d'uso con l'ora del reset leggibile:
 dal Solver. Il tick aspetta `riprendi_dopo` e rilancia il PBI con `--riprendi`, fino a tre
 riprese; dopo la terza il PBI attende una persona (`PBI-519`).
 
+Non passano dal Solver nemmeno le due uscite della pre-verifica nel giro (`PBI-522`), che
+arrivano prima del ramo: il `fermato` col motivo `preverifica`, il cui rimedio è correggere il
+PBI (il tick non lo rilancia finché il file del PBI non cambia su `main`), e il `senza esito` col motivo `lettore-senza-esito`, un Lettore che non ha chiamato
+`letto`, che col limite d'uso porta `riprendi_dopo` come il Builder: il tick lo aspetta e poi
+rilancia il PBI, senza `--riprendi` perché il ramo non è nato.
+
 ## Regole
 
 Ogni regola risponde alle quattro domande: **cosa si controlla · quando · cosa conta come

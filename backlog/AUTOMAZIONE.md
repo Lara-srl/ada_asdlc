@@ -25,6 +25,15 @@ sbagliare prima.
                      └→ ✋ fermato, con l'elenco dei commit
 ```
 
+**Prima del Builder, la pre-verifica** (`PBI-522`, `ADR-0031`). Con `[preverifica] attiva =
+true` il giro, dopo il controllo dell'albero pulito e prima di creare il ramo, legge il PBI alla
+base con i controlli di `--preverifica` e, con `[preverifica].lettore` (il default), col
+Lettore. Con un rilievo chiude `fermato`, motivo `preverifica`:
+niente ramo, commit, PR né Solver, e il rimedio è correggere il PBI. Un Lettore senza `letto`
+chiude `senza esito`, motivo `lettore-senza-esito`, con `riprendi_dopo` se si è fermato sul
+limite d'uso con l'ora del reset leggibile. `--riprendi` non la rifà, e nemmeno un giro su
+una versione del PBI (lo sha del suo file) che un rapporto di prima ha già letto pronta.
+
 Sono **tre gate diversi** perché rispondono a tre domande diverse
 (`.claude/skills/asdlc/patterns/context-gates.md`):
 *compila e passa i test?* · *rispetta il contratto della spec?* · *è la cosa giusta?*
@@ -484,7 +493,17 @@ quell'ora il tick scrive `attende il reset del limite d'uso: PBI-N riprende dopo
 lancia: non è un blocco (`ADR-0008`). Dopo quell'ora lancia `asdlc-runner PBI-N --riprendi`, e
 la riga è `lancia: PBI-N --riprendi, dopo il reset del limite d'uso`. Le riprese hanno un
 tetto di tre per PBI: il runner le conta in `riprese_limite`, e con `riprese_limite` ≥ 3 il
-tick non riprende e scrive `attende: …` come per ogni giro fermato.
+tick non riprende e scrive `attende: …` come per ogni giro fermato. Vale anche per un giro
+chiuso `lettore-senza-esito` (`PBI-522`), che non ha ramo su `origin`: prima dell'ora il tick
+scrive la stessa riga, e dopo lancia `asdlc-runner PBI-N`, senza `--riprendi`.
+
+**Un PBI fermo in pre-verifica aspetta la sua correzione** (`PBI-522`). Se l'ultimo rapporto
+del PBI chiude col motivo `preverifica`, il tick confronta il suo `sha_pbi` con `git rev-parse
+HEAD:<file del PBI>` nel proprio checkout, appena allineato a `main`: finché sono uguali scrive
+`attende: preverifica PBI-N — <n> rilievi, correggi il PBI` e non lancia. Quando la correzione
+del PBI arriva su `main` lo sha cambia, e il tick rilancia da solo. Una modifica non
+committata nel checkout non conta. Non è un blocco (`ADR-0008`): la coda resta su quel PBI e
+il tick dopo rilegge.
 
 Un giro **fermato** — un ramo su `origin` senza PR, che tiene la coda in `attende` — si chiude
 con un comando, dal checkout del tick:
