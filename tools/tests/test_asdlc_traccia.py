@@ -259,3 +259,17 @@ def test_un_messaggio_ripetuto_su_due_righe_conta_una_volta_con_l_uso_dell_ultim
     token, _ = runner.token_della_traccia(traccia)
 
     assert token == {"input": 2, "output": 20, "cache_creazione": 200, "cache_lettura": 2000}
+
+
+def test_la_cronologia_del_fork_non_si_conta_due_volte_nel_token_dell_esito(tmp_path):
+    prima = [messaggio("msg_1", (1, 10, 100, 1000)), messaggio("msg_2", (2, 20, 200, 2000))]
+    fork = [*prima, messaggio("msg_3", (3, 30, 300, 3000)), messaggio("msg_4", (4, 40, 400, 4000))]
+    invocazioni = []
+    for nome, righe in (("primo", prima), ("rilancio", fork)):
+        traccia = tmp_path / f"{nome}.sessione.jsonl"
+        traccia.write_text(sessione_finta(righe), encoding="utf-8")
+        invocazioni.append({"ruolo": "builder", "traccia": str(traccia)})
+
+    assert runner.token_dell_esito(invocazioni) == [
+        {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 10, "output": 100,
+         "cache_creazione": 1000, "cache_lettura": 10000}]
