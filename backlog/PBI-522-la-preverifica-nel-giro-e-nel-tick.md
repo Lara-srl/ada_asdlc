@@ -1,6 +1,7 @@
 # PBI-522: la pre-verifica nel giro, e il tick che non rilancia un PBI da correggere
 
-**Stato:** proposto, letto il 20/10 (vedi in fondo). Terzo di tre: 520, 521, 522 (`ADR-0031`).
+**Stato:** giro 1 fermato su una domanda del Protocollo, risposta e ripresa nel giro 2 (vedi in fondo).
+Letto il 20/10. Terzo di tre: 520, 521, 522 (`ADR-0031`).
 
 ## Direttiva
 
@@ -192,3 +193,69 @@ tre tipi, tutti recepiti.
 
 - con `attiva` assente i test esistenti di `esegui_pbi()` restano intatti;
 - le sezioni sconosciute non rompono la lettura dell'`asdlc.toml` ospite.
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (20/10, run `20261020-230508`, 18 minuti) ha fatto **tutto il lavoro** del PBI: i sei
+criteri con le loro coppie RED→GREEN (il 3 in due coppie, runner e coda), il 6 come guardia con
+`Guardia-su: tools/asdlc/runner.py::esegui_pbi`. La suite dava `1187 passed` e l'albero era pulito.
+Si è fermato alla fine, senza spuntare la Verifica, con la prima domanda del Protocollo di
+rifinitura: l'ordine fra la pre-verifica e `inventario()` cambia ciò che il giro registra dei
+residui, ma solo in due casi di guasto del Lettore:
+
+- (a) un albero usa e getta del Lettore che `git worktree remove` non smonta entra
+  nell'inventario d'inizio come «residuo dei giri prima», e non conta come «albero usa e getta
+  montato e non smontato», perché `contati = Counter(USA_E_GETTA)` si fotografa dopo;
+- (b) un file che il Lettore scrivesse nel worktree del giro, fuori dal suo albero, arriva dopo il
+  controllo dell'albero pulito: il Builder partirebbe su un albero sporco.
+
+Sulla seconda domanda (uno `sha_pbi` diverso fra la base del giro e il checkout del tick) il
+Builder non ha trovato casi, e non serve risposta. Il giro è chiuso col tag
+`giro-fermato/pbi-522-giro1-20261020` (`17d93b3`).
+
+**Risposta di Francesco (21/10): la (0).** L'ordine della decisione 2 resta com'è, e i due casi
+sono un **limite dichiarato** di questo PBI. Le due correzioni proposte dal Builder, il conteggio
+`contati` prima della pre-verifica e un secondo `git status --porcelain` dopo, sono
+`PBI-523`, non questo. In questo giro non si tocca `esegui_pbi()` e non si aggiunge nessun test.
+
+**Si riprendono i dodici commit del tag**, rimessi sul ramo del giro con `git cherry-pick -x` in
+ordine. Sono tutti sopra `9537640`, la base del giro 1, e nessuno tocca `backlog/`, quindi passano
+anche se `main` si è mosso dopo (si è mosso solo per questo file).
+Sul tag, verificato il 21/10 in un albero in `/tmp`: `python3 -m pytest -q tools/tests` dà
+`1187 passed`, `git status --porcelain` è vuoto dopo il gate, e `asdlc-runner --gate-rosso HEAD`
+dice «nessun test è nato verde». Il giro 1 non era arrivato ai gate: è la prima volta che girano
+su questi commit.
+
+**Da fare, in quest'ordine:**
+
+1. **I dodici commit sul ramo del giro:** `git cherry-pick -x
+   9537640..giro-fermato/pbi-522-giro1-20261020`. **Verifica:** `git log --oneline
+   origin/main..HEAD` mostra dodici commit, dal `test(runner): con un rilievo della pre-verifica…`
+   al `test(runner): con --riprendi il giro non lancia la pre-verifica`, e l'ultimo ha ancora il
+   trailer `Guardia-su: tools/asdlc/runner.py::esegui_pbi`. Se il cherry-pick dà un conflitto è
+   un fatto nuovo: `fermati` con la domanda, senza risolverlo a mano.
+2. **Il limite dichiarato nel `README.md`.** Nella sezione `### La pre-verifica nel giro`, dopo
+   il paragrafo e prima del blocco `toml`, un paragrafo con questo testo:
+
+   > **Un limite dichiarato** (`PBI-522`, giro 2). La pre-verifica gira prima dell'inventario
+   > d'inizio del giro e prima che il giro conti gli alberi usa e getta. Nel caso normale non
+   > cambia niente: il Lettore lavora nel suo albero, che si smonta, e il rapporto sta in `runs/`.
+   > Cambia in due casi di guasto del Lettore. Un suo albero che `git worktree remove` non smonta
+   > finisce fra i «residui dei giri prima» e non nel conto degli alberi montati e non smontati;
+   > un file che il Lettore scrivesse nel worktree del giro arriva dopo il controllo dell'albero
+   > pulito, e il Builder parte su un albero sporco. La correzione è `PBI-523`.
+
+   Un commit `docs(runner): …`. Non è codice di produzione e non ha un rosso da osservare; il
+   `README.md` è nello Scope.
+3. **Le spunte:** in questo file i sei criteri della Verifica si spuntano. Sono fatti, i commit
+   lo provano. Un commit `docs(runner): …`.
+4. **Il gate** sul ramo: `python3 -m pytest -q tools/tests` verde, e `git status --porcelain`
+   vuoto dopo averlo girato.
+5. **`fatto`**, perché il gate del rosso giri sui dodici commit e il Critic legga il lavoro. Se il
+   gate del rosso segnala un commit nato verde, fuori dalla guardia del criterio 6, è un fatto
+   nuovo: `fermati` con la domanda.
+
+**Non si fa:** non si riprende il tag come ramo e non se ne riscrive la storia, non si fa `git
+revert`, non si rifanno i test o il codice dei criteri, non si sposta né si aggiunge niente in
+`esegui_pbi()` (è `PBI-523`), non si committa nessun JSON. La prima domanda del Protocollo ha la
+sua risposta qui sopra e non si riapre.
