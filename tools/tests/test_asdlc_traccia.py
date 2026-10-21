@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from test_asdlc_runner import TestLaSessioneRuotaFraLeRevisioni, agente_finto, git_finto  # noqa: F401
+from test_asdlc_runner import (  # noqa: F401
+    FATTO, TestLaSessioneRuotaFraLeRevisioni, agente_finto, elenco_backlog, fermati, git_finto,
+    ruolo_ed_esito)
 
 runner = importlib.import_module("asdlc.runner")
 
@@ -296,3 +298,46 @@ def test_il_registro_dell_invocazione_porta_token_e_modello_dalla_sua_traccia(mo
     assert invocazione.registro["token"] == {"input": 3, "output": 30, "cache_creazione": 300,
                                              "cache_lettura": 3000}
     assert invocazione.registro["modello"] == "claude-fable-5-1"
+
+
+def test_il_rapporto_del_giro_porta_i_token_dell_esito_per_ruolo_e_modello(monkeypatch, tmp_path):
+    """Builder `fatto`, Critic `sospeso` e Solver muto: ogni agente finto scrive la sua
+    sessione, e nel JSON del giro l'esito ha una voce per `(ruolo, modello)`."""
+    cartella = tmp_path / "claude"
+    cartella.mkdir()
+    monkeypatch.setattr(runner, "cartella_delle_sessioni", lambda *a: cartella, raising=False)
+    monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(runner, "MAX_REVISIONI", 0)
+    monkeypatch.setattr(runner, "git", lambda *a: (
+        "3" if a[:2] == ("rev-list", "--count")
+        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only") else ""))
+    monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+    usi = {"builder": ("claude-opus-5-5", (1, 10, 100, 1000)),
+           "critic": ("claude-opus-5-5", (2, 20, 200, 2000)),
+           "solver": ("claude-fable-5-1", (3, 30, 300, 3000))}
+    interno = agente_finto({"builder": FATTO, "critic": fermati("la eseguo?")})
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        ruolo, _ = ruolo_ed_esito(cmd)
+        if "--session-id" in cmd and ruolo in usi:
+            sessione = cmd[cmd.index("--session-id") + 1]
+            modello, uso = usi[ruolo]
+            (cartella / f"{sessione}.jsonl").write_text(sessione_finta(
+                [messaggio(f"{sessione}-a", uso, modello), messaggio(f"{sessione}-b", uso, modello)]),
+                encoding="utf-8")
+        return interno(cmd, cwd, timeout, **k)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+
+    esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+    voce = json.loads(runner.scrivi_rapporto("giro", [esito], "finito")
+                      .read_text(encoding="utf-8"))["esiti"][0]
+
+    assert [i["ruolo"] for i in esito.invocazioni] == ["builder", "critic", "solver"]
+    assert voce["token"] == [
+        {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 2, "output": 20,
+         "cache_creazione": 200, "cache_lettura": 2000},
+        {"ruolo": "critic", "modello": "claude-opus-5-5", "input": 4, "output": 40,
+         "cache_creazione": 400, "cache_lettura": 4000},
+        {"ruolo": "solver", "modello": "claude-fable-5-1", "input": 6, "output": 60,
+         "cache_creazione": 600, "cache_lettura": 6000}]
