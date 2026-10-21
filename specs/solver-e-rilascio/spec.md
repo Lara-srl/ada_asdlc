@@ -250,6 +250,22 @@ quante chiamate a strumento, risposte e blocchi `thinking` la traccia contiene, 
 traccia senza ragionamenti si veda subito. Se il file non c'è, il rapporto lo dice e il giro non
 si ferma (`ADR-0008`).
 
+Dalla stessa traccia il rapporto dice quanto ha speso ogni invocazione (`PBI-516`): `token`, con
+i quattro contatori di `message.usage` sommati (`input`, `output`, `cache_creazione`,
+`cache_lettura`), e `modello`, da `message.model`. Si contano le sole righe `assistant` che
+portano un uso — le `api-request-blob` no — e un messaggio una volta per `message.id`, con l'uso
+dell'ultima riga: Claude Code lo scrive su una riga per blocco. Senza una traccia leggibile
+`token` e `modello` sono `None`, e il giro non si ferma. Il dato viene dalla traccia, mai dal
+testo del modello (`ADR-0027`); il prezzo non c'è, perché cambia per modello e per data.
+
+Ogni esito del rapporto porta in fondo `token`: una voce `{"ruolo", "modello", "input", "output",
+"cache_creazione", "cache_lettura"}` per coppia `(ruolo, modello)`, sommata sulle tracce di tutte
+le sue invocazioni. Un messaggio si conta una volta per esito, per `message.id`: il rilancio del
+Builder con `--fork-session` scrive una sessione che ripete la cronologia di quella di prima.
+Un messaggio senza `message.id` si conta per la sua riga nella sua traccia: due tracce non lo
+fanno collidere, e resta sul ruolo che l'ha scritto. Non c'è un totale fra modelli diversi, perché non si sommano. Una traccia che non si legge resta
+fuori dal conto, e il rapporto si scrive lo stesso.
+
 ### R13 — La guardia di processo è codice
 
 - **Cosa:** che R1-R12 siano state rispettate.

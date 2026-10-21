@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from test_asdlc_runner import TestLaSessioneRuotaFraLeRevisioni, agente_finto, git_finto  # noqa: F401
+from test_asdlc_runner import (  # noqa: F401
+    FATTO, TestLaSessioneRuotaFraLeRevisioni, agente_finto, elenco_backlog, fermati, git_finto,
+    ruolo_ed_esito)
 
 runner = importlib.import_module("asdlc.runner")
 
@@ -76,7 +78,8 @@ RIGHE = [
 
 def con_la_sessione(monkeypatch, tmp_path, righe):
     """`esegui` che, come `claude`, scrive la sessione sotto la cartella di Claude Code
-    (finta) col nome dell'uuid ricevuto; `righe=None` è una sessione che non c'è."""
+    (finta) col nome dell'uuid ricevuto; `righe=None` è una sessione che non c'è, e una
+    stringa si scrive com'è."""
     cartella = tmp_path / "claude" / "progetto"
     cartella.mkdir(parents=True)
     monkeypatch.setattr(runner, "cartella_delle_sessioni", lambda: cartella, raising=False)
@@ -85,7 +88,7 @@ def con_la_sessione(monkeypatch, tmp_path, righe):
     def _esegui(cmd, cwd, timeout=7200, **k):
         if righe is not None:
             (cartella / f"{cmd[cmd.index('--session-id') + 1]}.jsonl").write_text(
-                sessione_finta(righe), encoding="utf-8")
+                righe if isinstance(righe, str) else sessione_finta(righe), encoding="utf-8")
         return interno(cmd, cwd, timeout, **k)
 
     monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
@@ -226,3 +229,129 @@ def test_session_id_con_c_o_resume_esce_sempre_con_fork_session(monkeypatch, tmp
     assert "--session-id" in cmd
     if "-c" in cmd or "--resume" in cmd:
         assert "--fork-session" in cmd
+
+
+# --- I token di ogni giro (`backlog/PBI-516`) ---------------------------------
+
+TRACCIA_CON_TOKEN = Path(__file__).resolve().parent / "dati" / "traccia_con_token.jsonl"
+
+
+def test_una_traccia_si_somma_e_la_riga_api_request_blob_si_salta():
+    token, modello = runner.token_della_traccia(TRACCIA_CON_TOKEN)
+
+    assert token == {"input": 9, "output": 600, "cache_creazione": 6000,
+                     "cache_lettura": 60000}
+    assert modello == "claude-opus-5-5"
+
+
+def messaggio(id_messaggio, uso, modello="claude-opus-5-5", testo="x"):
+    """Una riga `assistant` di Claude Code con il suo `message.usage`: `uso` sono i quattro
+    contatori nell'ordine input, output, creazione e lettura della cache."""
+    return {"type": "assistant", "message": {
+        "id": id_messaggio, "role": "assistant", "model": modello,
+        "content": [{"type": "text", "text": testo}],
+        "usage": dict(zip(runner.CONTATORI_DEI_TOKEN.values(), uso))}}
+
+
+def test_un_messaggio_ripetuto_su_due_righe_conta_una_volta_con_l_uso_dell_ultima(tmp_path):
+    traccia = tmp_path / "s.sessione.jsonl"
+    traccia.write_text(sessione_finta([messaggio("msg_1", (1, 10, 100, 1000), testo="a"),
+                                       messaggio("msg_1", (2, 20, 200, 2000), testo="b")]),
+                       encoding="utf-8")
+
+    token, _ = runner.token_della_traccia(traccia)
+
+    assert token == {"input": 2, "output": 20, "cache_creazione": 200, "cache_lettura": 2000}
+
+
+def test_la_cronologia_del_fork_non_si_conta_due_volte_nel_token_dell_esito(tmp_path):
+    prima = [messaggio("msg_1", (1, 10, 100, 1000)), messaggio("msg_2", (2, 20, 200, 2000))]
+    fork = [*prima, messaggio("msg_3", (3, 30, 300, 3000)), messaggio("msg_4", (4, 40, 400, 4000))]
+    invocazioni = []
+    for nome, righe in (("primo", prima), ("rilancio", fork)):
+        traccia = tmp_path / f"{nome}.sessione.jsonl"
+        traccia.write_text(sessione_finta(righe), encoding="utf-8")
+        invocazioni.append({"ruolo": "builder", "traccia": str(traccia)})
+
+    assert runner.token_dell_esito(invocazioni) == [
+        {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 10, "output": 100,
+         "cache_creazione": 1000, "cache_lettura": 10000}]
+
+
+def test_due_messaggi_senza_id_alla_stessa_riga_di_tracce_diverse_contano_tutti_e_due(tmp_path):
+    invocazioni = []
+    for ruolo, uso in (("builder", (1, 10, 100, 1000)), ("critic", (2, 20, 200, 2000))):
+        traccia = tmp_path / f"{ruolo}.sessione.jsonl"
+        traccia.write_text(sessione_finta([messaggio(None, uso)]), encoding="utf-8")
+        invocazioni.append({"ruolo": ruolo, "traccia": str(traccia)})
+
+    assert runner.token_dell_esito(invocazioni) == [
+        {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 1, "output": 10,
+         "cache_creazione": 100, "cache_lettura": 1000},
+        {"ruolo": "critic", "modello": "claude-opus-5-5", "input": 2, "output": 20,
+         "cache_creazione": 200, "cache_lettura": 2000}]
+
+
+@pytest.mark.parametrize("righe", [None, "questo non è JSON\n"], ids=["assente", "illeggibile"])
+def test_una_traccia_assente_o_illeggibile_lascia_token_a_none_e_il_giro_non_si_ferma(
+        monkeypatch, tmp_path, righe):
+    invocazione = con_la_sessione(monkeypatch, tmp_path, righe)
+
+    assert invocazione.registro.get("token", "manca") is None
+    assert invocazione.registro.get("modello", "manca") is None
+    assert invocazione.codice == 0
+
+
+def test_il_registro_dell_invocazione_porta_token_e_modello_dalla_sua_traccia(monkeypatch,
+                                                                               tmp_path):
+    righe = [RIGHE[0], messaggio("msg_1", (1, 10, 100, 1000), modello="claude-fable-5-1"),
+             messaggio("msg_2", (2, 20, 200, 2000), modello="claude-fable-5-1")]
+
+    invocazione = con_la_sessione(monkeypatch, tmp_path, righe)
+
+    assert invocazione.registro["token"] == {"input": 3, "output": 30, "cache_creazione": 300,
+                                             "cache_lettura": 3000}
+    assert invocazione.registro["modello"] == "claude-fable-5-1"
+
+
+def test_il_rapporto_del_giro_porta_i_token_dell_esito_per_ruolo_e_modello(monkeypatch, tmp_path):
+    """Builder `fatto`, Critic `sospeso` e Solver muto: ogni agente finto scrive la sua
+    sessione, e nel JSON del giro l'esito ha una voce per `(ruolo, modello)`."""
+    cartella = tmp_path / "claude"
+    cartella.mkdir()
+    monkeypatch.setattr(runner, "cartella_delle_sessioni", lambda *a: cartella, raising=False)
+    monkeypatch.setattr(runner, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(runner, "MAX_REVISIONI", 0)
+    monkeypatch.setattr(runner, "git", lambda *a: (
+        "3" if a[:2] == ("rev-list", "--count")
+        else elenco_backlog() if a[:2] == ("ls-tree", "--name-only") else ""))
+    monkeypatch.setattr(runner, "gira_gate", lambda attivi, base=None: [])
+    usi = {"builder": ("claude-opus-5-5", (1, 10, 100, 1000)),
+           "critic": ("claude-opus-5-5", (2, 20, 200, 2000)),
+           "solver": ("claude-fable-5-1", (3, 30, 300, 3000))}
+    interno = agente_finto({"builder": FATTO, "critic": fermati("la eseguo?")})
+
+    def _esegui(cmd, cwd, timeout=7200, **k):
+        ruolo, _ = ruolo_ed_esito(cmd)
+        if "--session-id" in cmd and ruolo in usi:
+            sessione = cmd[cmd.index("--session-id") + 1]
+            modello, uso = usi[ruolo]
+            (cartella / f"{sessione}.jsonl").write_text(sessione_finta(
+                [messaggio(f"{sessione}-a", uso, modello), messaggio(f"{sessione}-b", uso, modello)]),
+                encoding="utf-8")
+        return interno(cmd, cwd, timeout, **k)
+
+    monkeypatch.setattr(runner, "esegui", _esegui)
+
+    esito = runner.esegui_pbi("PBI-102", attivi=set(), dry=False, con_pr=False)
+    voce = json.loads(runner.scrivi_rapporto("giro", [esito], "finito")
+                      .read_text(encoding="utf-8"))["esiti"][0]
+
+    assert [i["ruolo"] for i in esito.invocazioni] == ["builder", "critic", "solver"]
+    assert voce["token"] == [
+        {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 2, "output": 20,
+         "cache_creazione": 200, "cache_lettura": 2000},
+        {"ruolo": "critic", "modello": "claude-opus-5-5", "input": 4, "output": 40,
+         "cache_creazione": 400, "cache_lettura": 4000},
+        {"ruolo": "solver", "modello": "claude-fable-5-1", "input": 6, "output": 60,
+         "cache_creazione": 600, "cache_lettura": 6000}]

@@ -523,6 +523,10 @@ class Esito:
     # lo sha è lo stesso (PBI-522, decisioni 4 e 6).
     sha_pbi: str = ""
     rilievi_preverifica: int = 0
+    # Quanto ha speso l'esito: una voce per coppia `(ruolo, modello)` coi quattro contatori,
+    # letta dalle tracce di `invocazioni` (`token_dell_esito`, PBI-516). Nel JSON viene
+    # dopo `tempi`, in fondo, e lo riscrive `scrivi_rapporto`.
+    token: list[dict] = field(default_factory=list)
 
 
 def distribuzione_del_runner() -> importlib.metadata.Distribution:
@@ -584,7 +588,11 @@ def scrivi_rapporto(run: str, esiti: list[Esito], stato: str) -> Path:
     già chiusi, che vivevano solo in memoria (difetto 17). Riscrivere tutto il
     file ogni volta costa niente — sono kilobyte — e non lascia mai un JSON
     troncato a metà, che è ciò che un append farebbe.
+
+    Il `token` di ogni esito si rilegge qui dalle tracce delle sue invocazioni (PBI-516).
     """
+    for e in esiti:
+        e.token = token_dell_esito(e.invocazioni)
     rapporto = LOG_DIR / f"{run}.json"
     rapporto.parent.mkdir(exist_ok=True)
     rapporto.write_text(
@@ -593,8 +601,8 @@ def scrivi_rapporto(run: str, esiti: list[Esito], stato: str) -> Path:
             ("finito" if stato == "finito" else "aggiornato"):
                 datetime.now().isoformat(timespec="seconds"),
             "asdlc": identita_del_runner(),
-            "esiti": [{k: v for k, v in e.__dict__.items() if k != "tempi"}
-                      | {"tempi": dict(e.tempi)} for e in esiti],
+            "esiti": [{k: v for k, v in e.__dict__.items() if k not in ("tempi", "token")}
+                      | {"tempi": dict(e.tempi), "token": e.token} for e in esiti],
         }, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -1172,7 +1180,11 @@ def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
     `registro["traccia"]`. La cartella di Claude Code è fuori dal repository e può essere
     ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
     `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`). La sessione si cerca fra
-    quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`."""
+    quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`.
+    Dalla copia si leggono anche `token` e `modello` (`token_della_traccia`, PBI-516); senza
+    una traccia leggibile sono `None` tutti e due."""
+    # Senza una traccia leggibile non c'è un conto da fare (PBI-516, decisione 1).
+    registro["token"] = registro["modello"] = None
     # Senza `cwd` la chiamata resta senza argomenti, com'era prima di PBI-521.
     sessioni = cartella_delle_sessioni() if cwd is None else cartella_delle_sessioni(cwd)
     sorgente = sessioni / f"{sessione}.jsonl"
@@ -1185,6 +1197,7 @@ def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
     registro["traccia"] = str(destinazione)
     try:
         registro["contenuto"] = contenuto_della_traccia(destinazione)
+        registro["token"], registro["modello"] = token_della_traccia(destinazione)
     except (OSError, ValueError) as guasto:
         registro["traccia_nota"] = f"traccia copiata ma non leggibile ({guasto})"
 
@@ -1222,6 +1235,75 @@ def contenuto_della_traccia(percorso: Path) -> dict[str, int]:
                 conto["thinking"] += 1
     return {"chiamate": conto["chiamate"], "risposte": len(risposte),
             "thinking": conto["thinking"]}
+
+
+# I contatori di `message.usage` col loro nome nel rapporto del giro (`PBI-516`).
+CONTATORI_DEI_TOKEN = {"input": "input_tokens", "output": "output_tokens",
+                       "cache_creazione": "cache_creation_input_tokens",
+                       "cache_lettura": "cache_read_input_tokens"}
+
+
+def messaggi_con_uso(percorso: Path) -> dict[str, dict]:
+    """I messaggi dell'assistente di una traccia che portano `message.usage`, per
+    `message.id` (`PBI-516`, decisione 2). Le righe `api-request-blob` non portano uso, e
+    restano fuori. Claude Code scrive un messaggio su una riga per blocco, ognuna con lo
+    stesso uso, e vale l'ultima; senza id la chiave è il percorso con il numero di riga,
+    perché `token_dell_esito` fonde le tracce di più invocazioni e due messaggi senza id di
+    tracce diverse non devono collidere. Una riga che non è JSON alza `ValueError`."""
+    messaggi: dict[str, dict] = {}
+    for numero, riga in enumerate(percorso.read_text(encoding="utf-8").splitlines()):
+        if not riga.strip():
+            continue
+        dato = json.loads(riga)
+        messaggio = dato.get("message")
+        if dato.get("type") != "assistant" or not isinstance(messaggio, dict) \
+                or not isinstance(messaggio.get("usage"), dict):
+            continue
+        messaggi[messaggio.get("id") or f"{percorso}:{numero}"] = messaggio
+    return messaggi
+
+
+def somma_dei_token(messaggi) -> dict[str, int]:
+    """I quattro contatori di `message.usage` sommati su `messaggi`, coi nomi del rapporto."""
+    token = dict.fromkeys(CONTATORI_DEI_TOKEN, 0)
+    for messaggio in messaggi:
+        for nome, chiave in CONTATORI_DEI_TOKEN.items():
+            token[nome] += messaggio["usage"].get(chiave) or 0
+    return token
+
+
+def token_della_traccia(percorso: Path) -> tuple[dict[str, int], str | None]:
+    """Quanto ha speso una sessione: la somma dei quattro contatori dei suoi messaggi
+    (`messaggi_con_uso`), e il modello che li ha scritti (`PBI-516`)."""
+    messaggi = list(messaggi_con_uso(percorso).values())
+    modello = next((m["model"] for m in reversed(messaggi) if m.get("model")), None)
+    return somma_dei_token(messaggi), modello
+
+
+def token_dell_esito(invocazioni: list[dict]) -> list[dict]:
+    """Quanto ha speso un esito: una voce `{"ruolo", "modello", "input", "output",
+    "cache_creazione", "cache_lettura"}` per coppia `(ruolo, modello)`, nell'ordine in cui
+    compare (`PBI-516`, decisione 4). Un messaggio si conta una volta su tutte le tracce
+    dell'esito: il rilancio del Builder con `--fork-session` scrive una sessione che
+    contiene la cronologia di quella di prima (decisione 3). Fra modelli diversi non c'è
+    un totale, perché non si sommano."""
+    messaggi: dict[str, tuple[str, dict]] = {}
+    for voce in invocazioni:
+        if not voce.get("traccia"):
+            continue
+        # Una traccia che non si legge ha già la sua `traccia_nota`: il rapporto si scrive lo
+        # stesso, senza i suoi messaggi (decisione 1, `ADR-0008`).
+        try:
+            letti = messaggi_con_uso(Path(voce["traccia"]))
+        except (OSError, ValueError):
+            continue
+        for id_messaggio, messaggio in letti.items():
+            messaggi[id_messaggio] = (voce.get("ruolo"), messaggio)
+    gruppi: dict[tuple, list[dict]] = {}
+    for ruolo, messaggio in messaggi.values():
+        gruppi.setdefault((ruolo, messaggio.get("model")), []).append(messaggio)
+    return [{"ruolo": ruolo, "modello": modello, **somma_dei_token(lista)}
+            for (ruolo, modello), lista in gruppi.items()]
 
 
 def invoca_agente(ruolo: str | None, comando: list[str], prompt: Path,
