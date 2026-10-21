@@ -91,12 +91,12 @@ pulito dopo. L'ordine della decisione 2 del 522 non cambia: la pre-verifica rest
 I test accendono `[preverifica]` col Lettore (`accendi(monkeypatch, lettore=True)`) e usano il Lettore
 finto del 522, che chiama `letto` senza rilievi.
 
-- [ ] **Un albero del Lettore non smontato entra nel conto del giro.** `git worktree remove` fallisce
+- [x] **Un albero del Lettore non smontato entra nel conto del giro.** `git worktree remove` fallisce
       per l'albero del Lettore, il Builder finto chiama `fermati`. La nota del giro contiene «1
       albero usa e getta montato e non smontato» e `e.inventario["usa_e_getta"]` è `{"montati": 1,
       "smontati": 0}` (pytest, `git` vero per tutto il resto). Rosso atteso: dopo il 522 il conto è
       `{"montati": 0, "smontati": 0}`.
-- [ ] **Un Lettore che sporca l'albero del giro ferma il giro prima del ramo.** Il Lettore finto
+- [x] **Un Lettore che sporca l'albero del giro ferma il giro prima del ramo.** Il Lettore finto
       scrive un file non tracciato nel clone, fuori dal suo albero, e chiama `letto` senza rilievi.
       Il giro dà `motivo == "albero-sporco-all-ingresso"` e `stato == "fermato"`, il Builder finto
       non è invocato, `git branch` è uguale a prima ed `e.solver` è vuoto (pytest, `git` vero).

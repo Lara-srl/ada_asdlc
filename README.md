@@ -180,7 +180,10 @@ normale non cambia niente: il Lettore lavora nel suo albero, che si smonta, e il
 in `runs/`. Un suo albero che `git worktree remove` non smonta compare fra i «residui dei giri
 prima» nel log, ed entra anche nel conto: la nota del giro dice «1 albero usa e getta montato
 e non smontato». Un file che il Lettore scrivesse nel worktree del giro arriva dopo il
-controllo dell'albero pulito, e il Builder parte su un albero sporco.
+primo controllo dell'albero pulito: per questo, quando la pre-verifica ha girato, il giro
+ricontrolla l'albero dopo la lettura, e con l'albero sporco chiude `fermato` col motivo
+`albero-sporco-all-ingresso`, senza Builder, ramo, commit, PR né Solver. Il rapporto della
+lettura resta, e al giro dopo la stessa versione del PBI letta pronta non si rilegge.
 
 ```toml
 [preverifica]

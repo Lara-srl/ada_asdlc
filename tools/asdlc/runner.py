@@ -4397,6 +4397,14 @@ def esegui_pbi(
                                     rilievi_preverifica=len(rilievi)),
                               "preverifica",
                               f"rilievi: {len(rilievi)}, nel rapporto {rapporto}")
+            # Il Lettore ha `Write` ed `Edit`: un file scritto nel worktree del giro
+            # arriva dopo il primo controllo, e il Builder partirebbe sopra (PBI-523,
+            # decisioni 2 e 3). Si ricontrolla qui, dove la pre-verifica ha girato.
+            if git("status", "--porcelain"):
+                return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"]),
+                              "albero-sporco-all-ingresso",
+                              f"l'albero si è sporcato durante la pre-verifica · "
+                              f"nel rapporto {rapporto}")
 
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
               base=base)
