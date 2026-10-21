@@ -284,3 +284,15 @@ def test_una_traccia_assente_o_illeggibile_lascia_token_a_none_e_il_giro_non_si_
     assert invocazione.registro.get("token", "manca") is None
     assert invocazione.registro.get("modello", "manca") is None
     assert invocazione.codice == 0
+
+
+def test_il_registro_dell_invocazione_porta_token_e_modello_dalla_sua_traccia(monkeypatch,
+                                                                               tmp_path):
+    righe = [RIGHE[0], messaggio("msg_1", (1, 10, 100, 1000), modello="claude-fable-5-1"),
+             messaggio("msg_2", (2, 20, 200, 2000), modello="claude-fable-5-1")]
+
+    invocazione = con_la_sessione(monkeypatch, tmp_path, righe)
+
+    assert invocazione.registro["token"] == {"input": 3, "output": 30, "cache_creazione": 300,
+                                             "cache_lettura": 3000}
+    assert invocazione.registro["modello"] == "claude-fable-5-1"
