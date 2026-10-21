@@ -57,7 +57,6 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-520
 - PBI-521
 - PBI-522
-- ‖ tag v0.6.0, pin nei quattro repository e `[preverifica] attiva = true` nei loro `asdlc.toml`
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
