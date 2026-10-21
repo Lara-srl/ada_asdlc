@@ -1,7 +1,7 @@
 # PBI-523: la pre-verifica dentro il conto del giro
 
-**Stato:** proposto il 21/10, **non letto e non accodato**. Il codice che tocca nasce con `PBI-522`
-e su `main` non c'è ancora: la lettura avversariale si fa dopo il merge del 522.
+**Stato:** proposto il 21/10, letto il 21/10 su `main` `987c606` (la `v0.6.0`, che contiene
+`PBI-522`): vedi in fondo.
 
 ## Direttiva
 
@@ -49,6 +49,10 @@ pulito dopo. L'ordine della decisione 2 del 522 non cambia: la pre-verifica rest
   non smontato» di `worktree_usa_e_getta`.
 - Togliere `Write` ed `Edit` al Lettore, o cambiarne il `cwd`: sono di `PBI-521`.
 - `--riprendi`, che non lancia la pre-verifica (522, criterio 6), e non ha niente da ricontrollare.
+- Il rapporto della lettura. Quando il secondo controllo ferma il giro, il rapporto
+  `runs/<run>-<PBI>-preverifica.json` della lettura appena fatta resta: se è senza rilievi, al giro
+  dopo la stessa versione del PBI non si rilegge (`preverifica_gia_letta`, decisione 3 del 522).
+  È voluto: il PBI era pronto, era l'albero a essere sporco.
 
 ## ✅ Deciso
 
@@ -57,9 +61,12 @@ pulito dopo. L'ordine della decisione 2 del 522 non cambia: la pre-verifica rest
 2. **Il secondo controllo usa il motivo che c'è.** Con l'albero sporco dopo la pre-verifica il giro
    chiude `albero-sporco-all-ingresso`, la stessa uscita del primo controllo, senza ramo, commit, PR
    né Solver. Nessuna riga nuova in `USCITE`, quindi `USCITE_DEL_GIRO` non cambia.
-3. **Solo quando la pre-verifica ha girato.** Con la sezione spenta, con `--riprendi` e con una
-   versione del PBI già letta pronta il secondo controllo non serve: il primo ha appena guardato lo
-   stesso albero.
+3. **Solo quando la pre-verifica ha girato.** Il secondo controllo sta nel ramo `else` di
+   `preverifica_gia_letta`, dopo i due `return` (`lettore-senza-esito` e `preverifica`), **con o
+   senza Lettore**: con `lettore = false` la pre-verifica scrive lo stesso il suo rapporto. Con la
+   sezione spenta, con `--riprendi` e con una versione del PBI già letta pronta non serve: il primo
+   controllo ha appena guardato lo stesso albero. L'`Esito` della seconda uscita porta `base` e
+   `sha_pbi`, come le altre due uscite della pre-verifica.
 
 ## Dipendenze
 
@@ -72,8 +79,12 @@ pulito dopo. L'ordine della decisione 2 del 522 non cambia: la pre-verifica rest
 - `tools/asdlc/runner.py`: `esegui_pbi()` (il controllo `albero-sporco-all-ingresso`, il blocco della
   pre-verifica, `inventario()`, `contati`, `chiudi()`), `USA_E_GETTA`, `worktree_usa_e_getta`.
 - `tools/tests/test_asdlc_preverifica_nel_giro.py`: `giro_sul_clone` sostituisce `esegui` e lascia
-  passare i `git` veri; un test può intercettare lì `git worktree remove`, o far scrivere al
-  Lettore finto un file nel clone prima di rendere `letto`.
+  passare i `git` veri. `giro_sul_clone` non ha un parametro per intercettare: il test avvolge
+  di nuovo `runner.esegui` **dopo** averlo chiamato. L'albero del Lettore è il `cwd` della sua
+  invocazione, quindi il `git worktree remove` da far fallire è quello che nomina quella cartella.
+  Il Lettore finto può scrivere un file nel clone prima di rendere `letto`, e il clone di prova
+  non ha `.gitignore` (`FILE_DELLA_BASE`, `test_asdlc_preverifica.py`). Il Builder finto che chiama
+  `fermati` è `fermati()` di `test_asdlc_runner.py`.
 
 ## Verifica
 
@@ -108,3 +119,33 @@ Si può scegliere senza chiedere:
 Si scrive come domanda (e si chiama `fermati`):
 
 - se uno dei due criteri nasce verde sulla base: vuol dire che il 522 è cambiato dopo questo PBI.
+
+## La lettura avversariale del 21/10
+
+Un lettore in sola lettura ha provato il PBI sul codice di `main` (`987c606`). Ha scritto i test dei
+due criteri come sonde in un albero usa e getta:
+
+- su `main` nascono **rossi** tutti e due, per la ragione che dice la Verifica (conto
+  `{"montati": 0, "smontati": 0}`; il Builder parte e il ramo nasce);
+- con un GREEN abbozzato (la fotografia più su e il secondo controllo nel ramo `else`) diventano
+  verdi, e la suite dava `1188 passed`.
+
+**Erano da correggere, tutti recepiti:**
+
+- la riga «Stato» diceva il 522 non ancora su `main`, e il Builder l'avrebbe letta come una
+  dipendenza aperta;
+- la decisione 3 non diceva dove sta il secondo controllo né se vale senza Lettore;
+- il Contesto non diceva come intercettare `git worktree remove` in `giro_sul_clone`;
+- il rapporto della lettura che resta dopo il secondo controllo (Fuori scope), e la `base` e lo
+  `sha_pbi` della seconda uscita (decisione 3).
+
+**Verificato senza rilievi:**
+
+- nessun altro albero usa e getta si monta prima di `fermati`, che passa da `chiudi()`;
+- il secondo controllo non sporca ogni giro: in produzione `runs/` è ignorato (eccetto
+  `runs/tempi.csv`), nei test `LOG_DIR` sta fuori dal clone, e l'albero del Lettore sta in `/tmp`;
+- nessun test esistente si rompe: le uscite di `USCITE_DEL_GIRO` che passano dalla pre-verifica
+  escono prima del secondo controllo, e nessun'altra suite accende `[preverifica]`;
+- i due GREEN non fanno nascere verde l'altro criterio, e la guardia di fase in `IMPL` lascia
+  scrivere `runner.py` e `README.md`;
+- i nomi e i fatti citati esistono nel codice e dicono ciò che il PBI afferma.
