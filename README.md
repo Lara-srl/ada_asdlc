@@ -174,13 +174,16 @@ il suo file non cambia su `main`, e intanto scrive `attende: preverifica PBI-N �
 correggi il PBI`. `--riprendi` non la
 rifà. Senza la sezione la pre-verifica è spenta.
 
-**Un limite dichiarato** (`PBI-522`, giro 2). La pre-verifica gira prima dell'inventario
-d'inizio del giro e prima che il giro conti gli alberi usa e getta. Nel caso normale non
-cambia niente: il Lettore lavora nel suo albero, che si smonta, e il rapporto sta in `runs/`.
-Cambia in due casi di guasto del Lettore. Un suo albero che `git worktree remove` non smonta
-finisce fra i «residui dei giri prima» e non nel conto degli alberi montati e non smontati;
-un file che il Lettore scrivesse nel worktree del giro arriva dopo il controllo dell'albero
-pulito, e il Builder parte su un albero sporco. La correzione è `PBI-523`.
+**I guasti del Lettore** (`PBI-523`). La pre-verifica gira prima dell'inventario d'inizio
+del giro, ma dopo che il giro ha fotografato il conto degli alberi usa e getta. Nel caso
+normale non cambia niente: il Lettore lavora nel suo albero, che si smonta, e il rapporto sta
+in `runs/`. Un suo albero che `git worktree remove` non smonta compare fra i «residui dei giri
+prima» nel log, ed entra anche nel conto: la nota del giro dice «1 albero usa e getta montato
+e non smontato». Un file che il Lettore scrivesse nel worktree del giro arriva dopo il
+primo controllo dell'albero pulito: per questo, quando la pre-verifica ha girato, il giro
+ricontrolla l'albero dopo la lettura, e con l'albero sporco chiude `fermato` col motivo
+`albero-sporco-all-ingresso`, senza Builder, ramo, commit, PR né Solver. Il rapporto della
+lettura resta, e al giro dopo la stessa versione del PBI letta pronta non si rilegge.
 
 ```toml
 [preverifica]

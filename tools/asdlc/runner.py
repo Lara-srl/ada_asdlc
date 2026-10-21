@@ -4374,6 +4374,9 @@ def esegui_pbi(
     # limite d'uso il tick lo riprende dopo il reset, come il Builder (PBI-519). Una
     # ripresa non la rifà: il PBI è già passato da qui, e il suo ramo c'è già. Non la
     # rifà nemmeno una versione del PBI già letta pronta: una lettura per versione.
+    # Il conto degli alberi usa e getta si fotografa prima (PBI-523, decisione 1): un
+    # albero del Lettore che `git worktree remove` non smonta entra nella nota del giro.
+    contati = Counter(USA_E_GETTA)
     if CFG.preverifica.attiva and not riprendi:
         percorso = pbi_path.relative_to(REPO).as_posix()
         if preverifica_gia_letta(pbi, git("rev-parse", f"{base}:{percorso}"),
@@ -4394,6 +4397,14 @@ def esegui_pbi(
                                     rilievi_preverifica=len(rilievi)),
                               "preverifica",
                               f"rilievi: {len(rilievi)}, nel rapporto {rapporto}")
+            # Il Lettore ha `Write` ed `Edit`: un file scritto nel worktree del giro
+            # arriva dopo il primo controllo, e il Builder partirebbe sopra (PBI-523,
+            # decisioni 2 e 3). Si ricontrolla qui, dove la pre-verifica ha girato.
+            if git("status", "--porcelain"):
+                return motiva(Esito(pbi, "", base=base, sha_pbi=letto["sha_pbi"]),
+                              "albero-sporco-all-ingresso",
+                              f"l'albero si è sporcato durante la pre-verifica · "
+                              f"nel rapporto {rapporto}")
 
     e = Esito(pbi, "rosso", iniziato=datetime.now().isoformat(timespec="seconds"),
               base=base)
@@ -4401,7 +4412,6 @@ def esegui_pbi(
     # Prima del ramo: un ramo di questo PBI lasciato da un giro prima è un residuo
     # da nominare, e dopo `crea_branch` non si distinguerebbe dal nostro.
     e.inventario["inizio"] = inventario()
-    contati = Counter(USA_E_GETTA)
     # Solo nel log, non nella nota: fra i file ignorati ci sono sempre il venv e
     # `node_modules`, e in `runs/tempi.csv` sarebbero rumore a ogni riga.
     if trovati := residui(e.inventario["inizio"], pbi):
