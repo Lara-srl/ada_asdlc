@@ -58,6 +58,8 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-521
 - PBI-522
 - PBI-523
+- PBI-516
+- ‖ tag v0.7.0 e pin nei quattro repository, poi la pausa del tick
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
@@ -97,3 +99,7 @@ e il pin non ci sono, il tick lavora con la `v0.5.0` e la pre-verifica non è ac
 **`PBI-523`, la pre-verifica dentro il conto del giro** (Francesco, 21/10): le due correzioni che il
 Builder ha proposto nel giro 1 del 522, che lì restano un limite dichiarato. Va nel rilascio dopo la
 `v0.6.0`, ed è passato da una lettura avversariale su `main` (la sezione in fondo al PBI).
+
+**`PBI-516`, i token di ogni giro nel rapporto** (Francesco, 21/10): dopo il 523, perché tocca gli
+stessi file, e riletto su `main` prima di entrare (la sezione in fondo al PBI). Dopo il 516 il
+rilascio `v0.7.0` e la pausa del tick: la coda si ferma lì.
