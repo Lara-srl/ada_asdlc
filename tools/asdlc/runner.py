@@ -1173,6 +1173,8 @@ def copia_la_traccia(sessione: str, destinazione: Path, registro: dict,
     ripulita (PBI-511, decisione 2). Se il file non c'è o non si copia, `traccia` è `None` e
     `traccia_nota` dice perché: il giro non si ferma (`ADR-0008`). La sessione si cerca fra
     quelle di `cwd`, la cartella da cui l'agente è partito; senza, fra quelle di `REPO`."""
+    # Senza una traccia leggibile non c'è un conto da fare (PBI-516, decisione 1).
+    registro["token"] = registro["modello"] = None
     # Senza `cwd` la chiamata resta senza argomenti, com'era prima di PBI-521.
     sessioni = cartella_delle_sessioni() if cwd is None else cartella_delle_sessioni(cwd)
     sorgente = sessioni / f"{sessione}.jsonl"
