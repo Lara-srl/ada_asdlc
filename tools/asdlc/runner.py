@@ -1233,11 +1233,11 @@ CONTATORI_DEI_TOKEN = {"input": "input_tokens", "output": "output_tokens",
 def token_della_traccia(percorso: Path) -> tuple[dict[str, int], str | None]:
     """Quanto ha speso una sessione: la somma dei quattro contatori di `message.usage` dei
     messaggi dell'assistente, e il modello che li ha scritti (`PBI-516`, decisione 2). Le
-    righe `api-request-blob` non portano uso, e non si contano. Una riga che non è JSON
-    alza `ValueError`."""
-    token = dict.fromkeys(CONTATORI_DEI_TOKEN, 0)
-    modello = None
-    for riga in percorso.read_text(encoding="utf-8").splitlines():
+    righe `api-request-blob` non portano uso, e non si contano. Un messaggio si conta una
+    volta per `message.id`: Claude Code lo scrive su una riga per blocco, ognuna con lo
+    stesso uso, e vale l'ultima. Una riga che non è JSON alza `ValueError`."""
+    messaggi: dict[str, dict] = {}
+    for numero, riga in enumerate(percorso.read_text(encoding="utf-8").splitlines()):
         if not riga.strip():
             continue
         dato = json.loads(riga)
@@ -1245,6 +1245,10 @@ def token_della_traccia(percorso: Path) -> tuple[dict[str, int], str | None]:
         if dato.get("type") != "assistant" or not isinstance(messaggio, dict) \
                 or not isinstance(messaggio.get("usage"), dict):
             continue
+        messaggi[messaggio.get("id") or f"riga {numero}"] = messaggio
+    token = dict.fromkeys(CONTATORI_DEI_TOKEN, 0)
+    modello = None
+    for messaggio in messaggi.values():
         for nome, chiave in CONTATORI_DEI_TOKEN.items():
             token[nome] += messaggio["usage"].get(chiave) or 0
         modello = messaggio.get("model") or modello
