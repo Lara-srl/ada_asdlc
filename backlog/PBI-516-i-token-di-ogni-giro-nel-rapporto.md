@@ -91,21 +91,21 @@ Il dato c'è già. `PBI-511` copia accanto ai file del giro la traccia della ses
 
 Su `main` il rapporto non porta `token`, quindi ogni criterio è un **rosso atteso**.
 
-- [ ] **Una traccia si somma.** Con una traccia di esempio di tre messaggi dell'assistente e
+- [x] **Una traccia si somma.** Con una traccia di esempio di tre messaggi dell'assistente e
       una riga `api-request-blob`, la funzione restituisce la somma dei quattro contatori dei tre
       messaggi e il modello (pytest).
-- [ ] **Un messaggio ripetuto conta una volta.** Due righe con lo stesso `message.id` danno
+- [x] **Un messaggio ripetuto conta una volta.** Due righe con lo stesso `message.id` danno
       l'uso dell'ultima, non la somma (pytest).
-- [ ] **La cronologia del fork non si conta due volte.** Due tracce dello stesso esito, la
+- [x] **La cronologia del fork non si conta due volte.** Due tracce dello stesso esito, la
       seconda con i messaggi della prima più due nuovi: il `token` dell'esito conta ogni id una
       volta (pytest).
-- [ ] **Una traccia assente o illeggibile non ferma il giro.** Test parametrico con id `assente`
+- [x] **Una traccia assente o illeggibile non ferma il giro.** Test parametrico con id `assente`
       e `illeggibile`: `registro.get("token", "manca") is None` e il giro chiude com'era. Su `main`
       la chiave `token` non c'è, quindi il test cade per asserzione. La nota non si asserisce:
       `traccia_nota` c'è già (pytest).
-- [ ] **Il registro porta `token` e `modello`.** Con `esegui()` finto che scrive la traccia,
+- [x] **Il registro porta `token` e `modello`.** Con `esegui()` finto che scrive la traccia,
       `invoca_agente()` mette `token` e `modello` nel registro dell'invocazione (pytest).
-- [ ] **Il rapporto del giro porta la somma per ruolo.** Nel JSON finale l'esito ha `token`, una
+- [x] **Il rapporto del giro porta la somma per ruolo.** Nel JSON finale l'esito ha `token`, una
       voce per `(ruolo, modello)` con i quattro contatori (pytest, giro con Builder, Critic e
       Solver finti).
 
