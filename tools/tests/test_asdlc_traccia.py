@@ -278,6 +278,20 @@ def test_la_cronologia_del_fork_non_si_conta_due_volte_nel_token_dell_esito(tmp_
          "cache_creazione": 1000, "cache_lettura": 10000}]
 
 
+def test_due_messaggi_senza_id_alla_stessa_riga_di_tracce_diverse_contano_tutti_e_due(tmp_path):
+    invocazioni = []
+    for ruolo, uso in (("builder", (1, 10, 100, 1000)), ("critic", (2, 20, 200, 2000))):
+        traccia = tmp_path / f"{ruolo}.sessione.jsonl"
+        traccia.write_text(sessione_finta([messaggio(None, uso)]), encoding="utf-8")
+        invocazioni.append({"ruolo": ruolo, "traccia": str(traccia)})
+
+    assert runner.token_dell_esito(invocazioni) == [
+        {"ruolo": "builder", "modello": "claude-opus-5-5", "input": 1, "output": 10,
+         "cache_creazione": 100, "cache_lettura": 1000},
+        {"ruolo": "critic", "modello": "claude-opus-5-5", "input": 2, "output": 20,
+         "cache_creazione": 200, "cache_lettura": 2000}]
+
+
 @pytest.mark.parametrize("righe", [None, "questo non è JSON\n"], ids=["assente", "illeggibile"])
 def test_una_traccia_assente_o_illeggibile_lascia_token_a_none_e_il_giro_non_si_ferma(
         monkeypatch, tmp_path, righe):
