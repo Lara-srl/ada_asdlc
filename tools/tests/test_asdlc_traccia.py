@@ -239,3 +239,23 @@ def test_una_traccia_si_somma_e_la_riga_api_request_blob_si_salta():
     assert token == {"input": 9, "output": 600, "cache_creazione": 6000,
                      "cache_lettura": 60000}
     assert modello == "claude-opus-5-5"
+
+
+def messaggio(id_messaggio, uso, modello="claude-opus-5-5", testo="x"):
+    """Una riga `assistant` di Claude Code con il suo `message.usage`: `uso` sono i quattro
+    contatori nell'ordine input, output, creazione e lettura della cache."""
+    return {"type": "assistant", "message": {
+        "id": id_messaggio, "role": "assistant", "model": modello,
+        "content": [{"type": "text", "text": testo}],
+        "usage": dict(zip(runner.CONTATORI_DEI_TOKEN.values(), uso))}}
+
+
+def test_un_messaggio_ripetuto_su_due_righe_conta_una_volta_con_l_uso_dell_ultima(tmp_path):
+    traccia = tmp_path / "s.sessione.jsonl"
+    traccia.write_text(sessione_finta([messaggio("msg_1", (1, 10, 100, 1000), testo="a"),
+                                       messaggio("msg_1", (2, 20, 200, 2000), testo="b")]),
+                       encoding="utf-8")
+
+    token, _ = runner.token_della_traccia(traccia)
+
+    assert token == {"input": 2, "output": 20, "cache_creazione": 200, "cache_lettura": 2000}
