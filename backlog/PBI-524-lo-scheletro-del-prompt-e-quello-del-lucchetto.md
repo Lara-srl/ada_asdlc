@@ -1,7 +1,7 @@
 # PBI-524: lo scheletro che il prompt chiede è quello che il lucchetto accetta
 
-**Stato:** da rileggere prima di accodare (la lettura avversariale non c'è ancora; la scelta fra A e B
-della decisione 1 è di Francesco, che ha deciso lo scheletro vuoto con `PBI-515`)
+**Stato:** da rileggere prima di accodare (la lettura avversariale non c'è ancora). La decisione 1
+è confermata: Francesco, 24/10/2026, «allinea il prompt e non allargare il lucchetto».
 
 ## Direttiva
 
@@ -63,7 +63,7 @@ corso non cambia sotto i piedi.
 
 ## ✅ Deciso, per non fermare il giro
 
-1. **A: si allinea il prompt al lucchetto; il lucchetto non si tocca.** `PBI-515` ha scelto lo
+1. **A: si allinea il prompt al lucchetto; il lucchetto non si tocca** (Francesco, 24/10). `PBI-515` ha scelto lo
    scheletro vuoto (Francesco, 19/10, scelta B) perché uno scheletro con firme **anticipa il
    comportamento**: se fa già ciò che il test chiede, il test nasce verde e la fase non si apre, ed
    è l'avvertimento che lo stesso prompt dà due righe dopo. Alternativa scartata, **B: accettare
