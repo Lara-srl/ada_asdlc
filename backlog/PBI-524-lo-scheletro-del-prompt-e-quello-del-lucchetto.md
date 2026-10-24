@@ -43,7 +43,8 @@ cosa il lucchetto lascia passare. Il messaggio di `guardia_di_fase()` parla di �
 - `tools/asdlc/prompt/builder.md` — il paragrafo «Un modulo nuovo nasce vuoto»: lo scheletro è un
   file di soli commenti (con un esempio per `.py`), per un simbolo nuovo in un file che esiste non si
   scrive niente, e il rosso è l'`AttributeError` del test.
-- `tools/asdlc/runner.py` — il messaggio di `guardia_di_fase()` per un file di produzione in
+- `tools/asdlc/runner.py` — il messaggio di `chiedi_impl()` quando non trova test nuovi (decisione
+  6), e il messaggio di `guardia_di_fase()` per un file di produzione in
   `TEST_ONLY`: dice che uno scheletro è fatto solo di righe bianche e commenti, e che per un file
   esistente non c'è scheletro.
 - `tools/tests/dati/prompt/builder.txt` — il golden del prompt, aggiornato nello stesso commit del
@@ -82,18 +83,32 @@ corso non cambia sotto i piedi.
    non nominava lo scheletro e ha chiesto a un umano. Il messaggio nomina la regola (righe bianche
    e commenti) e la strada (il test accede all'attributo che manca).
 5. **Lo scope dei commit è `runner`.**
+6. **Il rifiuto di `--chiedi-impl` spiega cosa conta come test nuovo, e in che ordine si chiede**
+   (aggiunta del 24/10, giri 3 e 4 di `PBI-3` di `ada_nlt`). Oggi dice «Non c'è nessun test nuovo
+   nell'albero». Il Builder del giro 3 aveva committato un RED che estendeva soltanto un
+   `parametrize` esistente: per il runner un test che c'era non nasce, e non aveva modo di saperlo.
+   Il messaggio nomina i due fatti: **il test nuovo è una funzione nuova** (nuovi casi di un
+   `parametrize` esistente non contano) e **il RED si committa da solo prima di `--chiedi-impl`**,
+   che legge l'ultimo commit se l'albero non ha test non committati. `builder.md` lo dice già
+   (riga 55); qui si dice anche dove il Builder lo incontra. Alternativa scartata: far nascere i
+   casi nuovi di un `parametrize` come test nuovi. Cambierebbe la regola della nascita (`PBI-396`)
+   per tutti i linguaggi, ed è un altro PBI.
 
 ## Dipendenze
 
 - Bloccato da: nessuno. `PBI-519` è vicino ma indipendente (il limite d'uso, non il lucchetto).
-- Blocca: la ripresa di `PBI-3` di `ada_nlt` non lo aspetta: il suo giro 3 riprende dal tag del
-  giro 1, che ha già lo scheletro vuoto, e non incontra il difetto. Lo incontrerà il prossimo
-  modulo nuovo di un PBI di `ada_nlt` (`PBI-4`: `nlt/offerta.py`).
+- Blocca: la ripresa di `PBI-3` di `ada_nlt` non lo aspetta: riprende dal tag di un giro che ha già
+  lo scheletro vuoto, e l'ordine del RED lo dice nel PBI stesso. Lo incontrerà il prossimo modulo
+  nuovo di un PBI di `ada_nlt` (`PBI-4`: `nlt/offerta.py`).
 
 ## Contesto
 
 - `ada_nlt`: `runs/20261023-180406.json` e `runs/20261023-180411-253702_builder_esito.json` (la
   domanda del Builder), tag `giro-fermato/pbi-3-giro2-20261023`.
+- `ada_nlt`: tag `giro-fermato/pbi-3-giro3-20261024` (il RED di soli casi di `parametrize`) e
+  `giro-fermato/pbi-3-giro4-20261024` (il RED chiesto dopo `--chiedi-impl`, rifiutato in `IMPL`).
+- `tools/asdlc/runner.py`: `test_nuovi_da_aprire()` (l'ultimo commit se l'albero è pulito) e
+  `chiedi_impl()`.
 - `PBI-515`, decisioni 4 e 7 (lo scheletro vuoto; il file con del codice resta chiuso).
 - `ADR-0021` (il rosso si chiede prima; lo scheletro vuoto per i moduli nuovi, riga 78) e
   `ADR-0024` (anti-pattern nel prompt del Builder).
@@ -107,7 +122,7 @@ corso non cambia sotto i piedi.
 
 ## Verifica
 
-Su `main` i criteri 1 e 2 sono un **rosso atteso**.
+Su `main` i criteri 1, 2 e 3 sono un **rosso atteso**.
 
 - [ ] **L'esempio di scheletro del prompt è uno scheletro vuoto per il lucchetto.** Il test estrae
       da `builder.md` il blocco di esempio dello scheletro e verifica
@@ -118,6 +133,10 @@ Su `main` i criteri 1 e 2 sono un **rosso atteso**.
       produzione con del codice torna un messaggio che contiene «commenti» e «AttributeError» (o
       la formula equivalente scelta nel RED, dichiarata nel messaggio del commit); su un
       `.py` fatto di commenti torna `None` (pytest).
+- [ ] **Il rifiuto di `--chiedi-impl` dice cosa conta come test nuovo.** Con la fase `TEST_ONLY` e
+      nessun test nuovo, l'uscita di `chiedi_impl()` contiene «funzione» e «parametrize» (o la formula
+      equivalente scelta nel RED, dichiarata nel messaggio del commit) e il suo codice resta 1
+      (pytest, repository temporaneo). Su `main` il messaggio non li nomina: rosso.
 - [ ] **Il golden segue il testo.** `test_asdlc_prompt.py` resta verde col golden aggiornato nello
       stesso commit del testo del prompt.
 
