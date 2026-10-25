@@ -18,3 +18,4 @@ formato, non come precedenti di merito. Quella del 15/10 è un precedente vero.
 - 2026-10-16 · solver · il registro dei precedenti sta in `backlog/PRECEDENTI.md` · ADR-0030
 - 2026-10-16 · solver · la PR a monte si apre da un fork di `asdlc`, senza permessi di scrittura sul repository · ADR-0030
 - 2026-10-16 · runner-* · l'elenco delle cause `runner-*` sta in `backlog/README.md` di `asdlc` · ADR-0030
+- 2026-10-25 · merge · il merge di una PR di giro è del tick alle condizioni di `ADR-0033`; `(a vista)`, costituzione, deroghe e PR non del runner restano di Francesco · ADR-0033
