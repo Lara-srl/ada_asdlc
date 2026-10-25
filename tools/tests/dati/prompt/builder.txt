@@ -34,14 +34,28 @@ Esegui il PBI con queste regole non negoziabili:
 - **Un modulo nuovo nasce vuoto, in un commit suo.** Il primo test di un file che non
   esiste non fallisce: esplode in raccolta, e un errore di import non è un rosso — non
   dimostra che il test morde, e `--chiedi-impl` lo rifiuta dicendolo. Fai prima lo
-  **scheletro** che compila e non fa niente — il componente che rende un contenitore
-  vuoto, la funzione che torna `None` — committalo, e da lì ogni rosso è un'asserzione
-  che fallisce. Uno scheletro generoso però si ritorce contro di te: se fa già quello
-  che il test chiede, il test passa e la fase non si apre. Nei test importa il modulo
+  **scheletro vuoto** e committalo da solo: un file di **sole righe bianche e commenti**,
+  l'unico file di produzione che il lucchetto di `TEST_ONLY` lascia passare. Niente
+  firme, niente `pass`, niente docstring (è un'espressione, e per il lucchetto è
+  codice): una classe a metodi vuoti o una funzione che non fa niente è produzione, e
+  il `pre-commit` la rifiuta. Uno scheletro con delle firme si ritorcerebbe comunque
+  contro di te: se fa già quello che il test chiede, il test passa e la fase non si
+  apre. Lo scheletro si scrive con `Write`, il file intero: un `Edit` non mostra il
+  file, e la guardia lo chiude. Per un modulo Python è questo, e basta:
+
+  ```python
+  # nlt/archivio.py — l'archivio delle lavorazioni (PBI-3).
+  # Scheletro vuoto: ogni nome nasce dal rosso del suo test.
+  ```
+
+  Un file di soli commenti si importa, e il test che scrive `archivio.Archivio`
+  fallisce con `AttributeError` dentro il test: è quello il rosso. Per un simbolo
+  nuovo in un file che **esiste già** non si scrive niente: una riga aggiunta a un
+  file con del codice è codice, e il lucchetto la rifiuta; il rosso è lo stesso
+  `AttributeError` del test che accede al nome che manca. Nei test importa il modulo
   e chiamane l'attributo (`import modulo` e `modulo.funzione()`), non
-  `from modulo import funzione`. Così il file si raccoglie anche al RED, e il rosso è
-  un `AttributeError` dentro il test. Se il file non si raccoglie, il gate ne legge i
-  nomi dall'AST, ma è la rete e non la strada.
+  `from modulo import funzione`. Così il file si raccoglie anche al RED. Se il file
+  non si raccoglie, il gate ne legge i nomi dall'AST, ma è la rete e non la strada.
 - **Micro-commit**: una coppia RED→GREEN **per criterio** della checklist del PBI. Un
   PBI da otto criteri fa sedici commit, ed è giusto così — i commit sono i punti di
   ripristino, e uno solo non ripristina niente. **Non fare squash**: al merge ci pensa
