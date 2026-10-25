@@ -1,4 +1,4 @@
-# PBI-526: i criteri a vista, e chi li spunta
+# PBI-527: i criteri a vista, e chi li spunta
 rilascia: minor
 
 **Stato:** proposto il 25/10 in una sessione con Francesco, dopo `PBI-525`; **non letto** e **non in
@@ -42,7 +42,7 @@ blocca su un criterio a vista; la PR che li elenca; la spunta che resta a chi me
 - `README.md` — la marca e la sezione della PR.
 - `tools/tests/test_asdlc_preverifica.py`, `test_asdlc_lettore.py`, `test_asdlc_esito.py`,
   `test_asdlc_runner.py` — i test dei criteri.
-- `backlog/PBI-526-i-criteri-a-vista.md` — questo file, per la spunta.
+- `backlog/PBI-527-i-criteri-a-vista.md` — questo file, per la spunta.
 
 **Fuori scope**
 
