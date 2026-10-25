@@ -53,11 +53,13 @@ blocca su un criterio a vista; la PR che li elenca; la spunta che resta a chi me
 
 ## ✅ Deciso
 
-1. **La marca è il testo «a vista», a confine di parola, nel criterio.** Righe rientrate comprese,
-   maiuscole e minuscole uguali, come «guardia» (`RE_GUARDIA`): `RE_A_VISTA = r"\ba vista\b"`. Il
-   confine serve: «`SELECT` sulla vista riesce» (`ada_unical`, `PBI-008`, criterio 5) non è a vista.
-   Un criterio che dice sia «guardia» sia «a vista» è a vista. Si è scartata una marca in forma di
-   tag (`[a vista]`) per restare nella forma di «guardia», che il runner già legge.
+1. **La marca è il testo «(a vista)», con le parentesi, nel criterio.** Righe rientrate comprese,
+   maiuscole e minuscole uguali: `RE_A_VISTA = r"\(a vista\)"`. Le parentesi servono: la frase nuda
+   sta nella prosa di chi parla della regola (i sei criteri di questo PBI la contengono tutti) e dentro
+   «sulla vista» (`ada_unical`, `PBI-008`, criterio 5, una vista del database). Si è scartata la forma
+   di «guardia», la parola nuda ovunque nel testo: per la guardia il falso positivo costa un avviso in
+   meno, qui costerebbe un rilievo di forma e una PR che chiede un occhio che non serve. Un criterio
+   che dice sia «guardia» sia «(a vista)» è a vista.
 2. **Un criterio a vista non dichiara un rosso.** Non ha sonda, non ha coppia RED→GREEN, non ha test;
    `ADR-0021` e `ADR-0031` non gli si applicano perché non c'è niente da far nascere rosso. Il codice
    che serve per produrre ciò che si guarda sta nei criteri a test dello stesso PBI.
@@ -108,20 +110,20 @@ blocca su un criterio a vista; la PR che li elenca; la spunta che resta a chi me
 Tutto pytest, senza `claude`. Su `main` la marca, la domanda `V`, il campo e la sezione non esistono:
 i criteri nascono rossi per asserzione o per `AttributeError` dentro il test.
 
-- [ ] **`criteri_a_vista()` legge la marca a confine di parola, e il criterio non ha l'avviso della
-      sonda.** Un PBI con quattro criteri: il secondo ha «a vista» su una riga rientrata, il quarto
-      dice «`SELECT` sulla vista riesce». `criteri_a_vista(testo) == [2]`, e
+- [ ] **`criteri_a_vista()` legge la marca, e il criterio marcato non ha l'avviso della sonda.** Un
+      PBI con quattro criteri: il secondo porta la marca su una riga rientrata, il terzo dice «a vista»
+      senza parentesi, il quarto dice «`SELECT` sulla vista riesce». `criteri_a_vista(testo) == [2]`, e
       `criteri_senza_sonda(testo, [])` dà gli avvisi per 1, 3 e 4 e non per 2.
 - [ ] **Il server accetta la domanda `V`.** Come il test delle domande di `PBI-521`: `rilievo` con
       `domanda="V"` è valido e finisce in `letto`; una domanda fuori da `R F T A E D N V` resta
       rifiutata.
-- [ ] **Una `Verifica` di soli criteri a vista è un rilievo di forma.** Un PBI con un criterio a vista
-      e una guardia dà un rilievo `forma` il cui testo contiene «solo criteri a vista»; lo stesso PBI
-      con in più un criterio a test non lo dà.
+- [ ] **Una `Verifica` di soli criteri a vista è un rilievo di forma.** Un PBI con un criterio marcato
+      e uno che dice «nato verde» dà un rilievo `forma` il cui testo contiene «solo criteri a vista»;
+      lo stesso PBI con in più un criterio a test non lo dà.
 - [ ] **Il rapporto porta `a_vista`.** Il rapporto di `--preverifica` sul PBI del criterio 1 ha
       `a_vista == [2]`; su un PBI senza marca ha `a_vista == []`.
 - [ ] **La PR elenca i criteri a vista.** Come `test_il_corpo_della_pr`: con un PBI che ha un
-      criterio a vista il `--body` contiene «Da verificare a vista» e il testo in grassetto del
+      criterio marcato il `--body` contiene «Da verificare a vista» e il testo in grassetto del
       criterio; con `PBI-102` non contiene «Da verificare a vista».
 - [ ] **I tre prompt dicono la regola.** `lettore.md` ha una riga che comincia con «- **V**» e nomina
       «a vista»; `critic.md` nomina «a vista» e «Note per chi mergia» nella stessa frase o paragrafo;
@@ -141,7 +143,9 @@ Si può scegliere senza chiedere:
 
 Si scrive come domanda (e si chiama `fermati`):
 - se la sezione della PR supera il limite del corpo che `apri_pr()` già gestisce;
-- se un PBI di `main` di questo repository risulta avere un criterio marcato a vista per caso.
+- se un PBI di `main` di questo repository risulta avere un criterio marcato per caso;
+- i criteri di **questo** PBI non devono contenere la marca con le parentesi: la nominano come «la
+  marca». Se un test ha bisogno del letterale, sta nel test, non nel criterio.
 
 ## Dopo il merge (non è un criterio)
 

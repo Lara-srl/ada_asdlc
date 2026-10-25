@@ -37,7 +37,9 @@ L'occhio umano c'è già, una volta per PBI, alla fine. La regola lo usa invece 
 
 1. **Un criterio della `Verifica` è di tre specie.** Dichiara un rosso che un test prova; oppure
    è una guardia, nata verde; oppure è **a vista**, e lo giudica una persona. La terza si dichiara
-   nel testo del criterio con la marca «a vista», a confine di parola, come «guardia». Un criterio
+   nel testo del criterio con la marca «(a vista)», parentesi comprese: non la parola nuda come
+   «guardia», perché la frase sta nella prosa di chi parla della regola e in «sulla vista» di un
+   database, e qui un falso positivo costerebbe un rilievo e una PR che chiede un occhio inutile. Un criterio
    a vista non dichiara un rosso: niente sonda, niente coppia RED→GREEN, niente test. Il codice
    che produce la cosa da guardare sta nei criteri a test dello stesso PBI.
 2. **Prima del giro, il Lettore chiede se ogni criterio è provabile.** È l'ottava domanda, **V**:
