@@ -110,6 +110,18 @@ corso non cambia sotto i piedi.
 - `tools/asdlc/runner.py`: `test_nuovi_da_aprire()` (l'ultimo commit se l'albero è pulito) e
   `chiedi_impl()`.
 - `PBI-515`, decisioni 4 e 7 (lo scheletro vuoto; il file con del codice resta chiuso).
+- `ada_unical`, secondo caso (`PBI-003`, 25/10/2026, `asdlc` v0.7.0): stesso difetto, in Python. Il Builder
+  ha scritto `src/unical/markdown.py` con `euro()` e `tabella_md()` che tornano `None`, come dice il prompt, e il
+  commit è stato rifiutato («`src/unical/markdown.py` è codice di produzione e il giro è in TEST_ONLY»); anche con
+  il primo test insieme. Si è fermato con `fermati` dopo 52 secondi, un criterio fatto. Il Solver ha ricostruito
+  il vincolo dal sorgente (`e_scheletro_vuoto()`, righe 1664-1672) e ha risposto `risolto`: il giro è ripartito e in
+  4 minuti il Builder ha scritto 40 commit, uno scheletro di soli commenti per modulo nuovo (`esiti.py`,
+  `markdown.py`, `db.py`, `fermi.py`). Rapporto `runs/20261025-201606.json` (`ada_unical-run`), domanda del Builder
+  in `runs/20261025-201823-354789_builder_esito.json`, ramo `pbi/pbi-003`. Due dettagli che il caso aggiunge e che
+  il testo del prompt e del rifiuto devono dire: **un docstring non è un commento** (è un'espressione, e il
+  rifiuto lo tratta come codice), e, secondo il Solver, lo scheletro va scritto con `Write` sul file intero (con
+  `Edit` la guardia non vede il contenuto e chiude: da verificare nel RED del criterio 2). Il caso conferma la
+  decisione 1 e il criterio 1: l'esempio nel prompt è un file di soli commenti, senza docstring.
 - `ADR-0021` (il rosso si chiede prima; lo scheletro vuoto per i moduli nuovi, riga 78) e
   `ADR-0024` (anti-pattern nel prompt del Builder).
 - `tools/asdlc/runner.py`: `e_scheletro_vuoto()`, `guardia_di_fase()`.
