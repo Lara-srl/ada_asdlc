@@ -94,6 +94,14 @@ corso non cambia sotto i piedi.
    casi nuovi di un `parametrize` come test nuovi. Cambierebbe la regola della nascita (`PBI-396`)
    per tutti i linguaggi, ed è un altro PBI.
 
+7. **Il GREEN dei criteri 1 e 4 si committa in `TEST_ONLY`, senza `--chiedi-impl`** (lettura del
+   25/10, rilievo F). Il GREEN del criterio 1 è il testo di `builder.md` più il golden
+   `tools/tests/dati/prompt/builder.txt` nello stesso commit: nessuno dei due è produzione, e il golden
+   sta sotto `tools/tests/`, quindi per il lucchetto è un test e in `IMPL` sarebbe rifiutato. Il ciclo
+   del criterio 1 è: RED del test che legge il blocco, poi un commit `feat(prompt)` con prompt e golden,
+   fase ferma a `TEST_ONLY`. I criteri 2 e 3 (`runner.py`) fanno il ciclo intero con `--chiedi-impl`.
+
+
 ## Dipendenze
 
 - Bloccato da: nessuno. `PBI-519` è vicino ma indipendente (il limite d'uso, non il lucchetto).
@@ -163,3 +171,11 @@ Se il testo del rifiuto o dell'esempio ha più di una formulazione lecita, si sc
 si dichiara nel messaggio del commit RED. Se durante il giro emerge che il Builder ha bisogno di
 **firme** per far raccogliere un test (un linguaggio diverso da Python in cui un file vuoto non
 basta), non si allarga il lucchetto: si chiama `fermati` con la domanda, perché è la decisione 1.
+
+## La lettura del 25/10
+
+`asdlc-runner PBI-524 --preverifica --lettore` (runner `v0.7.0`), su `main` `8e472eb`. Un rilievo,
+recepito nella decisione qui sopra: il GREEN del criterio 1 non si committa in `IMPL` (caso F di
+`PBI-518`). Le tre sonde sono uscite `guasto` (gate guasto nell'albero usa e getta, non un verde): il
+rosso dei criteri 1-3 resta dichiarato, non provato, e il guasto delle sonde è da capire a parte.
+
