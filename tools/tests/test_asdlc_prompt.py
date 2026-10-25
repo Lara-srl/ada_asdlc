@@ -11,6 +11,7 @@ byte.
 """
 
 import importlib
+import re
 from pathlib import Path
 
 import pytest
@@ -159,3 +160,34 @@ def test_un_file_di_aggiunte_finisce_in_fondo_al_prompt_del_suo_ruolo_e_in_nessu
     for altro in RUOLI:
         if altro != ruolo:
             assert prompt[altro] == golden(altro), f"l'aggiunta di {ruolo} è finita in {altro}"
+
+
+# --- PBI-524: lo scheletro che il prompt chiede è quello che il lucchetto accetta ---
+
+
+# Il blocco di esempio dello scheletro nel prompt del Builder: l'unico blocco
+# `python` recintato del prompt.
+RE_ESEMPIO_DI_SCHELETRO = re.compile(r"```python\n(.*?)```", re.DOTALL)
+
+
+class TestLoScheletroDelPromptEQuelloDelLucchetto:
+    """PBI-524, criterio 1: il prompt e il lucchetto non possono divergere in
+    silenzio. L'esempio di scheletro che il prompt dà al Builder passa da
+    `e_scheletro_vuoto()`, la stessa funzione del `pre-commit` (decisione 3), e il
+    prompt non descrive più uno scheletro con firme (decisione 1)."""
+
+    def test_l_esempio_di_scheletro_del_prompt_e_uno_scheletro_vuoto_per_il_lucchetto(
+            self, configura):
+        configura()
+
+        blocchi = RE_ESEMPIO_DI_SCHELETRO.findall(generati()["builder"])
+
+        assert len(blocchi) == 1, "il prompt del Builder ha un blocco di esempio dello scheletro"
+        assert runner.e_scheletro_vuoto("nlt/esempio.py", blocchi[0])
+
+    @pytest.mark.parametrize("frase", ["la funzione che torna `None`", "contenitore vuoto"])
+    def test_il_prompt_non_promette_piu_uno_scheletro_con_firme(self, configura, frase):
+        configura()
+
+        # Gli a capo del prompt non contano: la frase può essere spezzata su due righe.
+        assert frase not in " ".join(generati()["builder"].split())
