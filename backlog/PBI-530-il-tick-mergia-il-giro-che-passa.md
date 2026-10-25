@@ -73,7 +73,7 @@ nuovo solo al tag successivo.
 - [ ] **Ogni condizione che manca lascia la PR a una persona, col motivo.** Parametrico, un id per
       caso, sullo stesso scenario con una sola cosa cambiata: ramo non `pbi/`; rapporto con
       `critic_saltato`; esito `intento`; CI `FAILURE`; `CONFLICTING`; un criterio `[ ]`; un criterio
-      `(a vista)` spuntato; un file fuori Scope; un file in `decisions/`; `files` assente. In ogni
+      marcato a vista e spuntato; un file fuori Scope; un file in `decisions/`; `files` assente. In ogni
       caso nessun `gh pr merge`, e la riga `merge: #1 attende una persona — …` nomina la condizione.
 - [ ] **`rilascia: major` dà la `v1.0.0`.** `prossimo_tag(["v0.9.2"], "major") == "v1.0.0"` e
       `rilascia_del_pbi("…\nrilascia: major\n…") == "major"`. Rosso su `main`: `RE_RILASCIA`
