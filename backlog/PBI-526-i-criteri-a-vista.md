@@ -118,7 +118,7 @@ i criteri nascono rossi per asserzione o per `AttributeError` dentro il test.
       `domanda="V"` è valido e finisce in `letto`; una domanda fuori da `R F T A E D N V` resta
       rifiutata.
 - [ ] **Una `Verifica` di soli criteri a vista è un rilievo di forma.** Un PBI con un criterio marcato
-      e uno che dice «nato verde» dà un rilievo `forma` il cui testo contiene «solo criteri a vista»;
+      e uno che la decisione 5 di `PBI-521` esenta dalla sonda dà un rilievo `forma` il cui testo contiene «solo criteri a vista»;
       lo stesso PBI con in più un criterio a test non lo dà.
 - [ ] **Il rapporto porta `a_vista`.** Il rapporto di `--preverifica` sul PBI del criterio 1 ha
       `a_vista == [2]`; su un PBI senza marca ha `a_vista == []`.
