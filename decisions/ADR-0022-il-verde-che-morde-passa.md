@@ -1,7 +1,8 @@
 # ADR-0022: un test nato verde passa se morde
 
 **Stato:** **Accettata**, **rivista il 2026-09-26** (la prima delle quattro scelte) e **il
-2026-10-01** (quando si giudica il morso), tutte e due in fondo
+2026-10-01** (quando si giudica il morso) e **il 2026-10-25** (il verde per costruzione su un file
+SQL), tutte e tre in fondo
 · **Data:** 2026-09-01 · **Ratifica:** Francesco, con il merge (`ADR-0012`); la revisione
 le revisioni le ha decise Francesco, il 26/09 e il 01/10, e le ratifica il merge della PR che
 le scrive. Non abroga niente di `AGENTS.md`: il SEMPRE del test-first resta, e questo
@@ -326,3 +327,31 @@ Misura sul caso vero, `asdlc-runner --gate-rosso` col codice del branch di `PBI-
 | `giro-fermato/pbi-391-giro1-20260930` | `45a5f9de` | **resta ferma**: né al suo commit né alla punta `9fb4cfd`, 22 mutanti per albero (15 falliti per eccezione), perimetro `comandi_dei_test` | 13 s |
 
 Torna con la tabella del 01/10: nessun tetto necessario.
+
+## Revisione del 25/10/2026 — il verde per costruzione su un file SQL
+
+Decisa da Francesco il 25/10, dopo il giro 1 di `ada_unical` `PBI-003`, e scritta in `PBI-526`; la
+ratifica il merge della PR che la scrive. **Restringe** la Decisione, che resta com'è: «nessuno → ferma»
+ha un'eccezione, e una sola.
+
+Un test che nega un permesso SQL nasce verde per costruzione: un ruolo senza `GRANT` non legge una
+vista nuova, e non c'è un rosso da vedere. E il gate non ha mutanti per l'SQL (`linguaggio_del_file()`
+conosce Python e TypeScript): una guardia su `db/schema.sql` non può mai mordere. Fermare quel giro è
+un fermo meccanico, che nessun Builder può evitare.
+
+**Le quattro domande** (`decisions/README.md`):
+
+1. **Cosa si controlla:** un test nato verde che non morde né al suo commit né alla punta, il corpo del
+   suo commit, e i file che il ramo cambia dalla base.
+2. **Quando:** nel gate del rosso, dove oggi il test finirebbe fra i mancati (`esamina_il_commit()`).
+3. **Cosa conta come prova:** la riga `Verde-per-costruzione: <motivo>` nel corpo del commit **e**
+   almeno un file `.sql` fra quelli che il ramo cambia. Il gate non giudica il motivo: lo riporta.
+4. **Cosa succede se manca:** senza la riga, o senza un `.sql`, il giro si ferma `rosso-mai-visto`
+   come prima. Con tutte e due il test passa **non verificato**: va nel rapporto e nel prompt del
+   Critic, che lo legge come un test da giudicare (`ADR-0008`: si segnala, non si blocca).
+
+**Alternative.** Mutanti SQL, che sarebbero l'unica prova vera: servono un database usa e getta e lo
+schema ricaricato a ogni mutante, e la forma dello schema è del progetto. Vengono dopo, con un PBI che
+ne misuri il costo. Una riga valida per ogni linguaggio: diventerebbe la formula che si scrive sempre,
+e per Python e TypeScript i mutanti ci sono.
+
