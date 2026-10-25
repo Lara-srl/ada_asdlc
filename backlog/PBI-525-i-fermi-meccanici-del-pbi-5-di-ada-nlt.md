@@ -1,6 +1,8 @@
 # PBI-525: i fermi meccanici del PBI-5 di ada_nlt, cinque difetti in un solo caso
+rilascia: minor
 
-**Stato:** bozza, con le domande aperte (❓) qui sotto: non si accoda finché Francesco non le chiude.
+**Stato:** letto il 25/10 (in fondo); le due domande hanno una **proposta** del 25/10 (*Deciso*, punti 4 e 6),
+che il merge della PR che accoda ratifica. Dopo `PBI-524`.
 
 ## Direttiva
 
@@ -51,9 +53,14 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
 - `tools/asdlc/prompt/critic.md` — l'igiene dei commit su un ramo già pubblicato: il Critic la scrive
   tra le note per chi mergia e non la usa come motivo di `non pronto`; il rimedio non è un rebase.
   Per un rilievo di correttezza, il Critic esamina l'intera classe e riporta tutti i casi che trova.
-- `tools/asdlc/runner.py` — il verdetto: un rilievo di sola storia non basta per `non pronto`; e
-  `--chiedi-impl`, che con test non committati nell'albero **non apre `IMPL`** e risponde «committa
-  prima il RED, poi richiedi la fase» (la fase resta `TEST_ONLY`, il Builder può proseguire).
+- `tools/asdlc/runner.py` — `--chiedi-impl` legge i test nuovi dai **commit** `base..HEAD`, non
+  dall'albero; con un file di test modificato e non committato rifiuta («committa prima il RED, poi
+  richiedi la fase») e la fase resta `TEST_ONLY`. Il verdetto sui rilievi di storia **non** passa dal
+  codice: sta nel prompt (decisione 1).
+- `tools/asdlc/prompt/critic.md` e `tools/tests/dati/prompt/critic.txt` — il golden nello stesso commit.
+- `tools/tests/test_asdlc_runner.py`, `test_asdlc_prompt.py`, `test_asdlc_chiudi_giro.py`,
+  `test_asdlc_coda.py` — i test dei criteri, e i test esistenti che le decisioni 2 e 3 cambiano **nel
+  commit RED**.
 - `tools/asdlc/chiudi_giro.py` — un settimo passo: se il worktree del runner ha modifiche non
   committate, le mette in `git stash` con un messaggio che nomina il PBI e il giro (mai
   `reset --hard`: il lavoro si recupera), e lo dice nel resoconto.
@@ -62,28 +69,73 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
 - `backlog/PBI-525-…md` — questo file, per la spunta.
 - **Fuori scope:** il tetto `[soglie].revisioni` (alzarlo nasconde il difetto).
 
-## ❓ Domande aperte
+## ✅ Deciso (25/10, dopo la lettura)
 
-1. Un rilievo di storia è sempre non bloccante, o solo dopo la prima pubblicazione del ramo
-   (prima si può ancora riscrivere)? Il codice oggi non distingue.
-2. L'avviso del fermo: file nella home, `PushNotification`, o una riga di `gh`? Scelta tua.
+1. **Un rilievo di sola storia lo governa il prompt, non il codice.** Il runner non può sapere che
+   un rilievo è «di storia» senza leggere il testo del Critic (`ADR-0027`), e un campo nuovo in
+   `fatto` non è in Scope. `critic.md` dice: un rilievo che riguarda solo la storia dei commit (un
+   GREEN con suite rossa, una deroga dichiarata un commit dopo, un messaggio che allude) va sotto
+   «Note per chi mergia», non fa `non pronto`, e il rimedio non è mai un rebase. Il criterio 1 è un
+   criterio sul prompt e sul golden, come quelli di `PBI-524`.
+2. **`--chiedi-impl` legge i test nuovi dai commit, non dall'albero.** È l'ordine che il prompt
+   prescrive (committa il RED, poi chiedi la fase) e l'unico che il lucchetto di `ADR-0021` permette:
+   un test osservato prima del commit e poi committato in `IMPL` è rifiutato. I test della classe di
+   `test_apre_la_fase_quando_il_test_nuovo_e_rosso` (`test_asdlc_runner.py:5651`) e il loro docstring
+   dicono il contrario e cambiano **nel commit RED**: la fixture committa il test prima di chiamare il
+   comando. `test_nuovi_dellalbero()` resta per la sola diagnosi dell'albero sporco.
+3. **Il settimo passo di `chiudi-giro` sta dopo il quinto e prima di togliere la pausa.** Nel
+   worktree del runner: `git status --porcelain`; se non è vuoto, `git stash push -u -m "PBI-N giro R:
+   lavoro del giro fermato"`, con `cwd` il worktree. Il dry-run lo stampa. I test
+   `test_un_giro_fermato_si_chiude_coi_sei_passi_in_ordine` e quello del dry-run
+   (`test_asdlc_chiudi_giro.py:167`, `:361`) cambiano **nel commit RED** per attendere il passo in più
+   col suo `cwd`.
+4. **Proposta per la domanda 1: un rilievo di storia non è mai bloccante dentro il giro**, prima o dopo la
+   pubblicazione del ramo. Il Builder non riscrive la storia e lo squash, se serve, è al merge
+   (`AGENTS.md`, micro-commit). Distinguere i due momenti chiederebbe al Critic di sapere se il ramo è
+   su `origin`, e darebbe due regole per lo stesso rilievo.
+5. **Il Critic riporta la classe, non l'istanza** (criterio 3): è prompt, nello stesso paragrafo della
+   decisione 1, e il golden lo segue.
+6. **Proposta per la domanda 2: l'avviso è una issue di GitHub nel repository del progetto**, aperta dal tick con
+   `gh issue create`, titolo «fermo: PBI-N — <motivo>», corpo con la riga di `attende` e il percorso del
+   rapporto. Una sola: prima di aprirla il tick cerca con `gh issue list --search` una issue aperta con
+   quel titolo, e se c'è non fa niente. La chiude chi riprende il PBI. Scartati: un file nella home
+   (nessuno lo legge), `PushNotification` (non c'è in un cron). La issue sta dove stanno le PR e si legge
+   da ovunque: è lo stesso canale che servirà per il resoconto dei merge, quando il merge non sarà più a
+   mano.
 
 ## Verifica
-- [ ] **Un giro il cui solo rilievo è di storia chiude `pronto`**, con la nota nel rapporto. Rosso su
-      `main`: oggi il Critic emette `non pronto`.
-- [ ] **`--chiedi-impl` con un test non committato non apre `IMPL`.** Fase `TEST_ONLY`, un file di
-      test modificato e non committato: il comando esce con il messaggio «committa prima il RED» e la
-      fase resta `TEST_ONLY`. Rosso su `main`: oggi apre `IMPL`.
-- [ ] **Il Critic che trova un 500 su un dato utente elenca l'intera classe che ha verificato**
-      (campi e rotte esaminati), non il solo caso: nel giro 2 ha trovato `economia` come padre e
-      `Infinity` alla revisione 0, e un importo finito ma enorme alla revisione 1.
-- [ ] **Il prompt del Critic non nomina più il rebase** come rimedio di un ramo pubblicato.
+
+- [ ] **Il prompt del Critic governa i rilievi di storia e non nomina il rebase.** Un test
+      parametrizzato su `critic.md`: (a) contiene «Note per chi mergia» e «storia» nella stessa regola
+      (o la formula equivalente scelta nel RED, dichiarata nel commit); (b) non contiene «rebase»;
+      (c) dice che un rilievo di correttezza su un dato utente elenca l'intera classe verificata
+      («classe», o formula equivalente). Il golden `critic.txt` segue nello stesso commit. Su `main`:
+      (a) e (c) mancano, (b) c'è il rebase a riga 38.
+- [ ] **`--chiedi-impl` con un test modificato e non committato non apre `IMPL`.** Fase `TEST_ONLY`,
+      un test committato nel RED e un secondo file di test modificato nell'albero: il comando esce 1,
+      stampa «committa prima il RED» e la fase resta `TEST_ONLY`. Con l'albero pulito e il test
+      committato, apre `IMPL` come oggi. Rosso su `main`: oggi apre `IMPL` leggendo l'albero.
 - [ ] **`asdlc-chiudi-giro` lascia il worktree del runner pulito.** Con un file in stage nel
       worktree, dopo il comando `git status --porcelain` è vuoto, `git stash list` nomina il PBI e
-      il giro, e il pre-flight del tick successivo passa. Rosso su `main`: oggi il file resta.
-- [ ] **Un tick che trova un `non convergente` lo segnala con l'avviso scelto**, una volta e non a ogni
-      passaggio.
+      il giro, il passo sta dopo il `merge --ff-only` e prima che la pausa sia tolta, e il dry-run lo
+      stampa senza eseguirlo. Rosso su `main`: oggi il file resta.
+- [ ] **Un tick che trova un `non convergente` apre una issue, una sola.** Con un `gh` finto: al primo
+      passaggio il tick chiama `gh issue create` col titolo «fermo: PBI-N — non convergente»; al secondo
+      passaggio, con `gh issue list` che la restituisce aperta, non chiama `create`. Rosso su `main`:
+      oggi il tick scrive solo `attende`.
 
 **Non regressione:**
 - Un rilievo di correttezza o di test-first resta `non pronto`.
 - La suite dei test resta verde.
+
+## La lettura del 25/10
+
+`asdlc-runner PBI-525 --preverifica --lettore` (runner `v0.7.0`), su `main` `8e472eb`: quattro
+rilievi, tutti recepiti nel *Deciso*. **D** sul criterio 1 (il runner non può classificare un rilievo
+senza leggerne il testo): decisione 1. **D** sul criterio 6 (il canale non era scelto): decisione 6.
+**T** sul criterio 2 (`test_apre_la_fase_quando_il_test_nuovo_e_rosso` dice il contrario): decisione 2.
+**T** sul criterio 5 (il test dei sei passi vuole esattamente cinque `git` con `cwd == repo`):
+decisione 3. I vecchi criteri 1 e 4 erano la stessa modifica minima e sono un criterio solo. Le tre
+sonde sono uscite `guasto` (gate guasto nell'albero usa e getta): il rosso resta dichiarato, non
+provato, e il guasto è da capire a parte.
+
