@@ -1,4 +1,4 @@
-# PBI-525: i fermi meccanici del PBI-5 di ada_nlt, quattro difetti in un solo caso
+# PBI-525: i fermi meccanici del PBI-5 di ada_nlt, cinque difetti in un solo caso
 
 **Stato:** bozza, con le domande aperte (❓) qui sotto: non si accoda finché Francesco non le chiude.
 
@@ -35,7 +35,15 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
    fermo. È la terza volta (`PBI-3` giri 3 e 4, `PBI-5` giro 2). `PBI-524` decisione 6 sistema solo
    il **messaggio** del rifiuto quando i test sono già committati; qui il comando **accetta** un
    albero sporco di test e apre la fase sbagliata, ed è un altro caso.
-4. **Il fermo è muto.** Un giro `non convergente` non avvisa nessuno: la coda attende per ore.
+4. **Il worktree del runner resta sporco dopo un giro fermato, e il giro dopo non parte.**
+   Giro 3 di `PBI-5` (25/10, 22:14): dopo `asdlc-chiudi-giro PBI-5` il worktree `../ada_nlt-run` aveva
+   ancora il test non committato del giro 2 in stage (`M  tests/test_servizio.py`, 21 righe). Il
+   tick ha provato il pre-flight e si è fermato su `git switch --detach origin/main` (uscita 1:
+   «Le tue modifiche locali […] sarebbero sovrascritte»), scrivendo `non lanciato`. Il comando
+   (`tools/asdlc/chiudi_giro.py`) fa i sei passi su `origin` e sul checkout del tick, ma non guarda il
+   worktree del runner. Un'altra persona è dovuta intervenire a mano (`git stash`); il lancio è
+   ripartito al tick dopo, ~10 minuti persi.
+5. **Il fermo è muto.** Un giro `non convergente` non avvisa nessuno: la coda attende per ore.
    Obiettivo di `PBI-519` (20/10): zero fermi meccanici, e se si ferma, si ferma con una domanda vera
    e lo si viene a sapere.
 
@@ -46,6 +54,9 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
 - `tools/asdlc/runner.py` — il verdetto: un rilievo di sola storia non basta per `non pronto`; e
   `--chiedi-impl`, che con test non committati nell'albero **non apre `IMPL`** e risponde «committa
   prima il RED, poi richiedi la fase» (la fase resta `TEST_ONLY`, il Builder può proseguire).
+- `tools/asdlc/chiudi_giro.py` — un settimo passo: se il worktree del runner ha modifiche non
+  committate, le mette in `git stash` con un messaggio che nomina il PBI e il giro (mai
+  `reset --hard`: il lavoro si recupera), e lo dice nel resoconto.
 - `tools/asdlc/coda.py` — l'avviso quando la coda resta in `attende` per un `non convergente`.
 - `tools/tests/` — i test dei criteri.
 - `backlog/PBI-525-…md` — questo file, per la spunta.
@@ -67,6 +78,9 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
       (campi e rotte esaminati), non il solo caso: nel giro 2 ha trovato `economia` come padre e
       `Infinity` alla revisione 0, e un importo finito ma enorme alla revisione 1.
 - [ ] **Il prompt del Critic non nomina più il rebase** come rimedio di un ramo pubblicato.
+- [ ] **`asdlc-chiudi-giro` lascia il worktree del runner pulito.** Con un file in stage nel
+      worktree, dopo il comando `git status --porcelain` è vuoto, `git stash list` nomina il PBI e
+      il giro, e il pre-flight del tick successivo passa. Rosso su `main`: oggi il file resta.
 - [ ] **Un tick che trova un `non convergente` lo segnala con l'avviso scelto**, una volta e non a ogni
       passaggio.
 
