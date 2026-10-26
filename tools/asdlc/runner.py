@@ -1694,7 +1694,7 @@ def guardia_di_fase(fase: str | None, percorso: str,
                 contenuto is not None and e_scheletro_vuoto(percorso, contenuto)):
             return (f"{percorso} è codice di produzione e il giro è in {FASE_TEST_ONLY}: "
                     f"qui si scrivono solo i test. Scrivi il test del comportamento che "
-                    f"ti serve, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
+                    f"ti serve, committalo da solo, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
                     f"produzione si apre. Se il test passa già, quel comportamento c'è "
                     f"di suo e non è questo il commit in cui nasce. Lo scheletro di un "
                     f"modulo nuovo passa solo se è fatto di righe bianche e commenti, "
@@ -2146,9 +2146,9 @@ def base_del_lucchetto() -> str:
 def test_nuovi_dellalbero() -> list[TestNuovo]:
     """I test che nascono nell'**albero di lavoro**, rispetto a `HEAD`.
 
-    Il gate del rosso legge un commit; il lucchetto deve leggere ciò che non è
-    ancora committato, perché il permesso di implementare si chiede **prima** del
-    commit — è tutto il punto della differenza fra impedire e accertare.
+    Non apre più la fase (PBI-525, decisione 2): il permesso si chiede sul
+    commit RED, e ciò che trova qui è la diagnosi dell'albero sporco, con cui
+    `chiedi_impl()` rifiuta la richiesta e nomina i test da committare.
 
     Per Python la regola è quella del gate, `nascite_python` (PBI-396, decisione
     1): il commit è l'albero di lavoro, il genitore è `HEAD`, e la base è quella
@@ -5427,13 +5427,15 @@ def stampa_la_guardia_di_fase() -> int:
 
 
 def test_nuovi_da_aprire() -> list[TestNuovo]:
-    """I test su cui si chiede il permesso: quelli non ancora committati, e se non
-    ce ne sono quelli dell'**ultimo commit**.
+    """I test su cui si chiede il permesso: quelli dell'**ultimo commit**, mai
+    quelli dell'albero (PBI-525, decisione 2).
 
     Guardare solo l'albero non committato non chiudeva il ciclo: il commit RED,
     che la convenzione vuole e che il gate del rosso pretende di soli test,
     rendeva cieca la richiesta. Lo ha trovato il Builder al primo giro vero, il
-    01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita.
+    01/09, fermandosi con `STOP:` invece di inventarsi una via d'uscita. E
+    leggere l'albero prima del commit apriva `IMPL` su un test che lì non si
+    poteva più committare: `chiedi_impl()` lo rifiuta prima di arrivare qui.
 
     L'ultimo commit e basta, non tutto `<base>..HEAD`: dopo tre criteri i test dei
     primi due sono verdi, e la richiesta verrebbe rifiutata per «nato verde» su
@@ -5444,9 +5446,6 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
     stesso con un merge veloce renderebbe `BASE..HEAD` vuoto (PBI-380, decisione
     3). Fuori da un giro lo sha non c'è, e si ripiega su `BASE`.
     """
-    nuovi = test_nuovi_dellalbero()
-    if nuovi:
-        return nuovi
     base = base_del_lucchetto()
     if git("rev-list", "--count", f"{base}..HEAD") == "0":
         # Il branch nasce dalla base, quindi al primo `--chiedi-impl` di ogni giro
@@ -5462,7 +5461,7 @@ def test_nuovi_da_aprire() -> list[TestNuovo]:
 def chiedi_impl() -> int:
     """Il permesso di scrivere produzione, dato dal rosso e non dalla parola.
 
-    Gira i test nati nell'albero e apre `IMPL` solo se **tutti** falliscono. Non
+    Gira i test nati nel commit RED e apre `IMPL` solo se **tutti** falliscono. Non
     è pignoleria sul singolo test: un test che passa al primo colpo dice che quel
     comportamento c'è già, e allora non è questo il commit in cui nasce — o è
     stato scritto in anticipo, che è la cosa che il lucchetto esiste per rendere
@@ -5471,6 +5470,10 @@ def chiedi_impl() -> int:
     Le ragioni sono le stesse tre di `ESITI_MANCATI`, e non per pigrizia: chi
     legge il rifiuto qui e il rapporto del gate là deve trovare le stesse parole,
     o crederà di avere davanti due controlli diversi.
+
+    Un test nuovo ancora nell'albero ferma la richiesta (PBI-525, decisione 2):
+    aperta `IMPL`, il `pre-commit` non lo lascerebbe più committare, e da `IMPL`
+    si esce solo con un commit.
     """
     fase = fase_corrente(REPO)
     if fase != FASE_TEST_ONLY:
@@ -5478,13 +5481,22 @@ def chiedi_impl() -> int:
               f"(fase: {fase or 'nessuna'}). Il permesso si chiede una volta per "
               f"comportamento, e il giro torna in {FASE_TEST_ONLY} dopo il commit.")
         return 1
+    sporchi = test_nuovi_dellalbero()
+    if sporchi:
+        print(f"Il permesso resta chiuso: nell'albero ci sono test non committati, e la "
+              f"fase resta {FASE_TEST_ONLY}.\n")
+        for nuovo in sporchi:
+            print(f"  {nuovo.file}::{nuovo.nome}")
+        print(f"\nIn {FASE_IMPL} il commit di un test è rifiutato: committa prima il RED, "
+              f"da solo, poi richiedi la fase.")
+        return 1
     nuovi = test_nuovi_da_aprire()
     if not nuovi:
-        print("Non c'è nessun test nuovo nell'albero, quindi nessun rosso da osservare. "
-              "Scrivi prima il test del comportamento che ti serve. Un test nuovo è una "
-              "funzione di test nuova: i casi aggiunti a un `parametrize` che c'era già "
-              "non contano. Il RED si committa da solo prima di `--chiedi-impl`, che legge "
-              "l'ultimo commit quando l'albero non ha test non committati.")
+        print("Non c'è nessun test nuovo nell'ultimo commit, quindi nessun rosso da "
+              "osservare. Scrivi prima il test del comportamento che ti serve. Un test "
+              "nuovo è una funzione di test nuova: i casi aggiunti a un `parametrize` che "
+              "c'era già non contano. Il RED si committa da solo prima di `--chiedi-impl`, "
+              "che legge l'ultimo commit.")
         return 1
     comandi, orfani = comandi_dei_test(REPO, nuovi)
     mancati: list[tuple[str, list[str]]] = []
@@ -5786,8 +5798,9 @@ def costruisci_parser() -> argparse.ArgumentParser:
                     help="non esegue niente: il pre-commit del giro — ciò che è in stage "
                          "deve stare nella fase corrente")
     ap.add_argument("--chiedi-impl", action="store_true",
-                    help="non esegue un PBI: gira i test nati nell'albero e apre la fase "
-                         "IMPL solo se li vede fallire")
+                    help="non esegue un PBI: gira i test nati nell'ultimo commit e apre "
+                         "la fase IMPL solo se li vede fallire; con test non committati "
+                         "nell'albero rifiuta")
     ap.add_argument("--guardia-fase", action="store_true",
                     help="non esegue niente: legge su stdin il JSON di un hook PreToolUse "
                          "e esce 2 se quella scrittura non si può fare nella fase corrente")
