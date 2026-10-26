@@ -1,7 +1,7 @@
 # PBI-528: il rilascio parte solo da una PR che tocca codice
 rilascia: patch
 
-**Stato:** proposto il 25/10; **non letto**, **non in coda**. Entra dopo la barriera della `v0.8.0`
+**Stato:** letto il 26/10 col Lettore (in fondo), **in coda** dopo la barriera della `v0.9.0` e prima di `PBI-530` (Francesco, 26/10). ~~Entra dopo la barriera della `v0.8.0`~~ (la `v0.8.0` è il tag fantasma di questo PBI; la barriera è la `v0.9.0`)
 (che in realtà sarà `v0.9.0`: sotto), insieme a `PBI-529`.
 
 ## Direttiva
@@ -29,7 +29,8 @@ questo PBI).
   `gh pr list` chiede anche `files`, come fa la coda. Una PR che nomina il PBI e non tocca codice si
   salta in silenzio, non è un avviso.
 - `backlog/README.md` — la regola sui titoli delle PR che accodano, con il caso del 25/10.
-- `tools/tests/test_asdlc_coda.py` — i test dei criteri, col `gh` finto dei test del rilascio.
+- `tools/tests/test_asdlc_rilascio.py` — i test dei criteri, accanto a quelli di R8 (`PBI-509`), con la classe
+  `Mondo` e la fixture `mondo` (origin bare, checkout e `gh` finto) che stanno lì.
 - `backlog/PBI-528-il-rilascio-parte-solo-da-una-pr-che-tocca-codice.md` — questo file, per la spunta.
 - **Fuori scope:** il bump di `tools/pyproject.toml` al tag (oggi è una PR a mano, `build/versione-…`,
   come per `v0.6.0` e `v0.7.0`; farlo fare al tick senza scrivere su `main` è un altro PBI, e serve
@@ -44,14 +45,15 @@ questo PBI).
    rilascio lo scavalca.
 
 ## Dipendenze
-- Bloccato da: nessuno (ma dopo la barriera della `v0.8.0`, per non cambiare `coda.py` sotto il tick).
+- Bloccato da: nessuno (ma dopo la barriera della `v0.9.0`, per non cambiare `coda.py` sotto il tick).
 - Blocca: il merge automatico (`PBI-530`), che non può esistere con un rilascio che parte dalla PR sbagliata.
 
 ## Contesto
 - `tools/asdlc/coda.py`: `passo_di_rilascio()`, `pbi_nominato()`, `tocca_codice()`, `LIMITE_FILE`, e il
   punto in cui la coda le usa insieme (riga ~352).
 - `runs/cron.log` del 25/10, 23:25; il tag `v0.8.0` su `297c1be`.
-- `tools/tests/test_asdlc_coda.py`: i test di R8 (`PBI-509`) col `gh` finto.
+- `tools/tests/test_asdlc_rilascio.py`: i test di R8 (`PBI-509`) col `gh` finto, `class Mondo` e la fixture `mondo`
+  (righe 65-115).
 
 ## Verifica
 - [ ] **Una PR mergiata che nomina il PBI e tocca solo `backlog/` non rilascia.** Col `gh` finto: una
@@ -68,3 +70,13 @@ non cambiano.
 Si può scegliere senza chiedere: se `files` entra nella stessa chiamata a `gh pr list` o in una seconda.
 Si chiama `fermati`: se `tocca_codice()` ha bisogno di un campo che `gh pr list --json` non dà per le
 PR mergiate.
+
+## La lettura del 26/10
+
+`asdlc-runner PBI-528 --preverifica --lettore` (runner `v0.7.0`), su `main` `3acb74d`, in un albero usa e
+getta. Un rilievo, verificato nel codice e recepito nello Scope e nel Contesto: i test di R8 e il `gh`
+finto del rilascio (`class Mondo`, fixture `mondo`) stanno in `tools/tests/test_asdlc_rilascio.py`, non in
+`test_asdlc_coda.py`, che del rilascio non ha niente. Il Lettore ha controllato e confermato il resto:
+`PBI-7` corrisponde a `RE_TITOLO_PR`, il `gh` finto di oggi non rende `files` (la guardia del criterio 2
+e i test di `PBI-509` restano verdi), `files` si chiede già per le PR mergiate in `coda.py`. La sonda del
+criterio 1 è uscita `guasto` (il gate nell'albero usa e getta, `PBI-529`): il rosso resta dichiarato.
