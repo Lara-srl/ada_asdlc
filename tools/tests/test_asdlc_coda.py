@@ -2091,10 +2091,11 @@ def rapporto_del_giro(albero: Path, pbi: str, stato: str = "non convergente") ->
 
 
 def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict],
-                   stato: str = "non convergente"):
+                   stato: str = "non convergente", ricerca: tuple[int, str] | None = None):
     """Un passaggio del tick che decide `Attende(pbi)` senza PR, col rapporto del
     giro chiuso con `stato` nel worktree. Il resto del passaggio è sostituito; `gh`
-    è finto e rende `issue_aperte` alla ricerca. Rende i comandi visti e il rapporto."""
+    è finto e rende `issue_aperte` alla ricerca — o `ricerca`, uscita e testo di
+    un `gh issue list` che non risponde. Rende i comandi visti e il rapporto."""
     repo, albero = tmp_path / "repo", tmp_path / "albero"
     repo.mkdir()
     albero.mkdir()
@@ -2109,7 +2110,7 @@ def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict],
     def esegui(cmd, cwd):
         visti.append(cmd)
         if cmd[:3] == ["gh", "issue", "list"]:
-            return 0, json.dumps(issue_aperte)
+            return ricerca if ricerca is not None else (0, json.dumps(issue_aperte))
         if cmd[:3] == ["gh", "issue", "create"]:
             return 0, "https://github.com/Lara-srl/ada_nlt/issues/7\n"
         raise AssertionError(f"comando non previsto: {cmd}")
@@ -2156,3 +2157,21 @@ class TestIlFermoNonConvergenteApreUnaIssue:
         visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [], stato=stato)
 
         assert not [c for c in visti if c[:2] == ["gh", "issue"]], visti
+
+    @pytest.mark.parametrize("ricerca", [
+        (1, "gh: HTTP 502: Bad Gateway\n"),
+        (0, "non è JSON"),
+    ], ids=["gh-esce-1", "json-che-non-si-legge"])
+    def test_con_la_ricerca_fallita_il_tick_non_apre_e_passa_con_un_avviso(
+            self, monkeypatch, tmp_path, ricerca):
+        """Un `gh issue list` che esce diverso da 0, o rende un JSON che non si
+        legge, non apre niente — il tick dopo ci riprova — e non alza niente: il
+        passaggio torna e il log porta la riga d'avviso (ADR-0008). Senza il ramo
+        `aperte is None` il tick morirebbe con un traceback dentro un cron."""
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [], ricerca=ricerca)
+
+        assert [c for c in visti if c[:3] == ["gh", "issue", "list"]], visti
+        assert not [c for c in visti if c[:3] == ["gh", "issue", "create"]], visti
+        log = (tmp_path / "repo" / coda.LOG).read_text(encoding="utf-8")
+        assert ("avviso: issue «fermo: PBI-5 — non convergente» — gh issue list "
+                f"(uscita {ricerca[0]})") in log, log
