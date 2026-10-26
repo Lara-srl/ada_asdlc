@@ -61,7 +61,7 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-516
 - PBI-524
 - PBI-525
-- ‖ tag `v0.8.0` e pin in `ada_nlt`, `ada_dispense`, `ada_unical`; poi `PBI-526` e `PBI-527` letti e accodati per la `v0.9.0`
+- ‖ tag `v0.9.0` e pin in `ada_nlt`, `ada_dispense`, `ada_unical`; poi i PBI letti e accodati per la `v0.10.0`
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
@@ -108,7 +108,10 @@ rilascio `v0.7.0` e la pausa del tick: la coda si ferma lì.
 
 **`PBI-524` e `PBI-525`, i fermi meccanici dei tre progetti** (Francesco, 25/10): letti il 25/10 col
 Lettore (le sezioni in fondo ai PBI), 524 prima perché 525 tocca gli stessi punti di `builder.md` e del
-gate. Il 525 dichiara `rilascia: minor`: dopo il suo merge il tick taglia la `v0.8.0`, e la barriera è
-il pin nei tre progetti. `PBI-526` (il verde per costruzione su SQL) e `PBI-527` (i criteri a vista)
-vengono dopo, nella `v0.9.0`, prima che parta `ada_nlt` `PBI-6`.
+gate. Il 525 dichiara `rilascia: minor`: dopo il suo merge il tick taglia la `v0.9.0`, e la barriera è
+il pin nei tre progetti. ~~la `v0.8.0`~~: *corretto il 26/10.* La `v0.8.0` esiste già ed è un tag
+fantasma: il tick l'ha tagliata il 25/10 sul merge della #98, che accodava 524 e 525 e toccava solo
+`backlog/` (il difetto di `PBI-528`). Il codice di quel tag è quello della `v0.7.0`; non si cancella,
+perché il tick lo rifarebbe, e `prossimo_tag()` dà la `v0.9.0`. `PBI-526` (il verde per costruzione su
+SQL) e `PBI-527` (i criteri a vista) vengono dopo, nella `v0.10.0`, prima che parta `ada_nlt` `PBI-6`.
 
