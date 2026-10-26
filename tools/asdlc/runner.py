@@ -2143,12 +2143,28 @@ def base_del_lucchetto() -> str:
             if file is not None and file.is_file() else "") or BASE
 
 
+def file_di_test_non_committati() -> list[str]:
+    """I percorsi dell'albero, in stage o no, tracciati o no, per cui
+    `e_file_di_test()` è vero: la diagnosi dell'albero sporco di `chiedi_impl()`.
+
+    Sono i percorsi che il `pre-commit` in `IMPL` rifiuta, tutti: un test cambiato
+    senza nomi nuovi, un golden sotto `tests/`, un test cancellato (PBI-525,
+    rilievo 1 del Critic). Di un rinominato si guardano i due lati, come li legge
+    `voci_del_name_status()`: il commit li rifiuterebbe tutti e due.
+    """
+    tracciati = [p for v in voci_del_name_status(git("diff", "HEAD", "-M", "--name-status"))
+                 for p in (v.percorso, v.vecchio) if p]
+    non_tracciati = git("ls-files", "--others", "--exclude-standard").splitlines()
+    return sorted({p for p in tracciati + non_tracciati if p and e_file_di_test(p)})
+
+
 def test_nuovi_dellalbero() -> list[TestNuovo]:
     """I test che nascono nell'**albero di lavoro**, rispetto a `HEAD`.
 
     Non apre più la fase (PBI-525, decisione 2): il permesso si chiede sul
-    commit RED, e ciò che trova qui è la diagnosi dell'albero sporco, con cui
-    `chiedi_impl()` rifiuta la richiesta e nomina i test da committare.
+    commit RED. La diagnosi dell'albero sporco è `file_di_test_non_committati()`;
+    ciò che trova qui serve solo a nominare, nel rifiuto di `chiedi_impl()`, i
+    test nuovi da committare.
 
     Per Python la regola è quella del gate, `nascite_python` (PBI-396, decisione
     1): il commit è l'albero di lavoro, il genitore è `HEAD`, e la base è quella
@@ -5471,9 +5487,10 @@ def chiedi_impl() -> int:
     legge il rifiuto qui e il rapporto del gate là deve trovare le stesse parole,
     o crederà di avere davanti due controlli diversi.
 
-    Un test nuovo ancora nell'albero ferma la richiesta (PBI-525, decisione 2):
+    Un file di test ancora nell'albero ferma la richiesta (PBI-525, decisione 2):
     aperta `IMPL`, il `pre-commit` non lo lascerebbe più committare, e da `IMPL`
-    si esce solo con un commit.
+    si esce solo con un commit. Il file, non il test nuovo: il `pre-commit` rifiuta
+    ogni percorso di `e_file_di_test()`, anche un golden o un test solo cambiato.
     """
     fase = fase_corrente(REPO)
     if fase != FASE_TEST_ONLY:
@@ -5481,11 +5498,13 @@ def chiedi_impl() -> int:
               f"(fase: {fase or 'nessuna'}). Il permesso si chiede una volta per "
               f"comportamento, e il giro torna in {FASE_TEST_ONLY} dopo il commit.")
         return 1
-    sporchi = test_nuovi_dellalbero()
+    sporchi = file_di_test_non_committati()
     if sporchi:
-        print(f"Il permesso resta chiuso: nell'albero ci sono test non committati, e la "
-              f"fase resta {FASE_TEST_ONLY}.\n")
-        for nuovo in sporchi:
+        print(f"Il permesso resta chiuso: nell'albero ci sono file di test non committati, "
+              f"e la fase resta {FASE_TEST_ONLY}.\n")
+        for percorso in sporchi:
+            print(f"  {percorso}")
+        for nuovo in test_nuovi_dellalbero():
             print(f"  {nuovo.file}::{nuovo.nome}")
         print(f"\nIn {FASE_IMPL} il commit di un test è rifiutato: committa prima il RED, "
               f"da solo, poi richiedi la fase.")
