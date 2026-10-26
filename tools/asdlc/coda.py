@@ -875,12 +875,26 @@ def avvisa_il_fermo(repo: Path, worktree: Path, pbi: str, riga: str) -> str | No
     stanno le PR, e si legge da ovunque. Il titolo è «fermo: PBI-N — non
     convergente»; il corpo, `riga` e il percorso del rapporto. È un avviso: la
     riga dice l'uscita di `gh`, qualunque sia, e il tick passa (`ADR-0008`).
+
+    Una issue sola: prima di aprirla si cerca una issue aperta con quel titolo, e
+    se c'è non si fa niente — la chiude chi riprende il PBI. Una ricerca a cui `gh`
+    non risponde non apre niente: il tick dopo ci riprova.
     """
     trovato = ultimo_rapporto(worktree, pbi)
     if trovato is None or trovato[1].get("stato") != "non convergente":
         return None
     rapporto, _ = trovato
     titolo = f"fermo: {pbi} — non convergente"
+    codice, uscita = esegui(["gh", "issue", "list", "--state", "open",
+                             "--search", f'"{titolo}" in:title', "--json", "title,url"], repo)
+    try:
+        aperte = json.loads(uscita) if codice == 0 else None
+    except ValueError:
+        aperte = None
+    if aperte is None:
+        return f"avviso: issue «{titolo}» — gh issue list (uscita {codice}): {in_una_riga(uscita)}"
+    if any(issue.get("title") == titolo for issue in aperte):
+        return None
     corpo = f"{riga}\n\nRapporto del giro: `{rapporto}`"
     codice, uscita = esegui(["gh", "issue", "create", "--title", titolo, "--body", corpo], repo)
     return f"avviso: issue «{titolo}» — gh issue create (uscita {codice}): {in_una_riga(uscita)}"
