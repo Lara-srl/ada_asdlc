@@ -2134,3 +2134,12 @@ class TestIlFermoNonConvergenteApreUnaIssue:
         corpo = creato[creato.index("--body") + 1]
         assert "attende: PBI-5 ha un ramo su origin" in corpo
         assert str(rapporto) in corpo
+
+    def test_con_la_issue_gia_aperta_il_tick_non_ne_apre_un_altra(self, monkeypatch, tmp_path):
+        aperta = [{"title": "fermo: PBI-5 — non convergente",
+                   "url": "https://github.com/Lara-srl/ada_nlt/issues/7"}]
+
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", aperta)
+
+        assert [c for c in visti if c[:3] == ["gh", "issue", "list"]], "il tick cerca la issue aperta"
+        assert not [c for c in visti if c[:3] == ["gh", "issue", "create"]], visti
