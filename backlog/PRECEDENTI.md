@@ -24,3 +24,4 @@ formato, non come precedenti di merito. Quella del 15/10 è un precedente vero.
 - 2026-10-25 · rosso-mai-visto · un test nato verde su un comportamento che vive in un file `.sql` passa non verificato se il commit porta `Verde-per-costruzione: <motivo>` e il ramo tocca un `.sql`; fuori dall'SQL ferma come prima · PBI-526, ADR-0022 (revisione del 25/10)
 - 2026-10-25 · criteri · un criterio che solo una persona può giudicare si marca `(a vista)`: niente sonda né test, il Critic non blocca, lo spunta chi mergia · ADR-0032
 - 2026-10-25 · rilascio · una PR che accoda o scrive un PBI non si intitola `PBI-XXX:` e non nasce da `pbi/`, finché PBI-528 non è in main · PBI-528
+- 2026-10-25 · merge · il merge di una PR di giro è del tick alle condizioni di `ADR-0033`; `(a vista)`, costituzione, deroghe e PR non del runner restano di Francesco · ADR-0033

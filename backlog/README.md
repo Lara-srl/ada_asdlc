@@ -36,6 +36,12 @@ asserzione, contro `main`. Un caso verde su `main` non è un criterio, è una **
 va nella non regressione dichiarata come tale (`ADR-0022`, nota del 23/09; misurato sul
 primo giro di PBI-364).
 
+**Una PR che accoda o scrive un PBI non si intitola `PBI-XXX:` e non nasce da un ramo `pbi/`**:
+il tick la leggerebbe come la PR che lo *fa*. La coda si difende (`tocca_codice()`), il rilascio no,
+finché `PBI-528` non è in `main`: il 25/10 la #93, `PBI-525: …`, di soli file in `backlog/`, ha fatto
+taggare `v0.8.0` senza il codice di 525. Si intitola «Accoda PBI-XXX…» o «PBI-XXX, bozza: …» (la
+virgola basta: il titolo che il tick riconosce è `PBI-XXX:` con i due punti).
+
 **Prima di accodare, rileggi** (le sette domande di `ADR-0031`; la forma e lo Scope li
 controlla `asdlc-runner PBI-XXX --preverifica`, `PBI-520`):
 - **R** — ogni criterio può nascere rosso su `main`?
