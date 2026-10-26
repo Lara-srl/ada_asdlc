@@ -2070,3 +2070,67 @@ def test_il_dry_run_con_la_cartella_del_pin_assente_lo_scrive_e_decide(
     assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
     assert righe[0].startswith("dry-run: "), righe
     assert "reinstallazione fallita: la cartella tools non c'è a HEAD — " in righe[0], righe
+
+
+# --- PBI-525: il fermo `non convergente` apre una issue -----------------------
+
+
+def rapporto_non_convergente(albero: Path, pbi: str) -> Path:
+    """Il rapporto di un giro chiuso `non convergente` a revisioni esaurite, nel
+    registro del worktree del runner, dove il tick lo cerca."""
+    registro = albero / coda.CFG.registro.cartella
+    registro.mkdir(parents=True, exist_ok=True)
+    file = registro / "20261025-085406.json"
+    file.write_text(json.dumps({
+        "run": "20261025-085406", "stato": "finito",
+        "esiti": [{"pbi": pbi, "stato": "non convergente", "motivo": "revisioni-esaurite",
+                   "ramo": f"pbi/pbi-{pbi.removeprefix('PBI-')}"}],
+    }), encoding="utf-8")
+    return file
+
+
+def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict]):
+    """Un passaggio del tick che decide `Attende(pbi)` senza PR, col rapporto
+    `non convergente` nel worktree. Il resto del passaggio è sostituito; `gh` è
+    finto e rende `issue_aperte` alla ricerca. Rende i comandi visti e il rapporto."""
+    repo, albero = tmp_path / "repo", tmp_path / "albero"
+    repo.mkdir()
+    albero.mkdir()
+    rapporto = rapporto_non_convergente(albero, pbi)
+    for nome, finto in (("batti", lambda r: None), ("pin", lambda r: []),
+                        ("fermo_in_pausa", lambda r: False), ("allinea", lambda r: None),
+                        ("rilascia", lambda r: []), ("reinstalla", lambda r, w: None),
+                        ("decidi", lambda r, w: coda.Attende(pbi, ()))):
+        monkeypatch.setattr(coda, nome, finto)
+    visti: list[list[str]] = []
+
+    def esegui(cmd, cwd):
+        visti.append(cmd)
+        if cmd[:3] == ["gh", "issue", "list"]:
+            return 0, json.dumps(issue_aperte)
+        if cmd[:3] == ["gh", "issue", "create"]:
+            return 0, "https://github.com/Lara-srl/ada_nlt/issues/7\n"
+        raise AssertionError(f"comando non previsto: {cmd}")
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+    coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+    return visti, rapporto
+
+
+class TestIlFermoNonConvergenteApreUnaIssue:
+    """PBI-525, criterio 3 (decisione 6): il giro 1 di `PBI-5` di `ada_nlt` si è
+    chiuso `non convergente`, e il tick ha scritto la stessa riga di `attende`
+    ogni dieci minuti per oltre dieci ore senza che nessuno lo sapesse. Il tick
+    apre una issue nel repository del progetto, col titolo «fermo: PBI-N — non
+    convergente» e nel corpo la riga di `attende` e il percorso del rapporto."""
+
+    def test_al_primo_passaggio_il_tick_apre_la_issue(self, monkeypatch, tmp_path):
+        visti, rapporto = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [])
+
+        creati = [c for c in visti if c[:3] == ["gh", "issue", "create"]]
+        assert len(creati) == 1, visti
+        creato = creati[0]
+        assert creato[creato.index("--title") + 1] == "fermo: PBI-5 — non convergente"
+        corpo = creato[creato.index("--body") + 1]
+        assert "attende: PBI-5 ha un ramo su origin" in corpo
+        assert str(rapporto) in corpo
