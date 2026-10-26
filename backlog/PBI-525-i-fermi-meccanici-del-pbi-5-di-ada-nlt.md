@@ -61,9 +61,9 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
 - `tools/tests/test_asdlc_runner.py`, `test_asdlc_prompt.py`, `test_asdlc_chiudi_giro.py`,
   `test_asdlc_coda.py` — i test dei criteri, e i test esistenti che le decisioni 2 e 3 cambiano **nel
   commit RED**.
-- `tools/asdlc/chiudi_giro.py` — un settimo passo: se il worktree del runner ha modifiche non
+- ~~`tools/asdlc/chiudi_giro.py` — un settimo passo: se il worktree del runner ha modifiche non
   committate, le mette in `git stash` con un messaggio che nomina il PBI e il giro (mai
-  `reset --hard`: il lavoro si recupera), e lo dice nel resoconto.
+  `reset --hard`: il lavoro si recupera), e lo dice nel resoconto.~~ *Barrato il 26/10 (Francesco): sostituito da `PBI-532`, che archivia il lavoro non committato in un `.patch` e pulisce l'albero alla fine del giro, in `chiudi()` del runner (decisioni 1, 2 e 8 di quel PBI). Si rivede se `PBI-532` non entra.*
 - `tools/asdlc/coda.py` — l'avviso quando la coda resta in `attende` per un `non convergente`.
 - `tools/tests/` — i test dei criteri.
 - `backlog/PBI-525-…md` — questo file, per la spunta.
@@ -83,12 +83,13 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
    `test_apre_la_fase_quando_il_test_nuovo_e_rosso` (`test_asdlc_runner.py:5651`) e il loro docstring
    dicono il contrario e cambiano **nel commit RED**: la fixture committa il test prima di chiamare il
    comando. `test_nuovi_dellalbero()` resta per la sola diagnosi dell'albero sporco.
-3. **Il settimo passo di `chiudi-giro` sta dopo il quinto e prima di togliere la pausa.** Nel
+3. ~~**Il settimo passo di `chiudi-giro` sta dopo il quinto e prima di togliere la pausa.** Nel
    worktree del runner: `git status --porcelain`; se non è vuoto, `git stash push -u -m "PBI-N giro R:
    lavoro del giro fermato"`, con `cwd` il worktree. Il dry-run lo stampa. I test
    `test_un_giro_fermato_si_chiude_coi_sei_passi_in_ordine` e quello del dry-run
    (`test_asdlc_chiudi_giro.py:167`, `:361`) cambiano **nel commit RED** per attendere il passo in più
-   col suo `cwd`.
+   col suo `cwd`.~~
+   *Barrato il 26/10 (Francesco): sostituito da `PBI-532`, che archivia il lavoro non committato in un `.patch` e pulisce l'albero alla fine del giro, in `chiudi()` del runner (decisioni 1, 2 e 8 di quel PBI). Si rivede se `PBI-532` non entra.*
 4. **Proposta per la domanda 1: un rilievo di storia non è mai bloccante dentro il giro**, prima o dopo la
    pubblicazione del ramo. Il Builder non riscrive la storia e lo squash, se serve, è al merge
    (`AGENTS.md`, micro-commit). Distinguere i due momenti chiederebbe al Critic di sapere se il ramo è
@@ -115,10 +116,11 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
       un test committato nel RED e un secondo file di test modificato nell'albero: il comando esce 1,
       stampa «committa prima il RED» e la fase resta `TEST_ONLY`. Con l'albero pulito e il test
       committato, apre `IMPL` come oggi. Rosso su `main`: oggi apre `IMPL` leggendo l'albero.
-- [ ] **`asdlc-chiudi-giro` lascia il worktree del runner pulito.** Con un file in stage nel
+- ~~**`asdlc-chiudi-giro` lascia il worktree del runner pulito.** Con un file in stage nel
       worktree, dopo il comando `git status --porcelain` è vuoto, `git stash list` nomina il PBI e
       il giro, il passo sta dopo il `merge --ff-only` e prima che la pausa sia tolta, e il dry-run lo
-      stampa senza eseguirlo. Rosso su `main`: oggi il file resta.
+      stampa senza eseguirlo. Rosso su `main`: oggi il file resta.~~
+      *Barrato il 26/10 (Francesco): sostituito da `PBI-532`, che archivia il lavoro non committato in un `.patch` e pulisce l'albero alla fine del giro, in `chiudi()` del runner (decisioni 1, 2 e 8 di quel PBI). Si rivede se `PBI-532` non entra.*
 - [ ] **Un tick che trova un `non convergente` apre una issue, una sola.** Con un `gh` finto: al primo
       passaggio il tick chiama `gh issue create` col titolo «fermo: PBI-N — non convergente»; al secondo
       passaggio, con `gh issue list` che la restituisce aperta, non chiama `create`. Rosso su `main`:
