@@ -191,3 +191,42 @@ class TestLoScheletroDelPromptEQuelloDelLucchetto:
 
         # Gli a capo del prompt non contano: la frase può essere spezzata su due righe.
         assert frase not in " ".join(generati()["builder"].split())
+
+
+# --- PBI-525: i rilievi di storia e la classe dei casi nel prompt del Critic ---
+
+
+def paragrafi(testo: str) -> list[str]:
+    """I paragrafi del prompt, separati dalle righe bianche, con gli a capo come
+    spazi: una regola può andare a capo a metà frase."""
+    return [" ".join(blocco.split()) for blocco in re.split(r"\n\s*\n", testo) if blocco.strip()]
+
+
+class TestIlCriticNonChiedeUnRebase:
+    """PBI-525, criterio 1: sul giro 1 di `PBI-5` di `ada_nlt` il Critic ha dato
+    `non pronto` per due rilievi di sola storia dei commit col rimedio «un rebase»,
+    che il Builder non può eseguire, e ha consumato due revisioni su quattro. E fra
+    un passaggio e l'altro ha riportato un'istanza per volta della stessa classe di
+    difetto (un dato utente non valido che torna 500). Il prompt manda i rilievi di
+    storia fra le note per chi mergia (decisioni 1 e 4), non nomina il rebase, e
+    chiede la classe intera (decisione 5)."""
+
+    def test_un_rilievo_di_sola_storia_va_nelle_note_per_chi_mergia(self, configura):
+        configura()
+
+        regole = [p for p in paragrafi(generati()["critic"])
+                  if "storia" in p and "Note per chi mergia" in p]
+
+        assert regole, "nessuna regola del Critic manda i rilievi di storia fra le note per chi mergia"
+
+    def test_il_prompt_non_nomina_il_rebase(self, configura):
+        configura()
+
+        assert "rebase" not in generati()["critic"]
+
+    def test_un_rilievo_di_correttezza_elenca_la_classe_intera(self, configura):
+        configura()
+
+        regole = [p for p in paragrafi(generati()["critic"]) if "classe" in p and "dato" in p]
+
+        assert regole, "il Critic non chiede di elencare la classe intera dei dati utente non validi"
