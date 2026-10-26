@@ -5720,6 +5720,38 @@ class TestIlPermessoDiImplementareSiChiede:
         assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
         assert "committa prima il RED" in capsys.readouterr().out
 
+    def _albero_sporco(self, repo, monkeypatch, sporca):
+        """Un RED committato e rosso, un file sotto `tests/` che c'era già, e il
+        gesto `sporca` che lo lascia non committato senza far nascere un test."""
+        repo.commit("test(pratica): la pratica c'è", {
+            self.SECONDO: "def test_la_pratica_ce():\n    assert True\n",
+            "backend/tests/dati/pratica.txt": "la pratica\n"})
+        self._in_test_only(repo, monkeypatch)
+        sporca(repo.radice)
+
+    @pytest.mark.parametrize("sporca", [
+        # (a) il corpo di un test che esiste già: ciò che il commit RED porta per
+        # «i test esistenti che le decisioni cambiano»
+        lambda r: (r / "backend/tests/test_pratica.py").write_text(
+            "def test_la_pratica_ce():\n    assert False\n", encoding="utf-8"),
+        # (c) un file di supporto sotto `tests/`, modificato o non tracciato
+        lambda r: (r / "backend/tests/dati/pratica.txt").write_text("cambiata\n"),
+        lambda r: (r / "backend/tests/conftest.py").write_text("import pytest\n"),
+        # (d) un test cancellato, senza un nome nuovo
+        lambda r: (r / "backend/tests/test_pratica.py").unlink(),
+    ], ids=["corpo-di-un-test-esistente", "golden-modificato", "conftest-non-tracciato",
+            "test-cancellato"])
+    def test_un_file_di_test_non_committato_che_non_nasce_un_test_non_apre(
+            self, repo_di_prova, monkeypatch, capsys, sporca):
+        """Rilievo 1 del Critic su PBI-525: in `IMPL` il `pre-commit` rifiuta ogni
+        percorso per cui `e_file_di_test()` è vero, non solo le nascite di test.
+        Ciascuno di questi apriva la fase e poi non si poteva più committare."""
+        self._albero_sporco(repo_di_prova, monkeypatch, sporca)
+
+        assert runner.smista() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert "committa prima il RED" in capsys.readouterr().out
+
     def test_non_apre_su_un_test_nato_verde(self, repo_di_prova, monkeypatch, capsys):
         self._in_test_only(repo_di_prova, monkeypatch, esito="verde")
 
