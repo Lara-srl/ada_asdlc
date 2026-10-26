@@ -5727,20 +5727,23 @@ class TestIlPermessoDiImplementareSiChiede:
             self.SECONDO: "def test_la_pratica_ce():\n    assert True\n",
             "backend/tests/dati/pratica.txt": "la pratica\n"})
         self._in_test_only(repo, monkeypatch)
-        sporca(repo.radice)
+        sporca(repo)
 
     @pytest.mark.parametrize("sporca", [
         # (a) il corpo di un test che esiste già: ciò che il commit RED porta per
         # «i test esistenti che le decisioni cambiano»
-        lambda r: (r / "backend/tests/test_pratica.py").write_text(
+        lambda repo: (repo.radice / "backend/tests/test_pratica.py").write_text(
             "def test_la_pratica_ce():\n    assert False\n", encoding="utf-8"),
         # (c) un file di supporto sotto `tests/`, modificato o non tracciato
-        lambda r: (r / "backend/tests/dati/pratica.txt").write_text("cambiata\n"),
-        lambda r: (r / "backend/tests/conftest.py").write_text("import pytest\n"),
+        lambda repo: (repo.radice / "backend/tests/dati/pratica.txt").write_text("cambiata\n"),
+        lambda repo: (repo.radice / "backend/tests/conftest.py").write_text("import pytest\n"),
         # (d) un test cancellato, senza un nome nuovo
-        lambda r: (r / "backend/tests/test_pratica.py").unlink(),
+        lambda repo: (repo.radice / "backend/tests/test_pratica.py").unlink(),
+        # (e) un test rinominato fuori da `tests/`, in stage: il lato nuovo non è
+        # un file di test, quello vecchio sì, e il `pre-commit` li guarda tutti e due
+        lambda repo: repo.sposta("backend/tests/test_pratica.py", "nota.txt"),
     ], ids=["corpo-di-un-test-esistente", "golden-modificato", "conftest-non-tracciato",
-            "test-cancellato"])
+            "test-cancellato", "test-rinominato-fuori-da-tests"])
     def test_un_file_di_test_non_committato_che_non_nasce_un_test_non_apre(
             self, repo_di_prova, monkeypatch, capsys, sporca):
         """Rilievo 1 del Critic su PBI-525: in `IMPL` il `pre-commit` rifiuta ogni
