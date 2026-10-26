@@ -1696,7 +1696,12 @@ def guardia_di_fase(fase: str | None, percorso: str,
                     f"qui si scrivono solo i test. Scrivi il test del comportamento che "
                     f"ti serve, poi `tools/asdlc/runner.py --chiedi-impl`: se è rosso, la "
                     f"produzione si apre. Se il test passa già, quel comportamento c'è "
-                    f"di suo e non è questo il commit in cui nasce.")
+                    f"di suo e non è questo il commit in cui nasce. Lo scheletro di un "
+                    f"modulo nuovo passa solo se è fatto di righe bianche e commenti, "
+                    f"scritto intero con `Write`: un docstring non è un commento, una firma è codice. "
+                    f"Per un file che esiste già non c'è scheletro. In tutti e due i casi "
+                    f"il test accede al nome che manca (`modulo.nome`), e il rosso è "
+                    f"l'AttributeError dentro il test.")
         return None
     if fase == FASE_IMPL:
         if e_file_di_test(percorso):
