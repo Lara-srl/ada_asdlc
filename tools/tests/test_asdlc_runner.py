@@ -5726,6 +5726,20 @@ class TestIlPermessoDiImplementareSiChiede:
         assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
         assert "nessun test nuovo" in capsys.readouterr().out
 
+    def test_senza_test_nuovi_il_rifiuto_dice_cosa_conta_come_test_nuovo(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-524, criterio 3 (decisione 6): il Builder del giro 3 di `PBI-3` di
+        `ada_nlt` aveva committato un RED di soli casi nuovi di un `parametrize`
+        esistente, e il rifiuto non gli diceva che per il runner quel test non
+        nasce. Il messaggio nomina la funzione nuova e il `parametrize`."""
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+        assert runner.smista() == 1
+        uscita = capsys.readouterr().out
+        assert "funzione" in uscita
+        assert "parametrize" in uscita
+
     def test_fuori_da_test_only_non_si_chiede(self, repo_di_prova, monkeypatch, capsys):
         """Da `IMPL` la richiesta non ha senso, e riaprirla sarebbe il modo di
         restarci per sempre: un giro che non torna mai a `TEST_ONLY` è un giro
