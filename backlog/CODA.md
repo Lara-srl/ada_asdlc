@@ -61,7 +61,10 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-516
 - PBI-524
 - PBI-525
-- ‖ tag `v0.9.0` e pin in `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`; poi i PBI letti e accodati per la `v0.10.0`
+- ‖ tag `v0.9.0` e pin in `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`
+- PBI-528
+- PBI-530
+- ‖ tag `v1.0.0` e pin in `ada_asdlc`, `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`; poi gli altri PBI letti e accodati per la `v1.1.0`
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
@@ -115,3 +118,10 @@ fantasma: il tick l'ha tagliata il 25/10 sul merge della #98, che accodava 524 e
 perché il tick lo rifarebbe, e `prossimo_tag()` dà la `v0.9.0`. `PBI-526` (il verde per costruzione su
 SQL) e `PBI-527` (i criteri a vista) vengono dopo, nella `v0.10.0`, prima che parta `ada_nlt` `PBI-6`.
 
+**`PBI-528` e `PBI-530`, il merge automatico** (Francesco, 26/10: «quello che mi interessa di più è il
+merge in automatico»). Letti il 26/10 col Lettore (le sezioni in fondo ai PBI, quattro rilievi recepiti).
+Il 528 prima, perché un rilascio che parte dalla PR sbagliata col merge automatico taggherebbe a vuoto
+più spesso. Il 530 dichiara `rilascia: major`: dopo il suo merge il tick taglia la `v1.0.0`, e la
+barriera è il pin nei cinque repository, compreso questo. `PBI-527` esce dalle dipendenze del 530
+(`ADR-0032` è in `main` e la condizione si legge con la stessa regex) e viene dopo, con 526, 529, 531,
+532 e 533, nella `v1.1.0`. Il bump di `tools/pyproject.toml` resta una PR a mano prima del tag.
