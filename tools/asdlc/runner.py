@@ -5481,7 +5481,10 @@ def chiedi_impl() -> int:
     nuovi = test_nuovi_da_aprire()
     if not nuovi:
         print("Non c'è nessun test nuovo nell'albero, quindi nessun rosso da osservare. "
-              "Scrivi prima il test del comportamento che ti serve.")
+              "Scrivi prima il test del comportamento che ti serve. Un test nuovo è una "
+              "funzione di test nuova: i casi aggiunti a un `parametrize` che c'era già "
+              "non contano. Il RED si committa da solo prima di `--chiedi-impl`, che legge "
+              "l'ultimo commit quando l'albero non ha test non committati.")
         return 1
     comandi, orfani = comandi_dei_test(REPO, nuovi)
     mancati: list[tuple[str, list[str]]] = []
