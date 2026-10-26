@@ -1,7 +1,7 @@
 # PBI-524: lo scheletro che il prompt chiede è quello che il lucchetto accetta
 
-**Stato:** da rileggere prima di accodare (la lettura avversariale non c'è ancora). La decisione 1
-è confermata: Francesco, 24/10/2026, «allinea il prompt e non allargare il lucchetto».
+**Stato:** in coda; giro 1 chiuso `senza esito` il 25/10 (limite d'uso), ripresa nel giro 2 (in fondo).
+La decisione 1 è confermata: Francesco, 24/10/2026, «allinea il prompt e non allargare il lucchetto».
 
 ## Direttiva
 
@@ -179,3 +179,71 @@ recepito nella decisione qui sopra: il GREEN del criterio 1 non si committa in `
 `PBI-518`). Le tre sonde sono uscite `guasto` (gate guasto nell'albero usa e getta, non un verde): il
 rosso dei criteri 1-3 resta dichiarato, non provato, e il guasto delle sonde è da capire a parte.
 
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (25/10, run `20261025-232512`, runner `v0.7.0`, 7 minuti) ha fatto il **criterio 1** e il
+**criterio 4** con due commit, RED e GREEN, sopra `297c1be`:
+
+- `e8a19bf` `test(prompt): l'esempio di scheletro di builder.md passa da e_scheletro_vuoto() (RED)`
+- `61caa54` `feat(prompt): lo scheletro di un modulo nuovo è un file di soli commenti, con l'esempio`
+  (prompt e golden nello stesso commit, fase ferma a `TEST_ONLY`, come la decisione 7)
+
+Poi ha scritto il RED del criterio 2 e si è fermato prima di committarlo: il **limite d'uso
+dell'account** (reset alle 00:10), scritto su stdout e non riconosciuto come tale, ha chiuso il giro
+`senza esito` (`builder-senza-esito`, è il caso di `PBI-531`). Il giro è chiuso col tag
+`giro-fermato/pbi-524-giro1-20261025` (`61caa54`). Il test non committato è rimasto nell'albero del
+tick e lo ha sporcato: dal 26/10 08:25 ogni lancio si è fermato `albero-sporco-all-ingresso`.
+L'albero è stato pulito a mano il 26/10, e il test è qui sotto.
+
+Sul tag, verificato il 26/10 in un albero in `/tmp`: `python3 -m pytest -q tools/tests` dà
+`1205 passed`, `git status --porcelain` è vuoto dopo il gate, e `asdlc-runner --gate-rosso HEAD`
+dice «nessun test è nato verde». Il test del criterio 2 qui sotto, applicato sul tag, **fallisce**
+su `assert "commenti" in ragione`: il rosso c'è.
+
+**Da fare, in quest'ordine:**
+
+1. **I due commit sul ramo del giro:** `git cherry-pick -x
+   297c1be..giro-fermato/pbi-524-giro1-20261025`. Nessuno dei due tocca `backlog/`, e `main` dopo
+   `297c1be` si è mosso solo in `backlog/` e `decisions/`. **Verifica:** `git log --oneline
+   origin/main..HEAD` mostra i due commit, `test(prompt)` e poi `feat(prompt)`. Se il cherry-pick dà
+   un conflitto è un fatto nuovo: `fermati` con la domanda, senza risolverlo a mano.
+2. **Il criterio 2**, ciclo intero: il RED è il test che il giro 1 aveva scritto in
+   `tools/tests/test_asdlc_runner.py`, prima di `class TestIlPermessoDiImplementareSiChiede`. Si
+   committa da solo (`test(runner): …`, con la formula scelta dichiarata nel messaggio), poi
+   `--chiedi-impl`, poi il messaggio di `guardia_di_fase()`. Il test, com'era:
+
+   ```python
+   class TestIlRifiutoDellaGuardiaDiceCosaPassa:
+       """PBI-524, criterio 2: il Builder del giro 2 di `PBI-3` di `ada_nlt` ha
+       ricevuto un rifiuto che non nominava lo scheletro vuoto, e ha chiesto a una
+       persona. Il messaggio dice la regola (righe bianche e commenti, e un docstring
+       non è un commento) e la strada (il test accede all'attributo che manca, e il
+       rosso è l'`AttributeError`) — decisione 4."""
+
+       ARCHIVIO = "backend/app/archivio.py"
+       CODICE = "class Archivio:\n    def cerca(self, codice):\n        return None\n"
+       DOCSTRING = '"""L\'archivio delle lavorazioni."""\n'
+       COMMENTI = "# l'archivio delle lavorazioni\n\n# ogni nome nasce dal rosso del suo test\n"
+
+       def test_su_un_py_con_del_codice_il_rifiuto_nomina_i_commenti_e_l_attribute_error(self):
+           ragione = runner.guardia_di_fase(runner.FASE_TEST_ONLY, self.ARCHIVIO, self.CODICE)
+
+           assert ragione is not None
+           assert "commenti" in ragione
+           assert "docstring" in ragione
+           assert "AttributeError" in ragione
+           # Lo stesso rifiuto sul docstring, che è un'espressione e non un commento;
+           # e nessun rifiuto sul file di soli commenti, che è lo scheletro vuoto.
+           assert runner.guardia_di_fase(runner.FASE_TEST_ONLY, self.ARCHIVIO, self.DOCSTRING) == ragione
+           assert runner.guardia_di_fase(runner.FASE_TEST_ONLY, self.ARCHIVIO, self.COMMENTI) is None
+   ```
+
+3. **Il criterio 3**, ciclo intero come il 2, così com'è scritto nella Verifica.
+4. **Le spunte:** i quattro criteri della Verifica, in un commit `docs(runner): …`.
+5. **Il gate** sul ramo: `python3 -m pytest -q tools/tests` verde, e `git status --porcelain`
+   vuoto dopo averlo girato.
+6. **`fatto`**, perché il gate del rosso giri su tutti i commit e il Critic legga il lavoro.
+
+**Non si fa:** non si riprende il tag come ramo e non se ne riscrive la storia, non si rifanno i
+commit del criterio 1, non si tocca `e_scheletro_vuoto()` né il `pre-commit` (decisione 1), non si
+committa nessun JSON.
