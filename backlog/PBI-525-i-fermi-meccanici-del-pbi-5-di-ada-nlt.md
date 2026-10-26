@@ -106,13 +106,13 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
 
 ## Verifica
 
-- [ ] **Il prompt del Critic governa i rilievi di storia e non nomina il rebase.** Un test
+- [x] **Il prompt del Critic governa i rilievi di storia e non nomina il rebase.** Un test
       parametrizzato su `critic.md`: (a) contiene «Note per chi mergia» e «storia» nella stessa regola
       (o la formula equivalente scelta nel RED, dichiarata nel commit); (b) non contiene «rebase»;
       (c) dice che un rilievo di correttezza su un dato utente elenca l'intera classe verificata
       («classe», o formula equivalente). Il golden `critic.txt` segue nello stesso commit. Su `main`:
       (a) e (c) mancano, (b) c'è il rebase a riga 38.
-- [ ] **`--chiedi-impl` con un test modificato e non committato non apre `IMPL`.** Fase `TEST_ONLY`,
+- [x] **`--chiedi-impl` con un test modificato e non committato non apre `IMPL`.** Fase `TEST_ONLY`,
       un test committato nel RED e un secondo file di test modificato nell'albero: il comando esce 1,
       stampa «committa prima il RED» e la fase resta `TEST_ONLY`. Con l'albero pulito e il test
       committato, apre `IMPL` come oggi. Rosso su `main`: oggi apre `IMPL` leggendo l'albero.
@@ -121,7 +121,7 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
       il giro, il passo sta dopo il `merge --ff-only` e prima che la pausa sia tolta, e il dry-run lo
       stampa senza eseguirlo. Rosso su `main`: oggi il file resta.~~
       *Barrato il 26/10 (Francesco): sostituito da `PBI-532`, che archivia il lavoro non committato in un `.patch` e pulisce l'albero alla fine del giro, in `chiudi()` del runner (decisioni 1, 2 e 8 di quel PBI). Si rivede se `PBI-532` non entra.*
-- [ ] **Un tick che trova un `non convergente` apre una issue, una sola.** Con un `gh` finto: al primo
+- [x] **Un tick che trova un `non convergente` apre una issue, una sola.** Con un `gh` finto: al primo
       passaggio il tick chiama `gh issue create` col titolo «fermo: PBI-N — non convergente»; al secondo
       passaggio, con `gh issue list` che la restituisce aperta, non chiama `create`. Rosso su `main`:
       oggi il tick scrive solo `attende`.
