@@ -5639,6 +5639,31 @@ class TestLHookERegistratoEFerma:
         assert esito.stderr == ""
 
 
+class TestIlRifiutoDellaGuardiaDiceCosaPassa:
+    """PBI-524, criterio 2: il Builder del giro 2 di `PBI-3` di `ada_nlt` ha
+    ricevuto un rifiuto che non nominava lo scheletro vuoto, e ha chiesto a una
+    persona. Il messaggio dice la regola (righe bianche e commenti, e un docstring
+    non è un commento) e la strada (il test accede all'attributo che manca, e il
+    rosso è l'`AttributeError`) — decisione 4."""
+
+    ARCHIVIO = "backend/app/archivio.py"
+    CODICE = "class Archivio:\n    def cerca(self, codice):\n        return None\n"
+    DOCSTRING = '"""L\'archivio delle lavorazioni."""\n'
+    COMMENTI = "# l'archivio delle lavorazioni\n\n# ogni nome nasce dal rosso del suo test\n"
+
+    def test_su_un_py_con_del_codice_il_rifiuto_nomina_i_commenti_e_l_attribute_error(self):
+        ragione = runner.guardia_di_fase(runner.FASE_TEST_ONLY, self.ARCHIVIO, self.CODICE)
+
+        assert ragione is not None
+        assert "commenti" in ragione
+        assert "docstring" in ragione
+        assert "AttributeError" in ragione
+        # Lo stesso rifiuto sul docstring, che è un'espressione e non un commento;
+        # e nessun rifiuto sul file di soli commenti, che è lo scheletro vuoto.
+        assert runner.guardia_di_fase(runner.FASE_TEST_ONLY, self.ARCHIVIO, self.DOCSTRING) == ragione
+        assert runner.guardia_di_fase(runner.FASE_TEST_ONLY, self.ARCHIVIO, self.COMMENTI) is None
+
+
 class TestIlPermessoDiImplementareSiChiede:
     """`--chiedi-impl`: l'unico modo di passare da `TEST_ONLY` a `IMPL`.
 
@@ -5700,6 +5725,20 @@ class TestIlPermessoDiImplementareSiChiede:
         assert runner.smista() == 1
         assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
         assert "nessun test nuovo" in capsys.readouterr().out
+
+    def test_senza_test_nuovi_il_rifiuto_dice_cosa_conta_come_test_nuovo(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-524, criterio 3 (decisione 6): il Builder del giro 3 di `PBI-3` di
+        `ada_nlt` aveva committato un RED di soli casi nuovi di un `parametrize`
+        esistente, e il rifiuto non gli diceva che per il runner quel test non
+        nasce. Il messaggio nomina la funzione nuova e il `parametrize`."""
+        runner.percorso_della_fase(repo_di_prova.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
+        monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
+
+        assert runner.smista() == 1
+        uscita = capsys.readouterr().out
+        assert "funzione" in uscita
+        assert "parametrize" in uscita
 
     def test_fuori_da_test_only_non_si_chiede(self, repo_di_prova, monkeypatch, capsys):
         """Da `IMPL` la richiesta non ha senso, e riaprirla sarebbe il modo di

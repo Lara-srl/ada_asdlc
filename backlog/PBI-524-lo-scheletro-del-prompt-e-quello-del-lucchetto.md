@@ -144,20 +144,20 @@ corso non cambia sotto i piedi.
 
 Su `main` i criteri 1, 2 e 3 sono un **rosso atteso**.
 
-- [ ] **L'esempio di scheletro del prompt è uno scheletro vuoto per il lucchetto.** Il test estrae
+- [x] **L'esempio di scheletro del prompt è uno scheletro vuoto per il lucchetto.** Il test estrae
       da `builder.md` il blocco di esempio dello scheletro e verifica
       `e_scheletro_vuoto("nlt/esempio.py", blocco)`. Sul prompt di `main` il blocco non c'è (il
       prompt descrive uno scheletro con una funzione che torna `None`): rosso. Un caso dello stesso
       test: il prompt non contiene più «la funzione che torna `None`» (pytest, parametrizzato).
-- [ ] **Il rifiuto dice cosa passa.** Con fase `TEST_ONLY`, `guardia_di_fase()` su un `.py` di
+- [x] **Il rifiuto dice cosa passa.** Con fase `TEST_ONLY`, `guardia_di_fase()` su un `.py` di
       produzione con del codice torna un messaggio che contiene «commenti» e «AttributeError» (o
       la formula equivalente scelta nel RED, dichiarata nel messaggio del commit); su un
       `.py` fatto di commenti torna `None` (pytest).
-- [ ] **Il rifiuto di `--chiedi-impl` dice cosa conta come test nuovo.** Con la fase `TEST_ONLY` e
+- [x] **Il rifiuto di `--chiedi-impl` dice cosa conta come test nuovo.** Con la fase `TEST_ONLY` e
       nessun test nuovo, l'uscita di `chiedi_impl()` contiene «funzione» e «parametrize» (o la formula
       equivalente scelta nel RED, dichiarata nel messaggio del commit) e il suo codice resta 1
       (pytest, repository temporaneo). Su `main` il messaggio non li nomina: rosso.
-- [ ] **Il golden segue il testo.** `test_asdlc_prompt.py` resta verde col golden aggiornato nello
+- [x] **Il golden segue il testo.** `test_asdlc_prompt.py` resta verde col golden aggiornato nello
       stesso commit del testo del prompt.
 
 **Non regressione:**
