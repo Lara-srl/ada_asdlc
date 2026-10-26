@@ -2075,28 +2075,30 @@ def test_il_dry_run_con_la_cartella_del_pin_assente_lo_scrive_e_decide(
 # --- PBI-525: il fermo `non convergente` apre una issue -----------------------
 
 
-def rapporto_non_convergente(albero: Path, pbi: str) -> Path:
-    """Il rapporto di un giro chiuso `non convergente` a revisioni esaurite, nel
-    registro del worktree del runner, dove il tick lo cerca."""
+def rapporto_del_giro(albero: Path, pbi: str, stato: str = "non convergente") -> Path:
+    """Il rapporto di un giro chiuso con `stato` — di suo `non convergente` a
+    revisioni esaurite — nel registro del worktree del runner, dove il tick lo
+    cerca."""
     registro = albero / coda.CFG.registro.cartella
     registro.mkdir(parents=True, exist_ok=True)
     file = registro / "20261025-085406.json"
     file.write_text(json.dumps({
         "run": "20261025-085406", "stato": "finito",
-        "esiti": [{"pbi": pbi, "stato": "non convergente", "motivo": "revisioni-esaurite",
+        "esiti": [{"pbi": pbi, "stato": stato, "motivo": "revisioni-esaurite",
                    "ramo": f"pbi/pbi-{pbi.removeprefix('PBI-')}"}],
     }), encoding="utf-8")
     return file
 
 
-def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict]):
-    """Un passaggio del tick che decide `Attende(pbi)` senza PR, col rapporto
-    `non convergente` nel worktree. Il resto del passaggio è sostituito; `gh` è
-    finto e rende `issue_aperte` alla ricerca. Rende i comandi visti e il rapporto."""
+def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict],
+                   stato: str = "non convergente"):
+    """Un passaggio del tick che decide `Attende(pbi)` senza PR, col rapporto del
+    giro chiuso con `stato` nel worktree. Il resto del passaggio è sostituito; `gh`
+    è finto e rende `issue_aperte` alla ricerca. Rende i comandi visti e il rapporto."""
     repo, albero = tmp_path / "repo", tmp_path / "albero"
     repo.mkdir()
     albero.mkdir()
-    rapporto = rapporto_non_convergente(albero, pbi)
+    rapporto = rapporto_del_giro(albero, pbi, stato)
     for nome, finto in (("batti", lambda r: None), ("pin", lambda r: []),
                         ("fermo_in_pausa", lambda r: False), ("allinea", lambda r: None),
                         ("rilascia", lambda r: []), ("reinstalla", lambda r, w: None),
@@ -2143,3 +2145,14 @@ class TestIlFermoNonConvergenteApreUnaIssue:
 
         assert [c for c in visti if c[:3] == ["gh", "issue", "list"]], "il tick cerca la issue aperta"
         assert not [c for c in visti if c[:3] == ["gh", "issue", "create"]], visti
+
+    @pytest.mark.parametrize("stato", ["fermato", "fatto"])
+    def test_un_attende_che_non_e_un_non_convergente_non_tocca_gh(
+            self, monkeypatch, tmp_path, stato):
+        """`Attende` è anche lo stato normale di un PBI con la PR aperta in attesa
+        del merge, e di un giro `fermato`: senza il filtro sullo `stato` del
+        rapporto il tick aprirebbe «fermo: PBI-N — non convergente» su ogni PR in
+        attesa. Nessun `gh issue`, né la ricerca né l'apertura."""
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [], stato=stato)
+
+        assert not [c for c in visti if c[:2] == ["gh", "issue"]], visti
