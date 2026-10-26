@@ -2158,6 +2158,19 @@ class TestIlFermoNonConvergenteApreUnaIssue:
 
         assert not [c for c in visti if c[:2] == ["gh", "issue"]], visti
 
+    def test_con_una_issue_di_un_altro_pbi_nella_ricerca_il_tick_apre(self, monkeypatch, tmp_path):
+        """`--search` è una ricerca a parole: per `PBI-5` può rendere anche la issue
+        di `PBI-50`. Conta il titolo esatto, non che la ricerca abbia reso qualcosa:
+        altrimenti il fermo di `PBI-5` resterebbe muto."""
+        altra = [{"title": "fermo: PBI-50 — non convergente",
+                  "url": "https://github.com/Lara-srl/ada_nlt/issues/6"}]
+
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", altra)
+
+        creati = [c for c in visti if c[:3] == ["gh", "issue", "create"]]
+        assert len(creati) == 1, visti
+        assert creati[0][creati[0].index("--title") + 1] == "fermo: PBI-5 — non convergente"
+
     @pytest.mark.parametrize("ricerca", [
         (1, "gh: HTTP 502: Bad Gateway\n"),
         (0, "non è JSON"),
