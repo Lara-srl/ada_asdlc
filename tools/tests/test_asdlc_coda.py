@@ -2091,7 +2091,8 @@ def rapporto_del_giro(albero: Path, pbi: str, stato: str = "non convergente") ->
 
 
 def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict],
-                   stato: str = "non convergente", ricerca: tuple[int, str] | None = None):
+                   stato: str = "non convergente", ricerca: tuple[int, str] | None = None,
+                   argomenti: tuple[str, ...] = ()):
     """Un passaggio del tick che decide `Attende(pbi)` senza PR, col rapporto del
     giro chiuso con `stato` nel worktree. Il resto del passaggio è sostituito; `gh`
     è finto e rende `issue_aperte` alla ricerca — o `ricerca`, uscita e testo di
@@ -2116,7 +2117,7 @@ def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict],
         raise AssertionError(f"comando non previsto: {cmd}")
 
     monkeypatch.setattr(coda, "esegui", esegui)
-    coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+    coda.smista(["--repo", str(repo), "--worktree", str(albero), *argomenti])
     return visti, rapporto
 
 
@@ -2170,6 +2171,16 @@ class TestIlFermoNonConvergenteApreUnaIssue:
         creati = [c for c in visti if c[:3] == ["gh", "issue", "create"]]
         assert len(creati) == 1, visti
         assert creati[0][creati[0].index("--title") + 1] == "fermo: PBI-5 — non convergente"
+
+    def test_con_il_dry_run_il_tick_non_apre_la_issue(self, monkeypatch, tmp_path):
+        """`--dry-run` dice ciò che un tick vero farebbe, senza cambiare lo stato: una
+        issue su GitHub è stato. Senza `not a.dry_run` nel `passaggio()` il rapporto
+        `non convergente` ne aprirebbe una vera. Nessun `gh issue create`."""
+        monkeypatch.setattr(coda, "indietro", lambda r: None)
+
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [], argomenti=("--dry-run",))
+
+        assert not [c for c in visti if c[:3] == ["gh", "issue", "create"]], visti
 
     @pytest.mark.parametrize("ricerca", [
         (1, "gh: HTTP 502: Bad Gateway\n"),
