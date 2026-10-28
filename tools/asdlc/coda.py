@@ -947,18 +947,23 @@ def ci_verde(repo: Path) -> bool:
 
 def passo_di_rilascio(repo: Path) -> list[str]:
     """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
-    `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive."""
+    `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive.
+
+    La PR è quella che spegne la voce nella coda: nomina il PBI e tocca codice
+    (`tocca_codice()`); la PR che solo lo accoda in `backlog/` non rilascia."""
     if not any(RE_RILASCIA.search(f.read_text(encoding="utf-8"))
                for f in (repo / BACKLOG).glob("*.md")):
         return []
     codice, uscita = esegui(["gh", "pr", "list", "--state", "merged", "--limit", str(LIMITE_PR),
-                             "--json", "title,headRefName,mergeCommit"], repo)
+                             "--json", "title,headRefName,mergeCommit,files"], repo)
     if codice != 0:
         return [f"rilascio: gh non risponde (uscita {codice})"]
     righe = []
     for pr in json.loads(uscita):
         pbi = pbi_nominato(pr)
-        if pbi is None:
+        # Come la coda: la PR del PBI nomina il PBI e tocca codice. La PR che lo
+        # accoda scrive solo `backlog/` e non rilascia (v0.8.0, 25/10).
+        if pbi is None or not tocca_codice(pr):
             continue
         for file in sorted((repo / BACKLOG).glob(f"{pbi}-*.md")):
             come = rilascia_del_pbi(file.read_text(encoding="utf-8"))
