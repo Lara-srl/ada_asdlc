@@ -693,13 +693,18 @@ class MondoDelMerge:
             self.pr["files"] = [{"path": p} for p in (
                 ["tools/asdlc/coda.py", "backlog/PBI-7-un-cambio.md"] if files == "ok" else files)]
         self.chiamate: list[list[str]] = []
+        self.altre_pr: list = []
+        self.uscita_merge = 0
+        self.uscita_commento = 0
 
     def esegui(self, cmd, cwd):
         self.chiamate.append(list(cmd))
         if cmd[:3] == ["gh", "pr", "list"]:
-            return 0, json.dumps([self.pr])
-        if cmd[:3] in (["gh", "pr", "merge"], ["gh", "pr", "comment"]):
-            return 0, ""
+            return 0, json.dumps([self.pr, *self.altre_pr])
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            return self.uscita_merge, "" if self.uscita_merge == 0 else "merge rifiutato"
+        if cmd[:3] == ["gh", "pr", "comment"]:
+            return self.uscita_commento, "" if self.uscita_commento == 0 else "commento rifiutato"
         return ESEGUI_VERO(cmd, cwd)
 
     def comandi(self, *inizio):
@@ -761,6 +766,60 @@ def test_ogni_condizione_che_manca_lascia_la_pr_a_una_persona_col_motivo(mondo_d
     [riga] = righe
     assert riga.startswith("merge: #1 attende una persona — ")
     assert parola in riga
+
+
+def test_un_merge_che_non_riesce_non_e_scritto_come_fatto(mondo_del_merge):
+    m = mondo_del_merge()
+    m.uscita_merge = 1
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert m.comandi("gh", "pr", "comment") == []
+    assert not any(r.startswith("merge: PBI-7 #1") for r in righe)
+    [riga] = righe
+    assert riga.startswith("merge: #1 non riuscito")
+    assert "merge rifiutato" in riga
+
+
+def test_un_commento_che_non_riesce_lascia_la_riga_del_merge_e_lo_dice(mondo_del_merge):
+    m = mondo_del_merge()
+    m.uscita_commento = 1
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe[0] == "merge: PBI-7 #1"
+    assert any("commento" in r and "#1" in r for r in righe[1:])
+
+
+@pytest.mark.parametrize("malformata", ["senza-numero", "rapporto-solver-null", "solver-non-dict"])
+def test_una_pr_malformata_non_cancella_le_righe_delle_altre(mondo_del_merge, malformata):
+    m = mondo_del_merge()
+    if malformata == "senza-numero":
+        m.altre_pr = [{"headRefName": "pbi/pbi-9"}]
+    else:
+        # Una seconda PR, di PBI-9, il cui rapporto ha un `solver` che non si legge.
+        m.altre_pr = [{**m.pr, "number": 2, "title": "PBI-9: altro", "headRefName": "pbi/pbi-9",
+                       "files": [{"path": "tools/asdlc/coda.py"},
+                                 {"path": "backlog/PBI-9-altro.md"}]}]
+        (m.repo / "backlog" / "CODA.md").write_text("# Coda\n\n- PBI-7\n- PBI-9\n")
+        git(m.repo, "commit", "-qam", "PBI-9 in coda")
+        solver = None if malformata == "rapporto-solver-null" else ["intento"]
+        (m.worktree / "runs" / "20261028-110000.json").write_text(json.dumps({
+            "run": "20261028-110000",
+            "esiti": [{"pbi": "PBI-9", "stato": "fatto", "critic_saltato": False,
+                       "solver": solver}]}))
+        git(m.repo, "checkout", "-q", "-b", "pbi/pbi-9")
+        (m.repo / "backlog" / "PBI-9-altro.md").write_text(PBI_7.replace("PBI-7", "PBI-9"))
+        git(m.repo, "add", ".")
+        git(m.repo, "commit", "-qm", "PBI-9")
+        git(m.repo, "push", "-q", "origin", "pbi/pbi-9")
+        git(m.repo, "checkout", "-q", "main")
+        git(m.repo, "fetch", "-q", "origin")
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert "merge: PBI-7 #1" in righe
+    assert len(righe) == 2, righe
 
 
 class MondoCheMergia(Mondo):
