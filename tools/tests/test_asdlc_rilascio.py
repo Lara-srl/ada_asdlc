@@ -647,6 +647,7 @@ Fai.
 
 - `tools/asdlc/coda.py` — il passo.
 - `backlog/PBI-7-un-cambio.md` — la spunta.
+- `decisions/` — le decisioni.
 
 ## Verifica
 - [x] **Il primo criterio.** Fatto.
@@ -659,7 +660,7 @@ class MondoDelMerge:
     nel worktree del runner e un `gh` finto che rende la PR aperta (e, dopo il `merge`, mergiata)."""
 
     def __init__(self, tmp_path, ramo="pbi/pbi-7", esito=None, ci="SUCCESS",
-                 mergeable="MERGEABLE", testo=PBI_7, files="ok"):
+                 mergeable="MERGEABLE", testo=PBI_7, files="ok", in_coda=True):
         self.origin = tmp_path / "merge-origin.git"
         self.repo = tmp_path / "merge-tick"
         self.worktree = tmp_path / "merge-albero"
@@ -668,7 +669,8 @@ class MondoDelMerge:
         git(self.repo, "config", "user.email", "t@t")
         git(self.repo, "config", "user.name", "t")
         (self.repo / "backlog").mkdir()
-        (self.repo / "backlog" / "CODA.md").write_text("# Coda\n\n- PBI-7\n")
+        (self.repo / "backlog" / "CODA.md").write_text(
+            "# Coda\n\n- PBI-7\n" if in_coda else "# Coda\n\n- PBI-8\n")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "base")
         git(self.repo, "push", "-q", "origin", "main")
@@ -723,3 +725,39 @@ def test_una_pr_che_passa_tutte_le_condizioni_si_mergia_e_il_tick_lo_dice(mondo_
     assert merge[:5] == ["gh", "pr", "merge", "1", "--merge"]
     assert m.comandi("gh", "pr", "comment"), "il commento sulla PR"
     assert m.chiamate.index(merge) < m.chiamate.index(m.comandi("gh", "pr", "comment")[0])
+
+
+SCENARI_CHE_ATTENDONO = {
+    "ramo-non-del-runner": ({"ramo": "feature/x"}, "ramo"),
+    "pbi-non-in-coda": ({"in_coda": False}, "coda"),
+    "rapporto-assente": ({"esito": {"pbi": "PBI-6"}}, "rapporto"),
+    "stato-non-fatto": ({"esito": {"stato": "fermato"}}, "stato"),
+    "critic-saltato": ({"esito": {"critic_saltato": True}}, "Critic"),
+    "esito-intento": ({"esito": {"solver": [{"esito": "intento"}]}}, "intento"),
+    "ci-rossa": ({"ci": "FAILURE"}, "CI"),
+    "conflitto": ({"mergeable": "CONFLICTING"}, "mergeable"),
+    "criterio-non-spuntato": ({"testo": PBI_7.replace("- [x] **Il secondo", "- [ ] **Il secondo")},
+                              "criterio non spuntato"),
+    "criterio-a-vista-spuntato": ({"testo": PBI_7.replace("Il secondo criterio.**",
+                                                          "Il secondo criterio (a vista).**")},
+                                  "a vista"),
+    "file-fuori-scope": ({"files": ["tools/asdlc/altro.py", "backlog/PBI-7-un-cambio.md"]},
+                         "fuori dallo Scope"),
+    "file-in-decisions": ({"files": ["decisions/ADR-0099-x.md", "backlog/PBI-7-un-cambio.md"]},
+                          "riservato"),
+    "files-assente": ({"files": None}, "elenco dei file"),
+}
+
+
+@pytest.mark.parametrize("scenario", SCENARI_CHE_ATTENDONO.values(),
+                         ids=SCENARI_CHE_ATTENDONO.keys())
+def test_ogni_condizione_che_manca_lascia_la_pr_a_una_persona_col_motivo(mondo_del_merge, scenario):
+    cambio, parola = scenario
+    m = mondo_del_merge(**cambio)
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert m.comandi("gh", "pr", "merge") == []
+    [riga] = righe
+    assert riga.startswith("merge: #1 attende una persona — ")
+    assert parola in riga
