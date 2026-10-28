@@ -77,7 +77,9 @@ repository, perché l'installazione usa `git+ssh`.
 3. Il **Quality Gate** esegue lo script, non l'agente: i gate di `asdlc.toml` e la verifica
    che i test nuovi siano mai stati rossi.
 4. Il **Critic** (sessione separata, sola lettura) rilegge il lavoro.
-5. Si apre una PR. **Il merge è tuo**: è l'Acceptance Gate umano.
+5. Si apre una PR. Il tick la mergia da solo se passa le condizioni di `ADR-0033`
+   (rapporto `fatto` col Critic, CI verde, criteri spuntati, file dentro lo Scope); altrimenti
+   **il merge è tuo**, e il log dice quale condizione manca.
 6. La voce in coda si spegne quando una PR mergiata nomina il PBI e tocca file fuori da
    `backlog/`.
 
@@ -194,12 +196,13 @@ lettore = true   # il default
 ### Il rilascio a tick
 
 Dopo il merge di un PBI a monte, due passi del tick sostituiscono i cinque gesti a mano
-(`specs/solver-e-rilascio/spec.md`, R8-R11). Il merge resta sempre di una persona: nel
-pacchetto non c'è nessun `gh pr merge`.
+(`specs/solver-e-rilascio/spec.md`, R8-R11). Il merge delle PR dei giri che passano
+le condizioni di `ADR-0033` è del tick, che lo fa prima del rilascio; `rilascia()` e `pin()`
+non emettono mai `gh pr merge`.
 
-- **In `asdlc`:** per ogni PR di PBI mergiata il cui PBI dichiara `rilascia: patch|minor`
+- **In `asdlc`:** per ogni PR di PBI mergiata il cui PBI dichiara `rilascia: patch|minor|major`
   (una riga sotto il titolo), con la CI di `main` verde e il merge non ancora in un tag, il
-  tick mette il tag successivo (`v0.3.0` → `v0.3.1` con `patch`, `v0.4.0` con `minor`).
+  tick mette il tag successivo (`v0.3.0` → `v0.3.1` con `patch`, `v0.4.0` con `minor`, `v1.0.0` con `major`).
   `--registra` e il tag girano in un worktree usa-e-getta fuori dal checkout, che resta pulito.
 - **Nel progetto:** per ogni PBI fermo (ramo su `origin`, nessun merge) con
   `attende: <repo>#<PBI>` (letta anche dai rami `pbi/*` su `origin` non ancora in `main`, nei soli file di `backlog/` che il ramo cambia, non solo da `main`), a PR a monte `MERGED` (`gh pr view`) e tag che la contiene il tick

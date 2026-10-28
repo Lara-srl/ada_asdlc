@@ -7,8 +7,9 @@ torni al terminale. Questo è il processo breve che `cron` chiama a intervalli
 regolari per togliere quell'attesa (`backlog/PBI-350`).
 
 Quello che **non** fa, ed è la riga che lo tiene dentro i suoi confini: non
-mergia — il merge è il terzo gate, il confine dell'accountability, e non è
-delegabile (`runner.py:17`) — e non decide cosa entra in coda. La coda la
+mergia altro che le PR dei giri che passano le condizioni verificabili di
+`ADR-0033` (`passo_del_merge()`) — le altre restano a una persona — e non decide
+cosa entra in coda. La coda la
 scrive Francesco a mano in `backlog/CODA.md`; il tick è un esecutore d'ordini già
 dati, e non ne inventa nessuno.
 
@@ -1025,7 +1026,9 @@ def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
                              "--json", "number,title,headRefName,files,statusCheckRollup,mergeable"],
                             repo)
     if codice != 0:
-        return [f"merge: gh non risponde (uscita {codice})"]
+        # Niente riga: `decidi()` dice già che `gh` non risponde, e un tick senza PR
+        # da guardare scrive le stesse righe di prima.
+        return []
     righe = []
     for pr in json.loads(uscita):
         numero = pr["number"]
@@ -1037,6 +1040,16 @@ def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
         esegui(["gh", "pr", "comment", str(numero), "--body", f"Mergiata dal tick: {pbi}."], repo)
         righe.append(f"merge: {pbi} #{numero}")
     return righe
+
+
+def mergia(repo: Path, worktree: Path) -> list[str]:
+    """`passo_del_merge()` senza che un errore fermi il tick: un JSON illeggibile di `gh`
+    o un file che non si legge diventano una riga di avviso (`ADR-0008`)."""
+    try:
+        return passo_del_merge(repo, worktree)
+    except Exception as errore:
+        return [f"merge: avviso, il passo non è andato a buon fine — "
+                f"{in_una_riga(f'{type(errore).__name__}: {errore}')}"]
 
 
 def passo_di_rilascio(repo: Path) -> list[str]:
@@ -1392,7 +1405,8 @@ def passaggio(a: argparse.Namespace) -> int:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
-    for riga in () if a.dry_run else rilascia(a.repo):
+    # Il merge prima del rilascio: il tag segue il merge nello stesso passaggio (`ADR-0033`).
+    for riga in () if a.dry_run else mergia(a.repo, a.worktree) + rilascia(a.repo):
         print(riga)
         scrivi_nel_log(a.repo, riga)
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
