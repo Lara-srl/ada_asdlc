@@ -761,3 +761,69 @@ def test_ogni_condizione_che_manca_lascia_la_pr_a_una_persona_col_motivo(mondo_d
     [riga] = righe
     assert riga.startswith("merge: #1 attende una persona — ")
     assert parola in riga
+
+
+class MondoCheMergia(Mondo):
+    """Il mondo del rilascio con la PR di `PBI-600` ancora aperta: `gh pr merge` la rende
+    mergiata, e solo da lì il rilascio la vede."""
+
+    def __init__(self, tmp_path):
+        super().__init__(tmp_path, rilascia="patch")
+        self.mergiato = False
+        self.worktree = tmp_path / "albero-del-giro"
+        (self.worktree / "runs").mkdir(parents=True)
+        (self.worktree / "runs" / "20261028-100000.json").write_text(json.dumps({
+            "run": "20261028-100000",
+            "esiti": [{"pbi": "PBI-600", "stato": "fatto", "critic_saltato": False,
+                       "solver": []}]}))
+        (self.repo / "backlog" / "CODA.md").write_text("# Coda\n\n- PBI-600\n")
+        git(self.repo, "checkout", "-q", "-b", "pbi/pbi-600")
+        (self.repo / "backlog" / "PBI-600-un-cambio.md").write_text(
+            "# PBI-600: un cambio al runner\n\nrilascia: patch\n\n## Direttiva\n\nFai.\n\n"
+            "**Scope**\n\n- `tools/asdlc/coda.py` — il passo.\n"
+            "- `backlog/PBI-600-un-cambio.md` — la spunta.\n\n## Verifica\n- [x] **Uno.** Fatto.\n")
+        git(self.repo, "commit", "-qam", "PBI-600: il giro")
+        git(self.repo, "push", "-q", "origin", "pbi/pbi-600")
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "fetch", "-q", "origin")
+
+    def esegui(self, cmd, cwd):
+        if cmd[:3] == ["gh", "pr", "list"] and "open" in cmd:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            aperte = [] if self.mergiato else [{
+                "number": 1, "title": "PBI-600: un cambio al runner",
+                "headRefName": "pbi/pbi-600", "mergeable": "MERGEABLE",
+                "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+                "files": [{"path": "tools/asdlc/coda.py"},
+                          {"path": "backlog/PBI-600-un-cambio.md"}]}]
+            return 0, json.dumps(aperte)
+        if cmd[:3] == ["gh", "pr", "list"] and not self.mergiato:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            return 0, "[]"
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            self.mergiato = True
+            return 0, ""
+        if cmd[:3] == ["gh", "pr", "comment"]:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            return 0, ""
+        return super().esegui(cmd, cwd)
+
+
+def test_il_tick_mergia_prima_di_rilasciare_nello_stesso_passaggio(tmp_path, monkeypatch, capsys):
+    m = MondoCheMergia(tmp_path)
+    monkeypatch.setattr(coda, "esegui", m.esegui)
+    casa = tmp_path / "casa-del-tick"
+    casa.mkdir()
+    monkeypatch.setenv("HOME", str(casa))
+    monkeypatch.setattr(coda, "allinea", lambda repo: None)
+    monkeypatch.setattr(coda, "reinstalla", lambda repo, albero: None)
+    monkeypatch.setattr(coda, "decidi", lambda repo, albero: coda.Finita())
+    monkeypatch.setattr(coda, "pin", lambda repo: [])
+
+    assert coda.smista(["--repo", str(m.repo), "--worktree", str(m.worktree)]) == 0
+
+    righe = capsys.readouterr().out.splitlines()
+    assert "merge: PBI-600 #1" in righe
+    [rilascio] = [r for r in righe if r.startswith("rilascio: PBI-600 → ")]
+    assert righe.index("merge: PBI-600 #1") < righe.index(rilascio)
