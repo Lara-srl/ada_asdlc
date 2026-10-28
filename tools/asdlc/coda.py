@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import fnmatch
 import json
 import os
 import re
@@ -950,6 +951,72 @@ def ci_verde(repo: Path) -> bool:
     return bool(corse) and corse[0].get("conclusion") == "success"
 
 
+# I file che il tick non mergia mai (`ADR-0033`, decisione 1): la costituzione e il suo
+# template, la configurazione, le decisioni. Il loro merge lo ratifica una persona (`ADR-0012`).
+FILE_RISERVATI = ("AGENTS.md", "CLAUDE.md", "asdlc.toml")
+CARTELLE_RISERVATE = ("decisions/", "template/AGENTS.md", "template/decisions/")
+
+
+def condizione_mancante(repo: Path, worktree: Path, pr: dict) -> str | None:
+    """La prima delle condizioni di `ADR-0033` che la PR aperta `pr` non soddisfa, o
+    `None` se le soddisfa tutte. Nell'ordine dell'ADR; le altre non si guardano."""
+    ramo = pr.get("headRefName", "")
+    if (dal_ramo := RE_RAMO_PR.match(ramo)) is None:
+        return f"il ramo {ramo} non è di un giro del runner"
+    pbi = CFG.backlog.id_di(dal_ramo.group(1))
+    if not any(isinstance(v, VocePbi) and v.pbi == pbi
+               for v in leggi_voci((repo / CODA).read_text(encoding="utf-8"))):
+        return f"{pbi} non è in coda"
+    esito = ultimo_esito(worktree, pbi)
+    if esito is None:
+        return f"nessun rapporto del giro di {pbi}"
+    if esito.get("stato") != "fatto":
+        return f"il giro di {pbi} non chiude fatto (stato {esito.get('stato')})"
+    if esito.get("critic_saltato"):
+        return "il Critic è stato saltato"
+    if any(x.get("esito") == "intento" for x in esito.get("solver", [])):
+        return "il Solver ha dichiarato un esito intento"
+    prove = pr.get("statusCheckRollup") or []
+    if not prove or any(p.get("conclusion") != "SUCCESS" for p in prove):
+        return "la CI sulla testa della PR non è verde"
+    if pr.get("mergeable") != "MERGEABLE":
+        return f"la PR non è mergeable ({pr.get('mergeable')})"
+    testo = testa_del_pbi(repo, pbi, ramo)
+    if testo is None:
+        return f"il file di {pbi} alla testa della PR non si legge"
+    criteri = asdlc_runner.criteri_del_pbi(testo)
+    if any(not c.startswith("- [x]") for c in criteri):
+        return "un criterio non spuntato"
+    if any("(a vista)" in c for c in criteri):
+        return "un criterio a vista: lo spunta chi mergia"
+    file = [f.get("path", "") for f in pr.get("files") or []]
+    if not file or len(file) >= LIMITE_FILE:
+        return "l'elenco dei file della PR manca o può essere tagliato"
+    percorsi = [p for p, _ in asdlc_runner.percorsi_dello_scope(testo)]
+    for f in file:
+        if not any(f == p or (p.endswith("/") and f.startswith(p)) for p in percorsi):
+            return f"il file {f} è fuori dallo Scope"
+    for f in file:
+        if f in FILE_RISERVATI or f.startswith(CARTELLE_RISERVATE):
+            return f"il file {f} è riservato a una persona"
+    return None
+
+
+def testa_del_pbi(repo: Path, pbi: str, ramo: str) -> str | None:
+    """Il file di `pbi` com'è alla testa di `ramo` su `origin`, o `None`."""
+    numero = CFG.backlog.numero(pbi)
+    codice, elenco = esegui(["git", "-C", str(repo), "ls-tree", "--name-only",
+                             f"{REMOTO}/{ramo}", f"{BACKLOG}/"], repo)
+    if numero is None or codice != 0:
+        return None
+    glob = CFG.backlog.glob_del_file(numero)
+    file = next((f for f in elenco.split() if fnmatch.fnmatch(Path(f).name, glob)), None)
+    if file is None:
+        return None
+    codice, testo = esegui(["git", "-C", str(repo), "show", f"{REMOTO}/{ramo}:{file}"], repo)
+    return testo if codice == 0 else None
+
+
 def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
     """Il merge delle PR dei giri (`ADR-0033`): per ogni PR aperta che passa le
     condizioni, `gh pr merge --merge` e un commento sulla PR. Rende le righe che il
@@ -961,8 +1028,11 @@ def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
         return [f"merge: gh non risponde (uscita {codice})"]
     righe = []
     for pr in json.loads(uscita):
-        pbi = pbi_nominato(pr)
         numero = pr["number"]
+        if (manca := condizione_mancante(repo, worktree, pr)) is not None:
+            righe.append(f"merge: #{numero} attende una persona — {manca}")
+            continue
+        pbi = pbi_nominato(pr)
         esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
         esegui(["gh", "pr", "comment", str(numero), "--body", f"Mergiata dal tick: {pbi}."], repo)
         righe.append(f"merge: {pbi} #{numero}")
