@@ -56,10 +56,10 @@ questo PBI).
   (righe 65-115).
 
 ## Verifica
-- [ ] **Una PR mergiata che nomina il PBI e tocca solo `backlog/` non rilascia.** Col `gh` finto: una
+- [x] **Una PR mergiata che nomina il PBI e tocca solo `backlog/` non rilascia.** Col `gh` finto: una
       PR `PBI-7: …` con `files` tutti sotto `backlog/`, e il file di `PBI-7` con `rilascia: minor`:
       `passo_di_rilascio()` non chiama `git tag` e non rende nessuna riga. Rosso su `main`: oggi tagga.
-- [ ] **La stessa PR con un file fuori da `backlog/` rilascia come prima.** È la **guardia** del
+- [x] **La stessa PR con un file fuori da `backlog/` rilascia come prima.** È la **guardia** del
       comportamento di `PBI-509`: lo stesso scenario con `tools/asdlc/x.py` fra i `files` tagga e rende
       `rilascio: PBI-7 → …`. Un `gh` che non rende `files` conta come «tocca», come in `tocca_codice()`.
 
