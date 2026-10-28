@@ -80,20 +80,20 @@ nuovo solo al tag successivo.
 - `tools/asdlc/coda.py`: `ultimo_esito()`, `passaggio()`; `specs/solver-e-rilascio/spec.md`: R8, R11.
 
 ## Verifica
-- [ ] **Una PR che passa tutte le condizioni si mergia, e il tick lo dice.** Repository di prova con
+- [x] **Una PR che passa tutte le condizioni si mergia, e il tick lo dice.** Repository di prova con
       `PBI-7` in coda, un rapporto `fatto` con Critic girato, il file del PBI tutto `[x]`, `gh` finto
       che rende una PR su `pbi/pbi-7` con CI `SUCCESS`, `MERGEABLE` e `files` dentro lo Scope:
       `passo_del_merge()` chiama `gh pr merge 1 --merge`, poi `gh pr comment`, e rende
       `merge: PBI-7 #1`. Rosso su `main`: `passo_del_merge` non esiste.
-- [ ] **Ogni condizione che manca lascia la PR a una persona, col motivo.** Parametrico, un id per
+- [x] **Ogni condizione che manca lascia la PR a una persona, col motivo.** Parametrico, un id per
       caso, sullo stesso scenario con una sola cosa cambiata: ramo non `pbi/`; rapporto con
       `critic_saltato`; esito `intento`; CI `FAILURE`; `CONFLICTING`; un criterio `[ ]`; un criterio
       marcato a vista e spuntato; un file fuori Scope; un file in `decisions/`; `files` assente. In ogni
       caso nessun `gh pr merge`, e la riga `merge: #1 attende una persona — …` nomina la condizione.
-- [ ] **`rilascia: major` dà la `v1.0.0`.** `prossimo_tag(["v0.9.2"], "major") == "v1.0.0"` e
+- [x] **`rilascia: major` dà la `v1.0.0`.** `prossimo_tag(["v0.9.2"], "major") == "v1.0.0"` e
       `rilascia_del_pbi("…\nrilascia: major\n…") == "major"`. Rosso su `main`: `RE_RILASCIA`
       accetta solo `patch|minor`.
-- [ ] **Il merge viene prima del rilascio nello stesso passaggio.** Col `gh` finto che rende la PR
+- [x] **Il merge viene prima del rilascio nello stesso passaggio.** Col `gh` finto che rende la PR
       aperta e poi, dopo il `merge`, la stessa PR `MERGED`: un passaggio del tick scrive
       `merge: PBI-7 #1` e poi `rilascio: PBI-7 → …`, in quest'ordine. Rosso su `main`: nessuna riga
       `merge:`.
