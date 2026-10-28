@@ -70,7 +70,8 @@ class Mondo:
     comando passa a `git` vero, e `--registra` è registrato col suo `cwd`.
     """
 
-    def __init__(self, tmp_path, rilascia="patch", ci="success"):
+    def __init__(self, tmp_path, rilascia="patch", ci="success", files=None):
+        self.files = files
         self.origin = tmp_path / "origin.git"
         self.repo = tmp_path / "checkout"
         git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.origin))
@@ -93,9 +94,14 @@ class Mondo:
     def esegui(self, cmd, cwd):
         self.chiamate.append((list(cmd), Path(cwd)))
         if cmd[:3] == ["gh", "pr", "list"]:
-            return 0, json.dumps([{"title": "PBI-600: un cambio al runner",
-                                   "headRefName": "pbi/pbi-600",
-                                   "mergeCommit": {"oid": self.merge}}])
+            pr = {"title": "PBI-600: un cambio al runner",
+                  "headRefName": "pbi/pbi-600",
+                  "mergeCommit": {"oid": self.merge}}
+            if self.files is not None:
+                pr["files"] = [{"path": p} for p in self.files]
+            # Come `gh`, rende solo i campi che `--json` chiede.
+            chiesti = cmd[cmd.index("--json") + 1].split(",") if "--json" in cmd else list(pr)
+            return 0, json.dumps([{k: v for k, v in pr.items() if k in chiesti}])
         if cmd[:3] == ["gh", "run", "list"]:
             return 0, json.dumps([{"conclusion": self.ci, "headSha": self.merge}])
         if "--registra" in cmd:
@@ -129,6 +135,17 @@ def test_un_pbi_con_rilascia_minor_azzera_la_patch(mondo):
     coda.rilascia(m.repo)
 
     assert m.tag_su_origin() == ["v0.3.0", "v0.4.0"]
+
+
+def test_una_pr_che_nomina_il_pbi_e_tocca_solo_backlog_non_rilascia(mondo):
+    m = mondo(rilascia="minor", files=["backlog/PBI-600-un-cambio.md", "backlog/CODA.md"])
+
+    righe = coda.rilascia(m.repo)
+
+    assert righe == []
+    assert m.tag_su_origin() == ["v0.3.0"]
+    assert not any(c[:2] == ["git", "tag"] and c[2] != "--contains" and c[2] != "--list"
+                   for c, _ in m.chiamate)
 
 
 def test_senza_rilascia_non_c_e_tag(mondo):
