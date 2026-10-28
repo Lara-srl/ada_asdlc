@@ -631,3 +631,95 @@ def test_attese_non_legge_i_rami_gia_in_main_ne_le_copie_vecchie_di_altri_pbi(tm
 def test_rilascia_major_alza_la_prima_cifra_e_azzera_le_altre_due():
     assert coda.prossimo_tag(["v0.9.2"], "major") == "v1.0.0"
     assert coda.rilascia_del_pbi("# PBI-1: x\n\nrilascia: major\n\n## Direttiva\n") == "major"
+
+
+# ---------------------------------------------------------------------------
+# Il merge del tick (PBI-530, ADR-0033)
+# ---------------------------------------------------------------------------
+
+PBI_7 = """# PBI-7: un cambio al runner
+
+## Direttiva
+
+Fai.
+
+**Scope**
+
+- `tools/asdlc/coda.py` — il passo.
+- `backlog/PBI-7-un-cambio.md` — la spunta.
+
+## Verifica
+- [x] **Il primo criterio.** Fatto.
+- [x] **Il secondo criterio.** Fatto.
+"""
+
+
+class MondoDelMerge:
+    """Il tick di un progetto con `PBI-7` in coda, il suo ramo su `origin`, il rapporto del giro
+    nel worktree del runner e un `gh` finto che rende la PR aperta (e, dopo il `merge`, mergiata)."""
+
+    def __init__(self, tmp_path, ramo="pbi/pbi-7", esito=None, ci="SUCCESS",
+                 mergeable="MERGEABLE", testo=PBI_7, files="ok"):
+        self.origin = tmp_path / "merge-origin.git"
+        self.repo = tmp_path / "merge-tick"
+        self.worktree = tmp_path / "merge-albero"
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        git(tmp_path, "clone", "-q", str(self.origin), str(self.repo))
+        git(self.repo, "config", "user.email", "t@t")
+        git(self.repo, "config", "user.name", "t")
+        (self.repo / "backlog").mkdir()
+        (self.repo / "backlog" / "CODA.md").write_text("# Coda\n\n- PBI-7\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "base")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(self.repo, "checkout", "-q", "-b", ramo)
+        (self.repo / "backlog" / "PBI-7-un-cambio.md").write_text(testo)
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "PBI-7: un cambio")
+        git(self.repo, "push", "-q", "origin", ramo)
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "fetch", "-q", "origin")
+        (self.worktree / "runs").mkdir(parents=True)
+        voce = {"pbi": "PBI-7", "stato": "fatto", "critic_saltato": False, "solver": []}
+        voce.update(esito or {})
+        (self.worktree / "runs" / "20261028-100000.json").write_text(
+            json.dumps({"run": "20261028-100000", "esiti": [voce]}))
+        self.pr = {"number": 1, "title": "PBI-7: un cambio al runner", "headRefName": ramo,
+                   "mergeable": mergeable,
+                   "statusCheckRollup": [{"conclusion": ci, "status": "COMPLETED"}]}
+        if files is not None:
+            self.pr["files"] = [{"path": p} for p in (
+                ["tools/asdlc/coda.py", "backlog/PBI-7-un-cambio.md"] if files == "ok" else files)]
+        self.chiamate: list[list[str]] = []
+
+    def esegui(self, cmd, cwd):
+        self.chiamate.append(list(cmd))
+        if cmd[:3] == ["gh", "pr", "list"]:
+            return 0, json.dumps([self.pr])
+        if cmd[:3] in (["gh", "pr", "merge"], ["gh", "pr", "comment"]):
+            return 0, ""
+        return ESEGUI_VERO(cmd, cwd)
+
+    def comandi(self, *inizio):
+        return [c for c in self.chiamate if c[:len(inizio)] == list(inizio)]
+
+
+@pytest.fixture
+def mondo_del_merge(tmp_path, monkeypatch):
+    def crea(**kwargs):
+        m = MondoDelMerge(tmp_path, **kwargs)
+        monkeypatch.setattr(coda, "esegui", m.esegui)
+        return m
+    return crea
+
+
+def test_una_pr_che_passa_tutte_le_condizioni_si_mergia_e_il_tick_lo_dice(mondo_del_merge):
+    m = mondo_del_merge()
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe == ["merge: PBI-7 #1"]
+    [merge] = m.comandi("gh", "pr", "merge")
+    assert merge[:5] == ["gh", "pr", "merge", "1", "--merge"]
+    assert m.comandi("gh", "pr", "comment"), "il commento sulla PR"
+    assert m.chiamate.index(merge) < m.chiamate.index(m.comandi("gh", "pr", "comment")[0])
