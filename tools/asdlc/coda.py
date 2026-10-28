@@ -1031,14 +1031,29 @@ def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
         return []
     righe = []
     for pr in json.loads(uscita):
-        numero = pr["number"]
-        if (manca := condizione_mancante(repo, worktree, pr)) is not None:
-            righe.append(f"merge: #{numero} attende una persona — {manca}")
-            continue
-        pbi = pbi_nominato(pr)
-        esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
-        esegui(["gh", "pr", "comment", str(numero), "--body", f"Mergiata dal tick: {pbi}."], repo)
-        righe.append(f"merge: {pbi} #{numero}")
+        # Un errore è della PR, non del passo: le righe dei merge già fatti restano.
+        try:
+            righe.extend(_mergia_una(repo, worktree, pr))
+        except Exception as errore:
+            righe.append(f"merge: avviso, la PR {pr.get('number') if isinstance(pr, dict) else '?'} "
+                         f"non si legge — {in_una_riga(f'{type(errore).__name__}: {errore}')}")
+    return righe
+
+
+def _mergia_una(repo: Path, worktree: Path, pr: dict) -> list[str]:
+    numero = pr["number"]
+    if (manca := condizione_mancante(repo, worktree, pr)) is not None:
+        return [f"merge: #{numero} attende una persona — {manca}"]
+    pbi = pbi_nominato(pr)
+    codice, uscita = esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
+    if codice != 0:
+        return [f"merge: #{numero} non riuscito (uscita {codice}): {in_una_riga(uscita)}"]
+    righe = [f"merge: {pbi} #{numero}"]
+    codice, uscita = esegui(["gh", "pr", "comment", str(numero), "--body",
+                             f"Mergiata dal tick: {pbi}."], repo)
+    if codice != 0:
+        righe.append(f"merge: avviso, il commento su #{numero} non è arrivato "
+                     f"(uscita {codice}): {in_una_riga(uscita)}")
     return righe
 
 

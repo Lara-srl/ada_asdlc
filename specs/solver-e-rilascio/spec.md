@@ -173,7 +173,10 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
   `coda.mergia()`, che avvolge `passo_del_merge()`: l'ordine del passaggio è pin, allinea, merge, rilascio.
   `passo_del_merge()` mergia (`gh pr merge --merge`, un commento, `merge: PBI-N #M`) la PR aperta di
   un giro che passa le condizioni di `ADR-0033`; per le altre scrive
-  `merge: #M attende una persona — <condizione>` e non fa niente.
+  `merge: #M attende una persona — <condizione>` e non fa niente. La riga `merge: PBI-N #M` e il commento
+  ci sono solo se `gh pr merge` esce 0; se esce ≠ 0 la riga è `merge: #M non riuscito (uscita …)`, e se
+  è il commento a non riuscire la riga del merge resta e segue un avviso. Un errore è della PR, non del
+  passo: una PR malformata dà una riga di avviso e le altre si valutano.
   Cerca le PR mergiate (`gh pr list`, con i `files`), legge `rilascia:` dal PBI nel checkout, chiede la CI
   (`gh run list`) e salta il PBI il cui merge è già contenuto in un tag (`git tag --contains`).
   Il tag è `[rilascio].prefisso_tag` + `X.Y.Z`, successivo all'ultimo: `patch` alza Z, `minor`
