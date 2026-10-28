@@ -141,3 +141,34 @@ decisione 3. I vecchi criteri 1 e 4 erano la stessa modifica minima e sono un cr
 sonde sono uscite `guasto` (gate guasto nell'albero usa e getta): il rosso resta dichiarato, non
 provato, e il guasto è da capire a parte.
 
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (26/10, run `20261026-233510`, e la ripresa `20261027-233434`, runner `v0.9.0`-pre) ha
+fatto i **criteri 1, 2 e 3** con 17 commit, RED e GREEN per criterio, e ha spuntato i tre. Si è
+chiuso in due modi: il 27/10 alle 00:02 `senza esito` per il **limite d'uso** dell'account (reset
+alle 02:40, scritto su stdout, il caso di `PBI-531`); la ripresa del 27/10 alle 23:34 si è fermata
+`rosso-mai-visto` sul commit `1c7f3e7`. Il tag è `giro-fermato/pbi-525-giro1-20261027` (`1c7f3e7`).
+
+**Perché `rosso-mai-visto`.** Il Critic (revisione 0 della ripresa) aveva un solo rilievo, di
+test-first: la condizione `not a.dry_run` in `passaggio()` (`tools/asdlc/coda.py`) era entrata nel
+commit `feat(coda)` del criterio 3 **senza un RED**: un `--dry-run` aprirebbe una issue vera su
+GitHub, e nessun test lo diceva. Il Builder ha scritto il test dopo (`1c7f3e7`): nato verde, perché
+la condizione c'è già. Il gate del rosso guarda ogni commit del ramo e un revert non lo toglie
+(lezione del 19/10): per questo `1c7f3e7` **non è stato riportato** e la ripresa non riparte dal tag.
+
+Sul ramo di ripresa, verificato il 28/10: `python3 -m pytest -q tools/tests` dà `1229 passed`,
+`git status --porcelain` è vuoto, e `asdlc-runner --gate-rosso HEAD` dice «nessun test è nato verde».
+
+**Da fare, in quest'ordine:**
+
+1. **I sedici commit sul ramo del giro:** `git cherry-pick -x origin/main..giro-fermato/pbi-525-giro1-20261027~1`
+   (tutti tranne `1c7f3e7`, già nel ramo di ripresa se questo file è in `main`: **verifica**
+   `git log --oneline origin/main..HEAD` mostra i commit del criterio 1, 2 e 3 da `03c0b63` a
+   `102bd06`). Se il cherry-pick dà un conflitto è un fatto nuovo: `fermati` con la domanda.
+2. **La guardia del dry-run, col suo RED.** In un commit `refactor(coda): …` si toglie `not a.dry_run`
+   dalla condizione in `passaggio()` (non cambia un test: oggi nessuno lo guarda). Poi il RED, da solo:
+   il test e il parametro `argomenti` di `tick_in_attesa()` come in `git show 1c7f3e7`, ora **rosso**
+   (con `--dry-run` il tick chiama `gh issue create`). Poi il GREEN: si rimette `not a.dry_run`.
+   **Verifica:** `asdlc-runner --gate-rosso HEAD` passa, e il test del dry-run fallisce sul commit del RED.
+3. **Il Critic** deve poter dire `pronto`: il suo unico rilievo era questo.
