@@ -622,3 +622,12 @@ def test_attese_non_legge_i_rami_gia_in_main_ne_le_copie_vecchie_di_altri_pbi(tm
         ("PBI-700-fermo.md", A_MONTE, "PBI-601"),
         ("PBI-702-vivo.md", A_MONTE, "PBI-502"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# `rilascia: major` (PBI-530, criterio 3)
+# ---------------------------------------------------------------------------
+
+def test_rilascia_major_alza_la_prima_cifra_e_azzera_le_altre_due():
+    assert coda.prossimo_tag(["v0.9.2"], "major") == "v1.0.0"
+    assert coda.rilascia_del_pbi("# PBI-1: x\n\nrilascia: major\n\n## Direttiva\n") == "major"
