@@ -165,15 +165,22 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
 - **Quando:** a ogni tick di `asdlc`, per ogni PR di PBI `MERGED`.
 - **Prova:** la PR nomina il PBI **e** tocca codice (fuori da `backlog/`, la stessa regola
   della coda, `tocca_codice()`: una PR che solo accoda il PBI non rilascia, `PBI-528`); il PBI
-  ha `rilascia: patch` o `rilascia: minor`; la CI su `main` è verde; il tag non esiste già.
+  ha `rilascia: patch`, `minor` o `major`; la CI su `main` è verde; il tag non esiste già.
 - **Se manca:** nessun tag; un PBI senza `rilascia:` non produce rilascio, ed è il caso dei
   PBI di documentazione.
 
-- **Dove sta:** `coda.rilascia()`, chiamata dal tick dopo `allinea()` (non con `--dry-run`).
+- **Dove sta:** `coda.rilascia()`, chiamata dal tick dopo `allinea()` (non con `--dry-run`) e dopo
+  `coda.mergia()`, che avvolge `passo_del_merge()`: l'ordine del passaggio è pin, allinea, merge, rilascio.
+  `passo_del_merge()` mergia (`gh pr merge --merge`, un commento, `merge: PBI-N #M`) la PR aperta di
+  un giro che passa le condizioni di `ADR-0033`; per le altre scrive
+  `merge: #M attende una persona — <condizione>` e non fa niente. Il commento elenca le sei condizioni con «ok» e lo sha della testa mergiata. La riga `merge: PBI-N #M` e il commento
+  ci sono solo se `gh pr merge` esce 0; se esce ≠ 0 la riga è `merge: #M non riuscito (uscita …)`, e se
+  è il commento a non riuscire la riga del merge resta e segue un avviso. Un errore è della PR, non del
+  passo: una PR malformata dà una riga di avviso e le altre si valutano.
   Cerca le PR mergiate (`gh pr list`, con i `files`), legge `rilascia:` dal PBI nel checkout, chiede la CI
   (`gh run list`) e salta il PBI il cui merge è già contenuto in un tag (`git tag --contains`).
   Il tag è `[rilascio].prefisso_tag` + `X.Y.Z`, successivo all'ultimo: `patch` alza Z, `minor`
-  alza Y e azzera Z. Senza `rilascia:` in nessun PBI non chiede niente al mondo.
+  alza Y e azzera Z, `major` alza X e azzera Y e Z. Senza `rilascia:` in nessun PBI non chiede niente al mondo.
   Un errore del passo (un worktree che non si crea, un JSON di `gh` illeggibile) non esce dal
   tick: `rilascia()` rende una riga `rilascio: avviso, …` e il tick prosegue (`ADR-0008`).
   Un `git tag` o un `git push` del tag che esce ≠ 0 non è un rilascio: la riga è
@@ -229,7 +236,8 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
 
 - **Dove sta:** `coda.stato_del_pin()`, che chiede lo stato a `gh pr view`. Solo `MERGED` toglie
   `~/asdlc-tick.pausa`; `OPEN`, `CLOSED` o un `gh` muto la lasciano.
-- **Il merge non è del tick:** né `rilascia()` né `pin()` emettono mai `gh pr merge`. Lo prova un
+- **Il merge delle PR dei giri è del tick alle condizioni di `ADR-0033`; `rilascia()` e `pin()` non
+  emettono mai `gh pr merge`.** Lo prova un
   test che li esegue davvero con un finto `gh` e guarda i comandi emessi (R10-R11).
 
 ### R12 — Il ciclo ha un tetto, e Francesco è l'ultimo

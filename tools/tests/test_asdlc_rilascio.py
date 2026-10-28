@@ -622,3 +622,291 @@ def test_attese_non_legge_i_rami_gia_in_main_ne_le_copie_vecchie_di_altri_pbi(tm
         ("PBI-700-fermo.md", A_MONTE, "PBI-601"),
         ("PBI-702-vivo.md", A_MONTE, "PBI-502"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# `rilascia: major` (PBI-530, criterio 3)
+# ---------------------------------------------------------------------------
+
+def test_rilascia_major_alza_la_prima_cifra_e_azzera_le_altre_due():
+    assert coda.prossimo_tag(["v0.9.2"], "major") == "v1.0.0"
+    assert coda.rilascia_del_pbi("# PBI-1: x\n\nrilascia: major\n\n## Direttiva\n") == "major"
+
+
+# ---------------------------------------------------------------------------
+# Il merge del tick (PBI-530, ADR-0033)
+# ---------------------------------------------------------------------------
+
+PBI_7 = """# PBI-7: un cambio al runner
+
+## Direttiva
+
+Fai.
+
+**Scope**
+
+- `tools/asdlc/coda.py` — il passo.
+- `backlog/PBI-7-un-cambio.md` — la spunta.
+- `decisions/` — le decisioni.
+
+## Verifica
+- [x] **Il primo criterio.** Fatto.
+- [x] **Il secondo criterio.** Fatto.
+"""
+
+
+class MondoDelMerge:
+    """Il tick di un progetto con `PBI-7` in coda, il suo ramo su `origin`, il rapporto del giro
+    nel worktree del runner e un `gh` finto che rende la PR aperta (e, dopo il `merge`, mergiata)."""
+
+    def __init__(self, tmp_path, ramo="pbi/pbi-7", esito=None, ci="SUCCESS",
+                 mergeable="MERGEABLE", testo=PBI_7, files="ok", in_coda=True):
+        self.origin = tmp_path / "merge-origin.git"
+        self.repo = tmp_path / "merge-tick"
+        self.worktree = tmp_path / "merge-albero"
+        git(tmp_path, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        git(tmp_path, "clone", "-q", str(self.origin), str(self.repo))
+        git(self.repo, "config", "user.email", "t@t")
+        git(self.repo, "config", "user.name", "t")
+        (self.repo / "backlog").mkdir()
+        (self.repo / "backlog" / "CODA.md").write_text(
+            "# Coda\n\n- PBI-7\n" if in_coda else "# Coda\n\n- PBI-8\n")
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "base")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(self.repo, "checkout", "-q", "-b", ramo)
+        (self.repo / "backlog" / "PBI-7-un-cambio.md").write_text(testo)
+        git(self.repo, "add", ".")
+        git(self.repo, "commit", "-qm", "PBI-7: un cambio")
+        git(self.repo, "push", "-q", "origin", ramo)
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "fetch", "-q", "origin")
+        (self.worktree / "runs").mkdir(parents=True)
+        voce = {"pbi": "PBI-7", "stato": "fatto", "critic_saltato": False, "solver": []}
+        voce.update(esito or {})
+        (self.worktree / "runs" / "20261028-100000.json").write_text(
+            json.dumps({"run": "20261028-100000", "esiti": [voce]}))
+        self.pr = {"number": 1, "title": "PBI-7: un cambio al runner", "headRefName": ramo,
+                   "mergeable": mergeable,
+                   "statusCheckRollup": [{"conclusion": ci, "status": "COMPLETED"}]}
+        if files is not None:
+            self.pr["files"] = [{"path": p} for p in (
+                ["tools/asdlc/coda.py", "backlog/PBI-7-un-cambio.md"] if files == "ok" else files)]
+        self.chiamate: list[list[str]] = []
+        self.altre_pr: list = []
+        self.uscita_merge = 0
+        self.uscita_commento = 0
+
+    def esegui(self, cmd, cwd):
+        self.chiamate.append(list(cmd))
+        if cmd[:3] == ["gh", "pr", "list"]:
+            return 0, json.dumps([self.pr, *self.altre_pr])
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            return self.uscita_merge, "" if self.uscita_merge == 0 else "merge rifiutato"
+        if cmd[:3] == ["gh", "pr", "comment"]:
+            return self.uscita_commento, "" if self.uscita_commento == 0 else "commento rifiutato"
+        return ESEGUI_VERO(cmd, cwd)
+
+    def comandi(self, *inizio):
+        return [c for c in self.chiamate if c[:len(inizio)] == list(inizio)]
+
+
+@pytest.fixture
+def mondo_del_merge(tmp_path, monkeypatch):
+    def crea(**kwargs):
+        m = MondoDelMerge(tmp_path, **kwargs)
+        monkeypatch.setattr(coda, "esegui", m.esegui)
+        return m
+    return crea
+
+
+def test_una_pr_che_passa_tutte_le_condizioni_si_mergia_e_il_tick_lo_dice(mondo_del_merge):
+    m = mondo_del_merge()
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe == ["merge: PBI-7 #1"]
+    [merge] = m.comandi("gh", "pr", "merge")
+    assert merge[:5] == ["gh", "pr", "merge", "1", "--merge"]
+    assert m.comandi("gh", "pr", "comment"), "il commento sulla PR"
+    assert m.chiamate.index(merge) < m.chiamate.index(m.comandi("gh", "pr", "comment")[0])
+
+
+SCENARI_CHE_ATTENDONO = {
+    "ramo-non-del-runner": ({"ramo": "feature/x"}, "ramo"),
+    "pbi-non-in-coda": ({"in_coda": False}, "coda"),
+    "rapporto-assente": ({"esito": {"pbi": "PBI-6"}}, "rapporto"),
+    "stato-non-fatto": ({"esito": {"stato": "fermato"}}, "stato"),
+    "critic-saltato": ({"esito": {"critic_saltato": True}}, "Critic"),
+    "esito-intento": ({"esito": {"solver": [{"esito": "intento"}]}}, "intento"),
+    "ci-rossa": ({"ci": "FAILURE"}, "CI"),
+    "conflitto": ({"mergeable": "CONFLICTING"}, "mergeable"),
+    "criterio-non-spuntato": ({"testo": PBI_7.replace("- [x] **Il secondo", "- [ ] **Il secondo")},
+                              "criterio non spuntato"),
+    "criterio-a-vista-spuntato": ({"testo": PBI_7.replace("Il secondo criterio.**",
+                                                          "Il secondo criterio (a vista).**")},
+                                  "a vista"),
+    "file-fuori-scope": ({"files": ["tools/asdlc/altro.py", "backlog/PBI-7-un-cambio.md"]},
+                         "fuori dallo Scope"),
+    "file-in-decisions": ({"files": ["decisions/ADR-0099-x.md", "backlog/PBI-7-un-cambio.md"]},
+                          "riservato"),
+    "files-assente": ({"files": None}, "elenco dei file"),
+}
+
+
+@pytest.mark.parametrize("scenario", SCENARI_CHE_ATTENDONO.values(),
+                         ids=SCENARI_CHE_ATTENDONO.keys())
+def test_ogni_condizione_che_manca_lascia_la_pr_a_una_persona_col_motivo(mondo_del_merge, scenario):
+    cambio, parola = scenario
+    m = mondo_del_merge(**cambio)
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert m.comandi("gh", "pr", "merge") == []
+    [riga] = righe
+    assert riga.startswith("merge: #1 attende una persona — ")
+    assert parola in riga
+
+
+def test_un_merge_che_non_riesce_non_e_scritto_come_fatto(mondo_del_merge):
+    m = mondo_del_merge()
+    m.uscita_merge = 1
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert m.comandi("gh", "pr", "comment") == []
+    assert not any(r.startswith("merge: PBI-7 #1") for r in righe)
+    [riga] = righe
+    assert riga.startswith("merge: #1 non riuscito")
+    assert "merge rifiutato" in riga
+
+
+def test_un_commento_che_non_riesce_lascia_la_riga_del_merge_e_lo_dice(mondo_del_merge):
+    m = mondo_del_merge()
+    m.uscita_commento = 1
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe[0] == "merge: PBI-7 #1"
+    assert any("commento" in r and "#1" in r for r in righe[1:])
+
+
+@pytest.mark.parametrize("malformata", ["senza-numero", "rapporto-solver-null", "solver-non-dict"])
+def test_una_pr_malformata_non_cancella_le_righe_delle_altre(mondo_del_merge, malformata):
+    m = mondo_del_merge()
+    if malformata == "senza-numero":
+        m.altre_pr = [{"headRefName": "pbi/pbi-9"}]
+    else:
+        # Una seconda PR, di PBI-9, il cui rapporto ha un `solver` che non si legge.
+        m.altre_pr = [{**m.pr, "number": 2, "title": "PBI-9: altro", "headRefName": "pbi/pbi-9",
+                       "files": [{"path": "tools/asdlc/coda.py"},
+                                 {"path": "backlog/PBI-9-altro.md"}]}]
+        (m.repo / "backlog" / "CODA.md").write_text("# Coda\n\n- PBI-7\n- PBI-9\n")
+        git(m.repo, "commit", "-qam", "PBI-9 in coda")
+        solver = None if malformata == "rapporto-solver-null" else ["intento"]
+        (m.worktree / "runs" / "20261028-110000.json").write_text(json.dumps({
+            "run": "20261028-110000",
+            "esiti": [{"pbi": "PBI-9", "stato": "fatto", "critic_saltato": False,
+                       "solver": solver}]}))
+        git(m.repo, "checkout", "-q", "-b", "pbi/pbi-9")
+        (m.repo / "backlog" / "PBI-9-altro.md").write_text(PBI_7.replace("PBI-7", "PBI-9"))
+        git(m.repo, "add", ".")
+        git(m.repo, "commit", "-qm", "PBI-9")
+        git(m.repo, "push", "-q", "origin", "pbi/pbi-9")
+        git(m.repo, "checkout", "-q", "main")
+        git(m.repo, "fetch", "-q", "origin")
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert "merge: PBI-7 #1" in righe
+    assert len(righe) == 2, righe
+
+
+def test_il_pbi_nel_log_e_nel_commento_e_quello_del_ramo_che_si_e_verificato(mondo_del_merge):
+    m = mondo_del_merge()
+    m.pr["title"] = "PBI-8: un altro titolo"
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe == ["merge: PBI-7 #1"]
+    [commento] = m.comandi("gh", "pr", "comment")
+    assert "PBI-7" in commento[-1]
+    assert "PBI-8" not in commento[-1]
+
+
+def test_il_commento_sulla_pr_elenca_le_sei_condizioni_e_lo_sha_mergiato(mondo_del_merge):
+    m = mondo_del_merge()
+    sha = git(m.repo, "rev-parse", "origin/pbi/pbi-7")
+
+    coda.passo_del_merge(m.repo, m.worktree)
+
+    [commento] = m.comandi("gh", "pr", "comment")
+    corpo = commento[commento.index("--body") + 1]
+    assert len([r for r in corpo.splitlines() if r.startswith("- ") and r.endswith(": ok")]) == 6
+    assert sha in corpo
+
+
+class MondoCheMergia(Mondo):
+    """Il mondo del rilascio con la PR di `PBI-600` ancora aperta: `gh pr merge` la rende
+    mergiata, e solo da lì il rilascio la vede."""
+
+    def __init__(self, tmp_path):
+        super().__init__(tmp_path, rilascia="patch")
+        self.mergiato = False
+        self.worktree = tmp_path / "albero-del-giro"
+        (self.worktree / "runs").mkdir(parents=True)
+        (self.worktree / "runs" / "20261028-100000.json").write_text(json.dumps({
+            "run": "20261028-100000",
+            "esiti": [{"pbi": "PBI-600", "stato": "fatto", "critic_saltato": False,
+                       "solver": []}]}))
+        (self.repo / "backlog" / "CODA.md").write_text("# Coda\n\n- PBI-600\n")
+        git(self.repo, "checkout", "-q", "-b", "pbi/pbi-600")
+        (self.repo / "backlog" / "PBI-600-un-cambio.md").write_text(
+            "# PBI-600: un cambio al runner\n\nrilascia: patch\n\n## Direttiva\n\nFai.\n\n"
+            "**Scope**\n\n- `tools/asdlc/coda.py` — il passo.\n"
+            "- `backlog/PBI-600-un-cambio.md` — la spunta.\n\n## Verifica\n- [x] **Uno.** Fatto.\n")
+        git(self.repo, "commit", "-qam", "PBI-600: il giro")
+        git(self.repo, "push", "-q", "origin", "pbi/pbi-600")
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "fetch", "-q", "origin")
+
+    def esegui(self, cmd, cwd):
+        if cmd[:3] == ["gh", "pr", "list"] and "open" in cmd:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            aperte = [] if self.mergiato else [{
+                "number": 1, "title": "PBI-600: un cambio al runner",
+                "headRefName": "pbi/pbi-600", "mergeable": "MERGEABLE",
+                "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+                "files": [{"path": "tools/asdlc/coda.py"},
+                          {"path": "backlog/PBI-600-un-cambio.md"}]}]
+            return 0, json.dumps(aperte)
+        if cmd[:3] == ["gh", "pr", "list"] and not self.mergiato:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            return 0, "[]"
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            self.mergiato = True
+            return 0, ""
+        if cmd[:3] == ["gh", "pr", "comment"]:
+            self.chiamate.append((list(cmd), Path(cwd)))
+            return 0, ""
+        return super().esegui(cmd, cwd)
+
+
+def test_il_tick_mergia_prima_di_rilasciare_nello_stesso_passaggio(tmp_path, monkeypatch, capsys):
+    m = MondoCheMergia(tmp_path)
+    monkeypatch.setattr(coda, "esegui", m.esegui)
+    casa = tmp_path / "casa-del-tick"
+    casa.mkdir()
+    monkeypatch.setenv("HOME", str(casa))
+    monkeypatch.setattr(coda, "allinea", lambda repo: None)
+    monkeypatch.setattr(coda, "reinstalla", lambda repo, albero: None)
+    monkeypatch.setattr(coda, "decidi", lambda repo, albero: coda.Finita())
+    monkeypatch.setattr(coda, "pin", lambda repo: [])
+
+    assert coda.smista(["--repo", str(m.repo), "--worktree", str(m.worktree)]) == 0
+
+    righe = capsys.readouterr().out.splitlines()
+    assert "merge: PBI-600 #1" in righe
+    [rilascio] = [r for r in righe if r.startswith("rilascio: PBI-600 → ")]
+    assert righe.index("merge: PBI-600 #1") < righe.index(rilascio)

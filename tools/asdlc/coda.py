@@ -7,8 +7,9 @@ torni al terminale. Questo è il processo breve che `cron` chiama a intervalli
 regolari per togliere quell'attesa (`backlog/PBI-350`).
 
 Quello che **non** fa, ed è la riga che lo tiene dentro i suoi confini: non
-mergia — il merge è il terzo gate, il confine dell'accountability, e non è
-delegabile (`runner.py:17`) — e non decide cosa entra in coda. La coda la
+mergia altro che le PR dei giri che passano le condizioni verificabili di
+`ADR-0033` (`passo_del_merge()`) — le altre restano a una persona — e non decide
+cosa entra in coda. La coda la
 scrive Francesco a mano in `backlog/CODA.md`; il tick è un esecutore d'ordini già
 dati, e non ne inventa nessuno.
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import fnmatch
 import json
 import os
 import re
@@ -912,23 +914,28 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
         log.write(f"{datetime.now().isoformat(timespec='seconds')}  {riga}\n")
 
 
-RE_RILASCIA = re.compile(r"^rilascia:\s*(patch|minor)\s*$", re.MULTILINE)
+RE_RILASCIA = re.compile(r"^rilascia:\s*(patch|minor|major)\s*$", re.MULTILINE)
 
 
 def rilascia_del_pbi(testo: str) -> str | None:
-    """`patch` o `minor` se il PBI dichiara `rilascia:`, altrimenti `None` (R8)."""
+    """`patch`, `minor` o `major` se il PBI dichiara `rilascia:`, altrimenti `None` (R8)."""
     trovato = RE_RILASCIA.search(testo)
     return trovato.group(1) if trovato else None
 
 
 def prossimo_tag(tag: list[str], come: str) -> str:
     """Il tag che segue l'ultimo `<prefisso>X.Y.Z` di `tag`: `patch` alza Z, `minor`
-    alza Y e azzera Z."""
+    alza Y e azzera Z, `major` alza X e azzera Y e Z."""
     prefisso = CFG.rilascio.prefisso_tag
     versioni = [tuple(int(n) for n in t.removeprefix(prefisso).split("."))
                 for t in tag if re.fullmatch(rf"{re.escape(prefisso)}\d+\.\d+\.\d+", t)]
     x, y, z = max(versioni, default=(0, 0, 0))
-    nuova = (x, y, z + 1) if come == "patch" else (x, y + 1, 0)
+    if come == "patch":
+        nuova = (x, y, z + 1)
+    elif come == "major":
+        nuova = (x + 1, 0, 0)
+    else:
+        nuova = (x, y + 1, 0)
     return prefisso + ".".join(str(n) for n in nuova)
 
 
@@ -943,6 +950,136 @@ def ci_verde(repo: Path) -> bool:
     except ValueError:
         return False
     return bool(corse) and corse[0].get("conclusion") == "success"
+
+
+# I file che il tick non mergia mai (`ADR-0033`, decisione 1): la costituzione e il suo
+# template, la configurazione, le decisioni. Il loro merge lo ratifica una persona (`ADR-0012`).
+FILE_RISERVATI = ("AGENTS.md", "CLAUDE.md", "asdlc.toml")
+CARTELLE_RISERVATE = ("decisions/", "template/AGENTS.md", "template/decisions/")
+
+
+# Le sei condizioni di `ADR-0033` (decisione 1), come il commento sulla PR le elenca.
+CONDIZIONI_DEL_MERGE = (
+    "la PR è di un giro del runner e il PBI è in coda",
+    "l'ultimo rapporto chiude fatto, col Critic girato e nessun esito intento",
+    "la CI sulla testa è verde e la PR è mergeable",
+    "ogni criterio del PBI è spuntato e nessuno è a vista",
+    "ogni file della PR sta nello Scope del PBI",
+    "nessun file della PR è riservato a una persona",
+)
+
+
+def condizione_mancante(repo: Path, worktree: Path, pr: dict) -> str | None:
+    """La prima delle condizioni di `ADR-0033` che la PR aperta `pr` non soddisfa, o
+    `None` se le soddisfa tutte. Nell'ordine dell'ADR; le altre non si guardano."""
+    ramo = pr.get("headRefName", "")
+    if (dal_ramo := RE_RAMO_PR.match(ramo)) is None:
+        return f"il ramo {ramo} non è di un giro del runner"
+    pbi = CFG.backlog.id_di(dal_ramo.group(1))
+    if not any(isinstance(v, VocePbi) and v.pbi == pbi
+               for v in leggi_voci((repo / CODA).read_text(encoding="utf-8"))):
+        return f"{pbi} non è in coda"
+    esito = ultimo_esito(worktree, pbi)
+    if esito is None:
+        return f"nessun rapporto del giro di {pbi}"
+    if esito.get("stato") != "fatto":
+        return f"il giro di {pbi} non chiude fatto (stato {esito.get('stato')})"
+    if esito.get("critic_saltato"):
+        return "il Critic è stato saltato"
+    if any(x.get("esito") == "intento" for x in esito.get("solver", [])):
+        return "il Solver ha dichiarato un esito intento"
+    prove = pr.get("statusCheckRollup") or []
+    if not prove or any(p.get("conclusion") != "SUCCESS" for p in prove):
+        return "la CI sulla testa della PR non è verde"
+    if pr.get("mergeable") != "MERGEABLE":
+        return f"la PR non è mergeable ({pr.get('mergeable')})"
+    testo = testa_del_pbi(repo, pbi, ramo)
+    if testo is None:
+        return f"il file di {pbi} alla testa della PR non si legge"
+    criteri = asdlc_runner.criteri_del_pbi(testo)
+    if any(not c.startswith("- [x]") for c in criteri):
+        return "un criterio non spuntato"
+    if any("(a vista)" in c for c in criteri):
+        return "un criterio a vista: lo spunta chi mergia"
+    file = [f.get("path", "") for f in pr.get("files") or []]
+    if not file or len(file) >= LIMITE_FILE:
+        return "l'elenco dei file della PR manca o può essere tagliato"
+    percorsi = [p for p, _ in asdlc_runner.percorsi_dello_scope(testo)]
+    for f in file:
+        if not any(f == p or (p.endswith("/") and f.startswith(p)) for p in percorsi):
+            return f"il file {f} è fuori dallo Scope"
+    for f in file:
+        if f in FILE_RISERVATI or f.startswith(CARTELLE_RISERVATE):
+            return f"il file {f} è riservato a una persona"
+    return None
+
+
+def testa_del_pbi(repo: Path, pbi: str, ramo: str) -> str | None:
+    """Il file di `pbi` com'è alla testa di `ramo` su `origin`, o `None`."""
+    numero = CFG.backlog.numero(pbi)
+    codice, elenco = esegui(["git", "-C", str(repo), "ls-tree", "--name-only",
+                             f"{REMOTO}/{ramo}", f"{BACKLOG}/"], repo)
+    if numero is None or codice != 0:
+        return None
+    glob = CFG.backlog.glob_del_file(numero)
+    file = next((f for f in elenco.split() if fnmatch.fnmatch(Path(f).name, glob)), None)
+    if file is None:
+        return None
+    codice, testo = esegui(["git", "-C", str(repo), "show", f"{REMOTO}/{ramo}:{file}"], repo)
+    return testo if codice == 0 else None
+
+
+def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
+    """Il merge delle PR dei giri (`ADR-0033`): per ogni PR aperta che passa le
+    condizioni, `gh pr merge --merge` e un commento sulla PR. Rende le righe che il
+    tick scrive. `worktree` è quello del runner, dove stanno i rapporti dei giri."""
+    codice, uscita = esegui(["gh", "pr", "list", "--state", "open", "--limit", str(LIMITE_PR),
+                             "--json", "number,title,headRefName,files,statusCheckRollup,mergeable"],
+                            repo)
+    if codice != 0:
+        # Niente riga: `decidi()` dice già che `gh` non risponde, e un tick senza PR
+        # da guardare scrive le stesse righe di prima.
+        return []
+    righe = []
+    for pr in json.loads(uscita):
+        # Un errore è della PR, non del passo: le righe dei merge già fatti restano.
+        try:
+            righe.extend(_mergia_una(repo, worktree, pr))
+        except Exception as errore:
+            righe.append(f"merge: avviso, la PR {pr.get('number') if isinstance(pr, dict) else '?'} "
+                         f"non si legge — {in_una_riga(f'{type(errore).__name__}: {errore}')}")
+    return righe
+
+
+def _mergia_una(repo: Path, worktree: Path, pr: dict) -> list[str]:
+    numero = pr["number"]
+    if (manca := condizione_mancante(repo, worktree, pr)) is not None:
+        return [f"merge: #{numero} attende una persona — {manca}"]
+    # Il PBI che le condizioni hanno verificato: quello del ramo, non del titolo.
+    pbi = CFG.backlog.id_di(RE_RAMO_PR.match(pr["headRefName"]).group(1))
+    codice, uscita = esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
+    if codice != 0:
+        return [f"merge: #{numero} non riuscito (uscita {codice}): {in_una_riga(uscita)}"]
+    righe = [f"merge: {pbi} #{numero}"]
+    ramo = pr["headRefName"]
+    sha = esegui(["git", "rev-parse", f"{REMOTO}/{ramo}"], repo)[1].strip()
+    corpo = "\n".join([f"Mergiata dal tick: {pbi}, testa {sha}.", "",
+                       *(f"- {c}: ok" for c in CONDIZIONI_DEL_MERGE)])
+    codice, uscita = esegui(["gh", "pr", "comment", str(numero), "--body", corpo], repo)
+    if codice != 0:
+        righe.append(f"merge: avviso, il commento su #{numero} non è arrivato "
+                     f"(uscita {codice}): {in_una_riga(uscita)}")
+    return righe
+
+
+def mergia(repo: Path, worktree: Path) -> list[str]:
+    """`passo_del_merge()` senza che un errore fermi il tick: un JSON illeggibile di `gh`
+    o un file che non si legge diventano una riga di avviso (`ADR-0008`)."""
+    try:
+        return passo_del_merge(repo, worktree)
+    except Exception as errore:
+        return [f"merge: avviso, il passo non è andato a buon fine — "
+                f"{in_una_riga(f'{type(errore).__name__}: {errore}')}"]
 
 
 def passo_di_rilascio(repo: Path) -> list[str]:
@@ -1298,7 +1435,8 @@ def passaggio(a: argparse.Namespace) -> int:
         print(riga)
         scrivi_nel_log(a.repo, riga)
         return 0
-    for riga in () if a.dry_run else rilascia(a.repo):
+    # Il merge prima del rilascio: il tag segue il merge nello stesso passaggio (`ADR-0033`).
+    for riga in () if a.dry_run else mergia(a.repo, a.worktree) + rilascia(a.repo):
         print(riga)
         scrivi_nel_log(a.repo, riga)
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
