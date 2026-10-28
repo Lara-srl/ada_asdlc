@@ -696,11 +696,15 @@ class MondoDelMerge:
         self.altre_pr: list = []
         self.uscita_merge = 0
         self.uscita_commento = 0
+        self.elenco = None
+        self.uscita_elenco = 0
 
     def esegui(self, cmd, cwd):
         self.chiamate.append(list(cmd))
         if cmd[:3] == ["gh", "pr", "list"]:
-            return 0, json.dumps([self.pr, *self.altre_pr])
+            if self.uscita_elenco != 0:
+                return self.uscita_elenco, "gh non risponde"
+            return 0, self.elenco if self.elenco is not None else json.dumps([self.pr, *self.altre_pr])
         if cmd[:3] == ["gh", "pr", "merge"]:
             return self.uscita_merge, "" if self.uscita_merge == 0 else "merge rifiutato"
         if cmd[:3] == ["gh", "pr", "comment"]:
@@ -844,6 +848,36 @@ def test_il_commento_sulla_pr_elenca_le_sei_condizioni_e_lo_sha_mergiato(mondo_d
     corpo = commento[commento.index("--body") + 1]
     assert len([r for r in corpo.splitlines() if r.startswith("- ") and r.endswith(": ok")]) == 6
     assert sha in corpo
+
+
+@pytest.mark.parametrize("elenco", ["non è JSON", "null"], ids=["illeggibile", "non-una-lista"])
+def test_mergia_rende_un_avviso_se_il_passo_non_si_legge(mondo_del_merge, elenco):
+    m = mondo_del_merge()
+    m.elenco = elenco
+
+    righe = coda.mergia(m.repo, m.worktree)
+
+    [riga] = righe
+    assert riga.startswith("merge: avviso, il passo non è andato a buon fine")
+    assert m.comandi("gh", "pr", "merge") == []
+
+
+def test_se_gh_pr_list_non_risponde_il_passo_non_scrive_righe_del_merge(mondo_del_merge):
+    m = mondo_del_merge()
+    m.uscita_elenco = 1
+
+    assert coda.passo_del_merge(m.repo, m.worktree) == []
+    assert coda.mergia(m.repo, m.worktree) == []
+    assert m.comandi("gh", "pr", "merge") == []
+
+
+def test_senza_pr_aperte_il_passo_del_merge_non_scrive_niente(mondo_del_merge):
+    m = mondo_del_merge()
+    m.elenco = "[]"
+
+    assert coda.passo_del_merge(m.repo, m.worktree) == []
+    assert m.comandi("gh", "pr", "merge") == []
+    assert m.comandi("gh", "pr", "comment") == []
 
 
 class MondoCheMergia(Mondo):
