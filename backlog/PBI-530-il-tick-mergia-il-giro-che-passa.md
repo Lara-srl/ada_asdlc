@@ -118,3 +118,36 @@ decisione 2 e Scope. **D** sulla spec: `specs/solver-e-rilascio/spec.md` R8 e R1
 criteri 1 e 3 e non erano nello Scope: Scope. **N** sui test: `Mondo` e le fixture stanno in
 `test_asdlc_rilascio.py`, non in `test_asdlc_coda.py`: Scope e Contesto. Le quattro sonde sono uscite
 `guasto` (il gate nell'albero usa e getta, `PBI-529`): il rosso resta dichiarato, non provato.
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (28/10, run `20261028-212514`, 21:25-21:44, runner `v0.9.0`) ha fatto i **quattro criteri**
+con quindici commit, RED e GREEN per criterio, e li ha spuntati. Il Critic (revisione 0) ha dato
+«non pronto» con quattro rilievi: il tick scriveva «mergiato» anche se il merge non era avvenuto (1), il
+commento sulla PR non elencava le sei condizioni né lo sha (2), comportamenti nati senza RED nel GREEN del
+criterio 4 (3), il PBI nominato nel log poteva non essere quello verificato (4). I rilievi 1, 2 e 4 il
+Builder li ha corretti **con i loro RED** (`7d5a6cf`…`64a03c4`). Il 3 lo ha chiuso con `5ec7fa2`, un test
+nato verde che non morde (122 mutanti provati nelle funzioni toccate, nessun fallimento per asserzione):
+il gate del rosso ha fermato il giro `rosso-mai-visto`. Il tag è `giro-fermato/pbi-530-giro1-20261028`
+(`5ec7fa2`).
+
+**Perché `5ec7fa2` non è riportato.** Un test nato verde non si toglie con un revert (il gate del rosso
+guarda ogni commit del ramo, lezione del 19/10); e il codice che doveva guardare è già in `6ca9a7e`.
+Come per il 525 si riporta tutto **tranne** quel commit e il RED dei tre comportamenti si rifà vero.
+
+Sul ramo di ripresa, verificato il 28/10: `python3 -m pytest -q tools/tests` dà `1257 passed`,
+`git status --porcelain` è vuoto e `asdlc-runner --gate-rosso HEAD` dice «nessun test è nato verde».
+
+**Da fare, in quest'ordine:**
+
+1. **I quindici commit sono già in `main`** (li porta la PR di ripresa, `cherry-pick -x` dal tag, senza
+   `5ec7fa2`), dal RED `64d024a` al GREEN `64a03c4`. **Verifica:** `git log --oneline` su `main` li
+   mostra; non si riportano di nuovo.
+2. **I tre comportamenti del rilievo 3, ciascuno col suo RED**, in un commit `test` solo dopo averne
+   tolto il codice in un `refactor`, come per la guardia del dry-run del 525: (a) `mergia()` rende
+   `merge: avviso, …` quando `passo_del_merge()` solleva e il tick prosegue e rilascia; (b) `gh pr list`
+   che esce diverso da 0 non scrive nessuna riga `merge:`; (c) con zero PR aperte nessuna riga del
+   passaggio comincia con `merge:` e non c'è né `gh pr merge` né commento. Per ognuno: `refactor`
+   (si toglie il codice, nessun test cambia), `test` (rosso), `fix` (si rimette il codice).
+   **Verifica:** `asdlc-runner --gate-rosso HEAD` passa e i tre test falliscono ognuno sul proprio RED.
+3. **Il Critic** deve poter dire `pronto`: il rilievo 3 era l'ultimo aperto.
