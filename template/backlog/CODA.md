@@ -20,6 +20,10 @@ prima: una PR che scrive solo il file del PBI e la sua riga qui non spegne nient
 anche un file fuori da `backlog/`, per esempio un ADR, lo spegne lo stesso: è il limite
 dichiarato della regola.
 
+**Il merge delle PR dei giri è del tick** (`ADR-0033`), prima del rilascio e a ogni passaggio:
+se la PR passa le condizioni verificabili in codice la mergia (`--merge`) e la commenta, se no
+il log scrive `merge: #M attende una persona — <condizione>` e il merge resta a una persona.
+
 **Mettere un PBI in coda è dichiarare che le sue domande sono chiuse**, ed è l'unico
 cancello che ci sia: il tick non lo rifà, perché non può. Il carattere `❓` nel PBI non è la
 prova né del contrario né a favore: può essere una domanda aperta o un protocollo di

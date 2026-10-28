@@ -169,7 +169,11 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
 - **Se manca:** nessun tag; un PBI senza `rilascia:` non produce rilascio, ed è il caso dei
   PBI di documentazione.
 
-- **Dove sta:** `coda.rilascia()`, chiamata dal tick dopo `allinea()` (non con `--dry-run`).
+- **Dove sta:** `coda.rilascia()`, chiamata dal tick dopo `allinea()` (non con `--dry-run`) e dopo
+  `coda.mergia()`, che avvolge `passo_del_merge()`: l'ordine del passaggio è pin, allinea, merge, rilascio.
+  `passo_del_merge()` mergia (`gh pr merge --merge`, un commento, `merge: PBI-N #M`) la PR aperta di
+  un giro che passa le condizioni di `ADR-0033`; per le altre scrive
+  `merge: #M attende una persona — <condizione>` e non fa niente.
   Cerca le PR mergiate (`gh pr list`, con i `files`), legge `rilascia:` dal PBI nel checkout, chiede la CI
   (`gh run list`) e salta il PBI il cui merge è già contenuto in un tag (`git tag --contains`).
   Il tag è `[rilascio].prefisso_tag` + `X.Y.Z`, successivo all'ultimo: `patch` alza Z, `minor`
@@ -229,7 +233,8 @@ esistente (per una PR, quello del suo titolo o del suo ramo). Un passo che falli
 
 - **Dove sta:** `coda.stato_del_pin()`, che chiede lo stato a `gh pr view`. Solo `MERGED` toglie
   `~/asdlc-tick.pausa`; `OPEN`, `CLOSED` o un `gh` muto la lasciano.
-- **Il merge non è del tick:** né `rilascia()` né `pin()` emettono mai `gh pr merge`. Lo prova un
+- **Il merge delle PR dei giri è del tick alle condizioni di `ADR-0033`; `rilascia()` e `pin()` non
+  emettono mai `gh pr merge`.** Lo prova un
   test che li esegue davvero con un finto `gh` e guarda i comandi emessi (R10-R11).
 
 ### R12 — Il ciclo ha un tetto, e Francesco è l'ultimo
