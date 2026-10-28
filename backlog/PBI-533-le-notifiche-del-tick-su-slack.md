@@ -1,7 +1,7 @@
 # PBI-533: le notifiche del tick su Slack, con un webhook
 
 **Stato:** proposto il 26/10 su richiesta di Francesco («un canale Slack per le notifiche, così se il
-runner si ferma lo so, tramite webhook»); **non letto**, **non in coda**. Le due domande hanno una
+runner si ferma lo so, tramite webhook»); **non letto**; accodato il 28/10 dopo la barriera `v1.0.0` (**da leggere con la lettura avversariale prima di toglierla**). Le due domande hanno una
 **proposta** (*Deciso*, punti 3 e 6) che il merge della PR che accoda ratifica.
 
 ## Direttiva
@@ -35,6 +35,11 @@ persona, o che una persona vuole sapere. Un messaggio per cambio, non uno ogni d
   nessun messaggio, ed è il battito di `PBI-510`; i messaggi del runner dentro il giro; la issue di
   `PBI-525`, che resta com'è; i pulsanti o le risposte da Slack.
 
+**Aggiunta del 28/10.** Gli ultimi tre eventi della tabella (`non-allineato`, `reinstallazione`, `pausa`)
+sono i fermi silenziosi visti quel giorno: due checkout fermi per ore su un ramo, e una barriera ferma
+per venti. Valgono la regola «un messaggio per cambio» come gli altri, e il criterio «ogni evento ha il
+suo messaggio» li copre nello stesso test parametrico.
+
 ## ❓ Domande aperte
 
 **❓1 — Quali eventi?** (a) solo i fermi; (b) i fermi e le PR pronte da mergiare; (c) anche il
@@ -65,6 +70,9 @@ d'ambiente nel `crontab`; (b) un file fuori dai repository, letto da tutti i pro
    | `barriera` | `Barriera` | «⏸️ <progetto>: barriera — <testo>» |
    | `finita` | `Finita` | «🏁 <progetto>: coda finita» |
    | `guasto` | lo stesso guasto del tick (`gh` che non risponde, un pre-flight) tre tick di fila | «⚠️ <progetto>: il tick non riesce — <riga>» |
+   | `non-allineato` | il tick scrive `non allineato: …` (il checkout non è su `main`) | «⚠️ <progetto>: checkout non allineato — <ragione>» |
+   | `reinstallazione` | il tick scrive `reinstallazione fallita: …` | «⚠️ <progetto>: reinstallazione fallita — <riga>» |
+   | `pausa` | il tick scrive `in pausa: …` (globale o di progetto, `PBI-535`) | «⏸️ <progetto>: in pausa — <motivo>» |
 
    Le PR pronte servono perché i merge li fa Francesco: è lo stesso gesto che oggi si scopre guardando.
    `[notifiche].eventi` sceglie quali mandare; il default è tutti.
@@ -90,7 +98,8 @@ d'ambiente nel `crontab`; (b) un file fuori dai repository, letto da tutti i pro
    # Le notifiche del tick su Slack (PBI-533). Il webhook è un segreto e non sta qui.
    attive = true
    webhook = "~/.config/asdlc/slack-webhook"
-   eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto"]
+   eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto",
+              "non-allineato", "reinstallazione", "pausa"]
    ```
 
    Senza la sezione, o con `attive = false`, il tick non manda niente e non lo dice. Con `attive = true`
