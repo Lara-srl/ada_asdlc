@@ -148,6 +148,15 @@ def test_una_pr_che_nomina_il_pbi_e_tocca_solo_backlog_non_rilascia(mondo):
                    for c, _ in m.chiamate)
 
 
+def test_una_pr_che_nomina_il_pbi_e_tocca_codice_rilascia_come_prima(mondo):
+    m = mondo(rilascia="minor", files=["backlog/PBI-600-un-cambio.md", "tools/asdlc/x.py"])
+
+    righe = coda.rilascia(m.repo)
+
+    assert righe == ["rilascio: PBI-600 → v0.4.0"]
+    assert m.tag_su_origin() == ["v0.3.0", "v0.4.0"]
+
+
 def test_senza_rilascia_non_c_e_tag(mondo):
     """Lo stesso scenario, ma il PBI non dichiara `rilascia:` (un PBI di documentazione)."""
     m = mondo(rilascia=None)
