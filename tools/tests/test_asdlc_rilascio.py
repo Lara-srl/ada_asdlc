@@ -822,6 +822,18 @@ def test_una_pr_malformata_non_cancella_le_righe_delle_altre(mondo_del_merge, ma
     assert len(righe) == 2, righe
 
 
+def test_il_pbi_nel_log_e_nel_commento_e_quello_del_ramo_che_si_e_verificato(mondo_del_merge):
+    m = mondo_del_merge()
+    m.pr["title"] = "PBI-8: un altro titolo"
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe == ["merge: PBI-7 #1"]
+    [commento] = m.comandi("gh", "pr", "comment")
+    assert "PBI-7" in commento[-1]
+    assert "PBI-8" not in commento[-1]
+
+
 class MondoCheMergia(Mondo):
     """Il mondo del rilascio con la PR di `PBI-600` ancora aperta: `gh pr merge` la rende
     mergiata, e solo da lì il rilascio la vede."""
