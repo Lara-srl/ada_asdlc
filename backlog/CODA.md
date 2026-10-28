@@ -64,6 +64,10 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-528
 - PBI-530
 - ‖ tag `v1.0.0` e pin in `ada_asdlc`, `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`; poi gli altri PBI letti e accodati per la `v1.1.0`
+- PBI-534
+- PBI-533
+- PBI-535
+- PBI-536
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
@@ -124,3 +128,13 @@ più spesso. Il 530 dichiara `rilascia: major`: dopo il suo merge il tick taglia
 barriera è il pin nei cinque repository, compreso questo. `PBI-527` esce dalle dipendenze del 530
 (`ADR-0032` è in `main` e la condizione si legge con la stessa regex) e viene dopo, con 526, 529, 531,
 532 e 533, nella `v1.1.0`. Il bump di `tools/pyproject.toml` resta una PR a mano prima del tag.
+
+**`PBI-534`, `PBI-533`, `PBI-535`, `PBI-536`, sapere cosa fa il runner e governarlo da Slack** (Francesco,
+28/10). Vanno dopo la barriera `v1.0.0`, per la `v1.1.0`, e in fila: il 534 è il comando `asdlc-stato` e
+il suo elenco dei progetti; il 533 manda i messaggi del tick su Slack (con `non-allineato`,
+`reinstallazione` e `pausa` aggiunti il 28/10); il 535 dà la pausa per progetto; il 536 risponde ai
+comandi (`stato`, `pausa`, `riprendi`, `rilancia`) per polling del canale. **Non sono ancora passati dalla
+lettura avversariale:** va fatta prima di togliere la barriera `v1.0.0`, e le correzioni entrano in
+`main` con una PR a parte. Fuori da questo giro, per scelta di Francesco: l'indipendenza dal modello,
+una plancia o un'API HTTP, le chiavi API separate per progetto. La sandbox del Builder resta un ADR da
+scrivere (`LETTURA-ADLC-IBM.md`, §3.2), non una voce di coda.
