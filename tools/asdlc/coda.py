@@ -912,23 +912,28 @@ def scrivi_nel_log(repo: Path, riga: str) -> None:
         log.write(f"{datetime.now().isoformat(timespec='seconds')}  {riga}\n")
 
 
-RE_RILASCIA = re.compile(r"^rilascia:\s*(patch|minor)\s*$", re.MULTILINE)
+RE_RILASCIA = re.compile(r"^rilascia:\s*(patch|minor|major)\s*$", re.MULTILINE)
 
 
 def rilascia_del_pbi(testo: str) -> str | None:
-    """`patch` o `minor` se il PBI dichiara `rilascia:`, altrimenti `None` (R8)."""
+    """`patch`, `minor` o `major` se il PBI dichiara `rilascia:`, altrimenti `None` (R8)."""
     trovato = RE_RILASCIA.search(testo)
     return trovato.group(1) if trovato else None
 
 
 def prossimo_tag(tag: list[str], come: str) -> str:
     """Il tag che segue l'ultimo `<prefisso>X.Y.Z` di `tag`: `patch` alza Z, `minor`
-    alza Y e azzera Z."""
+    alza Y e azzera Z, `major` alza X e azzera Y e Z."""
     prefisso = CFG.rilascio.prefisso_tag
     versioni = [tuple(int(n) for n in t.removeprefix(prefisso).split("."))
                 for t in tag if re.fullmatch(rf"{re.escape(prefisso)}\d+\.\d+\.\d+", t)]
     x, y, z = max(versioni, default=(0, 0, 0))
-    nuova = (x, y, z + 1) if come == "patch" else (x, y + 1, 0)
+    if come == "patch":
+        nuova = (x, y, z + 1)
+    elif come == "major":
+        nuova = (x + 1, 0, 0)
+    else:
+        nuova = (x, y + 1, 0)
     return prefisso + ".".join(str(n) for n in nuova)
 
 
