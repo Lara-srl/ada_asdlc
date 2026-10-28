@@ -61,7 +61,6 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-516
 - PBI-524
 - PBI-525
-- ‖ tag `v0.9.0` e pin in `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`
 - PBI-528
 - PBI-530
 - ‖ tag `v1.0.0` e pin in `ada_asdlc`, `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`; poi gli altri PBI letti e accodati per la `v1.1.0`
