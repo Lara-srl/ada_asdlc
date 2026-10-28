@@ -162,10 +162,9 @@ Sul ramo di ripresa, verificato il 28/10: `python3 -m pytest -q tools/tests` dà
 
 **Da fare, in quest'ordine:**
 
-1. **I sedici commit sul ramo del giro:** `git cherry-pick -x origin/main..giro-fermato/pbi-525-giro1-20261027~1`
-   (tutti tranne `1c7f3e7`, già nel ramo di ripresa se questo file è in `main`: **verifica**
-   `git log --oneline origin/main..HEAD` mostra i commit del criterio 1, 2 e 3 da `03c0b63` a
-   `102bd06`). Se il cherry-pick dà un conflitto è un fatto nuovo: `fermati` con la domanda.
+1. **I sedici commit sono già in `main`** (li porta la PR di ripresa, `cherry-pick -x` dal tag, senza
+   `1c7f3e7`). **Verifica:** `git log --oneline` su `main` li mostra, dal RED `03c0b63` a `102bd06`;
+   non si riportano di nuovo.
 2. **La guardia del dry-run, col suo RED.** In un commit `refactor(coda): …` si toglie `not a.dry_run`
    dalla condizione in `passaggio()` (non cambia un test: oggi nessuno lo guarda). Poi il RED, da solo:
    il test e il parametro `argomenti` di `tick_in_attesa()` come in `git show 1c7f3e7`, ora **rosso**
