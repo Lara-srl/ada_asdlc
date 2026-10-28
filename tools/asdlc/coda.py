@@ -1044,7 +1044,8 @@ def _mergia_una(repo: Path, worktree: Path, pr: dict) -> list[str]:
     numero = pr["number"]
     if (manca := condizione_mancante(repo, worktree, pr)) is not None:
         return [f"merge: #{numero} attende una persona — {manca}"]
-    pbi = pbi_nominato(pr)
+    # Il PBI che le condizioni hanno verificato: quello del ramo, non del titolo.
+    pbi = CFG.backlog.id_di(RE_RAMO_PR.match(pr["headRefName"]).group(1))
     codice, uscita = esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
     if codice != 0:
         return [f"merge: #{numero} non riuscito (uscita {codice}): {in_una_riga(uscita)}"]
