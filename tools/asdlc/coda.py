@@ -958,6 +958,17 @@ FILE_RISERVATI = ("AGENTS.md", "CLAUDE.md", "asdlc.toml")
 CARTELLE_RISERVATE = ("decisions/", "template/AGENTS.md", "template/decisions/")
 
 
+# Le sei condizioni di `ADR-0033` (decisione 1), come il commento sulla PR le elenca.
+CONDIZIONI_DEL_MERGE = (
+    "la PR è di un giro del runner e il PBI è in coda",
+    "l'ultimo rapporto chiude fatto, col Critic girato e nessun esito intento",
+    "la CI sulla testa è verde e la PR è mergeable",
+    "ogni criterio del PBI è spuntato e nessuno è a vista",
+    "ogni file della PR sta nello Scope del PBI",
+    "nessun file della PR è riservato a una persona",
+)
+
+
 def condizione_mancante(repo: Path, worktree: Path, pr: dict) -> str | None:
     """La prima delle condizioni di `ADR-0033` che la PR aperta `pr` non soddisfa, o
     `None` se le soddisfa tutte. Nell'ordine dell'ADR; le altre non si guardano."""
@@ -1050,8 +1061,11 @@ def _mergia_una(repo: Path, worktree: Path, pr: dict) -> list[str]:
     if codice != 0:
         return [f"merge: #{numero} non riuscito (uscita {codice}): {in_una_riga(uscita)}"]
     righe = [f"merge: {pbi} #{numero}"]
-    codice, uscita = esegui(["gh", "pr", "comment", str(numero), "--body",
-                             f"Mergiata dal tick: {pbi}."], repo)
+    ramo = pr["headRefName"]
+    sha = esegui(["git", "rev-parse", f"{REMOTO}/{ramo}"], repo)[1].strip()
+    corpo = "\n".join([f"Mergiata dal tick: {pbi}, testa {sha}.", "",
+                       *(f"- {c}: ok" for c in CONDIZIONI_DEL_MERGE)])
+    codice, uscita = esegui(["gh", "pr", "comment", str(numero), "--body", corpo], repo)
     if codice != 0:
         righe.append(f"merge: avviso, il commento su #{numero} non è arrivato "
                      f"(uscita {codice}): {in_una_riga(uscita)}")
