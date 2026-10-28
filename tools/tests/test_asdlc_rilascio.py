@@ -834,6 +834,18 @@ def test_il_pbi_nel_log_e_nel_commento_e_quello_del_ramo_che_si_e_verificato(mon
     assert "PBI-8" not in commento[-1]
 
 
+def test_il_commento_sulla_pr_elenca_le_sei_condizioni_e_lo_sha_mergiato(mondo_del_merge):
+    m = mondo_del_merge()
+    sha = git(m.repo, "rev-parse", "origin/pbi/pbi-7")
+
+    coda.passo_del_merge(m.repo, m.worktree)
+
+    [commento] = m.comandi("gh", "pr", "comment")
+    corpo = commento[commento.index("--body") + 1]
+    assert len([r for r in corpo.splitlines() if r.startswith("- ") and r.endswith(": ok")]) == 6
+    assert sha in corpo
+
+
 class MondoCheMergia(Mondo):
     """Il mondo del rilascio con la PR di `PBI-600` ancora aperta: `gh pr merge` la rende
     mergiata, e solo da lì il rilascio la vede."""
