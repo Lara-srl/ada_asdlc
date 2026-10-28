@@ -37,8 +37,8 @@ va nella non regressione dichiarata come tale (`ADR-0022`, nota del 23/09; misur
 primo giro di PBI-364).
 
 **Una PR che accoda o scrive un PBI non si intitola `PBI-XXX:` e non nasce da un ramo `pbi/`**:
-il tick la leggerebbe come la PR che lo *fa*. La coda si difende (`tocca_codice()`), il rilascio no,
-finché `PBI-528` non è in `main`: il 25/10 la #93, `PBI-525: …`, di soli file in `backlog/`, ha fatto
+il tick la leggerebbe come la PR che lo *fa*. La coda si difende (`tocca_codice()`) e, da `PBI-528`,
+anche il rilascio (attivo dal tag che lo contiene; il runner che lavora è quello installato): il 25/10 la #93, `PBI-525: …`, di soli file in `backlog/`, ha fatto
 taggare `v0.8.0` senza il codice di 525. Si intitola «Accoda PBI-XXX…» o «PBI-XXX, bozza: …» (la
 virgola basta: il titolo che il tick riconosce è `PBI-XXX:` con i due punti).
 
