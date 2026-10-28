@@ -950,6 +950,25 @@ def ci_verde(repo: Path) -> bool:
     return bool(corse) and corse[0].get("conclusion") == "success"
 
 
+def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
+    """Il merge delle PR dei giri (`ADR-0033`): per ogni PR aperta che passa le
+    condizioni, `gh pr merge --merge` e un commento sulla PR. Rende le righe che il
+    tick scrive. `worktree` è quello del runner, dove stanno i rapporti dei giri."""
+    codice, uscita = esegui(["gh", "pr", "list", "--state", "open", "--limit", str(LIMITE_PR),
+                             "--json", "number,title,headRefName,files,statusCheckRollup,mergeable"],
+                            repo)
+    if codice != 0:
+        return [f"merge: gh non risponde (uscita {codice})"]
+    righe = []
+    for pr in json.loads(uscita):
+        pbi = pbi_nominato(pr)
+        numero = pr["number"]
+        esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
+        esegui(["gh", "pr", "comment", str(numero), "--body", f"Mergiata dal tick: {pbi}."], repo)
+        righe.append(f"merge: {pbi} #{numero}")
+    return righe
+
+
 def passo_di_rilascio(repo: Path) -> list[str]:
     """Il passo di rilascio di `asdlc` (R8): per ogni PR di PBI mergiata che dichiara
     `rilascia:`, il tag successivo, su `origin`. Rende le righe che il tick scrive.
