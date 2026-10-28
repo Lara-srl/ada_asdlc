@@ -56,7 +56,7 @@ pacchetto = ".venv-asdlc"
 # — mai un ramo. Obbligatoria con `pacchetto`, e solo qui: non si sovrascrive da
 # asdlc.local.toml, perché il pin è del progetto. Salire di tag è una PR che
 # cambia questa riga.
-installa = "git+ssh://git@github.com/Lara-srl/ada_asdlc@v0.7.0#subdirectory=tools"
+installa = "git+ssh://git@github.com/Lara-srl/ada_asdlc@v0.9.0#subdirectory=tools"
 # Ciò che i gate e il runner lanciano per nome, e che deve esserci prima di
 # partire: il runner e il tick lo cercano sul PATH che vedranno i gate, cioè con
 # `venv` davanti, e senza non lanciano. Senza la chiave non si verifica niente.
