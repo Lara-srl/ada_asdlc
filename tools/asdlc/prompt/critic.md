@@ -35,8 +35,8 @@ capo. Il tuo resta il giudizio sulla diagnosi del Solver.
 6. **Igiene dei commit**: micro-commit veri o un unico commit finale? La spec è stata
    aggiornata nello stesso commit del codice che ne cambia il comportamento? E i
    **messaggi**: leggi `git log --oneline` come se il diff non ce l'avessi. Un soggetto
-   che allude invece di dire cosa è cambiato è un rilievo da chiudere con un rebase dei
-   messaggi, non una questione di gusto.
+   che allude invece di dire cosa è cambiato va segnalato, non è una questione di gusto.
+   Sono rilievi di storia, e si scrivono come dice la regola più sotto.
 
 ## Come si dichiara l'esito
 Il runner legge l'esito **solo** dalla tua chiamata a uno dei due strumenti, e la prima
@@ -54,6 +54,13 @@ che arriva al Builder e a chi mergia. Scrivi il rapporto in italiano, qualunque 
       - Rimedio: <come si chiude>
 
   e il verdetto è `non pronto`.
+
+**Un rilievo di correttezza riporta la classe, non l'istanza.** Quando trovi un dato
+utente non valido che il codice non gestisce — un campo che manca, un numero infinito,
+enorme, nullo o negativo, un riferimento a sé stesso — non fermarti al primo caso: cerca
+gli altri della stessa classe in tutti i punti d'ingresso del diff, verificali, ed
+elencali tutti nello stesso rilievo. Un caso per passaggio costa una revisione per caso,
+e il tetto delle revisioni arriva prima che la classe sia chiusa.
 
 Se invece trovi un rilievo che **nessuna correzione può chiudere** — perché la risposta è
 di una persona: una decisione di dominio, un `CHIEDI` di AGENTS.md saltato, una violazione
@@ -74,3 +81,12 @@ e riga, sotto il titolo
 
 fuori dai rilievi numerati: se è l'unica cosa che resta, il verdetto è `pass` e la nota
 va nel rapporto, dove chi mergia la legge.
+
+**Un rilievo di sola storia dei commit non fa `non pronto`**, prima o dopo che il ramo
+sia su `origin`: un GREEN committato con la suite rossa, una deroga allo Scope dichiarata
+un commit dopo, un messaggio che allude. Il Builder non riscrive la storia di un ramo
+(`ADR-0022`) e un commit nuovo non rende verde un commit vecchio: un rilievo così non ha
+un rimedio che il giro possa eseguire, e lo squash, se serve, è al merge. Scrivilo sotto
+«Note per chi mergia», con lo sha e il soggetto del commit, e non chiedere di riscrivere
+la storia. Resta `non pronto` un rilievo sul codice o sul test-first: un comportamento
+nato senza il suo RED, un test che passerebbe anche col codice rotto.

@@ -5673,17 +5673,19 @@ class TestIlPermessoDiImplementareSiChiede:
     primo colpo non è un permesso negato per pignoleria — è la prova che quel
     comportamento c'è già, e che non è questo il commit in cui nasce.
 
-    Il rosso si osserva **prima** del commit, quindi il commit di soli test che
-    ne segue è per costruzione quello che il gate di PBI-103 vorrebbe: nessun
-    file di produzione dentro, e il fallimento visto sull'albero esatto.
+    Il RED si committa **prima**, da solo, e il rosso si osserva su quel commit
+    (PBI-525, decisione 2): è l'ordine che il prompt prescrive e l'unico che il
+    lucchetto permette, perché in `IMPL` un test non si committa più. Un test
+    ancora nell'albero non apre la fase: il comando chiede di committarlo.
     """
 
     TEST_NUOVO = "backend/tests/test_foglio.py"
     SORGENTE = "def test_il_clic_apre_la_pratica():\n    assert False\n"
+    SECONDO = "backend/tests/test_pratica.py"
 
     def _in_test_only(self, repo, monkeypatch, esito="rosso"):
         runner.percorso_della_fase(repo.radice).write_text(f"{runner.FASE_TEST_ONLY}\n")
-        (repo.radice / self.TEST_NUOVO).write_text(self.SORGENTE, encoding="utf-8")
+        repo.commit("test(foglio): il clic apre la pratica (RED)", {self.TEST_NUOVO: self.SORGENTE})
         monkeypatch.setattr(runner, "esiti_del_comando",
                             lambda c: ({k: esito for k in c.etichette}, "coda"))
         monkeypatch.setattr(sys, "argv", ["asdlc_runner", "--chiedi-impl"])
@@ -5699,6 +5701,59 @@ class TestIlPermessoDiImplementareSiChiede:
 
         assert runner.smista() == 0
         assert self._fase(repo_di_prova) == runner.FASE_IMPL
+
+    def test_con_un_test_modificato_e_non_committato_non_apre(
+            self, repo_di_prova, monkeypatch, capsys):
+        """PBI-525, criterio 2: sul giro 2 di `PBI-5` di `ada_nlt` il Builder ha
+        lanciato `--chiedi-impl` coi test nell'albero, il comando ha aperto `IMPL`
+        leggendoli da lì, e il `pre-commit` ha poi rifiutato il commit del test.
+        Con un RED committato e un secondo file di test modificato nell'albero, la
+        fase resta `TEST_ONLY` e il rifiuto dice di committare prima il RED."""
+        repo_di_prova.commit("test(pratica): la pratica c'è", {
+            self.SECONDO: "def test_la_pratica_ce():\n    assert True\n"})
+        self._in_test_only(repo_di_prova, monkeypatch)
+        (repo_di_prova.radice / self.SECONDO).write_text(
+            "def test_la_pratica_ce():\n    assert True\n\n\n"
+            "def test_la_pratica_si_chiude():\n    assert False\n", encoding="utf-8")
+
+        assert runner.smista() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert "committa prima il RED" in capsys.readouterr().out
+
+    def _albero_sporco(self, repo, monkeypatch, sporca):
+        """Un RED committato e rosso, un file sotto `tests/` che c'era già, e il
+        gesto `sporca` che lo lascia non committato senza far nascere un test."""
+        repo.commit("test(pratica): la pratica c'è", {
+            self.SECONDO: "def test_la_pratica_ce():\n    assert True\n",
+            "backend/tests/dati/pratica.txt": "la pratica\n"})
+        self._in_test_only(repo, monkeypatch)
+        sporca(repo)
+
+    @pytest.mark.parametrize("sporca", [
+        # (a) il corpo di un test che esiste già: ciò che il commit RED porta per
+        # «i test esistenti che le decisioni cambiano»
+        lambda repo: (repo.radice / "backend/tests/test_pratica.py").write_text(
+            "def test_la_pratica_ce():\n    assert False\n", encoding="utf-8"),
+        # (c) un file di supporto sotto `tests/`, modificato o non tracciato
+        lambda repo: (repo.radice / "backend/tests/dati/pratica.txt").write_text("cambiata\n"),
+        lambda repo: (repo.radice / "backend/tests/conftest.py").write_text("import pytest\n"),
+        # (d) un test cancellato, senza un nome nuovo
+        lambda repo: (repo.radice / "backend/tests/test_pratica.py").unlink(),
+        # (e) un test rinominato fuori da `tests/`, in stage: il lato nuovo non è
+        # un file di test, quello vecchio sì, e il `pre-commit` li guarda tutti e due
+        lambda repo: repo.sposta("backend/tests/test_pratica.py", "nota.txt"),
+    ], ids=["corpo-di-un-test-esistente", "golden-modificato", "conftest-non-tracciato",
+            "test-cancellato", "test-rinominato-fuori-da-tests"])
+    def test_un_file_di_test_non_committato_che_non_nasce_un_test_non_apre(
+            self, repo_di_prova, monkeypatch, capsys, sporca):
+        """Rilievo 1 del Critic su PBI-525: in `IMPL` il `pre-commit` rifiuta ogni
+        percorso per cui `e_file_di_test()` è vero, non solo le nascite di test.
+        Ciascuno di questi apriva la fase e poi non si poteva più committare."""
+        self._albero_sporco(repo_di_prova, monkeypatch, sporca)
+
+        assert runner.smista() == 1
+        assert self._fase(repo_di_prova) == runner.FASE_TEST_ONLY
+        assert "committa prima il RED" in capsys.readouterr().out
 
     def test_non_apre_su_un_test_nato_verde(self, repo_di_prova, monkeypatch, capsys):
         self._in_test_only(repo_di_prova, monkeypatch, esito="verde")

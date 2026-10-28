@@ -2070,3 +2070,121 @@ def test_il_dry_run_con_la_cartella_del_pin_assente_lo_scrive_e_decide(
     assert len(righe) == 2 and righe[1] == "lancia: PBI-337", righe
     assert righe[0].startswith("dry-run: "), righe
     assert "reinstallazione fallita: la cartella tools non c'è a HEAD — " in righe[0], righe
+
+
+# --- PBI-525: il fermo `non convergente` apre una issue -----------------------
+
+
+def rapporto_del_giro(albero: Path, pbi: str, stato: str = "non convergente") -> Path:
+    """Il rapporto di un giro chiuso con `stato` — di suo `non convergente` a
+    revisioni esaurite — nel registro del worktree del runner, dove il tick lo
+    cerca."""
+    registro = albero / coda.CFG.registro.cartella
+    registro.mkdir(parents=True, exist_ok=True)
+    file = registro / "20261025-085406.json"
+    file.write_text(json.dumps({
+        "run": "20261025-085406", "stato": "finito",
+        "esiti": [{"pbi": pbi, "stato": stato, "motivo": "revisioni-esaurite",
+                   "ramo": f"pbi/pbi-{pbi.removeprefix('PBI-')}"}],
+    }), encoding="utf-8")
+    return file
+
+
+def tick_in_attesa(monkeypatch, tmp_path, pbi: str, issue_aperte: list[dict],
+                   stato: str = "non convergente", ricerca: tuple[int, str] | None = None):
+    """Un passaggio del tick che decide `Attende(pbi)` senza PR, col rapporto del
+    giro chiuso con `stato` nel worktree. Il resto del passaggio è sostituito; `gh`
+    è finto e rende `issue_aperte` alla ricerca — o `ricerca`, uscita e testo di
+    un `gh issue list` che non risponde. Rende i comandi visti e il rapporto."""
+    repo, albero = tmp_path / "repo", tmp_path / "albero"
+    repo.mkdir()
+    albero.mkdir()
+    rapporto = rapporto_del_giro(albero, pbi, stato)
+    for nome, finto in (("batti", lambda r: None), ("pin", lambda r: []),
+                        ("fermo_in_pausa", lambda r: False), ("allinea", lambda r: None),
+                        ("rilascia", lambda r: []), ("reinstalla", lambda r, w: None),
+                        ("decidi", lambda r, w: coda.Attende(pbi, ()))):
+        monkeypatch.setattr(coda, nome, finto)
+    visti: list[list[str]] = []
+
+    def esegui(cmd, cwd):
+        visti.append(cmd)
+        if cmd[:3] == ["gh", "issue", "list"]:
+            return ricerca if ricerca is not None else (0, json.dumps(issue_aperte))
+        if cmd[:3] == ["gh", "issue", "create"]:
+            return 0, "https://github.com/Lara-srl/ada_nlt/issues/7\n"
+        raise AssertionError(f"comando non previsto: {cmd}")
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+    coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+    return visti, rapporto
+
+
+class TestIlFermoNonConvergenteApreUnaIssue:
+    """PBI-525, criterio 3 (decisione 6): il giro 1 di `PBI-5` di `ada_nlt` si è
+    chiuso `non convergente`, e il tick ha scritto la stessa riga di `attende`
+    ogni dieci minuti per oltre dieci ore senza che nessuno lo sapesse. Il tick
+    apre una issue nel repository del progetto, col titolo «fermo: PBI-N — non
+    convergente» e nel corpo la riga di `attende` e il percorso del rapporto."""
+
+    def test_al_primo_passaggio_il_tick_apre_la_issue(self, monkeypatch, tmp_path):
+        visti, rapporto = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [])
+
+        creati = [c for c in visti if c[:3] == ["gh", "issue", "create"]]
+        assert len(creati) == 1, visti
+        creato = creati[0]
+        assert creato[creato.index("--title") + 1] == "fermo: PBI-5 — non convergente"
+        corpo = creato[creato.index("--body") + 1]
+        assert "attende: PBI-5 ha un ramo su origin" in corpo
+        assert str(rapporto) in corpo
+
+    def test_con_la_issue_gia_aperta_il_tick_non_ne_apre_un_altra(self, monkeypatch, tmp_path):
+        aperta = [{"title": "fermo: PBI-5 — non convergente",
+                   "url": "https://github.com/Lara-srl/ada_nlt/issues/7"}]
+
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", aperta)
+
+        assert [c for c in visti if c[:3] == ["gh", "issue", "list"]], "il tick cerca la issue aperta"
+        assert not [c for c in visti if c[:3] == ["gh", "issue", "create"]], visti
+
+    @pytest.mark.parametrize("stato", ["fermato", "fatto"])
+    def test_un_attende_che_non_e_un_non_convergente_non_tocca_gh(
+            self, monkeypatch, tmp_path, stato):
+        """`Attende` è anche lo stato normale di un PBI con la PR aperta in attesa
+        del merge, e di un giro `fermato`: senza il filtro sullo `stato` del
+        rapporto il tick aprirebbe «fermo: PBI-N — non convergente» su ogni PR in
+        attesa. Nessun `gh issue`, né la ricerca né l'apertura."""
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [], stato=stato)
+
+        assert not [c for c in visti if c[:2] == ["gh", "issue"]], visti
+
+    def test_con_una_issue_di_un_altro_pbi_nella_ricerca_il_tick_apre(self, monkeypatch, tmp_path):
+        """`--search` è una ricerca a parole: per `PBI-5` può rendere anche la issue
+        di `PBI-50`. Conta il titolo esatto, non che la ricerca abbia reso qualcosa:
+        altrimenti il fermo di `PBI-5` resterebbe muto."""
+        altra = [{"title": "fermo: PBI-50 — non convergente",
+                  "url": "https://github.com/Lara-srl/ada_nlt/issues/6"}]
+
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", altra)
+
+        creati = [c for c in visti if c[:3] == ["gh", "issue", "create"]]
+        assert len(creati) == 1, visti
+        assert creati[0][creati[0].index("--title") + 1] == "fermo: PBI-5 — non convergente"
+
+    @pytest.mark.parametrize("ricerca", [
+        (1, "gh: HTTP 502: Bad Gateway\n"),
+        (0, "non è JSON"),
+    ], ids=["gh-esce-1", "json-che-non-si-legge"])
+    def test_con_la_ricerca_fallita_il_tick_non_apre_e_passa_con_un_avviso(
+            self, monkeypatch, tmp_path, ricerca):
+        """Un `gh issue list` che esce diverso da 0, o rende un JSON che non si
+        legge, non apre niente — il tick dopo ci riprova — e non alza niente: il
+        passaggio torna e il log porta la riga d'avviso (ADR-0008). Senza il ramo
+        `aperte is None` il tick morirebbe con un traceback dentro un cron."""
+        visti, _ = tick_in_attesa(monkeypatch, tmp_path, "PBI-5", [], ricerca=ricerca)
+
+        assert [c for c in visti if c[:3] == ["gh", "issue", "list"]], visti
+        assert not [c for c in visti if c[:3] == ["gh", "issue", "create"]], visti
+        log = (tmp_path / "repo" / coda.LOG).read_text(encoding="utf-8")
+        assert ("avviso: issue «fermo: PBI-5 — non convergente» — gh issue list "
+                f"(uscita {ricerca[0]})") in log, log

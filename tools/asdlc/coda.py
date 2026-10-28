@@ -546,20 +546,30 @@ def sha_del_pbi(repo: Path, pbi: str) -> str | None:
     return uscita.strip() if codice == 0 else None
 
 
-def ultimo_esito(worktree: Path, pbi: str) -> dict | None:
-    """L'esito di `pbi` nel rapporto col `run` più recente fra quelli che il runner
-    ha scritto in `<worktree>/<[registro].cartella>/`, o `None`. I rapporti stanno
-    nel worktree del giro e non nel checkout del tick (PBI-519, decisione 5). Un
-    file che non è un rapporto, o che non si legge, non conta."""
-    trovati: list[tuple[str, dict]] = []
+def ultimo_rapporto(worktree: Path, pbi: str) -> tuple[Path, dict] | None:
+    """Il file del rapporto col `run` più recente fra quelli che il runner ha
+    scritto in `<worktree>/<[registro].cartella>/`, con l'esito di `pbi` che porta,
+    o `None`. I rapporti stanno nel worktree del giro e non nel checkout del tick
+    (PBI-519, decisione 5). Un file che non è un rapporto, o che non si legge, non
+    conta."""
+    trovati: list[tuple[str, Path, dict]] = []
     for file in (worktree / CFG.registro.cartella).glob("*.json"):
         try:
             rapporto = json.loads(file.read_text(encoding="utf-8"))
-            trovati += [(str(rapporto.get("run", "")), x) for x in rapporto.get("esiti", [])
-                        if x.get("pbi") == pbi]
+            trovati += [(str(rapporto.get("run", "")), file, x)
+                        for x in rapporto.get("esiti", []) if x.get("pbi") == pbi]
         except (OSError, ValueError, AttributeError, TypeError):
             continue
-    return max(trovati, key=lambda r: r[0])[1] if trovati else None
+    if not trovati:
+        return None
+    _, file, esito = max(trovati, key=lambda r: r[0])
+    return file, esito
+
+
+def ultimo_esito(worktree: Path, pbi: str) -> dict | None:
+    """L'esito di `pbi` nel suo ultimo rapporto (`ultimo_rapporto()`), o `None`."""
+    trovato = ultimo_rapporto(worktree, pbi)
+    return trovato[1] if trovato is not None else None
 
 
 # Quante riprese dopo il limite d'uso il tick fa per un PBI: il runner le conta in
@@ -853,6 +863,41 @@ def racconta(decisione: Decisione) -> str:
         case Lancia(pbi):
             return f"lancia: {pbi}"
     return f"decisione senza nome: {decisione}"
+
+
+def avvisa_il_fermo(repo: Path, worktree: Path, pbi: str, riga: str) -> str | None:
+    """Apre una issue nel repository del progetto se l'ultimo giro di `pbi` si è
+    chiuso `non convergente` (PBI-525, decisione 6), e rende la riga del log che
+    lo dice; `None` se il giro non è un `non convergente`.
+
+    Un fermo così non lo sapeva nessuno: il tick scriveva la stessa riga di
+    `attende` ogni dieci minuti in un log che nessuno guarda. La issue sta dove
+    stanno le PR, e si legge da ovunque. Il titolo è «fermo: PBI-N — non
+    convergente»; il corpo, `riga` e il percorso del rapporto. È un avviso: la
+    riga dice l'uscita di `gh`, qualunque sia, e il tick passa (`ADR-0008`).
+
+    Una issue sola: prima di aprirla si cerca una issue aperta con quel titolo, e
+    se c'è non si fa niente — la chiude chi riprende il PBI. Una ricerca a cui `gh`
+    non risponde non apre niente: il tick dopo ci riprova.
+    """
+    trovato = ultimo_rapporto(worktree, pbi)
+    if trovato is None or trovato[1].get("stato") != "non convergente":
+        return None
+    rapporto, _ = trovato
+    titolo = f"fermo: {pbi} — non convergente"
+    codice, uscita = esegui(["gh", "issue", "list", "--state", "open",
+                             "--search", f'"{titolo}" in:title', "--json", "title,url"], repo)
+    try:
+        aperte = json.loads(uscita) if codice == 0 else None
+    except ValueError:
+        aperte = None
+    if aperte is None:
+        return f"avviso: issue «{titolo}» — gh issue list (uscita {codice}): {in_una_riga(uscita)}"
+    if any(issue.get("title") == titolo for issue in aperte):
+        return None
+    corpo = f"{riga}\n\nRapporto del giro: `{rapporto}`"
+    codice, uscita = esegui(["gh", "issue", "create", "--title", titolo, "--body", corpo], repo)
+    return f"avviso: issue «{titolo}» — gh issue create (uscita {codice}): {in_una_riga(uscita)}"
 
 
 def scrivi_nel_log(repo: Path, riga: str) -> None:
@@ -1269,6 +1314,11 @@ def passaggio(a: argparse.Namespace) -> int:
         riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
     print(riga)
     scrivi_nel_log(a.repo, riga)
+    # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
+    if (isinstance(decisione, Attende) and not a.dry_run
+            and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):
+        print(avviso)
+        scrivi_nel_log(a.repo, avviso)
     # Le domande al mondo le ha già fatte `decidi()`, ed è giusto così: senza
     # `gh` non ci sarebbe nessuna decisione da leggere. Qui si ferma ciò che
     # **cambia** lo stato — il pre-flight, che sposta il worktree su un altro

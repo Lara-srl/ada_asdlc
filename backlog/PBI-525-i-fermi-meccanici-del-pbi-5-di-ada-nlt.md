@@ -106,13 +106,13 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
 
 ## Verifica
 
-- [ ] **Il prompt del Critic governa i rilievi di storia e non nomina il rebase.** Un test
+- [x] **Il prompt del Critic governa i rilievi di storia e non nomina il rebase.** Un test
       parametrizzato su `critic.md`: (a) contiene «Note per chi mergia» e «storia» nella stessa regola
       (o la formula equivalente scelta nel RED, dichiarata nel commit); (b) non contiene «rebase»;
       (c) dice che un rilievo di correttezza su un dato utente elenca l'intera classe verificata
       («classe», o formula equivalente). Il golden `critic.txt` segue nello stesso commit. Su `main`:
       (a) e (c) mancano, (b) c'è il rebase a riga 38.
-- [ ] **`--chiedi-impl` con un test modificato e non committato non apre `IMPL`.** Fase `TEST_ONLY`,
+- [x] **`--chiedi-impl` con un test modificato e non committato non apre `IMPL`.** Fase `TEST_ONLY`,
       un test committato nel RED e un secondo file di test modificato nell'albero: il comando esce 1,
       stampa «committa prima il RED» e la fase resta `TEST_ONLY`. Con l'albero pulito e il test
       committato, apre `IMPL` come oggi. Rosso su `main`: oggi apre `IMPL` leggendo l'albero.
@@ -121,7 +121,7 @@ errori veri del PBI (non meccanici, già corretti), si è fermato su un quarto d
       il giro, il passo sta dopo il `merge --ff-only` e prima che la pausa sia tolta, e il dry-run lo
       stampa senza eseguirlo. Rosso su `main`: oggi il file resta.~~
       *Barrato il 26/10 (Francesco): sostituito da `PBI-532`, che archivia il lavoro non committato in un `.patch` e pulisce l'albero alla fine del giro, in `chiudi()` del runner (decisioni 1, 2 e 8 di quel PBI). Si rivede se `PBI-532` non entra.*
-- [ ] **Un tick che trova un `non convergente` apre una issue, una sola.** Con un `gh` finto: al primo
+- [x] **Un tick che trova un `non convergente` apre una issue, una sola.** Con un `gh` finto: al primo
       passaggio il tick chiama `gh issue create` col titolo «fermo: PBI-N — non convergente»; al secondo
       passaggio, con `gh issue list` che la restituisce aperta, non chiama `create`. Rosso su `main`:
       oggi il tick scrive solo `attende`.
@@ -141,3 +141,33 @@ decisione 3. I vecchi criteri 1 e 4 erano la stessa modifica minima e sono un cr
 sonde sono uscite `guasto` (gate guasto nell'albero usa e getta): il rosso resta dichiarato, non
 provato, e il guasto è da capire a parte.
 
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (26/10, run `20261026-233510`, e la ripresa `20261027-233434`, runner `v0.9.0`-pre) ha
+fatto i **criteri 1, 2 e 3** con 17 commit, RED e GREEN per criterio, e ha spuntato i tre. Si è
+chiuso in due modi: il 27/10 alle 00:02 `senza esito` per il **limite d'uso** dell'account (reset
+alle 02:40, scritto su stdout, il caso di `PBI-531`); la ripresa del 27/10 alle 23:34 si è fermata
+`rosso-mai-visto` sul commit `1c7f3e7`. Il tag è `giro-fermato/pbi-525-giro1-20261027` (`1c7f3e7`).
+
+**Perché `rosso-mai-visto`.** Il Critic (revisione 0 della ripresa) aveva un solo rilievo, di
+test-first: la condizione `not a.dry_run` in `passaggio()` (`tools/asdlc/coda.py`) era entrata nel
+commit `feat(coda)` del criterio 3 **senza un RED**: un `--dry-run` aprirebbe una issue vera su
+GitHub, e nessun test lo diceva. Il Builder ha scritto il test dopo (`1c7f3e7`): nato verde, perché
+la condizione c'è già. Il gate del rosso guarda ogni commit del ramo e un revert non lo toglie
+(lezione del 19/10): per questo `1c7f3e7` **non è stato riportato** e la ripresa non riparte dal tag.
+
+Sul ramo di ripresa, verificato il 28/10: `python3 -m pytest -q tools/tests` dà `1229 passed`,
+`git status --porcelain` è vuoto, e `asdlc-runner --gate-rosso HEAD` dice «nessun test è nato verde».
+
+**Da fare, in quest'ordine:**
+
+1. **I sedici commit sono già in `main`** (li porta la PR di ripresa, `cherry-pick -x` dal tag, senza
+   `1c7f3e7`). **Verifica:** `git log --oneline` su `main` li mostra, dal RED `03c0b63` a `102bd06`;
+   non si riportano di nuovo.
+2. **La guardia del dry-run, col suo RED.** In un commit `refactor(coda): …` si toglie `not a.dry_run`
+   dalla condizione in `passaggio()` (non cambia un test: oggi nessuno lo guarda). Poi il RED, da solo:
+   il test e il parametro `argomenti` di `tick_in_attesa()` come in `git show 1c7f3e7`, ora **rosso**
+   (con `--dry-run` il tick chiama `gh issue create`). Poi il GREEN: si rimette `not a.dry_run`.
+   **Verifica:** `asdlc-runner --gate-rosso HEAD` passa, e il test del dry-run fallisce sul commit del RED.
+3. **Il Critic** deve poter dire `pronto`: il suo unico rilievo era questo.
