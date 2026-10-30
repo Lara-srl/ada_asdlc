@@ -329,6 +329,26 @@ def test_un_guasto_delle_firme_sta_nella_colonna_del_pin(tmp_path, capsys):
     assert riga.startswith("alfa · attende: PBI-1")
 
 
+def test_senza_pacchetto_il_pin_e_l_installato_sono_trattini(tmp_path, capsys):
+    """`[ambiente].pacchetto` è facoltativo, e senza non c'è `installa`: non c'è
+    una firma da leggere, e il progetto resta raggiungibile."""
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    toml = checkout / "asdlc.toml"
+    toml.write_text("".join(r for r in toml.read_text(encoding="utf-8").splitlines(True)
+                            if not r.startswith(("pacchetto =", "installa ="))),
+                    encoding="utf-8")
+    git("commit", "-q", "-am", "senza pacchetto", cwd=checkout)
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert riga.startswith("alfa · attende: PBI-1")
+    assert "non raggiungibile" not in riga
+    assert "pin - installato -" in riga
+    assert (oggetto["pin"], oggetto["installato"]) == (None, None)
+
+
 # --- Criterio 6: la pausa e il checkout fuori da `main`, come li vede il tick ------
 
 
