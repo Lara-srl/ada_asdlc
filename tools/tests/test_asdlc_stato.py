@@ -250,6 +250,36 @@ def test_un_elenco_che_manca_esce_2_e_lo_dice_su_stderr(capsys):
     assert uscita.out == ""
 
 
+def elenco_scritto_male(casa, contenuto):
+    """`progetti.toml` col `contenuto`: `bytes` scritti così come sono, `None` per
+    una cartella al posto del file."""
+    cartella = casa / ".config" / "asdlc"
+    cartella.mkdir(parents=True)
+    if contenuto is None:
+        (cartella / "progetti.toml").mkdir()
+    else:
+        (cartella / "progetti.toml").write_bytes(contenuto)
+
+
+@pytest.mark.parametrize("contenuto", [
+    pytest.param(b"checkout = [\n", id="toml-rotto"),
+    pytest.param(b'checkout = ["/\xff"]\n', id="non-utf8"),
+    pytest.param(None, id="cartella"),
+    pytest.param(b'altro = ["/percorso"]\n', id="senza-checkout"),
+    pytest.param(b'checkout = "/percorso"\n', id="checkout-non-lista"),
+    pytest.param(b"checkout = [1]\n", id="voci-non-stringhe"),
+])
+def test_un_elenco_scritto_male_esce_2_e_lo_dice_su_stderr(home_finta, capsys, contenuto):
+    """Decisione 1: il file che «non si legge» è come quello che manca."""
+    elenco_scritto_male(home_finta, contenuto)
+
+    assert stato.main([]) == 2
+    uscita = capsys.readouterr()
+
+    assert "progetti.toml" in uscita.err
+    assert uscita.out == ""
+
+
 def test_un_nome_che_non_c_e_esce_2_e_lo_dice_su_stderr(tmp_path, home_finta, capsys):
     elenco(home_finta, progetto(tmp_path, ["- PBI-1"], nome="alfa"))
 
