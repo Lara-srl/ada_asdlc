@@ -284,12 +284,30 @@ Il lucchetto del tick rende innocuo il doppio passaggio con il cron: il secondo 
 log né il registro. La decisione non è una seconda verità: è quella di `decidi()`, con le
 parole di `racconta()`, le stesse che il tick scrive in `runs/coda.log`.
 
-```bash
-asdlc-stato --repo /percorso/del/progetto
+L'elenco dei progetti è di macchina, come la pausa, e sta fuori dai repository, in
+`~/.config/asdlc/progetti.toml`:
+
+```toml
+checkout = ["/percorso/del/progetto", "/percorso/di/un/altro"]
 ```
 
-Stampa una riga: il nome del progetto (la cartella del checkout), la decisione e la voce
-della coda — il PBI o il testo della barriera.
+Il nome di un progetto è il nome della cartella del suo checkout.
+
+```bash
+asdlc-stato                                # tutti i progetti, nell'ordine del file
+asdlc-stato progetto                       # solo quello
+asdlc-stato --repo /percorso/del/progetto  # uno, senza passare dall'elenco
+asdlc-stato --json                         # un oggetto JSON per progetto
+```
+
+Il file che manca o non si legge, e un nome che non c'è, sono un messaggio su stderr e
+l'uscita 2.
+
+Ogni progetto è una riga: il nome, la decisione, la voce della coda — il PBI o il testo
+della barriera —, lo stato e il motivo dell'ultimo esito del runner (o `-`), e le PR aperte
+sul ramo del PBI (`PR ?` se `gh` non risponde, `PR -` se non ce ne sono). Con `--json` gli
+oggetti hanno le chiavi `progetto`, `decisione`, `voce`, `esito`, `pr`, `pausa`,
+`allineato`, `installato` e `pin`.
 
 ## Linguaggi e stack
 
