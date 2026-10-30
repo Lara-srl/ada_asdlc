@@ -394,6 +394,25 @@ def test_una_firma_illeggibile_sta_nella_colonna_del_pin(tmp_path, capsys):
     assert "pin ? (" in riga
 
 
+def test_una_firma_che_non_si_apre_sta_nella_colonna_del_pin(tmp_path, capsys):
+    """`.installato-da` c'è ma non si apre: `firme()` alza `PermissionError`, un
+    `OSError`, e il progetto resta raggiungibile. Una cartella al posto del file
+    non basta: `firme()` la scarta con `is_file()` e la firma è `None`."""
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    firma(checkout, "git+https://github.com/Lara-srl/asdlc@v1.0.0#subdirectory=tools")
+    file_della_firma = checkout / ".venv-asdlc" / ".installato-da"
+    file_della_firma.chmod(0)
+    try:
+        assert stato.main(["--repo", str(checkout)]) == 0
+    finally:
+        file_della_firma.chmod(0o644)
+    riga = capsys.readouterr().out
+
+    assert riga.startswith("alfa · attende: PBI-1")
+    assert "non raggiungibile" not in riga
+    assert "pin ? (" in riga
+
+
 # --- Criterio 6: la pausa e il checkout fuori da `main`, come li vede il tick ------
 
 
