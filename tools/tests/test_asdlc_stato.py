@@ -5,6 +5,7 @@ un `origin` locale, bare — e sostituisce soltanto `gh`: nessuna rete. `git` è
 quello vero, perché il ramo del PBI si legge da `origin` come fa il tick.
 """
 import importlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -51,15 +52,18 @@ def home_finta(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def gh_finto(monkeypatch):
     """`gh` risponde «nessuna PR», mergiata o aperta che sia; il resto passa a
-    `esegui()` vera."""
+    `esegui()` vera. Il test cambia la risposta per stato della PR: `(codice,
+    uscita)` sotto `"merged"` o `"open"`."""
     vera = coda.esegui
+    risposte = {"merged": (0, "[]"), "open": (0, "[]")}
 
     def esegui(cmd, cwd):
         if cmd[0] == "gh":
-            return 0, "[]"
+            return risposte[cmd[cmd.index("--state") + 1]]
         return vera(cmd, cwd)
 
     monkeypatch.setattr(coda, "esegui", esegui)
+    return risposte
 
 
 def git(*argomenti, cwd):
@@ -124,3 +128,77 @@ def test_con_la_coda_ferma_su_una_barriera_la_riga_porta_la_barriera(tmp_path, c
 
     assert "barriera: il merge della v1.0.0" in riga
     assert riga.startswith("alfa")
+
+
+# --- Criterio 2: `--json` -------------------------------------------------------
+
+CHIAVI = {"progetto", "decisione", "voce", "esito", "pr", "pausa", "allineato",
+          "installato", "pin"}
+
+
+def json_di(argv, capsys):
+    assert stato.main(argv) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_il_json_ha_un_oggetto_con_le_chiavi_fisse(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert set(oggetto) == CHIAVI
+    assert oggetto["progetto"] == "alfa"
+    assert oggetto["voce"] == "PBI-1"
+    assert oggetto["decisione"] == decisione_del_tick(checkout)
+    assert oggetto["esito"] is None
+    assert oggetto["pr"] == []
+
+
+def rapporto(tmp_path, esito, run="20261030-120000"):
+    """Un rapporto del runner nel worktree del progetto di prova, `../progetto-run`."""
+    registro = tmp_path / "progetto-run" / "runs"
+    registro.mkdir(parents=True, exist_ok=True)
+    (registro / f"{run}.json").write_text(
+        json.dumps({"run": run, "esiti": [{"pbi": "PBI-1", **esito}]}), encoding="utf-8")
+
+
+PR_APERTA = json.dumps([{"url": "https://github.com/Lara-srl/alfa/pull/7",
+                         "headRefName": "pbi/pbi-1"}])
+
+
+def test_l_ultimo_esito_e_la_pr_aperta_stanno_nella_riga_e_nel_json(
+    tmp_path, capsys, gh_finto
+):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    rapporto(tmp_path, {"stato": "fermato", "motivo": "non-convergente"})
+    gh_finto["open"] = (0, PR_APERTA)
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert " · fermato non-convergente · " in riga
+    assert " · PR https://github.com/Lara-srl/alfa/pull/7" in riga
+    assert oggetto["esito"] == {"stato": "fermato", "motivo": "non-convergente"}
+    assert oggetto["pr"] == ["https://github.com/Lara-srl/alfa/pull/7"]
+
+
+def test_senza_esito_e_senza_pr_la_riga_porta_dei_trattini(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+
+    assert " · PBI-1 · - · PR - " in riga + " "
+
+
+def test_un_gh_muto_sulle_pr_aperte_e_un_punto_di_domanda(tmp_path, capsys, gh_finto):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    gh_finto["open"] = (1, "gh: non autenticato")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert " · PR ? " in riga + " "
+    assert oggetto["pr"] is None
