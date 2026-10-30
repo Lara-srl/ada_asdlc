@@ -75,23 +75,23 @@ chiama da Slack.
 
 ## Verifica
 
-- [ ] **Il comando mostra lo stato di un progetto con la decisione del tick.** Repository temporaneo
+- [x] **Il comando mostra lo stato di un progetto con la decisione del tick.** Repository temporaneo
       con una coda, un `origin` locale col ramo del PBI e un `gh` finto senza PR;
       `python -m asdlc.stato --repo <tmp>` esce 0 e stampa una riga che contiene il nome (la cartella),
       la voce e la stessa decisione che `racconta(decidi(...))` dà sullo stesso repo. Con la coda
       ferma su una barriera la riga porta `barriera: <testo>`: è lo stesso `racconta()`, e sta in
       questo criterio. Rosso su `main`: il modulo non c'è, il comando esce con un codice diverso da 0.
-- [ ] **`--json` dà gli oggetti con le chiavi fisse.** Stesso repo: l'uscita è JSON valido e ha le
+- [x] **`--json` dà gli oggetti con le chiavi fisse.** Stesso repo: l'uscita è JSON valido e ha le
       chiavi della decisione 3; `pin` e `installato` possono essere `null` finché non c'è il criterio
       5. Rosso su `main`.
-- [ ] **Senza argomenti mostra tutti i progetti del file.** `HOME` spostato in `tmp_path` con due
+- [x] **Senza argomenti mostra tutti i progetti del file.** `HOME` spostato in `tmp_path` con due
       progetti in `progetti.toml`: due righe, nell'ordine del file. Rosso su `main`.
-- [ ] **Un progetto illeggibile non ferma gli altri.** Un percorso che non esiste e uno valido: la
+- [x] **Un progetto illeggibile non ferma gli altri.** Un percorso che non esiste e uno valido: la
       riga «non raggiungibile» e la riga dell'altro, uscita 0. Rosso su `main`.
-- [ ] **Mostra la differenza fra pin e versione installata.** `installa` URL `…@v1.1.0`, firma
+- [x] **Mostra la differenza fra pin e versione installata.** `installa` URL `…@v1.1.0`, firma
       scritta `…@v1.0.0`: la riga porta `pin v1.1.0 installato v1.0.0`. Rosso dopo i criteri 1-4:
       nessuno di loro chiede i tag.
-- [ ] **La pausa e il checkout fuori dal ramo di `BASE` si vedono, come li vede il tick.** Con
+- [x] **La pausa e il checkout fuori dal ramo di `BASE` si vedono, come li vede il tick.** Con
       `HOME` in `tmp_path` e `~/asdlc-tick.pausa` scritto, la decisione è `in pausa: <riga>`. Senza
       pausa e col repository temporaneo su un ramo `docs/x`, la riga dice `non allineato` col nome del
       ramo, `--json` ha `allineato` falso, e il checkout resta su `docs/x`. Un caso per riga. Rosso
