@@ -151,6 +151,20 @@ def test_gli_avvisi_della_base_non_sono_rilievi(testo, attesi, tmp_path, monkeyp
     assert all(isinstance(a, str) for a in avvisi), avvisi
 
 
+def test_i_file_in_testa_a_una_voce_contano_anche_senza_barra():
+    """PBI-537, decisione 2: in una voce senza rientro i file della testa contano anche
+    in radice; gli altri testi della riga e le voci annidate solo con una `/`."""
+    testo = pbi(scope="- `requirements.txt` — fissato.\n"
+                      "- `tools/a.py` e `README.md` — x.\n"
+                      "- `x.yml`, `Dockerfile` — y.\n"
+                      "- `tools/asdlc/runner.py` — usa `weasyprint` e `html(x)`.\n"
+                      "  - `COSTANTE` e `tools/b.py`")
+
+    assert [p for p, _ in runner.percorsi_dello_scope(testo)] == [
+        "requirements.txt", "tools/a.py", "README.md", "x.yml", "Dockerfile",
+        "tools/asdlc/runner.py", "tools/b.py"]
+
+
 def lancia(argv: list[str], monkeypatch) -> int:
     """`asdlc-runner <argv>` da `smista()`, col codice d'uscita: anche quello di
     `argparse`, che esce con `SystemExit`."""

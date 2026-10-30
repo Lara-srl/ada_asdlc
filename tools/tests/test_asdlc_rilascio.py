@@ -732,6 +732,17 @@ def test_una_pr_che_passa_tutte_le_condizioni_si_mergia_e_il_tick_lo_dice(mondo_
     assert m.chiamate.index(merge) < m.chiamate.index(m.comandi("gh", "pr", "comment")[0])
 
 
+def test_una_pr_che_tocca_un_file_in_radice_dello_scope_si_mergia(mondo_del_merge):
+    """PBI-537, criterio 1: `requirements.txt` nello Scope conta anche senza `/`."""
+    testo = PBI_7.replace("- `decisions/`", "- `requirements.txt` — fissato.\n- `decisions/`")
+    m = mondo_del_merge(testo=testo,
+                        files=["requirements.txt", "backlog/PBI-7-un-cambio.md"])
+
+    righe = coda.passo_del_merge(m.repo, m.worktree)
+
+    assert righe == ["merge: PBI-7 #1"]
+
+
 SCENARI_CHE_ATTENDONO = {
     "ramo-non-del-runner": ({"ramo": "feature/x"}, "ramo"),
     "pbi-non-in-coda": ({"in_coda": False}, "coda"),
