@@ -62,11 +62,14 @@ def tag_di(installa: str | None) -> str | None:
     return trovati[-1] if trovati else None
 
 
-def pin_e_installato(checkout: Path) -> tuple[str, str | None]:
+def pin_e_installato(checkout: Path) -> tuple[str | None, str | None]:
     """`(pin, installato)` di `coda.firme()` (decisione 7): i due tag con un
     `installa` URL, `None` per l'installato senza firma; la cartella per tutti e
-    due con un `installa` cartella. Un `Guasto` delle firme va nel pin,
-    `? (<motivo>)`, e il progetto resta raggiungibile."""
+    due con un `installa` cartella; `None` per tutti e due senza
+    `[ambiente].pacchetto`, che non ha una firma. Un `Guasto` delle firme va nel
+    pin, `? (<motivo>)`, e il progetto resta raggiungibile."""
+    if coda.PACCHETTO is None:
+        return None, None
     try:
         attesa, scritta = coda.firme(checkout)
     except coda.Guasto as guasto:
