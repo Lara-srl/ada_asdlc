@@ -759,6 +759,12 @@ SCENARI_CHE_ATTENDONO = {
                                   "a vista"),
     "file-fuori-scope": ({"files": ["tools/asdlc/altro.py", "backlog/PBI-7-un-cambio.md"]},
                          "fuori dallo Scope"),
+    "file-del-fuori-scope": ({"testo": PBI_7.replace(
+        "- `tools/asdlc/coda.py` — il passo.\n",
+        "- `tools/asdlc/runner.py` — il passo.\n").replace(
+        "- `decisions/` — le decisioni.\n",
+        "- `decisions/` — le decisioni.\n- **Fuori scope:** `tools/asdlc/coda.py` resta com'è;\n")},
+                             "fuori dallo Scope"),
     "file-in-decisions": ({"files": ["decisions/ADR-0099-x.md", "backlog/PBI-7-un-cambio.md"]},
                           "riservato"),
     "files-assente": ({"files": None}, "elenco dei file"),
