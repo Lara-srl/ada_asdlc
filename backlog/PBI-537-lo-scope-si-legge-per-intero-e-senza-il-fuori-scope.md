@@ -74,7 +74,7 @@ mostrato due difetti:
 
 ## Verifica
 
-- [ ] **Un file in radice nello Scope conta, e la PR che lo tocca si mergia.** **Una sola asserzione**
+- [x] **Un file in radice nello Scope conta, e la PR che lo tocca si mergia.** **Una sola asserzione**
       sulla lista resa da `percorsi_dello_scope()` per uno Scope con le voci ``- `requirements.txt` —
       fissato.``, ``- `tools/a.py` e `README.md` — x.``, ``- `x.yml`, `Dockerfile` — y.``,
       ``- `tools/asdlc/runner.py` — usa `weasyprint` e `html(x)`.`` e ``  - `COSTANTE` e `tools/b.py` ``
@@ -85,7 +85,7 @@ mostrato due difetti:
       Nel mondo del merge di `test_asdlc_rilascio.py`, un PBI con `- \`requirements.txt\`` nello Scope e
       una PR che tocca `requirements.txt` e il file del PBI si mergia (`merge: PBI-7 #1`). Rosso sulla
       base: `requirements.txt` non c'è fra i percorsi, e la PR attende «fuori dallo Scope».
-- [ ] **Il «Fuori scope» non dà percorsi: la PR che lo tocca attende, e la pre-verifica non avvisa.**
+- [x] **Il «Fuori scope» non dà percorsi: la PR che lo tocca attende, e la pre-verifica non avvisa.**
       Con uno Scope che finisce con ``- **Fuori scope:** `tools/asdlc/coda.py` resta com'è;`` e una
       voce annidata ``  - `docs/vecchio.md`: non cambia.``, `percorsi_dello_scope()` non rende né
       `tools/asdlc/coda.py` né `docs/vecchio.md`. Una PR che tocca `tools/asdlc/coda.py` (nominato solo
