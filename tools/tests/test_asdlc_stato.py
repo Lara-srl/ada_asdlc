@@ -273,3 +273,57 @@ def test_un_progetto_che_non_si_legge_non_ferma_gli_altri(tmp_path, home_finta, 
     assert len(righe) == 2
     assert righe[0].startswith("sparito · non raggiungibile — ")
     assert righe[1].startswith("alfa · attende: PBI-1")
+
+
+# --- Criterio 5: il pin e la versione installata ------------------------------------
+
+
+def firma(checkout, testo):
+    """La firma scritta dall'ultima installazione, in `<pacchetto>/.installato-da`."""
+    pacchetto = checkout / ".venv-asdlc"
+    pacchetto.mkdir(exist_ok=True)
+    (pacchetto / ".installato-da").write_text(testo + "\n", encoding="utf-8")
+
+
+def test_la_riga_mostra_il_tag_del_pin_e_quello_installato(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    firma(checkout, "git+https://github.com/Lara-srl/asdlc@v1.0.0#subdirectory=tools")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert "pin v1.1.0 installato v1.0.0" in riga
+    assert (oggetto["pin"], oggetto["installato"]) == ("v1.1.0", "v1.0.0")
+
+
+def test_senza_firma_l_installato_e_un_trattino(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+
+    assert "pin v1.1.0 installato -" in capsys.readouterr().out
+
+
+def test_con_un_installa_cartella_si_mostra_la_cartella(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"], installa="./tools")
+    (checkout / "tools").mkdir()
+    (checkout / "tools" / "pyproject.toml").write_text("", encoding="utf-8")
+    git("add", "tools", cwd=checkout)
+    git("commit", "-q", "-m", "tools", cwd=checkout)
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+
+    assert "pin ./tools installato ./tools" in capsys.readouterr().out
+
+
+def test_un_guasto_delle_firme_sta_nella_colonna_del_pin(tmp_path, capsys):
+    """La cartella di `installa` non c'è a `HEAD`: `firme()` alza `Guasto`, e il
+    progetto resta raggiungibile."""
+    checkout = progetto(tmp_path, ["- PBI-1"], installa="./tools")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+
+    assert "pin ? (la cartella tools non c'è a HEAD" in riga
+    assert riga.startswith("alfa · attende: PBI-1")
