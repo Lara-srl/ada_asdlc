@@ -66,14 +66,15 @@ def pin_e_installato(checkout: Path) -> tuple[str | None, str | None]:
     """`(pin, installato)` di `coda.firme()` (decisione 7): i due tag con un
     `installa` URL, `None` per l'installato senza firma; la cartella per tutti e
     due con un `installa` cartella; `None` per tutti e due senza
-    `[ambiente].pacchetto`, che non ha una firma. Un `Guasto` delle firme va nel
-    pin, `? (<motivo>)`, e il progetto resta raggiungibile."""
+    `[ambiente].pacchetto`, che non ha una firma. Un `Guasto` delle firme, o una
+    firma scritta che non si legge, va nel pin, `? (<motivo>)`, e il progetto
+    resta raggiungibile."""
     if coda.PACCHETTO is None:
         return None, None
     try:
         attesa, scritta = coda.firme(checkout)
-    except coda.Guasto as guasto:
-        return f"? ({guasto})", None
+    except (coda.Guasto, OSError, UnicodeDecodeError) as guasto:
+        return f"? ({coda.in_una_riga(str(guasto))})", None
     if coda.asdlc_config.e_un_url(coda.INSTALLA):
         return tag_di(attesa), tag_di(scritta)
     return coda.INSTALLA, coda.INSTALLA
