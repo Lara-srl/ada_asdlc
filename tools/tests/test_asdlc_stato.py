@@ -327,3 +327,46 @@ def test_un_guasto_delle_firme_sta_nella_colonna_del_pin(tmp_path, capsys):
 
     assert "pin ? (la cartella tools non c'è a HEAD" in riga
     assert riga.startswith("alfa · attende: PBI-1")
+
+
+# --- Criterio 6: la pausa e il checkout fuori da `main`, come li vede il tick ------
+
+
+def test_con_la_pausa_la_decisione_e_in_pausa(tmp_path, home_finta, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    (home_finta / "asdlc-tick.pausa").write_text("31/10 09:00 chiudo il giro a mano\n",
+                                                encoding="utf-8")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert riga.startswith("alfa · in pausa: 31/10 09:00 chiudo il giro a mano · ")
+    assert oggetto["pausa"] == "31/10 09:00 chiudo il giro a mano"
+
+
+def ramo_corrente(checkout):
+    return subprocess.run(["git", "branch", "--show-current"], cwd=checkout,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_un_checkout_fuori_da_main_e_non_allineato_e_resta_dov_e(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    git("switch", "-q", "-c", "docs/x", cwd=checkout)
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert f"non allineato: il checkout {checkout} è su «docs/x», non su main" in riga
+    assert oggetto["allineato"] is False
+    assert ramo_corrente(checkout) == "docs/x"
+
+
+def test_un_checkout_su_main_e_allineato(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+
+    [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
+
+    assert oggetto["allineato"] is True
+    assert oggetto["pausa"] is None
