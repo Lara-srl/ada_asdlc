@@ -370,3 +370,32 @@ def test_un_checkout_su_main_e_allineato(tmp_path, capsys):
 
     assert oggetto["allineato"] is True
     assert oggetto["pausa"] is None
+
+
+# --- Non regressione: la sola lettura -----------------------------------------------
+
+
+def fotografia(checkout, worktree):
+    """Ciò che un comando di sola lettura non deve cambiare: lo stato di git del
+    checkout, il registro del checkout e quello del worktree del runner, e il
+    log del tick, che `log_dir_temporanea` sposta fuori dal checkout."""
+    stato_git = subprocess.run(["git", "status", "--porcelain", "--ignored"], cwd=checkout,
+                               capture_output=True, text=True, check=True).stdout
+    registri = {
+        str(file): file.read_bytes()
+        for cartella in (checkout / "runs", worktree / "runs") if cartella.exists()
+        for file in sorted(cartella.rglob("*")) if file.is_file()
+    }
+    log = coda.LOG.read_bytes() if coda.LOG.exists() else None
+    return stato_git, registri, log
+
+
+def test_guardia_asdlc_stato_non_scrive_nel_checkout_ne_nel_registro(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    rapporto(tmp_path, {"stato": "fermato", "motivo": "non-convergente"})
+    prima = fotografia(checkout, tmp_path / "progetto-run")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    assert stato.main(["--repo", str(checkout), "--json"]) == 0
+
+    assert fotografia(checkout, tmp_path / "progetto-run") == prima
