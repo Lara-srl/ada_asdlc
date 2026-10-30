@@ -34,7 +34,7 @@ Niente demone, nessuna porta aperta, nessuna dipendenza (`urllib.request`, come 
 3. **Il vocabolario è chiuso e il testo non va mai a una shell né a un modello** (`ADR-0027`):
    - `stato [progetto]` — l'uscita di `asdlc-stato` (`PBI-534`);
    - `pausa <progetto> [motivo]` — `asdlc-coda --pausa` (`PBI-535`);
-   - `riprendi <progetto>` — `asdlc-coda --riprendi`;
+   - `riprendi <progetto>` — `asdlc-coda --togli-pausa`;
    - `rilancia <progetto> PBI-N` — `asdlc-chiudi-giro PBI-N` nel checkout del progetto.
    Ogni altra riga, o una riga che non comincia per una parola del vocabolario, riceve l'elenco dei
    comandi e non fa niente.
@@ -60,7 +60,7 @@ scrive `slack.toml` e il file del token, aggiunge al `crontab` la riga di `asdlc
 
 ## Dipendenze
 
-- Bloccato da: `PBI-534` (`stato`), `PBI-535` (`--pausa`/`--riprendi`), `PBI-533` (condivide il canale,
+- Bloccato da: `PBI-534` (`stato`), `PBI-535` (`--pausa`/`--togli-pausa`), `PBI-533` (condivide il canale,
   la regola dei segreti e il modo di provare con un server finto).
 - Blocca: nessuno.
 
