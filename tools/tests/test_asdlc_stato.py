@@ -349,6 +349,21 @@ def test_senza_pacchetto_il_pin_e_l_installato_sono_trattini(tmp_path, capsys):
     assert (oggetto["pin"], oggetto["installato"]) == (None, None)
 
 
+def test_una_firma_illeggibile_sta_nella_colonna_del_pin(tmp_path, capsys):
+    """`.installato-da` c'è ma non è UTF-8: `firme()` alza `UnicodeDecodeError`,
+    non `Guasto`, e il progetto resta raggiungibile."""
+    checkout = progetto(tmp_path, ["- PBI-1"])
+    firma(checkout, "")
+    (checkout / ".venv-asdlc" / ".installato-da").write_bytes(b"\xff\xfe\x80")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+    riga = capsys.readouterr().out
+
+    assert riga.startswith("alfa · attende: PBI-1")
+    assert "non raggiungibile" not in riga
+    assert "pin ? (" in riga
+
+
 # --- Criterio 6: la pausa e il checkout fuori da `main`, come li vede il tick ------
 
 
