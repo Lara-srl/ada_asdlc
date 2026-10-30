@@ -2,8 +2,9 @@
 
 **Stato:** proposto il 28/10 da Francesco («Slack per alcuni comandi base per gestire il runner da
 remoto»); le scelte sono sue: ricezione per **polling del canale**, comandi **stato, pausa/riprendi,
-rilancia**. Accodato dopo `PBI-535`. **Da leggere con la lettura avversariale prima di togliere la
-barriera `v1.0.0`:** è il PBI che dà a una chat il potere di toccare il repository.
+rilancia**. ~~Accodato dopo `PBI-535`.~~ **Tolto dalla coda il 30/10:** la lettura avversariale (in
+fondo) ha trovato cinque fermi, e quattro chiedono una scelta di Francesco. Rientra in coda quando le
+risposte sono nel *Deciso* e i criteri sono riscritti.
 
 ## Direttiva
 
@@ -34,7 +35,7 @@ Niente demone, nessuna porta aperta, nessuna dipendenza (`urllib.request`, come 
 3. **Il vocabolario è chiuso e il testo non va mai a una shell né a un modello** (`ADR-0027`):
    - `stato [progetto]` — l'uscita di `asdlc-stato` (`PBI-534`);
    - `pausa <progetto> [motivo]` — `asdlc-coda --pausa` (`PBI-535`);
-   - `riprendi <progetto>` — `asdlc-coda --riprendi`;
+   - `riprendi <progetto>` — `asdlc-coda --togli-pausa`;
    - `rilancia <progetto> PBI-N` — `asdlc-chiudi-giro PBI-N` nel checkout del progetto.
    Ogni altra riga, o una riga che non comincia per una parola del vocabolario, riceve l'elenco dei
    comandi e non fa niente.
@@ -60,7 +61,7 @@ scrive `slack.toml` e il file del token, aggiunge al `crontab` la riga di `asdlc
 
 ## Dipendenze
 
-- Bloccato da: `PBI-534` (`stato`), `PBI-535` (`--pausa`/`--riprendi`), `PBI-533` (condivide il canale,
+- Bloccato da: `PBI-534` (`stato`), `PBI-535` (`--pausa`/`--togli-pausa`), `PBI-533` (condivide il canale,
   la regola dei segreti e il modo di provare con un server finto).
 - Blocca: nessuno.
 
@@ -101,3 +102,38 @@ Si può scegliere senza chiedere: la forma dei messaggi di risposta, i nomi dell
 formato del registro. Si chiama `fermati`: se `asdlc-chiudi-giro` non si può chiamare per un
 progetto diverso da quello della cartella di lavoro; se `PBI-534` o `PBI-535` non sono in `main`; se
 serve una dipendenza esterna.
+
+## Lettura del 30/10 — da decidere prima di riaccodarlo
+
+Lettore separato, sola lettura, su `main` `13d6641`, con `PBI-534`, `533` e `535` come se fossero in
+`main`. Ogni rilievo è verificato nel codice.
+
+1. **FERMO — `rilancia` non fa ciò che la decisione 6 crede.** `asdlc-chiudi-giro` non rilancia: mette
+   il tag, cancella il ramo e lascia il rilancio al tick (`chiudi_giro.py`, righe 21-22). Rifiuta con 2
+   un esito senza `testa` o senza un solo ramo su `origin` (righe 157-172), cioè proprio
+   `albero-sporco-all-ingresso`, che chiude senza ramo e che il tick rilancia già da solo. Sul limite
+   d'uso il tick riprende da solo dalla punta del ramo (`--riprendi`), e `rilancia` cancellerebbe quel
+   ramo. `non lanciato` è una riga del log, non un esito. **Proposta:** `rilancia` chiude solo i giri
+   fermati con un ramo e una `testa` (la domanda già risposta nel PBI, `gate-rossi`); per il limite
+   d'uso e i fermi senza ramo risponde che il tick li riprende da solo. Il criterio 4 si riscrive con un
+   fermo che ha un ramo.
+2. **FERMO — la conferma nel thread non si vede** con `conversations.history`, che non rende le
+   risposte nei thread, e fra due esecuzioni di `cron` non c'è un posto per il comando che aspetta.
+   **Proposta:** niente thread: la conferma è un messaggio di primo livello `conferma <comando>
+   <progetto>` dallo stesso utente entro `conferma_minuti`, e il comando in attesa sta in
+   `~/.config/asdlc/slack-attese.json`.
+3. **FERMO — non è detto come `asdlc-slack` esegue i comandi.** Ogni progetto ha il suo pin, e `coda` ha
+   le costanti di un progetto solo. **Proposta:** un sottoprocesso del comando installato nel progetto
+   (`<checkout>/<[ambiente].pacchetto>/bin/asdlc-coda`, `asdlc-stato`, `asdlc-chiudi-giro`) con `cwd`
+   nel checkout; i test lo sostituiscono con un `esegui` finto; il README dice che un comando c'è in un
+   progetto solo dopo il pin al tag che lo porta.
+4. **FERMO — la prima esecuzione senza `slack-ts`.** **Proposta:** si scrive il `ts` dell'ultimo
+   messaggio e non si elabora niente; un caso nel criterio 6.
+5. **FERMO (meccanico) — il criterio 2 nasce verde dopo il GREEN del criterio 1.** Si riscrive con
+   `stato` da un utente non ammesso: nessuna `chat.postMessage`, una riga nel registro.
+
+Minori: due esecuzioni sovrapposte (un `flock` su `~/.config/asdlc/slack.lock`, chi lo trova tenuto
+esce 0); `canale` è l'ID; `channels:history` o `groups:history` secondo il canale, e il bot membro del
+canale; i messaggi senza `user` o con `subtype` (il webhook di `PBI-533`, il bot stesso) si saltano senza
+registrarli; `<progetto>` è la cartella del checkout, come in `PBI-534` (decisione 1) e `PBI-533`; il
+*Fuori scope* non dice più che il merge è di Francesco (dalla `v1.0.0` è del tick, `ADR-0033`).

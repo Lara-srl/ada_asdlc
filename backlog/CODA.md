@@ -66,11 +66,10 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-524
 - PBI-525
 - PBI-528
-- ‖ tag `v1.0.0` e pin in `ada_asdlc`, `ada_nlt`, `ada_dispense`, `ada_unical`, `ada_planning`; poi gli altri PBI letti e accodati per la `v1.1.0`
+- PBI-537
 - PBI-534
 - PBI-533
 - PBI-535
-- PBI-536
 
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
@@ -137,7 +136,15 @@ barriera è il pin nei cinque repository, compreso questo. `PBI-527` esce dalle 
 il suo elenco dei progetti; il 533 manda i messaggi del tick su Slack (con `non-allineato`,
 `reinstallazione` e `pausa` aggiunti il 28/10); il 535 dà la pausa per progetto; il 536 risponde ai
 comandi (`stato`, `pausa`, `riprendi`, `rilancia`) per polling del canale. **Non sono ancora passati dalla
-lettura avversariale:** va fatta prima di togliere la barriera `v1.0.0`, e le correzioni entrano in
-`main` con una PR a parte. Fuori da questo giro, per scelta di Francesco: l'indipendenza dal modello,
+lettura avversariale:** ~~va fatta prima di togliere la barriera `v1.0.0`, e le correzioni entrano in
+`main` con una PR a parte.~~ *Fatta il 30/10* (le sezioni in fondo ai PBI): 534, 533 e 535 corretti
+nella stessa PR che toglie la barriera, perché tag e pin `v1.0.0` sono fatti in tutti e cinque i
+repository (#116 qui). **`PBI-536` esce dalla coda:** cinque fermi, quattro chiedono una scelta di
+Francesco (la sezione in fondo al PBI); rientra quando sono decisi.
+
+**`PBI-537`, lo Scope per intero e senza il «Fuori scope»** (Francesco, 30/10): in testa alla `v1.1.0`,
+perché dalla `v1.0.0` la guardia dello Scope decide il merge automatico, e oggi accetta i file del
+«Fuori scope» e scarta quelli in radice (la `#44` di `ada_dispense`). Letto il 30/10, zero fermi. La
+sua PR la mergia una persona: il tick con la `v1.0.0` non vede `README.md` nel suo Scope. Fuori da questo giro, per scelta di Francesco: l'indipendenza dal modello,
 una plancia o un'API HTTP, le chiavi API separate per progetto. La sandbox del Builder resta un ADR da
 scrivere (`LETTURA-ADLC-IBM.md`, §3.2), non una voce di coda.
