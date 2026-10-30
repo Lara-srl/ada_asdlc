@@ -258,3 +258,18 @@ def test_un_nome_che_non_c_e_esce_2_e_lo_dice_su_stderr(tmp_path, home_finta, ca
 
     assert "gamma" in uscita.err
     assert uscita.out == ""
+
+
+# --- Criterio 4: un progetto illeggibile non ferma gli altri ------------------------
+
+
+def test_un_progetto_che_non_si_legge_non_ferma_gli_altri(tmp_path, home_finta, capsys):
+    alfa = progetto(tmp_path, ["- PBI-1"], nome="alfa")
+    elenco(home_finta, tmp_path / "sparito", alfa)
+
+    assert stato.main([]) == 0
+    righe = capsys.readouterr().out.splitlines()
+
+    assert len(righe) == 2
+    assert righe[0].startswith("sparito · non raggiungibile — ")
+    assert righe[1].startswith("alfa · attende: PBI-1")
