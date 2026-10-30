@@ -4186,9 +4186,12 @@ def percorsi_dello_scope(testo: str) -> list[tuple[str, str]]:
     `/` e senza spazi, `*`, `<`, `>`, `{`, `}` né `…` (PBI-520, decisione 5). Nella
     testa di una voce senza rientro — il primo testo e quelli legati a lui da `, `,
     ` e `, ` o ` — contano anche senza `/`, se non hanno neanche `(`, `)`, `[`, `]`
-    (PBI-537, decisione 2): i file in radice."""
+    (PBI-537, decisione 2): i file in radice. Le righe si leggono fino alla prima che
+    dice «Fuori scope», esclusa: quella e le seguenti non danno percorsi (decisione 1)."""
     percorsi = []
     for riga in (blocco_dello_scope(testo) or "").splitlines():
+        if "fuori scope" in riga.lower():
+            break
         testa = RE_TESTA_DELLA_VOCE.match(riga)
         for testo_fra_apici in re.finditer(r"`([^`]+)`", riga):
             percorso = testo_fra_apici.group(1)
