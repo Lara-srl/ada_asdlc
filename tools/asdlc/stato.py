@@ -45,7 +45,7 @@ def nome_di(checkout: Path) -> str:
     return checkout.resolve().name
 
 
-def voce_di(decisione: coda.Decisione) -> str | None:
+def voce_di(decisione: coda.Decisione | None) -> str | None:
     """La voce della coda su cui il tick si ferma: il PBI o il testo della barriera."""
     if isinstance(decisione, coda.Barriera):
         return decisione.testo
@@ -78,15 +78,29 @@ def pin_e_installato(checkout: Path) -> tuple[str, str | None]:
 
 def stato_di(checkout: Path) -> dict:
     """Lo stato di un progetto. `coda` ha le costanti di un progetto solo: si
-    configura con l'`asdlc.toml` di questo checkout prima di decidere."""
+    configura con l'`asdlc.toml` di questo checkout prima di decidere.
+
+    La decisione è quella del tick, nel suo ordine (decisione 6): la pausa, poi
+    il ramo del checkout — solo `git branch --show-current`, senza il `fetch` e
+    il `merge` di `allinea()` —, e solo dopo `decidi()`. In pausa o fuori dal
+    ramo di `BASE` il tick non decide, e non c'è una voce."""
     coda.configura(coda.asdlc_config.carica(checkout))
-    decisione = coda.decidi(checkout, coda.WORKTREE_DEL_RUNNER)
+    pausa = coda.pausa()
+    fuori = coda.fuori_dalla_base(checkout)
+    decisione = (coda.decidi(checkout, coda.WORKTREE_DEL_RUNNER)
+                 if pausa is None and fuori is None else None)
+    if pausa is not None:
+        racconto = f"in pausa: {pausa}"
+    elif fuori is not None:
+        racconto = f"non allineato: {fuori}"
+    else:
+        racconto = coda.racconta(decisione)
     pbi = getattr(decisione, "pbi", None)
     esito = coda.ultimo_esito(coda.WORKTREE_DEL_RUNNER, pbi) if pbi else None
     pin, installato = pin_e_installato(checkout)
     return {
         "progetto": nome_di(checkout),
-        "decisione": coda.racconta(decisione),
+        "decisione": racconto,
         "voce": voce_di(decisione),
         # Lo stato e il motivo dell'ultimo rapporto del runner su quel PBI.
         "esito": ({"stato": esito.get("stato"), "motivo": esito.get("motivo")}
@@ -94,8 +108,8 @@ def stato_di(checkout: Path) -> dict:
         # Gli URL delle PR aperte sul ramo del PBI, `None` se `gh` non risponde.
         "pr": list(pr) if pbi and (pr := coda.pr_sul_ramo(checkout, pbi)) is not None
         else None if pbi else [],
-        "pausa": None,
-        "allineato": None,
+        "pausa": pausa,
+        "allineato": fuori is None,
         "installato": installato,
         "pin": pin,
     }
