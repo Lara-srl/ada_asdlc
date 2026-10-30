@@ -143,11 +143,20 @@ Sul ramo di ripresa, verificato il 28/10: `python3 -m pytest -q tools/tests` dà
 1. **I quindici commit sono già in `main`** (li porta la PR di ripresa, `cherry-pick -x` dal tag, senza
    `5ec7fa2`), dal RED `64d024a` al GREEN `64a03c4`. **Verifica:** `git log --oneline` su `main` li
    mostra; non si riportano di nuovo.
-2. **I tre comportamenti del rilievo 3, ciascuno col suo RED**, in un commit `test` solo dopo averne
+2. **Due comportamenti del rilievo 3, ciascuno col suo RED**, in un commit `test` solo dopo averne
    tolto il codice in un `refactor`, come per la guardia del dry-run del 525: (a) `mergia()` rende
-   `merge: avviso, …` quando `passo_del_merge()` solleva e il tick prosegue e rilascia; (b) `gh pr list`
-   che esce diverso da 0 non scrive nessuna riga `merge:`; (c) con zero PR aperte nessuna riga del
-   passaggio comincia con `merge:` e non c'è né `gh pr merge` né commento. Per ognuno: `refactor`
-   (si toglie il codice, nessun test cambia), `test` (rosso), `fix` (si rimette il codice).
-   **Verifica:** `asdlc-runner --gate-rosso HEAD` passa e i tre test falliscono ognuno sul proprio RED.
+   `merge: avviso, …` quando `passo_del_merge()` solleva e il tick prosegue e rilascia (il `refactor` toglie
+   il `try/except` di `mergia()`); (b) `gh pr list` che esce diverso da 0 non scrive nessuna riga `merge:`
+   (il `refactor` toglie `if codice != 0: return []` in `passo_del_merge()`, e `json.loads` legge l'uscita
+   d'errore). Per ognuno: `refactor` (si toglie il codice, nessun test cambia), `test` (rosso), `fix` (si
+   rimette il codice). **Verifica:** `asdlc-runner --gate-rosso HEAD` passa e i due test falliscono ognuno
+   sul proprio RED.
+   **Il terzo comportamento, (c), esce dal punto 2** (deciso il 30/10/2026, rilievo R della preverifica
+   `20261029-000511`): «con zero PR aperte nessuna riga `merge:`, né `gh pr merge` né commento» non ha codice
+   da togliere in un `refactor`, perché con `[]` `passo_del_merge()` non entra nel ciclo per costruzione; un
+   suo test nascerebbe verde e il gate del rosso fermerebbe il giro come ha fermato il giro 1 con `5ec7fa2`.
+   Resta quello che già era: la **non regressione** «senza PR aperte il tick scrive le stesse righe di oggi»,
+   coperta dai test del tick che esistono. **Nessun test nuovo per (c)**, e il Critic accetta (a) e (b) come
+   chiusura del rilievo 3. Scartata l'alternativa di dichiarare (c) guardia: dovrebbe mordere un mutante, e
+   nelle funzioni toccate nessuno la fa fallire (122 mutanti provati sul giro 1).
 3. **Il Critic** deve poter dire `pronto`: il rilievo 3 era l'ultimo aperto.
