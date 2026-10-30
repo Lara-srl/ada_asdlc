@@ -79,7 +79,8 @@ repository, perché l'installazione usa `git+ssh`.
 4. Il **Critic** (sessione separata, sola lettura) rilegge il lavoro.
 5. Si apre una PR. Il tick la mergia da solo se passa le condizioni di `ADR-0033`
    (rapporto `fatto` col Critic, CI verde, criteri spuntati, file dentro lo Scope); altrimenti
-   **il merge è tuo**, e il log dice quale condizione manca.
+   **il merge è tuo**, e il log dice quale condizione manca. Dello Scope contano i file in
+   testa alle voci, anche in radice (`README.md`), e quelli con una `/`.
 6. La voce in coda si spegne quando una PR mergiata nomina il PBI e tocca file fuori da
    `backlog/`.
 
