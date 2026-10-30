@@ -202,3 +202,59 @@ def test_un_gh_muto_sulle_pr_aperte_e_un_punto_di_domanda(tmp_path, capsys, gh_f
 
     assert " · PR ? " in riga.rstrip("\n") + " "
     assert oggetto["pr"] is None
+
+
+# --- Criterio 3: l'elenco dei progetti --------------------------------------------
+
+
+def elenco(casa, *checkout):
+    """`~/.config/asdlc/progetti.toml` con i `checkout`, in quest'ordine."""
+    cartella = casa / ".config" / "asdlc"
+    cartella.mkdir(parents=True, exist_ok=True)
+    voci = ", ".join(f'"{percorso}"' for percorso in checkout)
+    (cartella / "progetti.toml").write_text(f"checkout = [{voci}]\n", encoding="utf-8")
+
+
+def test_senza_argomenti_mostra_i_progetti_del_file_nel_loro_ordine(
+    tmp_path, home_finta, capsys
+):
+    alfa = progetto(tmp_path, ["- PBI-1"], nome="alfa")
+    beta = progetto(tmp_path, ["- ‖ aspetta"], nome="beta")
+    elenco(home_finta, beta, alfa)
+
+    assert stato.main([]) == 0
+    righe = capsys.readouterr().out.splitlines()
+
+    assert len(righe) == 2
+    assert righe[0].startswith("beta · barriera: aspetta")
+    assert righe[1].startswith("alfa · attende: PBI-1")
+
+
+def test_con_un_nome_mostra_solo_quel_progetto(tmp_path, home_finta, capsys):
+    alfa = progetto(tmp_path, ["- PBI-1"], nome="alfa")
+    beta = progetto(tmp_path, ["- ‖ aspetta"], nome="beta")
+    elenco(home_finta, beta, alfa)
+
+    assert stato.main(["alfa"]) == 0
+    righe = capsys.readouterr().out.splitlines()
+
+    assert len(righe) == 1
+    assert righe[0].startswith("alfa · ")
+
+
+def test_un_elenco_che_manca_esce_2_e_lo_dice_su_stderr(capsys):
+    assert stato.main([]) == 2
+    uscita = capsys.readouterr()
+
+    assert "progetti.toml" in uscita.err
+    assert uscita.out == ""
+
+
+def test_un_nome_che_non_c_e_esce_2_e_lo_dice_su_stderr(tmp_path, home_finta, capsys):
+    elenco(home_finta, progetto(tmp_path, ["- PBI-1"], nome="alfa"))
+
+    assert stato.main(["gamma"]) == 2
+    uscita = capsys.readouterr()
+
+    assert "gamma" in uscita.err
+    assert uscita.out == ""
