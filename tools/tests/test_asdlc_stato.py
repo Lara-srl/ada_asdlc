@@ -189,7 +189,7 @@ def test_senza_esito_e_senza_pr_la_riga_porta_dei_trattini(tmp_path, capsys):
     assert stato.main(["--repo", str(checkout)]) == 0
     riga = capsys.readouterr().out
 
-    assert " · PBI-1 · - · PR - " in riga + " "
+    assert " · PBI-1 · - · PR - " in riga.rstrip("\n") + " "
 
 
 def test_un_gh_muto_sulle_pr_aperte_e_un_punto_di_domanda(tmp_path, capsys, gh_finto):
@@ -200,5 +200,5 @@ def test_un_gh_muto_sulle_pr_aperte_e_un_punto_di_domanda(tmp_path, capsys, gh_f
     riga = capsys.readouterr().out
     [oggetto] = json_di(["--repo", str(checkout), "--json"], capsys)
 
-    assert " · PR ? " in riga + " "
+    assert " · PR ? " in riga.rstrip("\n") + " "
     assert oggetto["pr"] is None
