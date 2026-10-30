@@ -75,7 +75,26 @@ def stato_di(checkout: Path) -> dict:
     }
 
 
+NON_RAGGIUNGIBILE = "non raggiungibile"
+
+
+def stato_o_guasto(checkout: Path) -> dict:
+    """`stato_di()`, o il progetto «non raggiungibile» col motivo: un progetto che
+    non si legge non ferma gli altri (decisione 4, `ADR-0008`). Le altre chiavi
+    restano `None`."""
+    try:
+        return stato_di(checkout)
+    except Exception as guasto:  # noqa: BLE001 — qualunque guasto è di quel progetto
+        motivo = coda.in_una_riga(str(guasto) or type(guasto).__name__)
+        return {"progetto": nome_di(checkout),
+                "decisione": f"{NON_RAGGIUNGIBILE} — {motivo}",
+                "voce": None, "esito": None, "pr": None, "pausa": None,
+                "allineato": None, "installato": None, "pin": None}
+
+
 def riga(dato: dict) -> str:
+    if dato["decisione"].startswith(NON_RAGGIUNGIBILE):
+        return f"{dato['progetto']} · {dato['decisione']}"
     esito = dato["esito"]
     pr = dato["pr"]
     return " · ".join([
@@ -111,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"asdlc-stato: nessun progetto «{a.nome}» in {file_dei_progetti()}",
                       file=sys.stderr)
                 return 2
-    dati = [stato_di(c) for c in checkout]
+    dati = [stato_o_guasto(c) for c in checkout]
     if a.json:
         print(json.dumps(dati, ensure_ascii=False, indent=2))
     else:

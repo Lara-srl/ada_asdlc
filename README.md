@@ -301,7 +301,8 @@ asdlc-stato --json                         # un oggetto JSON per progetto
 ```
 
 Il file che manca o non si legge, e un nome che non c'è, sono un messaggio su stderr e
-l'uscita 2.
+l'uscita 2. Un progetto che non si legge invece non ferma gli altri (`ADR-0008`): la sua
+riga è `<nome> · non raggiungibile — <motivo>`, e l'uscita resta 0.
 
 Ogni progetto è una riga: il nome, la decisione, la voce della coda — il PBI o il testo
 della barriera —, lo stato e il motivo dell'ultimo esito del runner (o `-`), e le PR aperte
