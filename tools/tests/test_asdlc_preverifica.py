@@ -127,6 +127,13 @@ def pbi_610(scope: str = "", bloccato_da: str = "nessuno.") -> str:
     )
 
 
+# Lo Scope che finisce col «Fuori scope» (PBI-537, decisione 1): né `coda.py` né
+# `docs/vecchio.md`, che alla base non c'è, sono percorsi dello Scope.
+FUORI_SCOPE = ("- `tools/asdlc/runner.py` — il passo.\n"
+               "- **Fuori scope:** `tools/asdlc/coda.py` resta com'è;\n"
+               "  - `docs/vecchio.md`: non cambia.")
+
+
 @pytest.mark.parametrize(
     "testo, attesi",
     [
@@ -137,6 +144,7 @@ def pbi_610(scope: str = "", bloccato_da: str = "nessuno.") -> str:
         pytest.param(pbi_610(bloccato_da="`PBI-600`."), 1, id="dipendenza-aperta"),
         pytest.param(pbi_610(bloccato_da="`PBI-601`."), 0, id="casella-fuori-dalla-verifica"),
         pytest.param(pbi_610("- `tools/tests/test_asdlc_prova.py`"), 1, id="scope-di-soli-test"),
+        pytest.param(pbi_610(FUORI_SCOPE), 0, id="fuori-scope-senza-avvisi"),
     ],
 )
 def test_gli_avvisi_della_base_non_sono_rilievi(testo, attesi, tmp_path, monkeypatch):
@@ -149,6 +157,26 @@ def test_gli_avvisi_della_base_non_sono_rilievi(testo, attesi, tmp_path, monkeyp
 
     assert len(avvisi) == attesi, avvisi
     assert all(isinstance(a, str) for a in avvisi), avvisi
+
+
+def test_i_file_in_testa_a_una_voce_contano_anche_senza_barra():
+    """PBI-537, decisione 2: in una voce senza rientro i file della testa contano anche
+    in radice; gli altri testi della riga e le voci annidate solo con una `/`."""
+    testo = pbi(scope="- `requirements.txt` — fissato.\n"
+                      "- `tools/a.py` e `README.md` — x.\n"
+                      "- `x.yml`, `Dockerfile` — y.\n"
+                      "- `tools/asdlc/runner.py` — usa `weasyprint` e `html(x)`.\n"
+                      "  - `COSTANTE` e `tools/b.py`")
+
+    assert [p for p, _ in runner.percorsi_dello_scope(testo)] == [
+        "requirements.txt", "tools/a.py", "README.md", "x.yml", "Dockerfile",
+        "tools/asdlc/runner.py", "tools/b.py"]
+
+
+def test_il_fuori_scope_non_da_percorsi():
+    percorsi = [p for p, _ in runner.percorsi_dello_scope(pbi_610(FUORI_SCOPE))]
+
+    assert "tools/asdlc/coda.py" not in percorsi and "docs/vecchio.md" not in percorsi, percorsi
 
 
 def lancia(argv: list[str], monkeypatch) -> int:

@@ -4178,13 +4178,29 @@ def forma_del_pbi(testo: str, pbi: str) -> list[Rilievo]:
     return rilievi
 
 
+RE_TESTA_DELLA_VOCE = re.compile(r"^- `[^`]+`(?:(?:, | e | o )`[^`]+`)*")
+
+
 def percorsi_dello_scope(testo: str) -> list[tuple[str, str]]:
     """I percorsi fra apici inversi dello Scope, con la loro riga: quelli con una
-    `/` e senza spazi, `*`, `<`, `>`, `{`, `}` né `…` (PBI-520, decisione 5)."""
-    return [(percorso, riga)
-            for riga in (blocco_dello_scope(testo) or "").splitlines()
-            for percorso in re.findall(r"`([^`]+)`", riga)
-            if "/" in percorso and not set(percorso) & set(" *<>{}…")]
+    `/` e senza spazi, `*`, `<`, `>`, `{`, `}` né `…` (PBI-520, decisione 5). Nella
+    testa di una voce senza rientro — il primo testo e quelli legati a lui da `, `,
+    ` e `, ` o ` — contano anche senza `/`, se non hanno neanche `(`, `)`, `[`, `]`
+    (PBI-537, decisione 2): i file in radice. Le righe si leggono fino alla prima che
+    dice «Fuori scope», esclusa: quella e le seguenti non danno percorsi (decisione 1)."""
+    percorsi = []
+    for riga in (blocco_dello_scope(testo) or "").splitlines():
+        if "fuori scope" in riga.lower():
+            break
+        testa = RE_TESTA_DELLA_VOCE.match(riga)
+        for testo_fra_apici in re.finditer(r"`([^`]+)`", riga):
+            percorso = testo_fra_apici.group(1)
+            if set(percorso) & set(" *<>{}…"):
+                continue
+            in_testa = testa is not None and testo_fra_apici.end() <= testa.end()
+            if "/" in percorso or (in_testa and not set(percorso) & set("()[]")):
+                percorsi.append((percorso, riga))
+    return percorsi
 
 
 def avvisi_della_base(testo: str, pbi: str, base: str) -> list[str]:
