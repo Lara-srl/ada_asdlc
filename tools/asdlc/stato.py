@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -51,6 +52,30 @@ def voce_di(decisione: coda.Decisione) -> str | None:
     return getattr(decisione, "pbi", None)
 
 
+# Il tag di un `installa` URL: il `vX.Y.Z` dopo l'ultima `@`, nella forma di
+# `RE_PIN_URL` (`config.py`).
+RE_TAG = re.compile(r"@(v\d+\.\d+\.\d+)")
+
+
+def tag_di(installa: str | None) -> str | None:
+    trovati = RE_TAG.findall(installa or "")
+    return trovati[-1] if trovati else None
+
+
+def pin_e_installato(checkout: Path) -> tuple[str, str | None]:
+    """`(pin, installato)` di `coda.firme()` (decisione 7): i due tag con un
+    `installa` URL, `None` per l'installato senza firma; la cartella per tutti e
+    due con un `installa` cartella. Un `Guasto` delle firme va nel pin,
+    `? (<motivo>)`, e il progetto resta raggiungibile."""
+    try:
+        attesa, scritta = coda.firme(checkout)
+    except coda.Guasto as guasto:
+        return f"? ({guasto})", None
+    if coda.asdlc_config.e_un_url(coda.INSTALLA):
+        return tag_di(attesa), tag_di(scritta)
+    return coda.INSTALLA, coda.INSTALLA
+
+
 def stato_di(checkout: Path) -> dict:
     """Lo stato di un progetto. `coda` ha le costanti di un progetto solo: si
     configura con l'`asdlc.toml` di questo checkout prima di decidere."""
@@ -58,6 +83,7 @@ def stato_di(checkout: Path) -> dict:
     decisione = coda.decidi(checkout, coda.WORKTREE_DEL_RUNNER)
     pbi = getattr(decisione, "pbi", None)
     esito = coda.ultimo_esito(coda.WORKTREE_DEL_RUNNER, pbi) if pbi else None
+    pin, installato = pin_e_installato(checkout)
     return {
         "progetto": nome_di(checkout),
         "decisione": coda.racconta(decisione),
@@ -70,8 +96,8 @@ def stato_di(checkout: Path) -> dict:
         else None if pbi else [],
         "pausa": None,
         "allineato": None,
-        "installato": None,
-        "pin": None,
+        "installato": installato,
+        "pin": pin,
     }
 
 
@@ -103,6 +129,7 @@ def riga(dato: dict) -> str:
         dato["voce"] or "-",
         f"{esito['stato']} {esito['motivo']}" if esito is not None else "-",
         "PR " + ("?" if pr is None else ", ".join(pr) or "-"),
+        f"pin {dato['pin'] or '-'} installato {dato['installato'] or '-'}",
     ])
 
 

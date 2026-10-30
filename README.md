@@ -306,7 +306,10 @@ riga è `<nome> · non raggiungibile — <motivo>`, e l'uscita resta 0.
 
 Ogni progetto è una riga: il nome, la decisione, la voce della coda — il PBI o il testo
 della barriera —, lo stato e il motivo dell'ultimo esito del runner (o `-`), e le PR aperte
-sul ramo del PBI (`PR ?` se `gh` non risponde, `PR -` se non ce ne sono). Con `--json` gli
+sul ramo del PBI (`PR ?` se `gh` non risponde, `PR -` se non ce ne sono), e
+`pin <tag> installato <tag>`: il tag di `[ambiente].installa` e quello della firma
+dell'ultima installazione (`-` se non c'è). Con un `installa` cartella si mostra la cartella
+per tutti e due; una firma che non si calcola è `pin ? (<motivo>)`. Con `--json` gli
 oggetti hanno le chiavi `progetto`, `decisione`, `voce`, `esito`, `pr`, `pausa`,
 `allineato`, `installato` e `pin`.
 
