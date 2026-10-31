@@ -222,6 +222,32 @@ prefisso_tag = "v"
 Un progetto che parte senza runner (il «livello zero») e sale a `mvp` con un ADR segue
 `template/ZERO.md`.
 
+### La pausa del tick, globale e del progetto
+
+Il tick si ferma con due file di pausa, che si sommano: basta uno dei due (`PBI-535`).
+
+- **La pausa globale**, `~/asdlc-tick.pausa`, ferma il tick di **tutti** i progetti della
+  macchina: la mettono `asdlc-chiudi-giro` e il runner che aspetta un PBI a monte, la toglie
+  il pin a PR `MERGED` o `asdlc-chiudi-giro`.
+- **La pausa del progetto**, `<[registro].cartella>/pausa` nel checkout (`runs/pausa`),
+  ferma solo il tick di quel progetto; gli altri lavorano. Si mette e si toglie con
+  `asdlc-coda`, dal checkout del progetto, senza scrivere il file a mano:
+
+  ```bash
+  cd /percorso/del/progetto
+  .venv-asdlc/bin/asdlc-coda --pausa "chiudo a mano il giro di PBI-7"
+  .venv-asdlc/bin/asdlc-coda --togli-pausa
+  ```
+
+  Il file è una riga: data, ora e motivo; a capo e spazi in fila nel motivo diventano uno
+  spazio solo. I due flag non fanno altro: non decidono e non lanciano. `--togli-pausa` senza file esce
+  0, e non tocca mai la pausa globale. Prendono il lucchetto del tick, come
+  `asdlc-chiudi-giro`: con un tick in corso escono 2 e il file non cambia.
+
+Il tick in pausa scrive in `runs/coda.log` `in pausa: <riga>` per la globale e
+`in pausa: (progetto) <riga>` per quella del progetto; con tutte e due, una riga sola, la
+globale. Lo stesso testo va nell'evento `pausa` su Slack e in `asdlc-stato`.
+
 ### Il battito del tick e il recupero dopo lo spegnimento
 
 Il tick è un cron su un PC: se il PC si spegne o si sospende, la coda si ferma in silenzio
@@ -296,7 +322,7 @@ il nome del progetto, cioè la cartella del checkout (`ada_nlt`, `ada_asdlc`, �
 | `guasto` | il tick non riesce a decidere (`gh` che non risponde, la coda che non si legge) per tre tick di fila |
 | `non-allineato` | il checkout del tick non è su `main` o non si allinea |
 | `reinstallazione` | la reinstallazione del pacchetto è fallita |
-| `pausa` | il tick è in pausa, con la riga del file di pausa |
+| `pausa` | il tick è in pausa, con la riga del file di pausa: la globale, o `(progetto) <riga>` per la sola pausa del progetto |
 
 **Il webhook, una volta per macchina:**
 
@@ -346,7 +372,8 @@ ha la sua forma vale come vuoto, e se non si scrive (disco pieno, permessi) la r
 **sola lettura**: non prende il lucchetto del tick, non allinea il checkout e non scrive il
 log né il registro. La decisione non è una seconda verità: è quella di `decidi()`, con le
 parole di `racconta()`, le stesse che il tick scrive in `runs/coda.log`. Prima, nell'ordine
-del tick, vengono la pausa (`in pausa: <riga>`) e il ramo del checkout: fuori dal ramo di
+del tick, vengono la pausa (`in pausa: <riga>` per la globale, `in pausa: (progetto) <riga>`
+per quella del progetto) e il ramo del checkout: fuori dal ramo di
 `[git].base` la decisione è `non allineato: …`, la frase del tick, e il checkout resta dov'è.
 
 L'elenco dei progetti è di macchina, come la pausa, e sta fuori dai repository, in
