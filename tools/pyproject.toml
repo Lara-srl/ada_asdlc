@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asdlc"
-version = "0.7.0"
+version = "1.1.0"
 description = "Il runner ASDLC: Builder, gate deterministici, Critic e PR, un PBI per volta"
 requires-python = ">=3.11"
 dependencies = []
