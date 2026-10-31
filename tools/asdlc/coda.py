@@ -1360,20 +1360,51 @@ def pausa() -> str | None:
         return f"{file} c'è ma non si legge — {illeggibile}"
 
 
+def file_di_pausa_del_progetto(repo: Path) -> Path:
+    """`<repo>/<registro>/pausa`, calcolato dal `repo` e non dal `LOG`, che i test
+    spostano fuori dal repository (PBI-535, decisione 1)."""
+    return repo / CFG.registro.cartella / "pausa"
+
+
 def pausa_del_progetto(repo: Path) -> str | None:
     """La riga del file di pausa del progetto, `<repo>/<registro>/pausa`, o `None`
     se il progetto non è in pausa (PBI-535). Ferma solo il tick di questo
-    checkout; la pausa globale è `pausa()`. Il file si calcola dal `repo` e non
-    dal `LOG`, che i test spostano fuori dal repository (decisione 1).
+    checkout; la pausa globale è `pausa()`. La mettono e la tolgono
+    `--pausa MOTIVO` e `--togli-pausa` (`metti_o_togli_la_pausa()`).
 
     Un file che c'è ma non si legge è pausa lo stesso, come per `pausa()`."""
-    file = repo / CFG.registro.cartella / "pausa"
+    file = file_di_pausa_del_progetto(repo)
     if not file.exists():
         return None
     try:
         return file.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as illeggibile:
         return f"{file} c'è ma non si legge — {illeggibile}"
+
+
+def metti_o_togli_la_pausa(repo: Path, motivo: str | None) -> int:
+    """`--pausa MOTIVO` (con `motivo`) o `--togli-pausa` (con `None`): scrive o
+    toglie il file di pausa del progetto, e non fa altro — non decide, non lancia
+    (PBI-535, decisione 3). La riga è data, ora e motivo, come la pausa globale.
+    `--togli-pausa` senza file esce 0, e non tocca la pausa globale (decisione 4).
+
+    Col lucchetto del tick, come `asdlc-chiudi-giro`: se lo tiene un tick in
+    corso esce 2 e non tocca il file."""
+    tenuto = lucchetto_del_tick(repo)
+    if tenuto is None:
+        print(f"il lucchetto {repo / LUCCHETTO_DEL_TICK} è tenuto: un tick è in corso "
+              "in questo checkout: riprova fra un minuto.")
+        return 2
+    with tenuto:
+        file = file_di_pausa_del_progetto(repo)
+        if motivo is None:
+            file.unlink(missing_ok=True)
+            print(f"pausa del progetto tolta: {file}")
+        else:
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(f"{datetime.now():%Y-%m-%d %H:%M} {motivo}\n", encoding="utf-8")
+            print(f"pausa del progetto messa: {file}")
+    return 0
 
 
 def motivo_della_pausa(repo: Path) -> str | None:
@@ -1470,7 +1501,18 @@ def smista(argv: list[str] | None = None) -> int:
                     help="l'albero in cui gira il runner")
     ap.add_argument("--dry-run", action="store_true",
                     help="stampa la decisione senza eseguirla")
+    pausa_del_tick = ap.add_mutually_exclusive_group()
+    pausa_del_tick.add_argument(
+        "--pausa", metavar="MOTIVO",
+        help="mette in pausa il solo tick di questo progetto, col motivo, ed esce")
+    pausa_del_tick.add_argument(
+        "--togli-pausa", action="store_true",
+        help="toglie la pausa del progetto (non quella globale, ~/asdlc-tick.pausa) ed esce")
     a = ap.parse_args(argv)
+
+    # I due flag della pausa del progetto non fanno altro (PBI-535, decisione 3).
+    if a.pausa is not None or a.togli_pausa:
+        return metti_o_togli_la_pausa(a.repo, a.pausa)
 
     if a.repo.resolve() == a.worktree.resolve():
         print(f"Non parto: --repo e --worktree sono lo stesso albero ({a.repo}).\n"
