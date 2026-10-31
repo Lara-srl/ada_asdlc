@@ -165,3 +165,21 @@ def test_pausa_col_lucchetto_del_tick_tenuto_esce_2_e_non_scrive_il_file(
     uscite = capsys.readouterr()
     assert ("è tenuto: un tick è in corso in questo checkout: riprova fra un minuto."
             in uscite.out + uscite.err)
+
+
+# --- Criterio 3: la pausa di un progetto non ferma un altro ---------------------
+
+
+def test_guardia_la_pausa_di_un_progetto_non_ferma_un_altro(tmp_path, chiamati):
+    """PBI-535, criterio 3. Due checkout, la pausa solo nel primo: il tick del
+    primo non lancia, quello del secondo sì. La pausa del progetto si legge dal
+    `repo` del tick, non da un posto comune ai due."""
+    fermo, albero_fermo = un_checkout(tmp_path, "fermo")
+    libero, albero_libero = un_checkout(tmp_path, "libero")
+    pausa_del_progetto_in(fermo, "2026-10-31 10:00 prova")
+
+    assert coda.smista(["--repo", str(fermo), "--worktree", str(albero_fermo)]) == 0
+    assert chiamati == []
+
+    assert coda.smista(["--repo", str(libero), "--worktree", str(albero_libero)]) == 0
+    assert chiamati == ["decidi", "lancia PBI-337"]
