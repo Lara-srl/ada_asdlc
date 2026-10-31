@@ -434,6 +434,79 @@ def test_un_tick_sano_in_mezzo_ricomincia_il_conto_di_fila(tmp_path, monkeypatch
     assert webhook.ricevuti == [], webhook.testi()
 
 
+PAUSA = "2026-10-31 10:00 chiudo a mano il giro di PBI-7\n"
+
+
+def tick_scritti(monkeypatch, tick: list[str]):
+    """Il tick `i` fa ciò che dice `tick[i]`: `guasto` è una `Barriera` nata da un
+    guasto; `non-lanciato`, `lanciato`, `ambiente-mancante` e `pausa-prima-del-lancio`
+    decidono `Lancia PBI-7` e poi il lancio fallisce, riesce, trova l'ambiente
+    incompleto o trova la pausa nata mentre il tick decideva; `pausa`,
+    `non-allineato` e `reinstallazione` escono prima di `decidi()`."""
+    file_di_pausa = Path.home() / "asdlc-tick.pausa"
+    da_fare = iter(tick)
+    adesso = {"tick": None}
+
+    def batti(repo):
+        adesso["tick"] = next(da_fare)
+        file_di_pausa.unlink(missing_ok=True)
+        if adesso["tick"] == "pausa":
+            file_di_pausa.write_text(PAUSA, encoding="utf-8")
+
+    def decidi(repo, worktree):
+        if adesso["tick"] == "guasto":
+            return coda.Barriera("gh non risponde", guasto=True)
+        if adesso["tick"] == "pausa-prima-del-lancio":
+            file_di_pausa.write_text(PAUSA, encoding="utf-8")
+        return coda.Lancia("PBI-7")
+
+    def lancia(pbi, worktree, **k):
+        if adesso["tick"] == "non-lanciato":
+            raise coda.Guasto("il pre-flight si è fermato su `git fetch origin` (uscita 128)")
+
+    passi_sostituiti(
+        monkeypatch, batti=batti, decidi=decidi, lancia=lancia,
+        allinea=lambda r: ("il checkout è su «pbi/pbi-7», non su main"
+                           if adesso["tick"] == "non-allineato" else None),
+        reinstalla=lambda r, w: ("reinstallazione fallita: ERROR: niente asdlc"
+                                 if adesso["tick"] == "reinstallazione" else None))
+    monkeypatch.setattr(coda, "mancanze_dell_ambiente", lambda w: (
+        ["ambiente mancante: il runner installato"]
+        if adesso["tick"] == "ambiente-mancante" else []))
+    mondo_finto(monkeypatch)
+
+
+@pytest.mark.parametrize("tick, contato", [
+    (["non-lanciato", "lanciato", "non-lanciato"], "non parte"),
+    (["non-lanciato", "ambiente-mancante", "non-lanciato"], "non parte"),
+    (["non-lanciato", "pausa-prima-del-lancio", "non-lanciato"], "non parte"),
+    (["non-lanciato", "pausa", "non-lanciato"], "non parte"),
+    (["non-lanciato", "non-allineato", "non-lanciato"], "non parte"),
+    (["non-lanciato", "reinstallazione", "non-lanciato"], "non parte"),
+    (["guasto", "guasto", "pausa", "guasto"], "non riesce"),
+    (["guasto", "guasto", "non-allineato", "guasto"], "non riesce"),
+    (["guasto", "guasto", "reinstallazione", "guasto"], "non riesce"),
+], ids=["lancia-riuscito", "ambiente-mancante", "pausa-prima-del-lancio", "pausa",
+        "non-allineato", "reinstallazione", "guasto-pausa", "guasto-non-allineato",
+        "guasto-reinstallazione"])
+def test_un_tick_che_non_continua_la_fila_la_rompe(tmp_path, monkeypatch, webhook,
+                                                   tick_configurato, tick, contato):
+    """PBI-533, criterio 2 (decisione 2): «di fila» vuol dire tick consecutivi.
+    Ogni tick che non rinnova la fila la rompe, anche quando esce prima di
+    `decidi()` (la pausa, il checkout non allineato, la reinstallazione fallita) o
+    nel ramo del lancio prima di `lancia()` (l'ambiente mancante, la pausa letta la
+    seconda volta), e anche quando il lancio riesce. Il `non lanciato` e il
+    `guasto` di prima e di dopo non si sommano: nessuna `POST` del loro evento.
+    Gli eventi del tick in mezzo, se ne ha, partono come sempre."""
+    repo, albero = progetto_finto(tmp_path)
+    tick_scritti(monkeypatch, tick)
+
+    for _ in tick:
+        un_tick(repo, albero)
+
+    assert not [testo for testo in webhook.testi() if contato in testo], webhook.testi()
+
+
 # --- Criterio 3: dopo un `lancia` lo stesso fermo si notifica di nuovo -------
 
 
