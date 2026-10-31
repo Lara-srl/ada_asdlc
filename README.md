@@ -346,7 +346,8 @@ ha la sua forma vale come vuoto, e se non si scrive (disco pieno, permessi) la r
 **sola lettura**: non prende il lucchetto del tick, non allinea il checkout e non scrive il
 log né il registro. La decisione non è una seconda verità: è quella di `decidi()`, con le
 parole di `racconta()`, le stesse che il tick scrive in `runs/coda.log`. Prima, nell'ordine
-del tick, vengono la pausa (`in pausa: <riga>`) e il ramo del checkout: fuori dal ramo di
+del tick, vengono la pausa (`in pausa: <riga>` per la globale, `in pausa: (progetto) <riga>`
+per quella del progetto) e il ramo del checkout: fuori dal ramo di
 `[git].base` la decisione è `non allineato: …`, la frase del tick, e il checkout resta dov'è.
 
 L'elenco dei progetti è di macchina, come la pausa, e sta fuori dai repository, in

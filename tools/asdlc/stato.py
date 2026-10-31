@@ -87,9 +87,11 @@ def stato_di(checkout: Path) -> dict:
     La decisione è quella del tick, nel suo ordine (decisione 6): la pausa, poi
     il ramo del checkout — solo `git branch --show-current`, senza il `fetch` e
     il `merge` di `allinea()` —, e solo dopo `decidi()`. In pausa o fuori dal
-    ramo di `BASE` il tick non decide, e non c'è una voce."""
+    ramo di `BASE` il tick non decide, e non c'è una voce. La pausa è quella che
+    ferma il tick di questo checkout: la globale, o `(progetto) <riga>` per la
+    pausa del progetto (PBI-535), come la riga di `coda.log`."""
     coda.configura(coda.asdlc_config.carica(checkout))
-    pausa = coda.pausa()
+    pausa = coda.motivo_della_pausa(checkout)
     fuori = coda.fuori_dalla_base(checkout)
     decisione = (coda.decidi(checkout, coda.WORKTREE_DEL_RUNNER)
                  if pausa is None and fuori is None else None)
