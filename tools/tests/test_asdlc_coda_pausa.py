@@ -103,6 +103,25 @@ def test_con_la_pausa_del_progetto_il_tick_non_lancia_e_lo_scrive_nel_log(
     assert righe[0].endswith("  in pausa: (progetto) 2026-10-31 10:00 prova"), righe
 
 
+def test_un_file_di_pausa_del_progetto_che_non_si_legge_e_pausa_lo_stesso(
+        tmp_path, chiamati):
+    """PBI-535, decisione 1: un `<registro>/pausa` che c'è ma non si legge è pausa
+    lo stesso, come per `pausa()`. Qui il file ha byte che non sono UTF-8: il
+    tick non lancia e non salta con un'eccezione, e la riga del log lo dice."""
+    repo, albero = un_checkout(tmp_path)
+    file = repo / coda.CFG.registro.cartella / "pausa"
+    file.parent.mkdir(parents=True)
+    file.write_bytes(b"\xff\xfe pausa\n")
+
+    uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero)])
+
+    assert uscita == 0
+    assert chiamati == []
+    righe = righe_del_log(repo)
+    assert len(righe) == 1 and "  in pausa: (progetto) " in righe[0], righe
+    assert "non si legge" in righe[0], righe
+
+
 # --- Criterio 2: `--pausa` e `--togli-pausa` creano e tolgono il file ----------
 
 
