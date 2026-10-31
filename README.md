@@ -277,6 +277,40 @@ systemctl --user daemon-reload && systemctl --user enable --now asdlc-tick.timer
 Il lucchetto del tick rende innocuo il doppio passaggio con il cron: il secondo scrive
 `occupato:` e esce.
 
+### Le notifiche del tick su Slack
+
+Il tick manda un messaggio su Slack quando la sua decisione **cambia** verso uno stato che
+chiede una persona (`PBI-533`): un PBI fermo senza PR, col motivo e la domanda del rapporto.
+Un messaggio per cambio, non uno ogni dieci minuti: l'ultimo evento mandato sta in
+`runs/notifiche.json` del checkout, e lo stesso evento — stesso tipo, stesso PBI, stesso
+motivo — non si rimanda. Il messaggio porta il nome del progetto, cioè la cartella del
+checkout (`ada_nlt`, `ada_asdlc`, …).
+
+**Il webhook, una volta per macchina:**
+
+1. Su <https://api.slack.com/apps> si crea un'app (*From scratch*) nello spazio di lavoro, si
+   apre *Incoming Webhooks*, si accende e si fa *Add New Webhook to Workspace* sul canale
+   scelto. Slack dà un URL `https://hooks.slack.com/services/…`.
+2. L'URL è un segreto, e va in un file fuori dai repository, letto da tutti i progetti della
+   macchina:
+
+   ```bash
+   mkdir -p ~/.config/asdlc
+   printf '%s\n' 'https://hooks.slack.com/services/…' > ~/.config/asdlc/slack-webhook
+   chmod 600 ~/.config/asdlc/slack-webhook
+   ```
+
+   Non sta in `asdlc.toml`, che è versionato e non porta percorsi di macchina.
+
+**In ogni progetto,** in `asdlc.toml`:
+
+```toml
+[notifiche]
+attive = true
+```
+
+Senza la sezione, o con `attive = false`, il tick non manda niente e non lo dice.
+
 ### Lo stato a comando
 
 `asdlc-stato` dice, senza cercarlo nei log, ciò che il tick vede adesso (`PBI-534`). È di

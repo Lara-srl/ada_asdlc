@@ -50,6 +50,8 @@ from asdlc import config as asdlc_config  # noqa: E402
 # La ricerca degli eseguibili e delle versioni è la stessa del runner: il tick la
 # fa prima di lanciare, sullo stesso `asdlc.toml` (PBI-384).
 from asdlc import runner as asdlc_runner  # noqa: E402
+# Le notifiche su Slack dei cambi di decisione (PBI-533).
+from asdlc import notifiche as asdlc_notifiche  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
 # file che legge il runner, quindi il tick e il runner non possono più dire due
@@ -1467,6 +1469,10 @@ def passaggio(a: argparse.Namespace) -> int:
         riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
     print(riga)
     scrivi_nel_log(a.repo, riga)
+    # La decisione che chiede una persona va su Slack, una volta per cambio (PBI-533).
+    esito = ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende) else None
+    asdlc_notifiche.manda(a.repo, CFG, asdlc_notifiche.della_decisione(
+        decisione, a.repo.resolve().name, esito))
     # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
     if (isinstance(decisione, Attende) and not a.dry_run
             and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):
