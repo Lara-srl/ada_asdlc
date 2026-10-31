@@ -291,3 +291,16 @@ def test_guardia_una_sezione_vuota_ha_la_riga_nessuno(tmp_path, capsys):
     assert sezione(testo, "In coda") == ["1. **PBI-1** — il primo · criteri 0/0"]
     assert sezione(testo, "Fatti") == ["- nessuno"]
     assert sezione(testo, "Fuori coda") == ["- nessuno"]
+
+
+def test_guardia_una_voce_di_coda_senza_file_e_file_mancante(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1", "- PBI-7"],
+                        {"PBI-1-uno.md": "# PBI-1: il primo\n"})
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    assert sezione(testo, "In coda") == [
+        "1. **PBI-1** — il primo · criteri 0/0",
+        "2. **PBI-7** — (file mancante) · criteri 0/0",
+    ]
