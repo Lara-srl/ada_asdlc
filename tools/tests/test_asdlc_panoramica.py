@@ -238,3 +238,41 @@ def test_guardia_origin_muto_lascia_in_corso_col_punto_di_domanda(
         "3. **PBI-5** — il quinto · criteri 0/0",
     ]
     assert sezione(testo, "Fatti") == ["- **PBI-1** — il primo · criteri 1/1"]
+
+
+# --- Non regressione: la sola lettura -----------------------------------------------
+
+
+def fotografia(checkout, worktree):
+    """Ciò che un comando di sola lettura non deve cambiare: lo stato di git del
+    checkout, il registro del checkout e quello del worktree del runner, e il log
+    del tick."""
+    stato_git = subprocess.run(["git", "status", "--porcelain", "--ignored"], cwd=checkout,
+                               capture_output=True, text=True, check=True).stdout
+    registri = {
+        str(file): file.read_bytes()
+        for cartella in (checkout / "runs", worktree / "runs") if cartella.exists()
+        for file in sorted(cartella.rglob("*")) if file.is_file()
+    }
+    log = coda.LOG.read_bytes() if coda.LOG.exists() else None
+    return stato_git, registri, log
+
+
+def test_guardia_asdlc_panoramica_non_scrive_nel_checkout_ne_nel_registro(
+    tmp_path, capsys, gh_finto
+):
+    checkout = progetto(tmp_path, CODA_DI_PROVA, FILE_DI_PROVA, rami=("pbi/pbi-5",))
+    gh_finto["merged"] = (0, PR_MERGIATA)
+    gh_finto["open"] = (0, PR_APERTA)
+    registro = tmp_path / "progetto-run" / "runs"
+    registro.mkdir(parents=True)
+    (registro / "20261030-120000.json").write_text(
+        json.dumps({"run": "20261030-120000",
+                    "esiti": [{"pbi": "PBI-5", "stato": "fermato", "motivo": "x"}]}),
+        encoding="utf-8")
+    prima = fotografia(checkout, tmp_path / "progetto-run")
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    assert "## Fatti" in capsys.readouterr().out
+
+    assert fotografia(checkout, tmp_path / "progetto-run") == prima
