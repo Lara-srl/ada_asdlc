@@ -2,6 +2,8 @@
 
 **Stato:** proposto il 28/10 da una sessione con Francesco; accodato il 28/10 dopo `PBI-533`.
 Letto il 30/10 col Lettore (in fondo, *Protocollo*): un fermo e quattro rilievi minori recepiti.
+Preverifica del tick del 31/10: un rilievo (la pausa del progetto non andava su Slack), deciso da
+Francesco il 31/10 — la pausa del progetto va su Slack (decisione 6, criterio 6).
 
 ## Direttiva
 
@@ -16,7 +18,8 @@ tolgono (`--pausa MOTIVO`, `--togli-pausa`), così chi lo fa (una persona o `asd
 **Scope**
 
 - `tools/asdlc/coda.py` — `pausa_del_progetto(repo)`, nuova; `fermo_in_pausa(repo)` guarda anche
-  quella; `--pausa MOTIVO` e `--togli-pausa`. `pausa()` **non cambia** (decisione 5).
+  quella; `notifica_la_pausa(repo)` manda anche quella su Slack (decisione 6); `--pausa MOTIVO` e
+  `--togli-pausa`. `pausa()` **non cambia** (decisione 5).
 - `tools/asdlc/stato.py` — la pausa del progetto compare nella riga (`PBI-534`).
 - `README.md` — i due flag e la differenza fra pausa globale e di progetto.
 - `tools/tests/test_asdlc_coda_pausa.py` — nuovo: i test dei criteri.
@@ -33,9 +36,11 @@ tolgono (`--pausa MOTIVO`, `--togli-pausa`), così chi lo fa (una persona o `asd
    (i test spostano `coda.LOG` fuori dal repository, `conftest.py`), una riga: data, ora e motivo, come
    la pausa globale. Un file che c'è ma non si legge è pausa lo stesso, come per `pausa()`.
 2. **Le due pause si sommano:** il tick è fermo se c'è una delle due. La riga del log comincia sempre
-   con `in pausa:`, così l'evento `pausa` di `PBI-533` la riconosce: `in pausa: <riga globale>` per la
-   globale, `in pausa: (progetto) <riga del progetto>` per quella del progetto. Con tutte e due si
-   scrive **una** riga, la globale.
+   con `in pausa:` ~~, così l'evento `pausa` di `PBI-533` la riconosce~~ (*abrogato il 31/10 dalla
+   preverifica del tick: nessun codice legge il log per riconoscere la pausa, l'evento lo manda
+   `notifica_la_pausa()` leggendo il file — decisione 6; si rivede se una notifica passa mai dal log*):
+   `in pausa: <riga globale>` per la globale, `in pausa: (progetto) <riga del progetto>` per quella
+   del progetto. Con tutte e due si scrive **una** riga, la globale.
 3. **`--pausa MOTIVO` e `--togli-pausa` non fanno altro:** non lanciano, non decidono; `--togli-pausa`
    senza file esce 0. Prendono il lucchetto del tick, come `asdlc-chiudi-giro`: se è tenuto escono **2**
    con «il lucchetto … è tenuto: un tick è in corso in questo checkout: riprova fra un minuto.» e non
@@ -45,6 +50,11 @@ tolgono (`--pausa MOTIVO`, `--togli-pausa`), così chi lo fa (una persona o `asd
 5. **`pausa()` resta solo globale e senza argomenti:** la chiama `asdlc-chiudi-giro` per sapere se la
    pausa globale c'era già, e quel senso non cambia. La pausa del progetto è `pausa_del_progetto(repo)`,
    con la stessa forma (riga o `None`).
+6. **La pausa del progetto va su Slack** (Francesco, 31/10): `notifica_la_pausa(repo)` manda l'evento
+   `pausa` di `PBI-533` anche quando c'è solo la pausa del progetto, col motivo `(progetto) <riga del
+   progetto>` — lo stesso testo della riga del log dopo `in pausa: `. Con tutte e due manda **una**
+   notifica, la globale, come la riga del log. `asdlc_notifiche.pausa()`, la memoria delle notifiche e
+   i due punti in cui `passaggio()` la chiama non cambiano; un `--dry-run` resta muto.
 
 ## Dipendenze
 
@@ -69,6 +79,11 @@ tolgono (`--pausa MOTIVO`, `--togli-pausa`), così chi lo fa (una persona o `asd
       solo nel primo, il tick del secondo lancia. `Guardia-su: tools/asdlc/coda.py::fermo_in_pausa`.
 - [ ] **La pausa globale vale ancora, e `--togli-pausa` non la toglie.** Guardia, stesso ancoraggio.
 - [ ] **`asdlc-stato` mostra la pausa del progetto.** Rosso su `main`.
+- [ ] **La pausa del progetto va su Slack.** Notifiche accese con un webhook finto (come in
+      `tools/tests/test_asdlc_notifiche.py`), solo il file `<registro>/pausa` con «prova»: un tick
+      fa **una** `POST` il cui testo contiene `in pausa — (progetto) ` e `prova`; con anche la pausa globale la `POST`
+      è una e porta la riga globale. Il test sta in `tools/tests/test_asdlc_coda_pausa.py`. Rosso su
+      `main`: nessuna `POST`.
 
 **Non regressione:** `python3 -m pytest -q tools/tests` resta verde.
 
