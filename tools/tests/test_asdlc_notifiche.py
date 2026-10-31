@@ -376,3 +376,19 @@ def test_ogni_evento_ha_il_suo_messaggio(tmp_path, monkeypatch, webhook, tick_co
     assert len(webhook.ricevuti) == 1, webhook.testi()
     for atteso in attesi:
         assert atteso in webhook.testi()[0], webhook.testi()
+        assert atteso in webhook.testi()[0], webhook.testi()
+
+
+def test_un_evento_fuori_da_eventi_non_manda_niente(tmp_path, monkeypatch, webhook,
+                                                     tick_configurato):
+    """PBI-533, criterio 2 (decisione 8): `[notifiche].eventi` sceglie quali eventi
+    mandare. Un progetto che chiede solo `fermo` non riceve la coda finita, mentre
+    con l'elenco di default la riceve."""
+    repo, albero = progetto_finto(
+        tmp_path, notifiche_toml='[notifiche]\nattive = true\neventi = ["fermo"]\n')
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
+    mondo_finto(monkeypatch)
+
+    un_tick(repo, albero)
+
+    assert webhook.ricevuti == [], webhook.testi()
