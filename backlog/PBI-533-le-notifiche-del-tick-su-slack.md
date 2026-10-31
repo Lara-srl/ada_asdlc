@@ -144,23 +144,23 @@ ogni cambio del tick (`ADR-0026`).
 
 ## Verifica
 
-- [ ] **Un fermo manda un messaggio, uno solo.** Server HTTP finto su `127.0.0.1`, `HOME` in `tmp_path`
+- [x] **Un fermo manda un messaggio, uno solo.** Server HTTP finto su `127.0.0.1`, `HOME` in `tmp_path`
       col file del webhook che porta il suo indirizzo, un `origin` locale col ramo del PBI, `gh` finto
       senza PR e un rapporto `fermato`: il
       primo tick fa una `POST` con `text` che contiene il progetto, il PBI e il motivo; il secondo tick,
       con la stessa situazione, non ne fa. Rosso su `main`: nessuna `POST`.
-- [ ] **Ogni evento ha il suo messaggio.** Parametrico, un id per evento della decisione 3 **tranne
+- [x] **Ogni evento ha il suo messaggio.** Parametrico, un id per evento della decisione 3 **tranne
       `fermo`**, che è il criterio 1: la sorgente della tabella dà il testo atteso; per `non-lanciato`
       due tick di fila con `lancia` e `non lanciato` dello stesso PBI, e la `POST` solo al secondo; per
       `guasto` tre tick, e la `POST` solo al terzo; un evento fuori da `eventi` non manda niente. Rosso
       dopo il criterio 1: nessun altro evento manda.
-- [ ] **Dopo un `lancia` lo stesso fermo si notifica di nuovo.** Fermo, lancia, stesso fermo: due
+- [x] **Dopo un `lancia` lo stesso fermo si notifica di nuovo.** Fermo, lancia, stesso fermo: due
       `POST`. Rosso su `main`.
-- [ ] **Una notifica che fallisce non ferma il tick e non svela l'URL.** Il server finto risponde 500,
+- [x] **Una notifica che fallisce non ferma il tick e non svela l'URL.** Il server finto risponde 500,
       o non risponde entro il timeout: il tick scrive la sua decisione come sempre, una riga «notifica
       non inviata» in `coda.log`, e né il log né l'uscita contengono l'indirizzo del server. Il tick
       dopo ci riprova. Rosso su `main`.
-- [ ] **Senza `[notifiche]` non cambia niente.** Un `asdlc.toml` senza la sezione: nessuna `POST` e
+- [x] **Senza `[notifiche]` non cambia niente.** Un `asdlc.toml` senza la sezione: nessuna `POST` e
       nessuna riga in più nel log. È una **guardia**: su `main` è già così.
       `Guardia-su: tools/asdlc/coda.py::main`.
 
