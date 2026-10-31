@@ -68,18 +68,18 @@ tolgono (`--pausa MOTIVO`, `--togli-pausa`), così chi lo fa (una persona o `asd
 
 ## Verifica
 
-- [ ] **Con la pausa del progetto il tick non lancia e lo dice.** Repository temporaneo con una voce
+- [x] **Con la pausa del progetto il tick non lancia e lo dice.** Repository temporaneo con una voce
       da lanciare e il file `<registro>/pausa`: nessun lancio, una riga `in pausa: (progetto) …` in
       `coda.LOG` (quello spostato dal `conftest`). Rosso su `main`: lancia.
-- [ ] **`--pausa` e `--togli-pausa` creano e tolgono il file, e rispettano il lucchetto.**
+- [x] **`--pausa` e `--togli-pausa` creano e tolgono il file, e rispettano il lucchetto.**
       `asdlc-coda --repo <tmp> --pausa "prova"` esce 0 e il file c'è col motivo; `--togli-pausa` lo
       toglie; un secondo `--togli-pausa` esce 0; col lucchetto del tick tenuto `--pausa` esce 2 e il
       file non c'è. Rosso su `main`: il flag è rifiutato.
-- [ ] **La pausa di un progetto non ferma un altro.** È una **guardia**: due repository, la pausa
+- [x] **La pausa di un progetto non ferma un altro.** È una **guardia**: due repository, la pausa
       solo nel primo, il tick del secondo lancia. `Guardia-su: tools/asdlc/coda.py::fermo_in_pausa`.
-- [ ] **La pausa globale vale ancora, e `--togli-pausa` non la toglie.** Guardia, stesso ancoraggio.
-- [ ] **`asdlc-stato` mostra la pausa del progetto.** Rosso su `main`.
-- [ ] **La pausa del progetto va su Slack.** Notifiche accese con un webhook finto (come in
+- [x] **La pausa globale vale ancora, e `--togli-pausa` non la toglie.** Guardia, stesso ancoraggio.
+- [x] **`asdlc-stato` mostra la pausa del progetto.** Rosso su `main`.
+- [x] **La pausa del progetto va su Slack.** Notifiche accese con un webhook finto (come in
       `tools/tests/test_asdlc_notifiche.py`), solo il file `<registro>/pausa` con «prova»: un tick
       fa **una** `POST` il cui testo contiene `in pausa — (progetto) ` e `prova`; con anche la pausa globale la `POST`
       è una e porta la riga globale. Il test sta in `tools/tests/test_asdlc_coda_pausa.py`. Rosso su
