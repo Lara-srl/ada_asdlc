@@ -307,6 +307,17 @@ def scenario_guasto_di_gh(tmp_path, monkeypatch):
     mondo_finto(monkeypatch, merged=(1, "HTTP 502: Bad Gateway"))
 
 
+def scenario_guasto_coda_illeggibile(tmp_path, monkeypatch):
+    # `decidi()` vero, con `CODA.md` che non si legge: una cartella al posto del
+    # file, e `read_text()` alza `OSError`. È una `Barriera` nata da un guasto, non
+    # una barriera scritta in coda.
+    passi_sostituiti(monkeypatch)
+    mondo_finto(monkeypatch)
+    file_coda = tmp_path / "ada_nlt" / "backlog" / "CODA.md"
+    file_coda.unlink()
+    file_coda.mkdir()
+
+
 def scenario_guasto_delle_pr(tmp_path, monkeypatch):
     # `Attende` con `pr is None`: `gh` muto sulla ricerca delle PR del ramo.
     passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Attende("PBI-7", None))
@@ -347,6 +358,8 @@ def scenario_fermo_in_preverifica(tmp_path, monkeypatch):
     (scenario_finita, "- PBI-7\n", 1, ["🏁 ada_nlt: coda finita"]),
     (scenario_guasto_di_gh, "- PBI-7\n", 3,
      ["⚠️ ada_nlt: il tick non riesce — ", "gh non risponde (uscita 1)"]),
+    (scenario_guasto_coda_illeggibile, "- PBI-7\n", 3,
+     ["⚠️ ada_nlt: il tick non riesce — barriera: la coda non si legge"]),
     (scenario_guasto_delle_pr, "- PBI-7\n", 3,
      ["⚠️ ada_nlt: il tick non riesce — ", "GitHub non ha risposto"]),
     (scenario_non_allineato, "- PBI-7\n", 1,
@@ -358,7 +371,7 @@ def scenario_fermo_in_preverifica(tmp_path, monkeypatch):
     (scenario_fermo_in_preverifica, "- PBI-7\n", 1,
      ["⛔ ada_nlt: PBI-7 fermo — preverifica, 3 rilievi"]),
 ], ids=["non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto-gh-muto",
-        "guasto-pr-senza-risposta", "non-allineato", "reinstallazione", "pausa",
+        "guasto-coda-illeggibile", "guasto-pr-senza-risposta", "non-allineato", "reinstallazione", "pausa",
         "fermo-in-preverifica"])
 def test_ogni_evento_ha_il_suo_messaggio(tmp_path, monkeypatch, webhook, tick_configurato,
                                          scenario, coda_md, tick, attesi):
@@ -376,14 +389,13 @@ def test_ogni_evento_ha_il_suo_messaggio(tmp_path, monkeypatch, webhook, tick_co
     assert len(webhook.ricevuti) == 1, webhook.testi()
     for atteso in attesi:
         assert atteso in webhook.testi()[0], webhook.testi()
-        assert atteso in webhook.testi()[0], webhook.testi()
 
 
 def test_un_evento_fuori_da_eventi_non_manda_niente(tmp_path, monkeypatch, webhook,
                                                      tick_configurato):
     """PBI-533, criterio 2 (decisione 8): `[notifiche].eventi` sceglie quali eventi
-    mandare. Un progetto che chiede solo `fermo` non riceve la coda finita, mentre
-    con l'elenco di default la riceve."""
+    mandare. Un progetto che chiede solo `fermo` non riceve la coda finita; che con
+    l'elenco di default la riceva lo prova l'id `finita` del test parametrico."""
     repo, albero = progetto_finto(
         tmp_path, notifiche_toml='[notifiche]\nattive = true\neventi = ["fermo"]\n')
     passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
