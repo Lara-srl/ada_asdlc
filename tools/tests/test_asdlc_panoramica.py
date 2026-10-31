@@ -276,3 +276,18 @@ def test_guardia_asdlc_panoramica_non_scrive_nel_checkout_ne_nel_registro(
     assert "## Fatti" in capsys.readouterr().out
 
     assert fotografia(checkout, tmp_path / "progetto-run") == prima
+
+
+# --- Guardie delle decisioni scritte nel GREEN del criterio 1 -----------------------
+
+
+def test_guardia_una_sezione_vuota_ha_la_riga_nessuno(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"], {"PBI-1-uno.md": "# PBI-1: il primo\n"})
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    assert sezione(testo, "In corso") == ["- nessuno"]
+    assert sezione(testo, "In coda") == ["1. **PBI-1** — il primo · criteri 0/0"]
+    assert sezione(testo, "Fatti") == ["- nessuno"]
+    assert sezione(testo, "Fuori coda") == ["- nessuno"]
