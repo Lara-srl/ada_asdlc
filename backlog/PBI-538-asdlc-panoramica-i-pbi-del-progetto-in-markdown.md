@@ -103,12 +103,12 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
       esce 0; `## Fatti` ha `PBI-1` col suo titolo; `## In corso` ha `PBI-5` con l'URL della PR;
       `## In coda` ha `1. **PBI-2**` con `criteri 2/3`, `- ‖ prova`, `2. **PBI-3**` in quest'ordine;
       `## Fuori coda` ha `PBI-4` con la riga che finisce in `· ❓`. Rosso su `main`: il modulo non c'è.
-- [ ] **Tutti i progetti, e uno illeggibile non ferma gli altri.** È una **guardia** (la decisione 1 si
+- [x] **Tutti i progetti, e uno illeggibile non ferma gli altri.** È una **guardia** (la decisione 1 si
       può scrivere già nel GREEN del criterio 1): `HOME` in `tmp_path` con `progetti.toml` di due progetti
       validi e un percorso che non esiste, in mezzo; `panoramica.main([])` dà tre sezioni `# `
       nell'ordine del file, quella di mezzo con `non raggiungibile`, uscita 0.
       `Guardia-su: tools/asdlc/panoramica.py::main`.
-- [ ] **`gh` e `origin` che non rispondono non fermano la panoramica.** È una **guardia** (decisione 6):
+- [x] **`gh` e `origin` che non rispondono non fermano la panoramica.** È una **guardia** (decisione 6):
       con il `gh` finto che esce 1 su `pr list --state merged`, `## Fatti` ha `- ? gh non risponde` e
       `PBI-1` è in `## In coda`; con `git ls-remote` che esce 1, `## In corso` ha `- ? git non parla con`;
       uscita 0 in tutti e due. `Guardia-su: tools/asdlc/panoramica.py::main`.
