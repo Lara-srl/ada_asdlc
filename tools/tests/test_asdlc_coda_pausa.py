@@ -8,7 +8,10 @@ Qui nessun test parla col mondo: `decidi()` e `lancia()` registrano di essere
 stati chiamati, e i passi del tick che toccano il checkout sono sostituiti.
 """
 
+import contextlib
 import importlib
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -95,3 +98,70 @@ def test_con_la_pausa_del_progetto_il_tick_non_lancia_e_lo_scrive_nel_log(
     righe = righe_del_log(repo)
     assert len(righe) == 1, righe
     assert righe[0].endswith("  in pausa: (progetto) 2026-10-31 10:00 prova"), righe
+
+
+# --- Criterio 2: `--pausa` e `--togli-pausa` creano e tolgono il file ----------
+
+
+@contextlib.contextmanager
+def tenuto_da_un_figlio(file: Path):
+    """Un processo figlio che prende il `flock` su `file` e lo tiene finché il
+    blocco `with` non finisce: il lucchetto del tick lo tiene un tick in corso."""
+    file.parent.mkdir(parents=True, exist_ok=True)
+    figlio = subprocess.Popen(
+        [sys.executable, "-c",
+         "import fcntl, sys\n"
+         "f = open(sys.argv[1], 'w')\n"
+         "fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+         "print('preso', flush=True)\n"
+         "sys.stdin.read()\n",
+         str(file)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert figlio.stdout.readline().strip() == "preso"
+        yield
+    finally:
+        figlio.stdin.close()
+        figlio.wait(timeout=10)
+
+
+def test_pausa_e_togli_pausa_creano_e_tolgono_il_file_senza_decidere(tmp_path, chiamati):
+    """PBI-535, criterio 2 (decisione 3). `--pausa MOTIVO` scrive il file del
+    progetto col motivo ed esce 0; `--togli-pausa` lo toglie, e senza file esce 0
+    lo stesso. Nessuno dei due decide o lancia."""
+    repo, albero = un_checkout(tmp_path)
+    file = repo / coda.CFG.registro.cartella / "pausa"
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                        "--pausa", "prova"]) == 0
+    assert file.exists()
+    assert "prova" in file.read_text(encoding="utf-8")
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                        "--togli-pausa"]) == 0
+    assert not file.exists()
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                        "--togli-pausa"]) == 0
+    assert not file.exists()
+    assert chiamati == []
+
+
+def test_pausa_col_lucchetto_del_tick_tenuto_esce_2_e_non_scrive_il_file(
+        tmp_path, chiamati, capsys):
+    """PBI-535, criterio 2 (decisione 3). Il flag prende il lucchetto del tick,
+    come `asdlc-chiudi-giro`: se lo tiene un tick in corso esce 2, lo dice, e il
+    file non c'è."""
+    repo, albero = un_checkout(tmp_path)
+    file = repo / coda.CFG.registro.cartella / "pausa"
+
+    with tenuto_da_un_figlio(repo / coda.LUCCHETTO_DEL_TICK):
+        uscita = coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                              "--pausa", "prova"])
+
+    assert uscita == 2
+    assert not file.exists()
+    assert chiamati == []
+    uscite = capsys.readouterr()
+    assert ("è tenuto: un tick è in corso in questo checkout: riprova fra un minuto."
+            in uscite.out + uscite.err)
