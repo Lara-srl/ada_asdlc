@@ -188,3 +188,53 @@ def test_guardia_tutti_i_progetti_e_uno_illeggibile_non_ferma_gli_altri(
     assert "## In coda" not in blocchi[1]
     assert "1. **PBI-1** — il primo · criteri 0/0" in blocchi[0]
     assert "1. **PBI-2** — il secondo · criteri 0/0" in blocchi[2]
+
+
+# --- Criterio 3: `gh` e `origin` che non rispondono non fermano la panoramica ---------
+
+
+def test_guardia_gh_muto_sulle_pr_mergiate_lascia_fatti_col_punto_di_domanda(
+    tmp_path, capsys, gh_finto
+):
+    checkout = progetto(tmp_path, CODA_DI_PROVA, FILE_DI_PROVA, rami=("pbi/pbi-5",))
+    gh_finto["merged"] = (1, "gh: non autenticato")
+    gh_finto["open"] = (0, PR_APERTA)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    [fatti] = sezione(testo, "Fatti")
+    assert fatti.startswith("- ? gh non risponde")
+    in_coda = sezione(testo, "In coda")
+    assert in_coda[0] == "1. **PBI-1** — il primo · criteri 1/1"
+    assert sezione(testo, "In corso") == [
+        f"- **PBI-5** — il quinto · criteri 0/0 · PR {URL_PR_5}"]
+
+
+def test_guardia_origin_muto_lascia_in_corso_col_punto_di_domanda(
+    tmp_path, capsys, gh_finto, monkeypatch
+):
+    checkout = progetto(tmp_path, CODA_DI_PROVA, FILE_DI_PROVA, rami=("pbi/pbi-5",))
+    gh_finto["merged"] = (0, PR_MERGIATA)
+    gh_finto["open"] = (0, PR_APERTA)
+    finta = coda.esegui
+
+    def esegui(cmd, cwd):
+        if "ls-remote" in cmd:
+            return 1, "fatal: impossibile raggiungere origin"
+        return finta(cmd, cwd)
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    [in_corso] = sezione(testo, "In corso")
+    assert in_corso.startswith("- ? git non parla con")
+    assert sezione(testo, "In coda") == [
+        "1. **PBI-2** — il secondo · criteri 2/3",
+        "- ‖ prova",
+        "2. **PBI-3** — il terzo · criteri 0/0",
+        "3. **PBI-5** — il quinto · criteri 0/0",
+    ]
+    assert sezione(testo, "Fatti") == ["- **PBI-1** — il primo · criteri 1/1"]
