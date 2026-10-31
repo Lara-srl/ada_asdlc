@@ -460,6 +460,40 @@ def test_dopo_un_lancia_lo_stesso_fermo_si_notifica_di_nuovo(tmp_path, monkeypat
     assert all("PBI-7 fermo" in testo for testo in webhook.testi()), webhook.testi()
 
 
+# --- Il `--dry-run` non manda niente -------------------------------------------
+
+
+@pytest.mark.parametrize("decisione, in_pausa", [
+    (coda.Finita(), False),
+    (coda.Barriera("gh non risponde", guasto=True), False),
+    (coda.Occupato(), False),
+    (coda.Finita(), True),
+], ids=["finita", "guasto", "occupato", "pausa"])
+def test_il_dry_run_non_manda_niente_e_non_tocca_la_memoria(
+        tmp_path, monkeypatch, webhook, tick_configurato, decisione, in_pausa):
+    """PBI-533 con il contratto di `--dry-run`, che «stampa la decisione senza
+    eseguirla» e deve dire ciò che un tick vero farebbe: niente (PBI-385,
+    decisione 5). Con le notifiche accese, un tick `--dry-run` non fa nessuna
+    `POST` e lascia `notifiche.json` com'era: non consuma il messaggio del tick
+    vero dopo, non conta un tick della fila del `guasto` e non dimentica l'ultimo
+    evento mandato su un giro in corso. Vale anche per la pausa."""
+    repo, albero = progetto_finto(tmp_path)
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: decisione)
+    mondo_finto(monkeypatch)
+    if in_pausa:
+        (Path.home() / "asdlc-tick.pausa").write_text(
+            "2026-10-31 10:00 chiudo a mano il giro di PBI-7\n", encoding="utf-8")
+    memoria = repo / "runs" / "notifiche.json"
+    memoria.parent.mkdir()
+    di_prima = json.dumps({"mandati": {"stato": ["fermo", "PBI-7", "fermato (x)"]}}) + "\n"
+    memoria.write_text(di_prima, encoding="utf-8")
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero), "--dry-run"]) == 0
+
+    assert webhook.ricevuti == [], webhook.testi()
+    assert memoria.read_text(encoding="utf-8") == di_prima
+
+
 # --- Criterio 4: una notifica che fallisce non ferma il tick e non svela l'URL
 
 
