@@ -326,6 +326,12 @@ eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "
 `eventi` sceglie quali mandare; senza la chiave, tutti. Senza la sezione, o con
 `attive = false`, il tick non manda niente e non lo dice. Il template la porta spenta.
 
+Una notifica che fallisce non ferma niente: una `POST` sola per evento, con un tetto di
+10 secondi, poi una riga `notifica non inviata: <esito>` in `runs/coda.log` («HTTP 500»,
+«scaduto dopo 10 s») e il tick prosegue; il tick dopo ci riprova. Con il file del webhook
+assente la riga dice `file del webhook assente`, una volta per evento. L'indirizzo del
+webhook non compare mai, né nel log né a schermo.
+
 ### Lo stato a comando
 
 `asdlc-stato` dice, senza cercarlo nei log, ciò che il tick vede adesso (`PBI-534`). È di

@@ -919,6 +919,14 @@ def avvisa_il_fermo(repo: Path, worktree: Path, pbi: str, riga: str) -> str | No
     return f"avviso: issue «{titolo}» — gh issue create (uscita {codice}): {in_una_riga(uscita)}"
 
 
+def notifica(repo: Path, evento: asdlc_notifiche.Evento | None) -> None:
+    """Manda `evento` su Slack (PBI-533); se l'invio non riesce, la riga che lo dice
+    va a schermo e in `coda.log`, e il tick prosegue (`ADR-0008`)."""
+    if (non_inviata := asdlc_notifiche.manda(repo, CFG, evento)) is not None:
+        print(non_inviata)
+        scrivi_nel_log(repo, non_inviata)
+
+
 def scrivi_nel_log(repo: Path, riga: str) -> None:
     """Una riga in coda a `runs/coda.log`, con l'ora davanti.
 
@@ -1072,8 +1080,11 @@ def _mergia_una(repo: Path, worktree: Path, pr: dict) -> list[str]:
     numero = pr["number"]
     if (manca := condizione_mancante(repo, worktree, pr)) is not None:
         # La PR che aspetta una persona va su Slack, una volta per PR (PBI-533).
-        asdlc_notifiche.manda(repo, CFG, asdlc_notifiche.pronto(repo.resolve().name, numero, manca))
-        return [f"merge: #{numero} attende una persona — {manca}"]
+        righe = [f"merge: #{numero} attende una persona — {manca}"]
+        if non_inviata := asdlc_notifiche.manda(
+                repo, CFG, asdlc_notifiche.pronto(repo.resolve().name, numero, manca)):
+            righe.append(non_inviata)
+        return righe
     # Il PBI che le condizioni hanno verificato: quello del ramo, non del titolo.
     pbi = CFG.backlog.id_di(RE_RAMO_PR.match(pr["headRefName"]).group(1))
     codice, uscita = esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
@@ -1149,8 +1160,9 @@ def passo_di_rilascio(repo: Path) -> list[str]:
                              f"arrivato su {REMOTO} (uscita {codice}): {in_una_riga(uscita)}")
                 continue
             righe.append(f"rilascio: {pbi} → {tag}")
-            asdlc_notifiche.manda(repo, CFG,
-                                  asdlc_notifiche.rilascio(repo.resolve().name, pbi, tag))
+            if non_inviata := asdlc_notifiche.manda(
+                    repo, CFG, asdlc_notifiche.rilascio(repo.resolve().name, pbi, tag)):
+                righe.append(non_inviata)
     return righe
 
 
@@ -1345,7 +1357,7 @@ def fermo_in_pausa(repo: Path) -> bool:
     riga = f"in pausa: {motivo}"
     print(riga)
     scrivi_nel_log(repo, riga)
-    asdlc_notifiche.manda(repo, CFG, asdlc_notifiche.pausa(repo.resolve().name, motivo))
+    notifica(repo, asdlc_notifiche.pausa(repo.resolve().name, motivo))
     return True
 
 
@@ -1460,7 +1472,7 @@ def passaggio(a: argparse.Namespace) -> int:
         riga = f"non allineato: {ragione}"
         print(riga)
         scrivi_nel_log(a.repo, riga)
-        asdlc_notifiche.manda(a.repo, CFG, asdlc_notifiche.non_allineato(progetto, ragione))
+        notifica(a.repo, asdlc_notifiche.non_allineato(progetto, ragione))
         return 0
     # Il merge prima del rilascio: il tag segue il merge nello stesso passaggio (`ADR-0033`).
     for riga in () if a.dry_run else mergia(a.repo, a.worktree) + rilascia(a.repo):
@@ -1469,7 +1481,7 @@ def passaggio(a: argparse.Namespace) -> int:
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
         print(riga)
         scrivi_nel_log(a.repo, riga)
-        asdlc_notifiche.manda(a.repo, CFG, asdlc_notifiche.reinstallazione(progetto, riga))
+        notifica(a.repo, asdlc_notifiche.reinstallazione(progetto, riga))
         return 0
     if a.dry_run and (riga := indietro(a.repo)) is not None:
         print(riga)
@@ -1490,7 +1502,7 @@ def passaggio(a: argparse.Namespace) -> int:
     evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
     # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
     asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento)
-    asdlc_notifiche.manda(a.repo, CFG, evento)
+    notifica(a.repo, evento)
     # Un giro in corso azzera l'ultimo evento: il fermo dopo è di un giro nuovo.
     if isinstance(decisione, Occupato):
         asdlc_notifiche.azzera(a.repo, CFG)
@@ -1526,7 +1538,7 @@ def passaggio(a: argparse.Namespace) -> int:
             # riga che dice «lancia», cioè il contrario di quel che è successo.
             print(guasto)
             scrivi_nel_log(a.repo, f"non lanciato: {guasto}")
-            asdlc_notifiche.manda(a.repo, CFG, asdlc_notifiche.non_lanciato(
+            notifica(a.repo, asdlc_notifiche.non_lanciato(
                 progetto, decisione.pbi, in_una_riga(str(guasto))))
             return 1
         # Solo il lancio riuscito azzera: il `non lanciato` dello stesso tick no

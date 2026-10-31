@@ -15,7 +15,10 @@ processo (decisione 5).
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,10 +184,18 @@ def leggi_memoria(file: Path) -> dict:
     return memoria if isinstance(memoria, dict) else {}
 
 
-def manda(repo: Path, cfg, evento: Evento | None) -> None:
+def manda(repo: Path, cfg, evento: Evento | None) -> str | None:
     """Manda `evento` al webhook, se le notifiche sono accese, l'evento è fra quelli
     di `[notifiche].eventi`, è venuto `di_fila` volte e non è lo stesso evento
-    dell'ultima volta nel suo posto; poi lo scrive nella memoria del checkout."""
+    dell'ultima volta nel suo posto; poi lo scrive nella memoria del checkout.
+
+    Rende la riga «notifica non inviata: <esito>» da scrivere nel log se l'invio
+    non è riuscito, altrimenti `None`. Una notifica che fallisce non ferma niente
+    (`ADR-0008`, decisione 6): nessun tentativo ripetuto in questo tick, e la
+    memoria resta com'era, così il tick dopo ci riprova. L'esito dice cosa è
+    successo, mai l'indirizzo del webhook (decisione 5). Il file del webhook che
+    manca si dice una volta per evento: è un gesto umano che non arriva fra un
+    tick e l'altro."""
     if evento is None or not cfg.notifiche.attive or evento.tipo not in cfg.notifiche.eventi:
         return
     file = file_della_memoria(repo, cfg)
@@ -201,15 +212,46 @@ def manda(repo: Path, cfg, evento: Evento | None) -> None:
             return
     mandati = memoria.setdefault("mandati", {})
     if mandati.get(evento.posto) == chiave:
-        return
-    url = file_del_webhook().read_text(encoding="utf-8").strip()
-    richiesta = urllib.request.Request(
-        url, data=json.dumps({"text": evento.testo}).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(richiesta, timeout=TIMEOUT):
-        pass
+        return None
+    if not file_del_webhook().exists():
+        detti = memoria.setdefault("senza_webhook", {})
+        if detti.get(evento.posto) == chiave:
+            return None
+        detti[evento.posto] = chiave
+        scrivi_memoria(file, memoria)
+        return "notifica non inviata: file del webhook assente"
+    if (esito := posta(evento.testo)) is not None:
+        return f"notifica non inviata: {esito}"
     mandati[evento.posto] = chiave
+    memoria.get("senza_webhook", {}).pop(evento.posto, None)
     scrivi_memoria(file, memoria)
+    return None
+
+
+def posta(testo: str) -> str | None:
+    """La `POST` di `testo` al webhook, una volta sola: `None` se Slack ha risposto
+    `200`, altrimenti l'esito in parole. Nessun messaggio d'errore di `urllib` passa
+    di qui com'è, perché alcuni portano l'indirizzo (decisione 5)."""
+    try:
+        url = file_del_webhook().read_text(encoding="utf-8").strip()
+        richiesta = urllib.request.Request(
+            url, data=json.dumps({"text": testo}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(richiesta, timeout=TIMEOUT) as risposta:
+            codice = risposta.status
+    except urllib.error.HTTPError as errore:
+        return f"HTTP {errore.code}"
+    except (TimeoutError, socket.timeout):
+        return f"scaduto dopo {TIMEOUT} s"
+    except urllib.error.URLError as errore:
+        if isinstance(errore.reason, (TimeoutError, socket.timeout)):
+            return f"scaduto dopo {TIMEOUT} s"
+        return f"il webhook non risponde ({type(errore.reason).__name__})"
+    except ValueError:
+        return "l'indirizzo nel file del webhook non è un URL"
+    except (OSError, http.client.HTTPException) as errore:
+        return f"il webhook non risponde ({type(errore).__name__})"
+    return None if codice == 200 else f"HTTP {codice}"
 
 
 def scrivi_memoria(file: Path, memoria: dict) -> None:
