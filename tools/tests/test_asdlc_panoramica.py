@@ -377,3 +377,24 @@ def test_guardia_un_guasto_dopo_lo_stato_rende_il_progetto_non_raggiungibile(
     assert righe[2].startswith("alfa · non raggiungibile — ")
     assert "utf-8" in righe[2]
     assert not any(riga.startswith("## ") for riga in righe)
+
+
+def test_guardia_la_domanda_finisce_la_riga_in_ogni_sezione(tmp_path, capsys, gh_finto):
+    domanda = "\n## ❓ Domande\n\n- quale?\n"
+    file_pbi = {nome: testo + domanda for nome, testo in FILE_DI_PROVA.items()}
+    checkout = progetto(tmp_path, CODA_DI_PROVA, file_pbi, rami=("pbi/pbi-5",))
+    gh_finto["merged"] = (0, PR_MERGIATA)
+    gh_finto["open"] = (0, PR_APERTA)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    assert sezione(testo, "Fatti") == ["- **PBI-1** — il primo · criteri 1/1 · ❓"]
+    assert sezione(testo, "In corso") == [
+        f"- **PBI-5** — il quinto · criteri 0/0 · PR {URL_PR_5} · ❓"]
+    assert sezione(testo, "In coda") == [
+        "1. **PBI-2** — il secondo · criteri 2/3 · ❓",
+        "- ‖ prova",
+        "2. **PBI-3** — il terzo · criteri 0/0 · ❓",
+    ]
+    assert sezione(testo, "Fuori coda") == ["- **PBI-4** — il quarto · criteri 0/0 · ❓"]
