@@ -67,7 +67,7 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
    - **Fuori coda:** i file di `backlog/` col nome del modello `[backlog].file` (`CFG.backlog`, come per
      `avviso_domande()`) il cui PBI non è in `CODA.md` e non è fatto, in ordine di numero.
 5. **Il titolo e i criteri vengono dal file del PBI**: il titolo è la prima riga `# PBI-XXX: <titolo>`
-   senza il prefisso; i criteri sono le righe `- [x]` e `- [ ]` **della sola sezione `## Verifica`**,
+   senza il prefisso (una prima `# ` senza il prefisso si mostra per intera: il titolo resta leggibile); i criteri sono le righe `- [x]` e `- [ ]` **della sola sezione `## Verifica`**,
    fino alla `##` seguente. Una voce di coda senza file ha il titolo `(file mancante)` e `criteri 0/0`.
 6. **Un progetto che non si legge non ferma gli altri** (`ADR-0008`): la sua sezione è `# <nome>` e,
    sotto, la riga di `stato.riga()` (`<nome> · non raggiungibile — <motivo>`), senza le quattro sezioni;
