@@ -1491,6 +1491,9 @@ def passaggio(a: argparse.Namespace) -> int:
     # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
     asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento)
     asdlc_notifiche.manda(a.repo, CFG, evento)
+    # Un giro in corso azzera l'ultimo evento: il fermo dopo è di un giro nuovo.
+    if isinstance(decisione, Occupato):
+        asdlc_notifiche.azzera(a.repo, CFG)
     # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
     if (isinstance(decisione, Attende) and not a.dry_run
             and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):
@@ -1526,6 +1529,9 @@ def passaggio(a: argparse.Namespace) -> int:
             asdlc_notifiche.manda(a.repo, CFG, asdlc_notifiche.non_lanciato(
                 progetto, decisione.pbi, in_una_riga(str(guasto))))
             return 1
+        # Solo il lancio riuscito azzera: il `non lanciato` dello stesso tick no
+        # (PBI-533, decisione 2).
+        asdlc_notifiche.azzera(a.repo, CFG)
     return 0
 
 

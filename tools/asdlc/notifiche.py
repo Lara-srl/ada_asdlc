@@ -160,6 +160,19 @@ def rompi_le_file(repo: Path, cfg, decisione, evento: Evento | None) -> None:
         scrivi_memoria(file, memoria)
 
 
+def azzera(repo: Path, cfg) -> None:
+    """Dimentica l'ultimo evento dello stato del tick, dopo un lancio riuscito o un
+    giro in corso (decisione 2): il fermo dopo è di un giro nuovo, e si manda anche
+    se ha lo stesso motivo. Le PR in attesa e i tag restano: non sono del giro."""
+    if not cfg.notifiche.attive:
+        return
+    file = file_della_memoria(repo, cfg)
+    memoria = leggi_memoria(file)
+    if STATO in memoria.get("mandati", {}):
+        del memoria["mandati"][STATO]
+        scrivi_memoria(file, memoria)
+
+
 def leggi_memoria(file: Path) -> dict:
     try:
         memoria = json.loads(file.read_text(encoding="utf-8"))
