@@ -169,6 +169,28 @@ def test_pausa_e_togli_pausa_creano_e_tolgono_il_file_senza_decidere(tmp_path, c
     assert chiamati == []
 
 
+def test_pausa_con_un_motivo_su_piu_righe_scrive_una_riga_sola(tmp_path, chiamati):
+    """PBI-535, decisioni 1 e 2. Il file è **una** riga: data, ora e motivo. Un
+    motivo con a capo o spazi in fila (dal telefono, `PBI-536`) diventa una riga
+    sola, con uno spazio solo al posto di ogni gruppo; così anche la riga
+    `in pausa: (progetto) …` di `coda.log` resta una."""
+    repo, albero = un_checkout(tmp_path)
+    file = repo / coda.CFG.registro.cartella / "pausa"
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                        "--pausa", "a\nb\r\n  c"]) == 0
+    righe_del_file = file.read_text(encoding="utf-8").splitlines()
+    assert len(righe_del_file) == 1, righe_del_file
+    assert righe_del_file[0].endswith(" a b c"), righe_del_file
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero)]) == 0
+    assert chiamati == []
+    righe = righe_del_log(repo)
+    assert len(righe) == 1, righe
+    assert "  in pausa: (progetto) " in righe[0], righe
+    assert righe[0].endswith(" a b c"), righe
+
+
 def test_pausa_e_togli_pausa_insieme_sono_rifiutati_e_non_toccano_il_file(
         tmp_path, chiamati):
     """PBI-535, decisione 3. `--pausa MOTIVO` e `--togli-pausa` si escludono:
