@@ -215,3 +215,164 @@ def test_un_fermo_manda_un_messaggio_uno_solo(tmp_path, monkeypatch, webhook, ti
     assert un_tick(repo, albero) == 0
 
     assert len(webhook.ricevuti) == 1, webhook.testi()
+
+
+# --- Criterio 2: ogni evento ha il suo messaggio ------------------------------
+
+
+def progetto_finto(tmp_path: Path, coda_md: str = "- PBI-7\n",
+                   notifiche_toml: str = NOTIFICHE_ACCESE) -> tuple[Path, Path]:
+    """Il checkout `ada_nlt` senza `git`, letto dal tick, e il worktree del runner:
+    i passi del tick che parlano col mondo li sostituisce il test."""
+    repo = tmp_path / "ada_nlt"
+    (repo / "backlog").mkdir(parents=True)
+    (repo / "asdlc.toml").write_text(toml_del_progetto(notifiche_toml), encoding="utf-8")
+    (repo / "backlog" / "CODA.md").write_text(coda_md, encoding="utf-8")
+    (repo / "backlog" / "PBI-7-la-somma.md").write_text(
+        "# PBI-7: la somma\n\nrilascia: patch\n", encoding="utf-8")
+    albero = tmp_path / "albero"
+    albero.mkdir()
+    coda.configura(coda.asdlc_config.carica(repo))
+    return repo, albero
+
+
+def mondo_finto(monkeypatch, *, merged=(0, "[]"), aperte=(0, "[]")):
+    """`esegui()` finto: `gh pr list` rende `merged` o `aperte`, `gh run list` una CI
+    verde, ogni altro comando esce `0` senza dire niente."""
+
+    def esegui(cmd, cwd):
+        if cmd[:3] == ["gh", "pr", "list"]:
+            return merged if "merged" in cmd else aperte
+        if cmd[:3] == ["gh", "run", "list"]:
+            return 0, json.dumps([{"conclusion": "success"}])
+        if cmd[0] == "gh":
+            raise AssertionError(f"gh non previsto: {cmd}")
+        return 0, ""
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+
+def passi_sostituiti(monkeypatch, **sostituti):
+    """I passi del tick che non sono sotto prova, sostituiti: il battito e il pin
+    non fanno niente, il checkout è allineato e il pacchetto installato. Ogni
+    altro passo si dà per nome."""
+    passi = {"batti": lambda r: None, "pin": lambda r: [],
+             "allinea": lambda r: None, "reinstalla": lambda r, w: None,
+             "lancia": lambda pbi, w, **k: None}
+    passi.update(sostituti)
+    for nome, finto in passi.items():
+        monkeypatch.setattr(coda, nome, finto)
+
+
+def scenario_non_lanciato(tmp_path, monkeypatch):
+    def non_parte(pbi, worktree, **k):
+        raise coda.Guasto("il pre-flight si è fermato su `git fetch origin` (uscita 128): "
+                          f"fatal: rete assente {tmp_path.name}")
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Lancia("PBI-7"), lancia=non_parte)
+    mondo_finto(monkeypatch)
+
+
+def scenario_pronto(tmp_path, monkeypatch):
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Occupato())
+    mondo_finto(monkeypatch, aperte=(0, json.dumps([{
+        "number": 12, "title": "una PR a mano", "headRefName": "feature/x", "files": [],
+        "statusCheckRollup": [], "mergeable": "MERGEABLE"}])))
+
+
+def scenario_rilascio(tmp_path, monkeypatch):
+    import contextlib
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Occupato())
+    mondo_finto(monkeypatch, merged=(0, json.dumps([{
+        "title": "PBI-7: la somma", "headRefName": "pbi/pbi-7",
+        "mergeCommit": {"oid": "a" * 40}, "files": [{"path": "somma.py"}]}])))
+    (tmp_path / "rilascio").mkdir()
+    monkeypatch.setattr(coda.asdlc_runner, "worktree_di_rilascio",
+                        lambda repo, base: contextlib.nullcontext(tmp_path / "rilascio"))
+
+
+def scenario_barriera(tmp_path, monkeypatch):
+    # La barriera scritta in `CODA.md`, letta da `decidi()` vero.
+    passi_sostituiti(monkeypatch)
+    mondo_finto(monkeypatch)
+
+
+def scenario_finita(tmp_path, monkeypatch):
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
+    mondo_finto(monkeypatch)
+
+
+def scenario_guasto_di_gh(tmp_path, monkeypatch):
+    # `decidi()` vero, con `gh` che non risponde: una `Barriera` nata da un `Guasto`.
+    passi_sostituiti(monkeypatch)
+    mondo_finto(monkeypatch, merged=(1, "HTTP 502: Bad Gateway"))
+
+
+def scenario_guasto_delle_pr(tmp_path, monkeypatch):
+    # `Attende` con `pr is None`: `gh` muto sulla ricerca delle PR del ramo.
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Attende("PBI-7", None))
+    mondo_finto(monkeypatch)
+
+
+def scenario_non_allineato(tmp_path, monkeypatch):
+    passi_sostituiti(monkeypatch, allinea=lambda r: f"il checkout {r} è su «pbi/pbi-7», non su main")
+    mondo_finto(monkeypatch)
+
+
+def scenario_reinstallazione(tmp_path, monkeypatch):
+    passi_sostituiti(monkeypatch, reinstalla=lambda r, w: (
+        "reinstallazione fallita: ERROR: No matching distribution found for asdlc"))
+    mondo_finto(monkeypatch)
+
+
+def scenario_pausa(tmp_path, monkeypatch):
+    passi_sostituiti(monkeypatch)
+    mondo_finto(monkeypatch)
+    (Path.home() / "asdlc-tick.pausa").write_text(
+        "2026-10-31 10:00 chiudo a mano il giro di PBI-7\n", encoding="utf-8")
+
+
+def scenario_fermo_in_preverifica(tmp_path, monkeypatch):
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.AttendeLaPreverifica("PBI-7", 3))
+    mondo_finto(monkeypatch)
+
+
+@pytest.mark.parametrize("scenario, coda_md, tick, attesi", [
+    (scenario_non_lanciato, "- PBI-7\n", 2,
+     ["⛔ ada_nlt: PBI-7 non parte — ", "git fetch origin"]),
+    (scenario_pronto, "- PBI-7\n", 1,
+     ["✅ ada_nlt: PR #12 da mergiare a mano — il ramo feature/x non è di un giro del runner"]),
+    (scenario_rilascio, "- PBI-7\n", 1, ["🏷️ ada_nlt: v0.0.1 da PBI-7"]),
+    (scenario_barriera, "- ‖ firma il contratto\n- PBI-7\n", 1,
+     ["⏸️ ada_nlt: barriera — firma il contratto"]),
+    (scenario_finita, "- PBI-7\n", 1, ["🏁 ada_nlt: coda finita"]),
+    (scenario_guasto_di_gh, "- PBI-7\n", 3,
+     ["⚠️ ada_nlt: il tick non riesce — ", "gh non risponde (uscita 1)"]),
+    (scenario_guasto_delle_pr, "- PBI-7\n", 3,
+     ["⚠️ ada_nlt: il tick non riesce — ", "GitHub non ha risposto"]),
+    (scenario_non_allineato, "- PBI-7\n", 1,
+     ["⚠️ ada_nlt: checkout non allineato — ", "è su «pbi/pbi-7», non su main"]),
+    (scenario_reinstallazione, "- PBI-7\n", 1,
+     ["⚠️ ada_nlt: reinstallazione fallita — ERROR: No matching distribution found"]),
+    (scenario_pausa, "- PBI-7\n", 1,
+     ["⏸️ ada_nlt: in pausa — 2026-10-31 10:00 chiudo a mano il giro di PBI-7"]),
+    (scenario_fermo_in_preverifica, "- PBI-7\n", 1,
+     ["⛔ ada_nlt: PBI-7 fermo — preverifica, 3 rilievi"]),
+], ids=["non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto-gh-muto",
+        "guasto-pr-senza-risposta", "non-allineato", "reinstallazione", "pausa",
+        "fermo-in-preverifica"])
+def test_ogni_evento_ha_il_suo_messaggio(tmp_path, monkeypatch, webhook, tick_configurato,
+                                         scenario, coda_md, tick, attesi):
+    """PBI-533, criterio 2 (decisione 3). La sorgente della tabella dà il testo
+    atteso, col progetto e il PBI o il motivo. `non-lanciato` manda al secondo tick
+    di fila sullo stesso PBI, `guasto` al terzo: la `POST` arriva solo lì."""
+    repo, albero = progetto_finto(tmp_path, coda_md)
+    scenario(tmp_path, monkeypatch)
+
+    for _ in range(tick - 1):
+        un_tick(repo, albero)
+        assert webhook.ricevuti == [], webhook.testi()
+    un_tick(repo, albero)
+
+    assert len(webhook.ricevuti) == 1, webhook.testi()
+    for atteso in attesi:
+        assert atteso in webhook.testi()[0], webhook.testi()
