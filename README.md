@@ -325,6 +325,8 @@ eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "
 
 `eventi` sceglie quali mandare; senza la chiave, tutti. Senza la sezione, o con
 `attive = false`, il tick non manda niente e non lo dice. Il template la porta spenta.
+Un `asdlc-tick --dry-run` non manda niente nemmeno con le notifiche accese, e lascia
+`runs/notifiche.json` com'era: il tick vero dopo trova ciò che avrebbe trovato senza.
 
 Una notifica che fallisce non ferma niente: una `POST` sola per evento, con un tetto di
 10 secondi, poi una riga `notifica non inviata: <esito>` in `runs/coda.log` («HTTP 500»,

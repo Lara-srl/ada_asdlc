@@ -1351,14 +1351,21 @@ def pausa() -> str | None:
 def fermo_in_pausa(repo: Path) -> bool:
     """Il tick è in pausa? Se sì lo dice a schermo e in `coda.log`, con la riga
     del file: chi legge il log deve vedere perché non è successo niente.
-    `smista()` lo chiede due volte, prima di `decidi()` e prima di `lancia()`."""
+    `smista()` lo chiede due volte, prima di `decidi()` e prima di `lancia()`.
+    Su Slack la manda il chiamante con `notifica_la_pausa()`, che un `--dry-run`
+    non chiama (PBI-533)."""
     if (motivo := pausa()) is None:
         return False
     riga = f"in pausa: {motivo}"
     print(riga)
     scrivi_nel_log(repo, riga)
-    notifica(repo, asdlc_notifiche.pausa(repo.resolve().name, motivo))
     return True
+
+
+def notifica_la_pausa(repo: Path) -> None:
+    """La pausa su Slack, con la riga del file di pausa (PBI-533, decisione 3)."""
+    if (motivo := pausa()) is not None:
+        notifica(repo, asdlc_notifiche.pausa(repo.resolve().name, motivo))
 
 
 def adesso() -> datetime:
@@ -1465,6 +1472,9 @@ def passaggio(a: argparse.Namespace) -> int:
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
+        # Un `--dry-run` non manda niente su Slack (PBI-533).
+        if not a.dry_run:
+            notifica_la_pausa(a.repo)
         return 0
     # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
     # di decidere, col lucchetto del tick già preso.
@@ -1498,14 +1508,18 @@ def passaggio(a: argparse.Namespace) -> int:
     print(riga)
     scrivi_nel_log(a.repo, riga)
     # La decisione che chiede una persona va su Slack, una volta per cambio (PBI-533).
-    esito = ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende) else None
-    evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
-    # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
-    asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento)
-    notifica(a.repo, evento)
-    # Un giro in corso azzera l'ultimo evento: il fermo dopo è di un giro nuovo.
-    if isinstance(decisione, Occupato):
-        asdlc_notifiche.azzera(a.repo, CFG)
+    # Non da un `--dry-run`: niente `POST`, e la memoria delle notifiche resta com'è,
+    # perché il tick vero dopo deve trovare ciò che avrebbe trovato senza.
+    if not a.dry_run:
+        esito = (ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende)
+                 else None)
+        evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
+        # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
+        asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento)
+        notifica(a.repo, evento)
+        # Un giro in corso azzera l'ultimo evento: il fermo dopo è di un giro nuovo.
+        if isinstance(decisione, Occupato):
+            asdlc_notifiche.azzera(a.repo, CFG)
     # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
     if (isinstance(decisione, Attende) and not a.dry_run
             and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):
@@ -1528,6 +1542,7 @@ def passaggio(a: argparse.Namespace) -> int:
         # La seconda lettura, subito prima del lancio: la pausa può essere nata
         # mentre questo tick decideva, e chi l'ha creata sta chiudendo un giro.
         if fermo_in_pausa(a.repo):
+            notifica_la_pausa(a.repo)
             return 0
         try:
             # Il lancio di sempre resta la chiamata di sempre; la ripresa lo dice.
