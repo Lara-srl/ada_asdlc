@@ -10,6 +10,7 @@ scrivere produzione dato dal rosso osservato. Comandi installati:
 | `asdlc-coda` | il tick: legge `backlog/CODA.md` e lancia il PBI successivo quando il precedente è in `main` |
 | `asdlc-chiudi-giro` | chiude un giro fermato: tag `giro-fermato/…`, ramo tolto |
 | `asdlc-stato` | lo stato dei PBI, in sola lettura: per un progetto, ciò che il tick deciderebbe adesso (`PBI-534`, *Lo stato a comando*) |
+| `asdlc-panoramica` | i PBI di ogni progetto in markdown, in sola lettura: in corso, in coda, fatti e fuori coda, coi criteri spuntati (`PBI-538`, *La panoramica dei PBI*) |
 | `asdlc-esito` | il server MCP dell'esito, da cui gli agenti dichiarano com'è andata (`ADR-0027`) |
 
 ## Da dove viene
@@ -405,6 +406,52 @@ per tutti e due, e senza `[ambiente].pacchetto` un trattino per tutti e due; una
 non si calcola, o una firma scritta che non si legge, è `pin ? (<motivo>)`. Con `--json` gli
 oggetti hanno le chiavi `progetto`, `decisione`, `voce`, `esito`, `pr`, `pausa`,
 `allineato`, `installato` e `pin`.
+
+### La panoramica dei PBI
+
+`asdlc-panoramica` stampa su stdout, in markdown, i PBI di ogni progetto (`PBI-538`): chi la
+vuole in un file la redirige. È di **sola lettura** come `asdlc-stato`, ne prende gli
+argomenti, l'elenco dei progetti e le uscite, e i dati dalle stesse funzioni del tick:
+
+```bash
+asdlc-panoramica                                # tutti i progetti, nell'ordine del file
+asdlc-panoramica progetto                       # solo quello
+asdlc-panoramica --repo /percorso/del/progetto  # uno, senza passare dall'elenco
+asdlc-panoramica > panoramica.md                # in un file
+```
+
+Per ogni progetto, una sezione `# <nome>` con sotto la riga di `asdlc-stato` e quattro
+sezioni:
+
+```markdown
+## In corso
+- **PBI-XXX** — <titolo> · criteri <x>/<y> · PR <url>, <url> (o -)
+## In coda
+1. **PBI-XXX** — <titolo> · criteri <x>/<y>
+- ‖ <testo della barriera>
+## Fatti
+- **PBI-XXX** — <titolo> · criteri <x>/<y>
+## Fuori coda
+- **PBI-XXX** — <titolo> · criteri <x>/<y>
+```
+
+- **In corso:** le voci di `CODA.md` non fatte che hanno un ramo su `origin`, con le PR
+  aperte sul ramo (`-` se non ce ne sono, `?` se `gh` non risponde);
+- **In coda:** le altre voci non fatte, nell'ordine del file, numerate, con le barriere al
+  loro posto;
+- **Fatti:** i PBI che una PR mergiata nomina e ha implementato, se hanno un file in
+  `backlog/`, in ordine di numero;
+- **Fuori coda:** i file di `backlog/` col nome del modello `[backlog].file` il cui PBI non
+  è in `CODA.md` e non è fatto, in ordine di numero.
+
+Il titolo è la prima riga `# PBI-XXX: <titolo>` del file, senza il prefisso; i criteri sono
+le caselle `- [x]` e `- [ ]` della sola sezione `## Verifica`. Una voce di coda senza file è
+`(file mancante)` con `criteri 0/0`; un PBI con una sezione `❓` ha la riga che finisce in
+`· ❓`; una sezione vuota è `- nessuno`. Un progetto che non si legge ha la sola riga
+`<nome> · non raggiungibile — <motivo>` e non ferma gli altri; `gh` che non risponde sulle
+PR mergiate fa di **Fatti** la riga `- ? gh non risponde …`, con le voci trattate come non
+fatte, e `origin` che non risponde fa di **In corso** la riga `- ? git non parla con …`, con
+le voci in **In coda**. L'uscita resta 0.
 
 ## Linguaggi e stack
 
