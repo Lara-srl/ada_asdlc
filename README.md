@@ -332,7 +332,9 @@ Una notifica che fallisce non ferma niente: una `POST` sola per evento, con un t
 10 secondi, poi una riga `notifica non inviata: <esito>` in `runs/coda.log` («HTTP 500»,
 «scaduto dopo 10 s») e il tick prosegue; il tick dopo ci riprova. Con il file del webhook
 assente la riga dice `file del webhook assente`, una volta per evento. L'indirizzo del
-webhook non compare mai, né nel log né a schermo.
+webhook non compare mai, né nel log né a schermo. `runs/notifiche.json` è una cache: se non
+ha la sua forma vale come vuoto, e se non si scrive (disco pieno, permessi) la riga dice
+`notifica non inviata: <funzione> ha alzato <errore>` e il tick decide e lancia come sempre.
 
 ### Lo stato a comando
 

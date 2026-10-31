@@ -15,6 +15,7 @@ processo (decisione 5).
 """
 from __future__ import annotations
 
+import functools
 import http.client
 import json
 import socket
@@ -50,6 +51,23 @@ class Evento:
     testo: str
     posto: str = STATO
     di_fila: int = 1
+
+
+def nel_perimetro(funzione):
+    """Una notifica che fallisce non ferma niente (`ADR-0008`, decisione 6): ogni
+    eccezione di `funzione` — la memoria che non si scrive, una `HOME` che non si
+    trova — diventa la riga «notifica non inviata: <esito>» da scrivere nel log,
+    e il tick prosegue. L'esito porta il nome dell'eccezione e non il suo
+    messaggio, che potrebbe portare l'indirizzo del webhook (decisione 5)."""
+
+    @functools.wraps(funzione)
+    def protetta(*argomenti, **chiavi):
+        try:
+            return funzione(*argomenti, **chiavi)
+        except Exception as errore:  # noqa: BLE001 — il perimetro è proprio questo
+            return f"notifica non inviata: {funzione.__name__} ha alzato {type(errore).__name__}"
+
+    return protetta
 
 
 def file_del_webhook() -> Path:
@@ -142,9 +160,11 @@ def pausa(progetto: str, motivo: str) -> Evento:
     return Evento("pausa", "", motivo, f"⏸️ {progetto}: in pausa — {motivo}")
 
 
-def rompi_le_file(repo: Path, cfg, decisione, evento: Evento | None) -> None:
+@nel_perimetro
+def rompi_le_file(repo: Path, cfg, decisione, evento: Evento | None) -> str | None:
     """Toglie dalla memoria i conti di fila che la decisione di questo tick
-    interrompe (decisione 2). Il conto del `guasto` resta solo se la decisione è
+    interrompe (decisione 2). Rende la riga da scrivere nel log se non ci
+    riesce (`nel_perimetro()`). Il conto del `guasto` resta solo se la decisione è
     ancora un guasto; quello del `non lanciato` solo se la decisione è un lancio,
     perché il `non lanciato` arriva dopo, nello stesso tick: è la coppia
     `lancia` → `non lanciato` che si ripete, e il lancio non la deve azzerare."""
@@ -163,10 +183,12 @@ def rompi_le_file(repo: Path, cfg, decisione, evento: Evento | None) -> None:
         scrivi_memoria(file, memoria)
 
 
-def azzera(repo: Path, cfg) -> None:
+@nel_perimetro
+def azzera(repo: Path, cfg) -> str | None:
     """Dimentica l'ultimo evento dello stato del tick, dopo un lancio riuscito o un
     giro in corso (decisione 2): il fermo dopo è di un giro nuovo, e si manda anche
-    se ha lo stesso motivo. Le PR in attesa e i tag restano: non sono del giro."""
+    se ha lo stesso motivo. Le PR in attesa e i tag restano: non sono del giro.
+    Rende la riga da scrivere nel log se non ci riesce (`nel_perimetro()`)."""
     if not cfg.notifiche.attive:
         return
     file = file_della_memoria(repo, cfg)
@@ -177,13 +199,26 @@ def azzera(repo: Path, cfg) -> None:
 
 
 def leggi_memoria(file: Path) -> dict:
+    """La memoria del checkout. Ciò che non ha la sua forma — un file che non si
+    legge, una radice che non è un oggetto, una delle tre caselle che non è un
+    oggetto, un conto di fila che non è un oggetto col suo numero — vale come
+    vuoto: è una cache, e il primo invio riuscito la riscrive (`ADR-0008`)."""
     try:
-        memoria = json.loads(file.read_text(encoding="utf-8"))
+        letta = json.loads(file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return memoria if isinstance(memoria, dict) else {}
+    if not isinstance(letta, dict):
+        return {}
+    memoria = {casella: letta[casella] for casella in ("di_fila", "mandati", "senza_webhook")
+               if isinstance(letta.get(casella), dict)}
+    if "di_fila" in memoria:
+        memoria["di_fila"] = {
+            tipo: conto for tipo, conto in memoria["di_fila"].items()
+            if isinstance(conto, dict) and type(conto.get("conto", 0)) is int}
+    return memoria
 
 
+@nel_perimetro
 def manda(repo: Path, cfg, evento: Evento | None) -> str | None:
     """Manda `evento` al webhook, se le notifiche sono accese, l'evento è fra quelli
     di `[notifiche].eventi`, è venuto `di_fila` volte e non è lo stesso evento
@@ -195,7 +230,8 @@ def manda(repo: Path, cfg, evento: Evento | None) -> str | None:
     memoria resta com'era, così il tick dopo ci riprova. L'esito dice cosa è
     successo, mai l'indirizzo del webhook (decisione 5). Il file del webhook che
     manca si dice una volta per evento: è un gesto umano che non arriva fra un
-    tick e l'altro."""
+    tick e l'altro. Un'eccezione qui dentro diventa la stessa riga
+    (`nel_perimetro()`)."""
     if evento is None or not cfg.notifiche.attive or evento.tipo not in cfg.notifiche.eventi:
         return
     file = file_della_memoria(repo, cfg)

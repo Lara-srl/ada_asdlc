@@ -922,7 +922,13 @@ def avvisa_il_fermo(repo: Path, worktree: Path, pbi: str, riga: str) -> str | No
 def notifica(repo: Path, evento: asdlc_notifiche.Evento | None) -> None:
     """Manda `evento` su Slack (PBI-533); se l'invio non riesce, la riga che lo dice
     va a schermo e in `coda.log`, e il tick prosegue (`ADR-0008`)."""
-    if (non_inviata := asdlc_notifiche.manda(repo, CFG, evento)) is not None:
+    di_la_non_inviata(repo, asdlc_notifiche.manda(repo, CFG, evento))
+
+
+def di_la_non_inviata(repo: Path, non_inviata: str | None) -> None:
+    """La riga «notifica non inviata» che una funzione di `asdlc.notifiche` rende,
+    a schermo e in `coda.log`; `None` non scrive niente (PBI-533)."""
+    if non_inviata is not None:
         print(non_inviata)
         scrivi_nel_log(repo, non_inviata)
 
@@ -1515,11 +1521,11 @@ def passaggio(a: argparse.Namespace) -> int:
                  else None)
         evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
         # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
-        asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento)
+        di_la_non_inviata(a.repo, asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento))
         notifica(a.repo, evento)
         # Un giro in corso azzera l'ultimo evento: il fermo dopo è di un giro nuovo.
         if isinstance(decisione, Occupato):
-            asdlc_notifiche.azzera(a.repo, CFG)
+            di_la_non_inviata(a.repo, asdlc_notifiche.azzera(a.repo, CFG))
     # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
     if (isinstance(decisione, Attende) and not a.dry_run
             and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):
@@ -1558,7 +1564,7 @@ def passaggio(a: argparse.Namespace) -> int:
             return 1
         # Solo il lancio riuscito azzera: il `non lanciato` dello stesso tick no
         # (PBI-533, decisione 2).
-        asdlc_notifiche.azzera(a.repo, CFG)
+        di_la_non_inviata(a.repo, asdlc_notifiche.azzera(a.repo, CFG))
     return 0
 
 
