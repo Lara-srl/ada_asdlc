@@ -10,8 +10,11 @@ stati chiamati, e i passi del tick che toccano il checkout sono sostituiti.
 
 import contextlib
 import importlib
+import json
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -253,3 +256,77 @@ def test_asdlc_stato_mostra_la_pausa_del_progetto(tmp_path, monkeypatch, capsys,
 
     riga = capsys.readouterr().out
     assert riga.startswith("alfa · in pausa: (progetto) 2026-10-31 10:00 prova · "), riga
+
+
+# --- Criterio 6: la pausa del progetto va su Slack ------------------------------
+
+
+@pytest.fixture
+def webhook(home_finta):
+    """Un Incoming Webhook finto su `127.0.0.1`, come in `test_asdlc_notifiche.py`:
+    tiene il testo di ogni `POST`, e il suo indirizzo sta nel file del webhook
+    della `HOME` finta, una riga e permessi `600`."""
+    ricevuti: list[str] = []
+
+    class Gestore(BaseHTTPRequestHandler):
+        def do_POST(self):
+            lunghezza = int(self.headers.get("Content-Length", 0))
+            ricevuti.append(json.loads(self.rfile.read(lunghezza))["text"])
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *argomenti):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Gestore)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    file = home_finta / ".config" / "asdlc" / "slack-webhook"
+    file.parent.mkdir(parents=True)
+    file.write_text(f"http://127.0.0.1:{server.server_address[1]}/services/T0/B0/x\n",
+                    encoding="utf-8")
+    file.chmod(0o600)
+    yield ricevuti
+    server.shutdown()
+    server.server_close()
+
+
+def checkout_con_le_notifiche(tmp_path: Path, nome: str) -> tuple[Path, Path]:
+    """Un finto checkout con l'`asdlc.toml` del progetto di prova e le notifiche
+    accese, già letto dal tick."""
+    repo, albero = un_checkout(tmp_path, nome)
+    (repo / "asdlc-aggiunte").mkdir()
+    (repo / "asdlc.toml").write_text(
+        (PROGETTO / "asdlc.toml").read_text(encoding="utf-8")
+        + "\n[notifiche]\nattive = true\n", encoding="utf-8")
+    coda.configura(coda.asdlc_config.carica(repo))
+    return repo, albero
+
+
+def test_la_pausa_del_progetto_va_su_slack_e_con_la_globale_una_volta(
+        tmp_path, home_finta, chiamati, webhook, configurazione_rimessa):
+    """PBI-535, criterio 6 (decisione 6). Con le notifiche accese e il solo file
+    `<registro>/pausa` con «prova», un tick fa **una** `POST` col motivo
+    `(progetto) prova`. Con anche la pausa globale, in un altro checkout, la
+    `POST` è una e porta la riga globale."""
+    solo, albero_solo = checkout_con_le_notifiche(tmp_path, "solo")
+    pausa_del_progetto_in(solo, "prova")
+
+    assert coda.smista(["--repo", str(solo), "--worktree", str(albero_solo)]) == 0
+
+    assert len(webhook) == 1, webhook
+    assert "in pausa — (progetto) " in webhook[0], webhook
+    assert "prova" in webhook[0], webhook
+
+    webhook.clear()
+    tutte, albero_tutte = checkout_con_le_notifiche(tmp_path, "tutte")
+    pausa_del_progetto_in(tutte, "prova")
+    (home_finta / "asdlc-tick.pausa").write_text(
+        "2026-10-31 09:00 asdlc-chiudi-giro PBI-7\n", encoding="utf-8")
+
+    assert coda.smista(["--repo", str(tutte), "--worktree", str(albero_tutte)]) == 0
+
+    assert len(webhook) == 1, webhook
+    assert "in pausa — 2026-10-31 09:00 asdlc-chiudi-giro PBI-7" in webhook[0], webhook
+    assert chiamati == []
