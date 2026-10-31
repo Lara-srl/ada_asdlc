@@ -446,3 +446,61 @@ def test_dopo_un_lancia_lo_stesso_fermo_si_notifica_di_nuovo(tmp_path, monkeypat
 
     assert len(webhook.ricevuti) == 2, webhook.testi()
     assert all("PBI-7 fermo" in testo for testo in webhook.testi()), webhook.testi()
+
+
+# --- Criterio 4: una notifica che fallisce non ferma il tick e non svela l'URL
+
+
+def righe_del_log(repo: Path) -> list[str]:
+    file = repo / coda.LOG
+    return file.read_text(encoding="utf-8").splitlines() if file.exists() else []
+
+
+@pytest.mark.parametrize("guasto", ["http-500", "scaduto"])
+def test_una_notifica_che_fallisce_non_ferma_il_tick_e_non_svela_l_url(
+        tmp_path, monkeypatch, capsys, webhook, tick_configurato, guasto):
+    """PBI-533, criterio 4 (decisioni 5 e 6). Il webhook risponde 500, o non
+    risponde entro il timeout: il tick scrive la sua decisione come sempre, una
+    riga «notifica non inviata» in `coda.log`, e né il log né l'uscita portano
+    l'indirizzo del webhook, che è un segreto. La memoria non si aggiorna, e il
+    tick dopo ci riprova."""
+    monkeypatch.setattr(notifiche, "TIMEOUT", 0.3)
+    if guasto == "http-500":
+        webhook.codice = 500
+    else:
+        webhook.ritardo = 1.5
+    repo, albero = progetto_finto(tmp_path)
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
+    mondo_finto(monkeypatch)
+
+    assert un_tick(repo, albero) == 0
+
+    righe = righe_del_log(repo)
+    assert any(riga.endswith("finita: in coda non resta niente da lanciare") for riga in righe), righe
+    assert any("notifica non inviata: " in riga for riga in righe), righe
+    indirizzo = webhook.url.split("//", 1)[1].split("/", 1)[0]
+    scritto = "\n".join(righe) + capsys.readouterr().out
+    assert "segreto-del-webhook" not in scritto and indirizzo not in scritto, scritto
+
+    webhook.codice, webhook.ritardo = 200, 0.0
+    assert un_tick(repo, albero) == 0
+
+    assert len(webhook.ricevuti) == 2, webhook.testi()
+    assert webhook.testi()[-1] == "🏁 ada_nlt: coda finita"
+
+
+def test_senza_il_file_del_webhook_il_tick_lo_dice_una_volta_per_evento(
+        tmp_path, monkeypatch, webhook, tick_configurato):
+    """PBI-533, decisione 8: con `attive = true` e il file del webhook assente, il
+    tick lo dice una volta per evento nel log, e prosegue."""
+    notifiche.file_del_webhook().unlink()
+    repo, albero = progetto_finto(tmp_path)
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
+    mondo_finto(monkeypatch)
+
+    assert un_tick(repo, albero) == 0
+    assert un_tick(repo, albero) == 0
+
+    assert [riga.split("  ", 1)[1] for riga in righe_del_log(repo)
+            if "notifica non inviata" in riga] == [
+        "notifica non inviata: file del webhook assente"], righe_del_log(repo)
