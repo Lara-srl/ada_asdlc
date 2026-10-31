@@ -469,7 +469,10 @@ def interpreta(dati: dict, file: str) -> Config:
     notifiche = Notifiche()
     if "notifiche" in sezione.dati:
         dichiarato = sezione.dentro("notifiche")
-        notifiche = Notifiche(attive=dichiarato.booleano("attive", default=False),
+        dichiarato.solo("attive", "eventi",
+                        perche="la sezione dice se il tick manda le notifiche su Slack "
+                               "e quali eventi")
+        notifiche =Notifiche(attive=dichiarato.booleano("attive", default=False),
                               eventi=dichiarato.testi("eventi", default=Notifiche.eventi))
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).

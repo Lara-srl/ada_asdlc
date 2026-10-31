@@ -325,6 +325,8 @@ eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "
 
 `eventi` sceglie quali mandare; senza la chiave, tutti. Senza la sezione, o con
 `attive = false`, il tick non manda niente e non lo dice. Il template la porta spenta.
+Una chiave diversa da `attive` ed `eventi` (un `attiva = true`, per dire) è un errore
+che la nomina, come in ogni altra sezione: un refuso non spegne le notifiche in silenzio.
 Un `asdlc-tick --dry-run` non manda niente nemmeno con le notifiche accese, e lascia
 `runs/notifiche.json` com'era: il tick vero dopo trova ciò che avrebbe trovato senza.
 
