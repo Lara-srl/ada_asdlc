@@ -98,3 +98,8 @@ rilievi minori: il file calcolato dal `repo` e non dal `LOG` spostato dei test (
 1); il «Fuori scope» con i punti veri che leggono, scrivono e tolgono la pausa globale; la riga che
 comincia con `in pausa:` per l'evento di `PBI-533` (decisione 2); il lucchetto tenuto, le due pause
 insieme e il nome `--togli-pausa` al posto di `--riprendi` (decisioni 2 e 3).
+
+**Domanda aperta** (dalla revisione del Critic del 31/10, per chi mergia; `PBI-536` la eredita):
+`--pausa ""`, o un motivo di soli spazi, va **rifiutato** o accettato? Oggi è accettato e il file
+è solo `data ora`, senza motivo; la decisione 1 dice «data, ora e motivo» e non dice se il motivo
+può mancare. Non si è scelto in silenzio: il comportamento resta quello di oggi.
