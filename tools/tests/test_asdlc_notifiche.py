@@ -420,3 +420,29 @@ def test_un_tick_sano_in_mezzo_ricomincia_il_conto_di_fila(tmp_path, monkeypatch
         un_tick(repo, albero)
 
     assert webhook.ricevuti == [], webhook.testi()
+
+
+# --- Criterio 3: dopo un `lancia` lo stesso fermo si notifica di nuovo -------
+
+
+@pytest.mark.parametrize("in_mezzo", [coda.Lancia("PBI-7"), coda.Occupato()],
+                         ids=["lancia", "occupato"])
+def test_dopo_un_lancia_lo_stesso_fermo_si_notifica_di_nuovo(tmp_path, monkeypatch, webhook,
+                                                            tick_configurato, in_mezzo):
+    """PBI-533, criterio 3 (decisione 2). Fermo, un lancio riuscito — o un giro
+    in corso —, lo stesso fermo: è un giro nuovo che si è fermato di nuovo sullo
+    stesso motivo, e chi lo deve sapere lo sa solo se arriva un'altra `POST`."""
+    repo, _ = progetto_finto(tmp_path)
+    # Il worktree vuoto di `progetto_finto()` lascia il posto a quello col rapporto.
+    (tmp_path / "albero").rmdir()
+    albero = albero_col_rapporto(tmp_path, "PBI-7")
+    fermo = coda.Attende("PBI-7", ())
+    da_decidere = iter([fermo, in_mezzo, fermo])
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: next(da_decidere))
+    mondo_finto(monkeypatch)
+
+    for _ in range(3):
+        un_tick(repo, albero)
+
+    assert len(webhook.ricevuti) == 2, webhook.testi()
+    assert all("PBI-7 fermo" in testo for testo in webhook.testi()), webhook.testi()
