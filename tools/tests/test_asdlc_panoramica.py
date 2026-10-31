@@ -155,3 +155,36 @@ def test_un_progetto_ha_le_quattro_sezioni_coi_criteri_e_la_domanda(
     ]
     fuori = sezione(testo, "Fuori coda")
     assert fuori == ["- **PBI-4** — il quarto · criteri 0/0 · ❓"]
+
+
+# --- Criterio 2: tutti i progetti, e uno illeggibile non ferma gli altri ------------
+
+
+def elenco(casa, *checkout):
+    """`~/.config/asdlc/progetti.toml` con i `checkout`, in quest'ordine."""
+    cartella = casa / ".config" / "asdlc"
+    cartella.mkdir(parents=True, exist_ok=True)
+    voci = ", ".join(f'"{percorso}"' for percorso in checkout)
+    (cartella / "progetti.toml").write_text(f"checkout = [{voci}]\n", encoding="utf-8")
+
+
+def test_guardia_tutti_i_progetti_e_uno_illeggibile_non_ferma_gli_altri(
+    tmp_path, home_finta, capsys
+):
+    alfa = progetto(tmp_path, ["- PBI-1"], {"PBI-1-uno.md": "# PBI-1: il primo\n"},
+                    nome="alfa")
+    beta = progetto(tmp_path, ["- PBI-2"], {"PBI-2-due.md": "# PBI-2: il secondo\n"},
+                    nome="beta")
+    elenco(home_finta, alfa, tmp_path / "sparito", beta)
+
+    assert panoramica.main([]) == 0
+    testo = capsys.readouterr().out
+
+    progetti = [riga for riga in testo.splitlines() if riga.startswith("# ")]
+    assert progetti == ["# alfa", "# sparito", "# beta"]
+    blocchi = testo.split("\n\n# ")
+    assert len(blocchi) == 3
+    assert "sparito · non raggiungibile — " in blocchi[1]
+    assert "## In coda" not in blocchi[1]
+    assert "1. **PBI-1** — il primo · criteri 0/0" in blocchi[0]
+    assert "1. **PBI-2** — il secondo · criteri 0/0" in blocchi[2]
