@@ -933,6 +933,12 @@ def di_la_non_inviata(repo: Path, non_inviata: str | None) -> None:
         scrivi_nel_log(repo, non_inviata)
 
 
+def rompi_ogni_fila(repo: Path) -> None:
+    """Il tick che esce senza continuare la fila del `guasto` o del `non lanciato`
+    la rompe: «di fila» vuol dire tick consecutivi (PBI-533, decisione 2)."""
+    di_la_non_inviata(repo, asdlc_notifiche.rompi_le_file(repo, CFG, None, None))
+
+
 def scrivi_nel_log(repo: Path, riga: str) -> None:
     """Una riga in coda a `runs/coda.log`, con l'ora davanti.
 
@@ -1480,6 +1486,7 @@ def passaggio(a: argparse.Namespace) -> int:
     if fermo_in_pausa(a.repo):
         # Un `--dry-run` non manda niente su Slack (PBI-533).
         if not a.dry_run:
+            rompi_ogni_fila(a.repo)
             notifica_la_pausa(a.repo)
         return 0
     # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
@@ -1488,6 +1495,7 @@ def passaggio(a: argparse.Namespace) -> int:
         riga = f"non allineato: {ragione}"
         print(riga)
         scrivi_nel_log(a.repo, riga)
+        rompi_ogni_fila(a.repo)
         notifica(a.repo, asdlc_notifiche.non_allineato(progetto, ragione))
         return 0
     # Il merge prima del rilascio: il tag segue il merge nello stesso passaggio (`ADR-0033`).
@@ -1497,6 +1505,7 @@ def passaggio(a: argparse.Namespace) -> int:
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
         print(riga)
         scrivi_nel_log(a.repo, riga)
+        rompi_ogni_fila(a.repo)
         notifica(a.repo, asdlc_notifiche.reinstallazione(progetto, riga))
         return 0
     if a.dry_run and (riga := indietro(a.repo)) is not None:
@@ -1544,10 +1553,12 @@ def passaggio(a: argparse.Namespace) -> int:
             riga = prefisso + "; ".join(m.removeprefix(prefisso) for m in mancanze)
             print(riga)
             scrivi_nel_log(a.repo, riga)
+            rompi_ogni_fila(a.repo)
             return 1
         # La seconda lettura, subito prima del lancio: la pausa può essere nata
         # mentre questo tick decideva, e chi l'ha creata sta chiudendo un giro.
         if fermo_in_pausa(a.repo):
+            rompi_ogni_fila(a.repo)
             notifica_la_pausa(a.repo)
             return 0
         try:
@@ -1563,8 +1574,10 @@ def passaggio(a: argparse.Namespace) -> int:
                 progetto, decisione.pbi, in_una_riga(str(guasto))))
             return 1
         # Solo il lancio riuscito azzera: il `non lanciato` dello stesso tick no
-        # (PBI-533, decisione 2).
+        # (PBI-533, decisione 2). E rompe la fila del `non lanciato`, che questo
+        # tick non continua.
         di_la_non_inviata(a.repo, asdlc_notifiche.azzera(a.repo, CFG))
+        rompi_ogni_fila(a.repo)
     return 0
 
 

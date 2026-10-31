@@ -167,7 +167,10 @@ def rompi_le_file(repo: Path, cfg, decisione, evento: Evento | None) -> str | No
     riesce (`nel_perimetro()`). Il conto del `guasto` resta solo se la decisione è
     ancora un guasto; quello del `non lanciato` solo se la decisione è un lancio,
     perché il `non lanciato` arriva dopo, nello stesso tick: è la coppia
-    `lancia` → `non lanciato` che si ripete, e il lancio non la deve azzerare."""
+    `lancia` → `non lanciato` che si ripete, e il lancio non la deve azzerare.
+    Con `decisione` ed `evento` a `None` rompe ogni fila: è il tick che esce
+    senza continuarne nessuna — prima di `decidi()`, o nel ramo del lancio prima
+    del `non lanciato`, o col lancio riuscito."""
     if not cfg.notifiche.attive:
         return
     tieni = {evento.tipo} if evento is not None and evento.di_fila > 1 else set()
