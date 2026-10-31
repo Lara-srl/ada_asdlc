@@ -280,11 +280,23 @@ Il lucchetto del tick rende innocuo il doppio passaggio con il cron: il secondo 
 ### Le notifiche del tick su Slack
 
 Il tick manda un messaggio su Slack quando la sua decisione **cambia** verso uno stato che
-chiede una persona (`PBI-533`): un PBI fermo senza PR, col motivo e la domanda del rapporto.
-Un messaggio per cambio, non uno ogni dieci minuti: l'ultimo evento mandato sta in
-`runs/notifiche.json` del checkout, e lo stesso evento — stesso tipo, stesso PBI, stesso
-motivo — non si rimanda. Il messaggio porta il nome del progetto, cioè la cartella del
-checkout (`ada_nlt`, `ada_asdlc`, …).
+chiede una persona, o che una persona vuole sapere (`PBI-533`). Un messaggio per cambio, non
+uno ogni dieci minuti: l'ultimo evento mandato sta in `runs/notifiche.json` del checkout, e
+lo stesso evento — stesso tipo, stesso PBI, stesso motivo — non si rimanda. Il messaggio porta
+il nome del progetto, cioè la cartella del checkout (`ada_nlt`, `ada_asdlc`, …).
+
+| Evento | Quando |
+|---|---|
+| `fermo` | un PBI col ramo e senza PR, col motivo e la domanda del rapporto; o fermo in pre-verifica |
+| `non-lanciato` | il lancio dello stesso PBI non parte per due tick di fila |
+| `pronto` | una PR che il tick non mergia e aspetta una persona, con la condizione che manca |
+| `rilascio` | il tick taglia un tag |
+| `barriera` | una barriera scritta in `CODA.md` |
+| `finita` | la coda è finita |
+| `guasto` | il tick non riesce a decidere (`gh` che non risponde, la coda che non si legge) per tre tick di fila |
+| `non-allineato` | il checkout del tick non è su `main` o non si allinea |
+| `reinstallazione` | la reinstallazione del pacchetto è fallita |
+| `pausa` | il tick è in pausa, con la riga del file di pausa |
 
 **Il webhook, una volta per macchina:**
 
