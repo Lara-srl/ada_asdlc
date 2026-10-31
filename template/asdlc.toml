@@ -103,9 +103,11 @@ attiva = true
 [notifiche]
 # Le notifiche del tick su Slack. Il webhook è un segreto e non sta qui: l'URL va nel
 # file `.config/asdlc/slack-webhook` della cartella di casa, una riga, permessi 600
-# (il README del pacchetto `asdlc` dice come si crea). Spente finché il webhook
-# della macchina non c'è; `eventi` sceglie quali mandare, e il default è tutti.
-attive = false
+# (il README del pacchetto `asdlc` dice come si crea). Accese in ogni progetto
+# (`ADR-0035`): senza il webhook ogni evento è una riga «notifica non inviata» nel log e
+# il tick prosegue. Un progetto che le spegne scrive `false` e perché. `eventi` sceglie
+# quali mandare, e il default è tutti.
+attive = true
 eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto",
           "non-allineato", "reinstallazione", "pausa"]
 
