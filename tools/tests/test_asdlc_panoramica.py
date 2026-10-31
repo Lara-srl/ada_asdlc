@@ -337,3 +337,26 @@ def test_guardia_un_nome_mostra_solo_quel_progetto(tmp_path, home_finta, capsys)
 
     assert [riga for riga in testo.splitlines() if riga.startswith("# ")] == ["# beta"]
     assert sezione(testo, "In coda") == ["1. **PBI-2** — il secondo · criteri 0/0"]
+
+
+def test_guardia_un_nome_che_non_ce_esce_2(tmp_path, home_finta, capsys):
+    alfa = progetto(tmp_path, ["- PBI-1"], {"PBI-1-uno.md": "# PBI-1: il primo\n"})
+    elenco(home_finta, alfa)
+
+    assert panoramica.main(["inesistente"]) == 2
+    uscita = capsys.readouterr()
+
+    assert uscita.out == ""
+    assert "nessun progetto «inesistente»" in uscita.err
+
+
+def test_guardia_un_elenco_illeggibile_esce_2(home_finta, capsys):
+    cartella = home_finta / ".config" / "asdlc"
+    cartella.mkdir(parents=True)
+    (cartella / "progetti.toml").write_text("checkout = [", encoding="utf-8")
+
+    assert panoramica.main([]) == 2
+    uscita = capsys.readouterr()
+
+    assert uscita.out == ""
+    assert "non si legge" in uscita.err
