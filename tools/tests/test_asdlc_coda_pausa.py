@@ -215,3 +215,41 @@ def test_guardia_la_pausa_globale_vale_ancora_e_togli_pausa_non_la_toglie(
     righe = righe_del_log(repo)
     assert len(righe) == 2, righe
     assert righe[1].endswith("  in pausa: 2026-10-31 09:00 asdlc-chiudi-giro PBI-7"), righe
+
+
+# --- Criterio 5: `asdlc-stato` mostra la pausa del progetto ---------------------
+
+
+@pytest.fixture
+def configurazione_rimessa():
+    """`asdlc-stato` configura `coda` con l'`asdlc.toml` del checkout che legge:
+    alla fine del test si rimette quella del progetto di prova."""
+    di_prima = coda.CFG
+    yield
+    coda.configura(di_prima)
+
+
+def test_asdlc_stato_mostra_la_pausa_del_progetto(tmp_path, monkeypatch, capsys,
+                                                  configurazione_rimessa):
+    """PBI-535, criterio 5. Un checkout su `main` col file `<registro>/pausa`:
+    la riga di `asdlc-stato` dice che il tick è in pausa, con la riga della pausa
+    del progetto, come la scriverebbe il tick in `coda.log`. `gh` risponde
+    «nessuna PR» senza rete; `git` è quello vero."""
+    stato = importlib.import_module("asdlc.stato")
+    vera = coda.esegui
+    monkeypatch.setattr(coda, "esegui", lambda cmd, cwd: (
+        (0, "[]") if cmd[0] == "gh" else vera(cmd, cwd)))
+    checkout = tmp_path / "alfa"
+    checkout.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(checkout)], check=True)
+    (checkout / "asdlc.toml").write_text(
+        (PROGETTO / "asdlc.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    (checkout / "asdlc-aggiunte").mkdir()
+    (checkout / "backlog").mkdir()
+    (checkout / "backlog" / "CODA.md").write_text("- PBI-337\n", encoding="utf-8")
+    pausa_del_progetto_in(checkout, "2026-10-31 10:00 prova")
+
+    assert stato.main(["--repo", str(checkout)]) == 0
+
+    riga = capsys.readouterr().out
+    assert riga.startswith("alfa · in pausa: (progetto) 2026-10-31 10:00 prova · "), riga
