@@ -323,3 +323,17 @@ def test_guardia_le_pr_di_un_pbi_in_corso(tmp_path, capsys, gh_finto, aperte, pr
 
     assert sezione(testo, "In corso") == [
         f"- **PBI-5** — il quinto · criteri 0/0 · PR {pr}"]
+
+
+def test_guardia_un_nome_mostra_solo_quel_progetto(tmp_path, home_finta, capsys):
+    alfa = progetto(tmp_path, ["- PBI-1"], {"PBI-1-uno.md": "# PBI-1: il primo\n"},
+                    nome="alfa")
+    beta = progetto(tmp_path, ["- PBI-2"], {"PBI-2-due.md": "# PBI-2: il secondo\n"},
+                    nome="beta")
+    elenco(home_finta, alfa, beta)
+
+    assert panoramica.main(["beta"]) == 0
+    testo = capsys.readouterr().out
+
+    assert [riga for riga in testo.splitlines() if riga.startswith("# ")] == ["# beta"]
+    assert sezione(testo, "In coda") == ["1. **PBI-2** — il secondo · criteri 0/0"]
