@@ -557,6 +557,19 @@ def test_una_chiave_di_notifiche_sconosciuta_e_un_errore_che_la_nomina(tmp_path,
         asdlc_config.carica(tmp_path)
 
 
+@pytest.mark.parametrize("nome", ["non_lanciato", "fermi", "pr-pronta"])
+def test_un_evento_di_notifiche_fuori_dalla_tabella_e_un_errore_che_lo_nomina(tmp_path, nome):
+    """PBI-533, decisione 3: gli eventi sono i dieci della tabella. Un nome che non
+    c'è non partirebbe mai, e nessuno lo direbbe: chi accende le notifiche e
+    sbaglia una parola crede di essere avvisato e non lo è."""
+    scrivi_toml(tmp_path, TOML_DI_PROVA
+                + f'\n[notifiche]\nattive = true\neventi = ["fermo", "{nome}"]\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione,
+                       match=rf"\[notifiche\]\.eventi.*{re.escape(nome)}"):
+        asdlc_config.carica(tmp_path)
+
+
 # --- L'`asdlc.toml` vero del progetto ospite (PBI-395, decisione 10) ----------
 
 
