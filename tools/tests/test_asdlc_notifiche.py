@@ -504,3 +504,24 @@ def test_senza_il_file_del_webhook_il_tick_lo_dice_una_volta_per_evento(
     assert [riga.split("  ", 1)[1] for riga in righe_del_log(repo)
             if "notifica non inviata" in riga] == [
         "notifica non inviata: file del webhook assente"], righe_del_log(repo)
+
+
+# --- Criterio 5: senza `[notifiche]` non cambia niente ------------------------
+
+
+def test_guardia_senza_la_sezione_notifiche_il_tick_non_manda_e_non_scrive_niente_in_piu(
+        tmp_path, monkeypatch, webhook, tick_configurato):
+    """PBI-533, criterio 5 (decisione 8). Un `asdlc.toml` senza `[notifiche]`, col
+    file del webhook presente: il tick decide la coda finita, che con le notifiche
+    accese partirebbe. Nessuna `POST`, una sola riga nel log — la decisione — e
+    nessuna memoria delle notifiche nel registro."""
+    repo, albero = progetto_finto(tmp_path, notifiche_toml="")
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
+    mondo_finto(monkeypatch)
+
+    assert un_tick(repo, albero) == 0
+
+    assert webhook.ricevuti == [], webhook.testi()
+    assert [riga.split("  ", 1)[1] for riga in righe_del_log(repo)] == [
+        "finita: in coda non resta niente da lanciare"], righe_del_log(repo)
+    assert not (repo / "runs" / "notifiche.json").exists()
