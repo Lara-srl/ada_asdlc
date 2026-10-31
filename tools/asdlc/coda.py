@@ -1487,8 +1487,10 @@ def passaggio(a: argparse.Namespace) -> int:
     scrivi_nel_log(a.repo, riga)
     # La decisione che chiede una persona va su Slack, una volta per cambio (PBI-533).
     esito = ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende) else None
-    asdlc_notifiche.manda(a.repo, CFG, asdlc_notifiche.della_decisione(
-        decisione, progetto, esito, riga))
+    evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
+    # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
+    asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento)
+    asdlc_notifiche.manda(a.repo, CFG, evento)
     # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
     if (isinstance(decisione, Attende) and not a.dry_run
             and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):

@@ -139,6 +139,27 @@ def pausa(progetto: str, motivo: str) -> Evento:
     return Evento("pausa", "", motivo, f"⏸️ {progetto}: in pausa — {motivo}")
 
 
+def rompi_le_file(repo: Path, cfg, decisione, evento: Evento | None) -> None:
+    """Toglie dalla memoria i conti di fila che la decisione di questo tick
+    interrompe (decisione 2). Il conto del `guasto` resta solo se la decisione è
+    ancora un guasto; quello del `non lanciato` solo se la decisione è un lancio,
+    perché il `non lanciato` arriva dopo, nello stesso tick: è la coppia
+    `lancia` → `non lanciato` che si ripete, e il lancio non la deve azzerare."""
+    if not cfg.notifiche.attive:
+        return
+    tieni = {evento.tipo} if evento is not None and evento.di_fila > 1 else set()
+    if type(decisione).__name__ == "Lancia":
+        tieni.add("non-lanciato")
+    file = file_della_memoria(repo, cfg)
+    memoria = leggi_memoria(file)
+    conti = memoria.get("di_fila", {})
+    rotti = [tipo for tipo in conti if tipo not in tieni]
+    if rotti:
+        for tipo in rotti:
+            del conti[tipo]
+        scrivi_memoria(file, memoria)
+
+
 def leggi_memoria(file: Path) -> dict:
     try:
         memoria = json.loads(file.read_text(encoding="utf-8"))
