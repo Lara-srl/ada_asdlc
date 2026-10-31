@@ -472,8 +472,14 @@ def interpreta(dati: dict, file: str) -> Config:
         dichiarato.solo("attive", "eventi",
                         perche="la sezione dice se il tick manda le notifiche su Slack "
                                "e quali eventi")
-        notifiche =Notifiche(attive=dichiarato.booleano("attive", default=False),
+        notifiche = Notifiche(attive=dichiarato.booleano("attive", default=False),
                               eventi=dichiarato.testi("eventi", default=Notifiche.eventi))
+        # Un nome fuori dalla tabella della decisione 3 non partirebbe mai, e in silenzio.
+        for evento in notifiche.eventi:
+            if evento not in Notifiche.eventi:
+                raise ErroreDiConfigurazione(
+                    f"{file}: `[notifiche].eventi` nomina {evento!r}, che non è un evento "
+                    f"— sono {', '.join(Notifiche.eventi)}")
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
