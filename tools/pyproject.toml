@@ -24,6 +24,7 @@ asdlc-coda = "asdlc.coda:main"
 asdlc-esito = "asdlc.esito:main"
 asdlc-chiudi-giro = "asdlc.chiudi_giro:main"
 asdlc-stato = "asdlc.stato:main"
+asdlc-panoramica = "asdlc.panoramica:main"
 
 # Il solo pacchetto `asdlc`: in `tools/` stanno anche gli script di aDa, che non
 # sono del runner e non si installano. Accanto, come modulo a sé, il plugin di

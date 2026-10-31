@@ -95,7 +95,7 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
 
 ## Verifica
 
-- [ ] **Un progetto, con le quattro sezioni, i criteri e la `❓`.** Repository temporaneo con `CODA.md` =
+- [x] **Un progetto, con le quattro sezioni, i criteri e la `❓`.** Repository temporaneo con `CODA.md` =
       `PBI-1`, `PBI-2`, `‖ prova`, `PBI-3`, `PBI-5`; i file di `PBI-1`…`PBI-5`; un ramo `pbi/pbi-5` su
       `origin`; un `gh` finto con una PR mergiata che nomina `PBI-1` e tocca `tools/`, e una PR aperta sul
       ramo di `PBI-5`. `PBI-2` ha tre righe di criterio in `## Verifica`, due spuntate, e una `- [ ]` in
