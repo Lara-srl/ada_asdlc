@@ -51,9 +51,16 @@ artefatti al cliente».
    futuri è una proposta, non un impegno. Così il ciclo è sviluppo (i giri), verifica (gate, Critic,
    CI), revisione (le persone) e ripresa (lo sprint dopo).
 6. **Il runner segnala, non blocca** (`ADR-0008`). `PBI-539` gli insegna a leggere gli sprint:
-   avvisa, nel log e su Slack, se uno sprint ha più di 5 PBI, se non dice il risultato o se non
-   finisce con la sua barriera di revisione; quando arriva alla barriera manda la revisione su Slack
-   col risultato e i PBI fatti. Una coda senza sprint funziona come oggi.
+   avvisa **nel log**, sulla riga del lancio del primo PBI dello sprint, se lo sprint ha più di 5 PBI,
+   se non dice il risultato o se non finisce con la sua barriera di revisione; quando arriva alla
+   barriera manda la revisione **su Slack** col risultato e i PBI fatti. Una coda senza sprint
+   funziona come oggi.
+7. **Questo ADR non si copia nel `template/`.** Gli ADR di metodo del template sono numerati come
+   qui (0008…0027) e un progetto conta i suoi dal 0028 (`template/decisions/README.md`): un ADR di
+   metodo nuovo, numerato dopo, collide con quelli dei progetti (`ada_unical` ne ha dieci fra 0030 e
+   0039). La riga di `## Metodo` lo cita come «`ADR-0034` del pacchetto `asdlc`», e la grammatica
+   dello sprint la mostra il `template/backlog/CODA.md` (`PBI-539`). Si rivede se gli ADR di metodo
+   avranno una numerazione loro.
 
 Le quattro domande, per la regola del punto 6:
 
@@ -63,7 +70,8 @@ Le quattro domande, per la regola del punto 6:
    sua barriera (la revisione);
 3. **cosa conta come prova:** il conto delle righe `- PBI` fra un'intestazione e la barriera, il
    testo dopo `—`, la presenza della barriera prima dell'intestazione seguente;
-4. **cosa succede se manca:** una riga `avviso:` nel log e il lancio procede; nessun esito cambia.
+4. **cosa succede se manca:** un `avviso, …` in coda alla riga del lancio nel log, e il lancio
+   procede; nessun esito cambia.
 
 ## Conseguenze
 
@@ -73,7 +81,8 @@ Le quattro domande, per la regola del punto 6:
 - **Negative:** il tick si ferma più spesso, e ogni fermo aspetta una revisione con due persone;
   scrivere il risultato da mostrare prima costa un pensiero in più per ogni sprint.
 - **Neutre:** `CODA.md` resta l'unico cancello e la scrive Francesco; i progetti di oggi si
-  convertono alla prossima scrittura della loro coda, senza fretta.
+  convertono alla prossima scrittura della loro coda, senza fretta. La riga di `## Metodo` arriva
+  negli `AGENTS.md` degli altri progetti con una PR ciascuno, dopo la ratifica.
 
 ## Alternative considerate
 
