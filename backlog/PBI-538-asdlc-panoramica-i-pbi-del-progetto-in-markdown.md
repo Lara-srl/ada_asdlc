@@ -2,7 +2,8 @@
 
 **Stato:** proposto il 31/10 da una sessione con Francesco («un comando per avere una panoramica del
 progetto con tutti i PBI, in coda, da fare e fatti, in formato .md», prima della plancia). Sprint 1
-della coda di questo repository (`ADR-0034`).
+della coda di questo repository (`ADR-0034`). Letto il 31/10 (in fondo, *Protocollo*): un fermo e
+quattro rilievi minori recepiti.
 
 ## Direttiva
 
@@ -31,7 +32,8 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
 1. **Gli stessi argomenti di `asdlc-stato`:** senza argomenti tutti i progetti di
    `~/.config/asdlc/progetti.toml`, nell'ordine del file; con un nome quello; `--repo <percorso>` uno
    senza l'elenco. Un elenco che manca o non si legge, o un nome che non c'è, è un messaggio su stderr e
-   l'uscita **2**, come lì: si riusano `stato.progetti()` e `stato.nome_di()`.
+   l'uscita **2**, come lì: si riusano `stato.progetti()` e `stato.nome_di()`. `main(argv)` prende la
+   lista degli argomenti come `stato.main()`.
 2. **Sola lettura**, come la decisione 2 di `PBI-534`: niente lucchetto del tick, niente `fetch` che
    cambi un ramo, niente log né registro. Per ogni progetto `coda.configura()` col suo `asdlc.toml`.
 3. **La forma, per un progetto:**
@@ -39,40 +41,42 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
    ```markdown
    # <nome>
 
-   <la riga di `asdlc-stato` di quel progetto, `stato.riga(stato.stato_o_guasto(checkout))`>
+   <stato.riga(stato.stato_o_guasto(checkout))>
 
    ## In corso
-   - **PBI-XXX** — <titolo> · criteri <x>/<y> · PR <url o ->
+   - **PBI-XXX** — <titolo> · criteri <x>/<y> · PR <url>, <url> (o -)
    ## In coda
    1. **PBI-XXX** — <titolo> · criteri <x>/<y>
    - ‖ <testo della barriera>
    ## Fatti
    - **PBI-XXX** — <titolo> · criteri <x>/<y>
    ## Fuori coda
-   - **PBI-XXX** — <titolo> · criteri <x>/<y> · ❓
+   - **PBI-XXX** — <titolo> · criteri <x>/<y>
    ```
 
-   Una sezione vuota ha la riga `- nessuno`. Con più progetti le sezioni `# <nome>` si susseguono
-   separate da una riga vuota.
+   In **ogni** sezione la riga di un PBI che ha una sezione `❓` (`coda.RE_DOMANDE`) finisce con `· ❓`.
+   Più PR si separano con `, `. Una sezione vuota ha la riga `- nessuno`. Con più progetti le sezioni
+   `# <nome>` si susseguono separate da una riga vuota.
 4. **Da dove viene ogni sezione:**
-   - **Fatti:** i PBI di `coda.pbi_mergiati()` che hanno un file in `backlog/`, in ordine di numero;
+   - **Fatti:** i PBI di `coda.pbi_mergiati()` che hanno un file in `backlog/`, in ordine di numero (un
+     PBI fatto senza file non compare);
    - **In corso:** le voci di `CODA.md` non fatte che hanno un ramo su `origin`
      (`coda.pbi_con_ramo()`), con le PR aperte di `coda.pr_sul_ramo()`, `-` se non ce ne sono;
    - **In coda:** le altre voci di `CODA.md` non fatte, nell'ordine del file (`coda.leggi_voci()`),
      numerate, con le barriere al loro posto come righe `- ‖`;
-   - **Fuori coda:** i file `backlog/PBI-*.md` il cui PBI non è in `CODA.md` e non è fatto, in ordine
-     di numero.
-5. **Il titolo e i criteri vengono dal file del PBI** (`CFG.backlog`, la stessa ricerca di
-   `coda.avviso_domande()`): il titolo è la prima riga `# PBI-XXX: <titolo>` senza il prefisso; i
-   criteri sono le righe `- [x]` e `- [ ]` **della sola sezione `## Verifica`**, fino alla `##`
-   seguente. `❓` compare se `coda.RE_DOMANDE` trova una sezione `❓` nel file. Una voce di coda senza
-   file ha il titolo `(file mancante)`.
-6. **Un progetto che non si legge non ferma gli altri** (`ADR-0008`): la sua sezione è `# <nome>` e la
-   riga `non raggiungibile — <motivo>`, e si va avanti. **`gh` che non risponde** non rende il progetto
-   non raggiungibile: con un `Guasto` di `pbi_mergiati()` la sezione **Fatti** è la riga
-   `- ? gh non risponde — <motivo>` e le voci di `CODA.md` si trattano come non fatte; con `None` da
-   `pr_sul_ramo()` la PR è `?`. Con un `Guasto` di `pbi_con_ramo()` (`origin` che non risponde) la
-   sezione **In corso** è la riga `- ? origin non risponde — <motivo>` e le voci vanno in **In coda**.
+   - **Fuori coda:** i file di `backlog/` col nome del modello `[backlog].file` (`CFG.backlog`, come per
+     `avviso_domande()`) il cui PBI non è in `CODA.md` e non è fatto, in ordine di numero.
+5. **Il titolo e i criteri vengono dal file del PBI**: il titolo è la prima riga `# PBI-XXX: <titolo>`
+   senza il prefisso; i criteri sono le righe `- [x]` e `- [ ]` **della sola sezione `## Verifica`**,
+   fino alla `##` seguente. Una voce di coda senza file ha il titolo `(file mancante)` e `criteri 0/0`.
+6. **Un progetto che non si legge non ferma gli altri** (`ADR-0008`): la sua sezione è `# <nome>` e,
+   sotto, la riga di `stato.riga()` (`<nome> · non raggiungibile — <motivo>`), senza le quattro sezioni;
+   si va avanti. **`gh` o `origin` che non rispondono** non rendono il progetto non raggiungibile:
+   - un `Guasto` di `pbi_mergiati()`: **Fatti** è la riga `- ? <messaggio del Guasto>` (comincia già con
+     `gh non risponde`), e le voci di `CODA.md` si trattano come non fatte;
+   - un `Guasto` di `pbi_con_ramo()`: **In corso** è la riga `- ? <messaggio del Guasto>`, e le voci
+     vanno in **In coda**;
+   - `None` da `pr_sul_ramo()`: la PR è `?`.
    L'uscita è 0.
 
 ## Dipendenze
@@ -85,29 +89,29 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
   modello degli argomenti e delle uscite).
 - `tools/asdlc/coda.py`: `configura()`, `leggi_voci()`, `pbi_mergiati()`, `pbi_con_ramo()`,
   `pr_sul_ramo()`, `RE_DOMANDE`, `avviso_domande()` (la ricerca del file del PBI).
-- `tools/tests/test_asdlc_stato.py` — come si costruiscono il repository temporaneo, l'`origin`
-  locale e il `gh` finto.
+- `tools/tests/test_asdlc_stato.py` — come si costruiscono il repository temporaneo e l'`origin`
+  locale, e il `gh` finto: un monkeypatch di `coda.esegui`, quindi i test chiamano `panoramica.main()`
+  **nello stesso processo**, non `python -m` in un sottoprocesso (andrebbe al `gh` vero).
 
 ## Verifica
 
-- [ ] **Le quattro sezioni coi PBI giusti.** Repository temporaneo con `CODA.md` = `PBI-1`, `PBI-2`,
-      `‖ prova`, `PBI-3`, i file di `PBI-1`…`PBI-4`, nessun ramo su `origin`, e un `gh` finto con una PR
-      mergiata che nomina `PBI-1` e tocca `tools/`: `python -m asdlc.panoramica --repo <tmp>` esce 0;
-      `## Fatti` ha `PBI-1` col suo titolo, `## In coda` ha `1. **PBI-2**`, `- ‖ prova`, `2. **PBI-3**`
-      in quest'ordine, `## Fuori coda` ha `PBI-4`, `## In corso` ha `- nessuno`. Rosso su `main`: il
-      modulo non c'è.
-- [ ] **Un PBI col ramo è in corso, con la PR.** Stesso repository con un ramo `pbi/pbi-2` su `origin`
-      e il `gh` finto che dà una PR aperta su quel ramo: `PBI-2` è in `## In corso` con l'URL, e non è
-      in `## In coda`. Rosso dopo il criterio 1: nessun ramo lo chiede.
-- [ ] **I criteri si contano nella sola Verifica, e la `❓` si vede.** Un PBI con tre righe di criterio
-      in `## Verifica`, due spuntate, e una riga `- [ ]` in un'altra sezione: `criteri 2/3`. Un PBI con
-      un'intestazione `## ❓ Domande`: la sua riga finisce con `· ❓`. Rosso dopo i criteri 1-2.
-- [ ] **Tutti i progetti, e uno illeggibile non ferma gli altri.** `HOME` in `tmp_path` con
-      `progetti.toml` di due progetti validi e un percorso che non esiste, in mezzo: tre sezioni `# `
-      nell'ordine del file, quella di mezzo con `non raggiungibile`, uscita 0. Rosso dopo i criteri 1-3.
-- [ ] **`gh` che non risponde non ferma la panoramica.** Il `gh` finto esce 1: `## Fatti` ha
-      `- ? gh non risponde`, `PBI-1`, `PBI-2` e `PBI-3` sono in `## In coda`, uscita 0. Rosso dopo i
-      criteri 1-4.
+- [ ] **Un progetto, con le quattro sezioni, i criteri e la `❓`.** Repository temporaneo con `CODA.md` =
+      `PBI-1`, `PBI-2`, `‖ prova`, `PBI-3`, `PBI-5`; i file di `PBI-1`…`PBI-5`; un ramo `pbi/pbi-5` su
+      `origin`; un `gh` finto con una PR mergiata che nomina `PBI-1` e tocca `tools/`, e una PR aperta sul
+      ramo di `PBI-5`. `PBI-2` ha tre righe di criterio in `## Verifica`, due spuntate, e una `- [ ]` in
+      un'altra sezione; `PBI-4` ha un'intestazione `## ❓ Domande`. `panoramica.main(["--repo", <tmp>])`
+      esce 0; `## Fatti` ha `PBI-1` col suo titolo; `## In corso` ha `PBI-5` con l'URL della PR;
+      `## In coda` ha `1. **PBI-2**` con `criteri 2/3`, `- ‖ prova`, `2. **PBI-3**` in quest'ordine;
+      `## Fuori coda` ha `PBI-4` con la riga che finisce in `· ❓`. Rosso su `main`: il modulo non c'è.
+- [ ] **Tutti i progetti, e uno illeggibile non ferma gli altri.** È una **guardia** (la decisione 1 si
+      può scrivere già nel GREEN del criterio 1): `HOME` in `tmp_path` con `progetti.toml` di due progetti
+      validi e un percorso che non esiste, in mezzo; `panoramica.main([])` dà tre sezioni `# `
+      nell'ordine del file, quella di mezzo con `non raggiungibile`, uscita 0.
+      `Guardia-su: tools/asdlc/panoramica.py::main`.
+- [ ] **`gh` e `origin` che non rispondono non fermano la panoramica.** È una **guardia** (decisione 6):
+      con il `gh` finto che esce 1 su `pr list --state merged`, `## Fatti` ha `- ? gh non risponde` e
+      `PBI-1` è in `## In coda`; con `git ls-remote` che esce 1, `## In corso` ha `- ? git non parla con`;
+      uscita 0 in tutti e due. `Guardia-su: tools/asdlc/panoramica.py::main`.
 
 **Non regressione:**
 - Dopo `asdlc-panoramica` `git status --porcelain`, `runs/coda.log` e il registro del progetto sono
@@ -120,3 +124,10 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
 Si può scegliere senza chiedere: i nomi delle funzioni private, l'ordine delle funzioni nel modulo.
 Si chiama `fermati`: se una funzione di `coda.py` o `stato.py` nominata qui non c'è o ha un'altra firma;
 se servisse cambiare `coda.py` o `stato.py`.
+
+**Lettura del 31/10** (Lettore separato, sola lettura, sul ramo `c95c1ea`): un fermo — i criteri 2, 3 e 4
+della prima stesura potevano nascere verdi dopo un GREEN del criterio 1 che seguisse le decisioni; ora il
+criterio 1 li comprende e i due casi di guasto sono guardie — e quattro minori: la riga del progetto non
+raggiungibile (decisioni 3 e 6), il `gh non risponde` ripetuto (decisione 6), il `gh` finto che non arriva
+a un sottoprocesso (*Contesto*), il separatore delle PR, la `❓` in ogni sezione e il modello del nome
+del file (decisioni 3 e 4).
