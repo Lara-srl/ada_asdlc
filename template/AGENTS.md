@@ -40,6 +40,9 @@ Il gate CI è la verità.
   che compila, un modulo che passa il lint) — una coppia RED→GREEN **per criterio** del PBI,
   quindi sedici commit su un PBI da otto criteri. Un commit unico finale non è un punto di
   ripristino. Lo squash, se serve, è al merge.
+- **Si lavora a sprint**: da 1 a 5 PBI con un risultato da mostrare, scritto prima, e una
+  barriera di revisione in `CODA.md` alla fine. Lo sprint dopo si scrive dopo la revisione,
+  con ciò che ha chiesto di cambiare (`decisions/ADR-0034-si-lavora-a-sprint.md`).
 - Allargare lo **Scope** di un PBI è lecito; farlo in silenzio no. La deroga si dichiara
   nel commit che la introduce, con cosa, perché e cosa non cambia
   (`decisions/ADR-0015-la-deroga-allo-scope-si-dichiara.md`).
