@@ -71,6 +71,12 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-533
 - PBI-535
 
+### Sprint 1 — la panoramica dei PBI di ogni progetto in markdown, con gli sprint
+
+- PBI-538
+- PBI-539
+- ‖ revisione dello sprint 1 con Francesco: `asdlc-panoramica` sui cinque progetti, con la tabella degli sprint; poi tag `v1.2.0` e pin nei cinque repository
+
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
 tocca `coda.py` come il 509 e viene dopo. **`PBI-512`** (la PR a monte del Solver, R5 e R6) esce dal 509 per decisione di Francesco del 16/10 e va subito dopo, perché legge `attende:` e il pin. **`PBI-509`** è stato accodato da Francesco il 16/10
@@ -148,3 +154,10 @@ perché dalla `v1.0.0` la guardia dello Scope decide il merge automatico, e oggi
 sua PR la mergia una persona: il tick con la `v1.0.0` non vede `README.md` nel suo Scope. Fuori da questo giro, per scelta di Francesco: l'indipendenza dal modello,
 una plancia o un'API HTTP, le chiavi API separate per progetto. La sandbox del Builder resta un ADR da
 scrivere (`LETTURA-ADLC-IBM.md`, §3.2), non una voce di coda.
+
+**Sprint 1, `PBI-538` e `PBI-539`** (Francesco, 31/10): la prima coda scritta a sprint (`ADR-0034`). Il
+risultato da mostrare è `asdlc-panoramica` che stampa in markdown i PBI di ogni progetto, divisi in in
+corso, in coda, fatti e fuori coda, e la tabella degli sprint. Fino al `PBI-539` l'intestazione dello
+sprint è prosa per il tick, e la revisione è una barriera come le altre. La sua PR la mergia il tick se
+passa le condizioni di `ADR-0033`; il tag `v1.2.0` e il bump di `tools/pyproject.toml` restano a mano,
+dopo la revisione.
