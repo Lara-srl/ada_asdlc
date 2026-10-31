@@ -392,3 +392,31 @@ def test_un_evento_fuori_da_eventi_non_manda_niente(tmp_path, monkeypatch, webho
     un_tick(repo, albero)
 
     assert webhook.ricevuti == [], webhook.testi()
+
+
+@pytest.mark.parametrize("decisioni", [
+    [coda.Barriera("gh non risponde", guasto=True)] * 2
+    + [coda.Attende("PBI-7", ("https://github.com/Lara-srl/ada_nlt/pull/9",))]
+    + [coda.Barriera("gh non risponde", guasto=True)] * 2,
+    [coda.Lancia("PBI-7"), coda.Attende("PBI-7", ("https://github.com/Lara-srl/ada_nlt/pull/9",)),
+     coda.Lancia("PBI-7")],
+], ids=["guasto", "non-lanciato"])
+def test_un_tick_sano_in_mezzo_ricomincia_il_conto_di_fila(tmp_path, monkeypatch, webhook,
+                                                          tick_configurato, decisioni):
+    """PBI-533, criterio 2 (decisione 2): `guasto` aspetta tre tick **di fila** e
+    `non-lanciato` due. Un tick che decide altro — qui l'attesa di una PR aperta,
+    che non è un evento — rompe la fila: i guasti e i lanci falliti prima e dopo
+    non si sommano, e nessuna `POST` parte."""
+    repo, albero = progetto_finto(tmp_path)
+    da_decidere = iter(decisioni)
+
+    def non_parte(pbi, worktree, **k):
+        raise coda.Guasto("il pre-flight si è fermato su `git fetch origin` (uscita 128)")
+
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: next(da_decidere), lancia=non_parte)
+    mondo_finto(monkeypatch)
+
+    for _ in decisioni:
+        un_tick(repo, albero)
+
+    assert webhook.ricevuti == [], webhook.testi()
