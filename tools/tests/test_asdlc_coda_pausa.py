@@ -169,6 +169,22 @@ def test_pausa_e_togli_pausa_creano_e_tolgono_il_file_senza_decidere(tmp_path, c
     assert chiamati == []
 
 
+def test_pausa_e_togli_pausa_insieme_sono_rifiutati_e_non_toccano_il_file(
+        tmp_path, chiamati):
+    """PBI-535, decisione 3. `--pausa MOTIVO` e `--togli-pausa` si escludono:
+    insieme `argparse` esce 2, il file non c'è e non si decide né si lancia."""
+    repo, albero = un_checkout(tmp_path)
+    file = repo / coda.CFG.registro.cartella / "pausa"
+
+    with pytest.raises(SystemExit) as uscita:
+        coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                     "--pausa", "prova", "--togli-pausa"])
+
+    assert uscita.value.code == 2
+    assert not file.exists()
+    assert chiamati == []
+
+
 def test_pausa_col_lucchetto_del_tick_tenuto_esce_2_e_non_scrive_il_file(
         tmp_path, chiamati, capsys):
     """PBI-535, criterio 2 (decisione 3). Il flag prende il lucchetto del tick,
