@@ -239,7 +239,8 @@ Il tick si ferma con due file di pausa, che si sommano: basta uno dei due (`PBI-
   .venv-asdlc/bin/asdlc-coda --togli-pausa
   ```
 
-  I due flag non fanno altro: non decidono e non lanciano. `--togli-pausa` senza file esce
+  Il file è una riga: data, ora e motivo; a capo e spazi in fila nel motivo diventano uno
+  spazio solo. I due flag non fanno altro: non decidono e non lanciano. `--togli-pausa` senza file esce
   0, e non tocca mai la pausa globale. Prendono il lucchetto del tick, come
   `asdlc-chiudi-giro`: con un tick in corso escono 2 e il file non cambia.
 

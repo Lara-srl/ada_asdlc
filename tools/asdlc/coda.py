@@ -1385,8 +1385,9 @@ def pausa_del_progetto(repo: Path) -> str | None:
 def metti_o_togli_la_pausa(repo: Path, motivo: str | None) -> int:
     """`--pausa MOTIVO` (con `motivo`) o `--togli-pausa` (con `None`): scrive o
     toglie il file di pausa del progetto, e non fa altro — non decide, non lancia
-    (PBI-535, decisione 3). La riga è data, ora e motivo, come la pausa globale.
-    `--togli-pausa` senza file esce 0, e non tocca la pausa globale (decisione 4).
+    (PBI-535, decisione 3). La riga è data, ora e motivo, come la pausa globale:
+    **una**, perché a capo e spazi in fila nel motivo diventano uno spazio solo, e
+    la riga `in pausa: (progetto) …` di `coda.log` non si spezza. `--togli-pausa` senza file esce 0, e non tocca la pausa globale (decisione 4).
 
     Col lucchetto del tick, come `asdlc-chiudi-giro`: se lo tiene un tick in
     corso esce 2 e non tocca il file."""
@@ -1402,7 +1403,9 @@ def metti_o_togli_la_pausa(repo: Path, motivo: str | None) -> int:
             print(f"pausa del progetto tolta: {file}")
         else:
             file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text(f"{datetime.now():%Y-%m-%d %H:%M} {motivo}\n", encoding="utf-8")
+            in_una_riga = " ".join(motivo.split())
+            file.write_text(f"{datetime.now():%Y-%m-%d %H:%M} {in_una_riga}\n",
+                            encoding="utf-8")
             print(f"pausa del progetto messa: {file}")
     return 0
 
