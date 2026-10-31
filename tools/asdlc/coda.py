@@ -593,6 +593,20 @@ def riprendi_dopo(worktree: Path, pbi: str) -> datetime | None:
         return None
 
 
+def fuori_dalla_base(repo: Path) -> str | None:
+    """Perché il checkout non sta sul ramo di `BASE`, o `None` se ci sta: solo
+    `git branch --show-current`, che non sposta niente. È la prima domanda di
+    `allinea()`, e la fa anche `asdlc-stato`, che non allinea (PBI-534,
+    decisione 6)."""
+    ramo = BASE.removeprefix(f"{REMOTO}/")
+    codice, uscita = esegui(["git", "branch", "--show-current"], repo)
+    if codice != 0:
+        return f"`git branch --show-current` è uscito {codice}: {in_una_riga(uscita)}"
+    if uscita.strip() != ramo:
+        return f"il checkout {repo} è su «{uscita.strip()}», non su {ramo}"
+    return None
+
+
 def allinea(repo: Path) -> str | None:
     """Porta il checkout del tick a `origin/main`: `git fetch` e poi `git merge
     --ff-only` nel `--repo` (PBI-392, decisione 7). `None` se c'è riuscito,
@@ -608,12 +622,8 @@ def allinea(repo: Path) -> str | None:
     persona (`ADR-0008`). Il `fetch` ha il tetto di `esegui()`, lo stesso del
     pre-flight.
     """
-    ramo = BASE.removeprefix(f"{REMOTO}/")
-    codice, uscita = esegui(["git", "branch", "--show-current"], repo)
-    if codice != 0:
-        return f"`git branch --show-current` è uscito {codice}: {in_una_riga(uscita)}"
-    if uscita.strip() != ramo:
-        return f"il checkout {repo} è su «{uscita.strip()}», non su {ramo}"
+    if (fuori := fuori_dalla_base(repo)) is not None:
+        return fuori
     for comando in (["git", "fetch", REMOTO], ["git", "merge", "--ff-only", BASE]):
         codice, uscita = esegui(comando, repo)
         if codice != 0:

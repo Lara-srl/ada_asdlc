@@ -9,6 +9,7 @@ scrivere produzione dato dal rosso osservato. Comandi installati:
 | `asdlc-runner` | un giro su un PBI, la guardia di fase (`--guardia-fase`) per l'hook `PreToolUse`, e la pre-verifica di un PBI prima della coda (`PBI-N --preverifica`: rapporto in `runs/<run>-<PBI>-preverifica.json`, esce 1 con un rilievo di forma, gli avvisi non contano; `PBI-520`; con `--lettore` legge anche il Lettore, `PBI-521`) |
 | `asdlc-coda` | il tick: legge `backlog/CODA.md` e lancia il PBI successivo quando il precedente è in `main` |
 | `asdlc-chiudi-giro` | chiude un giro fermato: tag `giro-fermato/…`, ramo tolto |
+| `asdlc-stato` | lo stato dei PBI, in sola lettura: per un progetto, ciò che il tick deciderebbe adesso (`PBI-534`, *Lo stato a comando*) |
 | `asdlc-esito` | il server MCP dell'esito, da cui gli agenti dichiarano com'è andata (`ADR-0027`) |
 
 ## Da dove viene
@@ -275,6 +276,45 @@ systemctl --user daemon-reload && systemctl --user enable --now asdlc-tick.timer
 
 Il lucchetto del tick rende innocuo il doppio passaggio con il cron: il secondo scrive
 `occupato:` e esce.
+
+### Lo stato a comando
+
+`asdlc-stato` dice, senza cercarlo nei log, ciò che il tick vede adesso (`PBI-534`). È di
+**sola lettura**: non prende il lucchetto del tick, non allinea il checkout e non scrive il
+log né il registro. La decisione non è una seconda verità: è quella di `decidi()`, con le
+parole di `racconta()`, le stesse che il tick scrive in `runs/coda.log`. Prima, nell'ordine
+del tick, vengono la pausa (`in pausa: <riga>`) e il ramo del checkout: fuori dal ramo di
+`[git].base` la decisione è `non allineato: …`, la frase del tick, e il checkout resta dov'è.
+
+L'elenco dei progetti è di macchina, come la pausa, e sta fuori dai repository, in
+`~/.config/asdlc/progetti.toml`:
+
+```toml
+checkout = ["/percorso/del/progetto", "/percorso/di/un/altro"]
+```
+
+Il nome di un progetto è il nome della cartella del suo checkout.
+
+```bash
+asdlc-stato                                # tutti i progetti, nell'ordine del file
+asdlc-stato progetto                       # solo quello
+asdlc-stato --repo /percorso/del/progetto  # uno, senza passare dall'elenco
+asdlc-stato --json                         # un oggetto JSON per progetto
+```
+
+Il file che manca o non si legge, e un nome che non c'è, sono un messaggio su stderr e
+l'uscita 2. Un progetto che non si legge invece non ferma gli altri (`ADR-0008`): la sua
+riga è `<nome> · non raggiungibile — <motivo>`, e l'uscita resta 0.
+
+Ogni progetto è una riga: il nome, la decisione, la voce della coda — il PBI o il testo
+della barriera —, lo stato e il motivo dell'ultimo esito del runner (o `-`), e le PR aperte
+sul ramo del PBI (`PR ?` se `gh` non risponde, `PR -` se non ce ne sono), e
+`pin <tag> installato <tag>`: il tag di `[ambiente].installa` e quello della firma
+dell'ultima installazione (`-` se non c'è). Con un `installa` cartella si mostra la cartella
+per tutti e due, e senza `[ambiente].pacchetto` un trattino per tutti e due; una firma che
+non si calcola, o una firma scritta che non si legge, è `pin ? (<motivo>)`. Con `--json` gli
+oggetti hanno le chiavi `progetto`, `decisione`, `voce`, `esito`, `pr`, `pausa`,
+`allineato`, `installato` e `pin`.
 
 ## Linguaggi e stack
 
