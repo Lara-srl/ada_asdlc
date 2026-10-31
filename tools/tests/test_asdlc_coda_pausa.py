@@ -183,3 +183,35 @@ def test_guardia_la_pausa_di_un_progetto_non_ferma_un_altro(tmp_path, chiamati):
 
     assert coda.smista(["--repo", str(libero), "--worktree", str(albero_libero)]) == 0
     assert chiamati == ["decidi", "lancia PBI-337"]
+
+
+# --- Criterio 4: la pausa globale vale ancora, e `--togli-pausa` non la toglie --
+
+
+def test_guardia_la_pausa_globale_vale_ancora_e_togli_pausa_non_la_toglie(
+        tmp_path, home_finta, chiamati):
+    """PBI-535, criterio 4 (decisioni 2 e 4). Con la pausa globale e quella del
+    progetto il tick non lancia e scrive **una** riga, la globale. `--togli-pausa`
+    toglie solo il file del progetto: `~/asdlc-tick.pausa` resta, e il tick dopo
+    è ancora fermo, con la riga globale."""
+    repo, albero = un_checkout(tmp_path)
+    globale = home_finta / "asdlc-tick.pausa"
+    globale.write_text("2026-10-31 09:00 asdlc-chiudi-giro PBI-7\n", encoding="utf-8")
+    del_progetto = pausa_del_progetto_in(repo, "2026-10-31 10:00 prova")
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero)]) == 0
+    assert chiamati == []
+    righe = righe_del_log(repo)
+    assert len(righe) == 1, righe
+    assert righe[0].endswith("  in pausa: 2026-10-31 09:00 asdlc-chiudi-giro PBI-7"), righe
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero),
+                        "--togli-pausa"]) == 0
+    assert not del_progetto.exists()
+    assert globale.read_text(encoding="utf-8") == "2026-10-31 09:00 asdlc-chiudi-giro PBI-7\n"
+
+    assert coda.smista(["--repo", str(repo), "--worktree", str(albero)]) == 0
+    assert chiamati == []
+    righe = righe_del_log(repo)
+    assert len(righe) == 2, righe
+    assert righe[1].endswith("  in pausa: 2026-10-31 09:00 asdlc-chiudi-giro PBI-7"), righe
