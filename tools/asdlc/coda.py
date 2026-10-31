@@ -1360,13 +1360,41 @@ def pausa() -> str | None:
         return f"{file} c'è ma non si legge — {illeggibile}"
 
 
+def pausa_del_progetto(repo: Path) -> str | None:
+    """La riga del file di pausa del progetto, `<repo>/<registro>/pausa`, o `None`
+    se il progetto non è in pausa (PBI-535). Ferma solo il tick di questo
+    checkout; la pausa globale è `pausa()`. Il file si calcola dal `repo` e non
+    dal `LOG`, che i test spostano fuori dal repository (decisione 1).
+
+    Un file che c'è ma non si legge è pausa lo stesso, come per `pausa()`."""
+    file = repo / CFG.registro.cartella / "pausa"
+    if not file.exists():
+        return None
+    try:
+        return file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as illeggibile:
+        return f"{file} c'è ma non si legge — {illeggibile}"
+
+
+def motivo_della_pausa(repo: Path) -> str | None:
+    """Il motivo per cui il tick di `repo` è fermo: la riga della pausa globale,
+    se c'è, altrimenti `(progetto) <riga della pausa del progetto>`; `None` senza
+    pausa. Le due pause si sommano, e con tutte e due vale la globale (PBI-535,
+    decisione 2)."""
+    if (globale := pausa()) is not None:
+        return globale
+    if (del_progetto := pausa_del_progetto(repo)) is not None:
+        return f"(progetto) {del_progetto}"
+    return None
+
+
 def fermo_in_pausa(repo: Path) -> bool:
-    """Il tick è in pausa? Se sì lo dice a schermo e in `coda.log`, con la riga
-    del file: chi legge il log deve vedere perché non è successo niente.
-    `smista()` lo chiede due volte, prima di `decidi()` e prima di `lancia()`.
-    Su Slack la manda il chiamante con `notifica_la_pausa()`, che un `--dry-run`
-    non chiama (PBI-533)."""
-    if (motivo := pausa()) is None:
+    """Il tick è in pausa, globale o del progetto? Se sì lo dice a schermo e in
+    `coda.log`, con la riga del file: chi legge il log deve vedere perché non è
+    successo niente. `smista()` lo chiede due volte, prima di `decidi()` e prima
+    di `lancia()`. Su Slack la manda il chiamante con `notifica_la_pausa()`, che
+    un `--dry-run` non chiama (PBI-533)."""
+    if (motivo := motivo_della_pausa(repo)) is None:
         return False
     riga = f"in pausa: {motivo}"
     print(riga)
