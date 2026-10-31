@@ -4,6 +4,7 @@
 Letto il 30/10 col Lettore (in fondo, *Protocollo*): un fermo e quattro rilievi minori recepiti.
 Preverifica del tick del 31/10: un rilievo (la pausa del progetto non andava su Slack), deciso da
 Francesco il 31/10 — la pausa del progetto va su Slack (decisione 6, criterio 6).
+Giro 1 del 31/10 fermato `rosso-mai-visto` su un test in più; **fatto** con la ripresa (*Il giro 2*, in fondo).
 
 ## Direttiva
 
@@ -55,6 +56,8 @@ tolgono (`--pausa MOTIVO`, `--togli-pausa`), così chi lo fa (una persona o `asd
    progetto>` — lo stesso testo della riga del log dopo `in pausa: `. Con tutte e due manda **una**
    notifica, la globale, come la riga del log. `asdlc_notifiche.pausa()`, la memoria delle notifiche e
    i due punti in cui `passaggio()` la chiama non cambiano; un `--dry-run` resta muto.
+7. **Il motivo può mancare** (Francesco, 31/10, sulla domanda del giro 1): `--pausa ""` o un motivo di
+   soli spazi è accettato e il file è solo `data ora`. Si segnala, non si blocca (`ADR-0008`).
 
 ## Dipendenze
 
@@ -99,7 +102,40 @@ rilievi minori: il file calcolato dal `repo` e non dal `LOG` spostato dei test (
 comincia con `in pausa:` per l'evento di `PBI-533` (decisione 2); il lucchetto tenuto, le due pause
 insieme e il nome `--togli-pausa` al posto di `--riprendi` (decisioni 2 e 3).
 
-**Domanda aperta** (dalla revisione del Critic del 31/10, per chi mergia; `PBI-536` la eredita):
+**Domanda del giro 1, chiusa** dalla decisione 7 (Francesco, 31/10: accettato). Il testo di allora
+(dalla revisione del Critic del 31/10, per chi mergia; `PBI-536` la eredita):
 `--pausa ""`, o un motivo di soli spazi, va **rifiutato** o accettato? Oggi è accettato e il file
 è solo `data ora`, senza motivo; la decisione 1 dice «data, ora e motivo» e non dice se il motivo
 può mancare. Non si è scelto in silenzio: il comportamento resta quello di oggi.
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (31/10, run `20261031-215511`, 21:55-22:15, runner `v1.0.0`) ha fatto i **sei criteri**, RED e
+GREEN per criterio, e li ha spuntati. Il Critic (revisione 0) ha dato «non pronto» con due rilievi: codice
+senza il suo RED (il file di pausa del progetto illeggibile; il gruppo mutuamente esclusivo di `--pausa` e
+`--togli-pausa`) e il motivo con gli a capo che spezzava la riga (decisione 1). Il Builder ha chiuso il
+secondo col suo RED (`15e6255` → `09c7aa7`) e il primo con due test nati verdi: `55be3d9` (il file
+illeggibile) morde, `0d1233a` (i due flag insieme) no — nessun mutante del perimetro lo fa fallire per
+asserzione — e il gate del rosso ha fermato il giro `rosso-mai-visto`. Il tag è
+`giro-fermato/pbi-535-giro1-20261031` (`5ffc7aa`).
+
+**Perché `0d1233a` non è riportato.** Un test nato verde non si toglie con un revert (il gate del rosso
+guarda ogni commit del ramo); il gruppo esclusivo che guardava è già in `34137ae`. Come per il 530 si
+riporta tutto **tranne** quel commit.
+
+**Riportati in questa PR** (`cherry-pick -x` dal tag, quindici commit, da `f11e5a3` a `5ffc7aa`, senza
+`0d1233a`; in `15e6255` il conflitto si è risolto togliendo solo il test di `0d1233a`). Verificato il 31/10
+sul ramo: `python3 -m pytest -q tools/tests` dà `1345 passed`, `git status --porcelain` è vuoto e
+`asdlc-runner --gate-rosso HEAD` dice «nessun test è nato verde». La punta differisce dal tag solo per quel
+test.
+
+**PBI-535 è fatto** con il merge di questa PR: non c'è un giro 2 da lanciare.
+
+**Residui, per chi mergia:**
+- I due flag insieme (`argparse` esce 2) non hanno un test; si riprende se un giro tocca il gruppo
+  esclusivo di `smista()`. Nemmeno `--togli-pausa` col lucchetto tenuto è provato: il criterio 2 non lo
+  chiede, e il ramo di codice è lo stesso di `--pausa`.
+- Le correzioni della revisione 1 (`55be3d9`, `15e6255`, `09c7aa7`) non le ha rilette il Critic, perché il
+  giro si è fermato prima. Le hanno verificate il gate e il gate del rosso.
+- Note del Critic sulla storia: il README dei due flag entra in `e845228` (il commit di Slack) e non nei
+  GREEN di `98a01fa`/`34137ae`. Lo squash, se serve, si fa al merge.
