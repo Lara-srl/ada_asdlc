@@ -1434,8 +1434,11 @@ def fermo_in_pausa(repo: Path) -> bool:
 
 
 def notifica_la_pausa(repo: Path) -> None:
-    """La pausa su Slack, con la riga del file di pausa (PBI-533, decisione 3)."""
-    if (motivo := pausa()) is not None:
+    """La pausa su Slack, con la riga del file di pausa (PBI-533, decisione 3): la
+    globale, o `(progetto) <riga>` con la sola pausa del progetto — lo stesso
+    testo della riga del log dopo `in pausa: `, una notifica sola (PBI-535,
+    decisione 6)."""
+    if (motivo := motivo_della_pausa(repo)) is not None:
         notifica(repo, asdlc_notifiche.pausa(repo.resolve().name, motivo))
 
 
