@@ -552,6 +552,64 @@ def test_senza_il_file_del_webhook_il_tick_lo_dice_una_volta_per_evento(
         "notifica non inviata: file del webhook assente"], righe_del_log(repo)
 
 
+# --- La memoria delle notifiche non ferma il tick ---------------------------
+
+
+@pytest.mark.parametrize("memoria, decisione, senza_webhook, posta", [
+    ({"di_fila": [1], "mandati": []}, coda.Lancia("PBI-7"), False, []),
+    ({"mandati": []}, coda.Finita(), False, ["🏁 ada_nlt: coda finita"]),
+    ({"di_fila": {"guasto": "x"}}, coda.Barriera("gh non risponde", guasto=True), False, []),
+    ({"senza_webhook": []}, coda.Finita(), True, []),
+], ids=["di-fila-lista", "mandati-lista", "conto-testo", "senza-webhook-lista"])
+def test_una_memoria_di_forma_sbagliata_vale_come_vuota(
+        tmp_path, monkeypatch, webhook, tick_configurato, memoria, decisione, senza_webhook,
+        posta):
+    """PBI-533, decisione 6 (`ADR-0008`): una notifica che fallisce non ferma
+    niente, e meno ancora un file di cache. Un `notifiche.json` che è JSON ma non
+    ha la forma della memoria vale come memoria vuota: il tick decide, lancia,
+    scrive la riga di sempre e manda ciò che manderebbe da vuoto, senza righe
+    «notifica non inviata» che non siano quelle di sempre."""
+    repo, albero = progetto_finto(tmp_path)
+    lanciati = []
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: decisione,
+                     lancia=lambda pbi, w, **k: lanciati.append(pbi))
+    mondo_finto(monkeypatch)
+    if senza_webhook:
+        notifiche.file_del_webhook().unlink()
+    (repo / "runs").mkdir()
+    (repo / "runs" / "notifiche.json").write_text(json.dumps(memoria), encoding="utf-8")
+
+    assert un_tick(repo, albero) == 0
+
+    righe = [riga.split("  ", 1)[1] for riga in righe_del_log(repo)]
+    assert righe[0] == coda.racconta(decisione), righe
+    assert lanciati == (["PBI-7"] if isinstance(decisione, coda.Lancia) else []), lanciati
+    assert [riga for riga in righe if riga.startswith("notifica non inviata")] == (
+        ["notifica non inviata: file del webhook assente"] if senza_webhook else []), righe
+    assert webhook.testi() == posta, webhook.testi()
+
+
+def test_una_memoria_che_non_si_scrive_non_ferma_il_tick(
+        tmp_path, monkeypatch, capsys, webhook, tick_configurato):
+    """PBI-533, decisione 6 (`ADR-0008`): `runs/notifiche.json` che non si scrive
+    — qui è una cartella, come un disco pieno o un permesso tolto — non ferma il
+    tick: la decisione va nel log come sempre, e una riga «notifica non inviata»
+    dice cosa è successo, senza l'indirizzo del webhook (decisione 5)."""
+    repo, albero = progetto_finto(tmp_path)
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Finita())
+    mondo_finto(monkeypatch)
+    (repo / "runs" / "notifiche.json").mkdir(parents=True)
+
+    assert un_tick(repo, albero) == 0
+
+    righe = [riga.split("  ", 1)[1] for riga in righe_del_log(repo)]
+    assert righe[0] == "finita: in coda non resta niente da lanciare", righe
+    assert any(riga.startswith("notifica non inviata: ") for riga in righe[1:]), righe
+    indirizzo = webhook.url.split("//", 1)[1].split("/", 1)[0]
+    scritto = "\n".join(righe) + capsys.readouterr().out
+    assert "segreto-del-webhook" not in scritto and indirizzo not in scritto, scritto
+
+
 # --- Criterio 5: senza `[notifiche]` non cambia niente ------------------------
 
 
