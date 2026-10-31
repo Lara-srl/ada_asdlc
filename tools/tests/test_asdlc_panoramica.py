@@ -304,3 +304,22 @@ def test_guardia_una_voce_di_coda_senza_file_e_file_mancante(tmp_path, capsys):
         "1. **PBI-1** — il primo · criteri 0/0",
         "2. **PBI-7** — (file mancante) · criteri 0/0",
     ]
+
+
+@pytest.mark.parametrize(("aperte", "pr"), [
+    ((0, "[]"), "-"),
+    ((0, json.dumps([{"url": "https://esempio/pull/1", "headRefName": "pbi/pbi-5"},
+                     {"url": "https://esempio/pull/2", "headRefName": "pbi/pbi-5-2"}])),
+     "https://esempio/pull/1, https://esempio/pull/2"),
+    ((1, "gh: non autenticato"), "?"),
+], ids=["nessuna", "due", "gh-muto"])
+def test_guardia_le_pr_di_un_pbi_in_corso(tmp_path, capsys, gh_finto, aperte, pr):
+    checkout = progetto(tmp_path, ["- PBI-5"], {"PBI-5-cinque.md": "# PBI-5: il quinto\n"},
+                        rami=("pbi/pbi-5",))
+    gh_finto["open"] = aperte
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    assert sezione(testo, "In corso") == [
+        f"- **PBI-5** — il quinto · criteri 0/0 · PR {pr}"]
