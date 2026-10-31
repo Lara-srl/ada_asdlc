@@ -398,3 +398,12 @@ def test_guardia_la_domanda_finisce_la_riga_in_ogni_sezione(tmp_path, capsys, gh
         "2. **PBI-3** — il terzo · criteri 0/0 · ❓",
     ]
     assert sezione(testo, "Fuori coda") == ["- **PBI-4** — il quarto · criteri 0/0 · ❓"]
+
+
+def test_guardia_un_titolo_senza_prefisso_si_mostra_per_intero(tmp_path, capsys):
+    checkout = progetto(tmp_path, ["- PBI-1"], {"PBI-1-uno.md": "# Il primo, a mano\n"})
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    assert sezione(testo, "In coda") == ["1. **PBI-1** — Il primo, a mano · criteri 0/0"]
