@@ -360,3 +360,20 @@ def test_guardia_un_elenco_illeggibile_esce_2(home_finta, capsys):
 
     assert uscita.out == ""
     assert "non si legge" in uscita.err
+
+
+def test_guardia_un_guasto_dopo_lo_stato_rende_il_progetto_non_raggiungibile(
+    tmp_path, capsys
+):
+    """`stato_o_guasto()` legge il progetto, ma un file di `backlog/` che non è
+    UTF-8 fa cadere le sezioni: il progetto è «non raggiungibile» (decisione 6)."""
+    checkout = progetto(tmp_path, ["- PBI-1"], {"PBI-1-uno.md": "# PBI-1: il primo\n"})
+    (checkout / "backlog" / "PBI-9-rotto.md").write_bytes(b"# PBI-9: \xff\xfe\n")
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    righe = capsys.readouterr().out.splitlines()
+
+    assert righe[0] == "# alfa"
+    assert righe[2].startswith("alfa · non raggiungibile — ")
+    assert "utf-8" in righe[2]
+    assert not any(riga.startswith("## ") for riga in righe)
