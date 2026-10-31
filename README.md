@@ -319,9 +319,12 @@ il nome del progetto, cio√® la cartella del checkout (`ada_nlt`, `ada_asdlc`, ‚Ä
 ```toml
 [notifiche]
 attive = true
+eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto",
+          "non-allineato", "reinstallazione", "pausa"]
 ```
 
-Senza la sezione, o con `attive = false`, il tick non manda niente e non lo dice.
+`eventi` sceglie quali mandare; senza la chiave, tutti. Senza la sezione, o con
+`attive = false`, il tick non manda niente e non lo dice. Il template la porta spenta.
 
 ### Lo stato a comando
 

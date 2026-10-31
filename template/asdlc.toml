@@ -100,6 +100,15 @@ attivo = true
 # Senza la sezione è spenta.
 attiva = true
 
+[notifiche]
+# Le notifiche del tick su Slack. Il webhook è un segreto e non sta qui: l'URL va nel
+# file `.config/asdlc/slack-webhook` della cartella di casa, una riga, permessi 600
+# (il README del pacchetto `asdlc` dice come si crea). Spente finché il webhook
+# della macchina non c'è; `eventi` sceglie quali mandare, e il default è tutti.
+attive = false
+eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto",
+          "non-allineato", "reinstallazione", "pausa"]
+
 # I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.
 # Un gate con `solo_se_tocca` si accende solo se il diff del branch tocca uno di
 # quei percorsi; senza il campo è sempre acceso. La CI

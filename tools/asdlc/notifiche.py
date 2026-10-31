@@ -148,10 +148,10 @@ def leggi_memoria(file: Path) -> dict:
 
 
 def manda(repo: Path, cfg, evento: Evento | None) -> None:
-    """Manda `evento` al webhook, se le notifiche sono accese, l'evento è venuto
-    `di_fila` volte e non è lo stesso evento dell'ultima volta nel suo posto; poi
-    lo scrive nella memoria del checkout."""
-    if evento is None or not cfg.notifiche.attive:
+    """Manda `evento` al webhook, se le notifiche sono accese, l'evento è fra quelli
+    di `[notifiche].eventi`, è venuto `di_fila` volte e non è lo stesso evento
+    dell'ultima volta nel suo posto; poi lo scrive nella memoria del checkout."""
+    if evento is None or not cfg.notifiche.attive or evento.tipo not in cfg.notifiche.eventi:
         return
     file = file_della_memoria(repo, cfg)
     memoria = leggi_memoria(file)

@@ -223,6 +223,10 @@ class Notifiche:
     # Le notifiche del tick su Slack (`PBI-533`, decisione 8): spente se la sezione
     # manca. Il webhook è un segreto e non sta qui, ma in `~/.config/asdlc/slack-webhook`.
     attive: bool = False
+    # Gli eventi da mandare, fra quelli della decisione 3: il default è tutti.
+    eventi: tuple[str, ...] = ("fermo", "non-lanciato", "pronto", "rilascio", "barriera",
+                               "finita", "guasto", "non-allineato", "reinstallazione",
+                               "pausa")
 
 
 @dataclass(frozen=True)
@@ -465,7 +469,8 @@ def interpreta(dati: dict, file: str) -> Config:
     notifiche = Notifiche()
     if "notifiche" in sezione.dati:
         dichiarato = sezione.dentro("notifiche")
-        notifiche = Notifiche(attive=dichiarato.booleano("attive", default=False))
+        notifiche = Notifiche(attive=dichiarato.booleano("attive", default=False),
+                              eventi=dichiarato.testi("eventi", default=Notifiche.eventi))
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:

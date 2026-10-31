@@ -115,6 +115,13 @@ minuti = 30
 # la contiene: il tick gira col pacchetto installato (`ADR-0026`).
 attiva = true
 
+[notifiche]
+# Le notifiche del tick su Slack (PBI-533). Il webhook è un segreto e non sta qui:
+# l'URL va in ~/.config/asdlc/slack-webhook, una riga, permessi 600 (vedi README).
+attive = true
+eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto",
+          "non-allineato", "reinstallazione", "pausa"]
+
 # I gate deterministici, nell'ordine in cui girano. `cwd` è relativo alla radice.
 # Un gate con `solo_se_tocca` si accende solo se il diff del branch tocca uno di
 # quei percorsi; senza il campo è sempre acceso.
