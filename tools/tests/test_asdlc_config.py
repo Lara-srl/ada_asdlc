@@ -542,6 +542,21 @@ def test_l_asdlc_toml_del_repository_dichiara_le_aggiunte_in_asdlc_aggiunte():
     assert cfg.prompt.aggiunte == (PROGETTO / "asdlc-aggiunte").resolve()
 
 
+# --- [notifiche] (PBI-533) ----------------------------------------------------
+
+
+@pytest.mark.parametrize("chiave", ["attiva", "evento"])
+def test_una_chiave_di_notifiche_sconosciuta_e_un_errore_che_la_nomina(tmp_path, chiave):
+    """PBI-533, decisione 8: `[notifiche]` ha solo `attive` ed `eventi`. Un refuso
+    — `attiva` è la grafia di `[preverifica].attiva` — lascerebbe le notifiche
+    spente senza che nessuno lo sappia: il fermo silenzioso che il PBI chiude."""
+    scrivi_toml(tmp_path, TOML_DI_PROVA + f'\n[notifiche]\n{chiave} = true\n')
+
+    with pytest.raises(asdlc_config.ErroreDiConfigurazione,
+                       match=rf"\[notifiche\]\.{chiave}"):
+        asdlc_config.carica(tmp_path)
+
+
 # --- L'`asdlc.toml` vero del progetto ospite (PBI-395, decisione 10) ----------
 
 
