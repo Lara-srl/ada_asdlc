@@ -219,6 +219,17 @@ class Tick:
 
 
 @dataclass(frozen=True)
+class Notifiche:
+    # Le notifiche del tick su Slack (`PBI-533`, decisione 8): spente se la sezione
+    # manca. Il webhook è un segreto e non sta qui, ma in `~/.config/asdlc/slack-webhook`.
+    attive: bool = False
+    # Gli eventi da mandare, fra quelli della decisione 3: il default è tutti.
+    eventi: tuple[str, ...] = ("fermo", "non-lanciato", "pronto", "rilascio", "barriera",
+                               "finita", "guasto", "non-allineato", "reinstallazione",
+                               "pausa")
+
+
+@dataclass(frozen=True)
 class Config:
     git: Git
     backlog: Backlog
@@ -235,6 +246,7 @@ class Config:
     preverifica: Preverifica = Preverifica()
     rilascio: Rilascio = Rilascio()
     tick: Tick = Tick()
+    notifiche: Notifiche = Notifiche()
 
 
 def radice(cwd: Path) -> Path:
@@ -453,6 +465,21 @@ def interpreta(dati: dict, file: str) -> Config:
                         perche="la sezione dice la soglia del battito del tick")
         tick = Tick(soglia_battito_minuti=dichiarato.positivo("soglia_battito_minuti",
                                                               default=30))
+    # Facoltativa: senza, il tick non manda niente e non lo dice (`PBI-533`, decisione 8).
+    notifiche = Notifiche()
+    if "notifiche" in sezione.dati:
+        dichiarato = sezione.dentro("notifiche")
+        dichiarato.solo("attive", "eventi",
+                        perche="la sezione dice se il tick manda le notifiche su Slack "
+                               "e quali eventi")
+        notifiche = Notifiche(attive=dichiarato.booleano("attive", default=False),
+                              eventi=dichiarato.testi("eventi", default=Notifiche.eventi))
+        # Un nome fuori dalla tabella della decisione 3 non partirebbe mai, e in silenzio.
+        for evento in notifiche.eventi:
+            if evento not in Notifiche.eventi:
+                raise ErroreDiConfigurazione(
+                    f"{file}: `[notifiche].eventi` nomina {evento!r}, che non è un evento "
+                    f"— sono {', '.join(Notifiche.eventi)}")
     # Un pacchetto senza sapere da dove reinstallarlo si ferma: un `"./tools"`
     # implicito è la causa `default-implicito` (PBI-395, decisione 2).
     if "pacchetto" in ambiente.dati and "installa" not in ambiente.dati:
@@ -486,6 +513,7 @@ def interpreta(dati: dict, file: str) -> Config:
         preverifica=preverifica,
         rilascio=rilascio,
         tick=tick,
+        notifiche=notifiche,
     )
 
 

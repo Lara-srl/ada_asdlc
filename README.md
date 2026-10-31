@@ -277,6 +277,69 @@ systemctl --user daemon-reload && systemctl --user enable --now asdlc-tick.timer
 Il lucchetto del tick rende innocuo il doppio passaggio con il cron: il secondo scrive
 `occupato:` e esce.
 
+### Le notifiche del tick su Slack
+
+Il tick manda un messaggio su Slack quando la sua decisione **cambia** verso uno stato che
+chiede una persona, o che una persona vuole sapere (`PBI-533`). Un messaggio per cambio, non
+uno ogni dieci minuti: l'ultimo evento mandato sta in `runs/notifiche.json` del checkout, e
+lo stesso evento — stesso tipo, stesso PBI, stesso motivo — non si rimanda. Il messaggio porta
+il nome del progetto, cioè la cartella del checkout (`ada_nlt`, `ada_asdlc`, …).
+
+| Evento | Quando |
+|---|---|
+| `fermo` | un PBI col ramo e senza PR, col motivo e la domanda del rapporto; o fermo in pre-verifica |
+| `non-lanciato` | il lancio dello stesso PBI non parte per due tick di fila |
+| `pronto` | una PR che il tick non mergia e aspetta una persona, con la condizione che manca |
+| `rilascio` | il tick taglia un tag |
+| `barriera` | una barriera scritta in `CODA.md` |
+| `finita` | la coda è finita |
+| `guasto` | il tick non riesce a decidere (`gh` che non risponde, la coda che non si legge) per tre tick di fila |
+| `non-allineato` | il checkout del tick non è su `main` o non si allinea |
+| `reinstallazione` | la reinstallazione del pacchetto è fallita |
+| `pausa` | il tick è in pausa, con la riga del file di pausa |
+
+**Il webhook, una volta per macchina:**
+
+1. Su <https://api.slack.com/apps> si crea un'app (*From scratch*) nello spazio di lavoro, si
+   apre *Incoming Webhooks*, si accende e si fa *Add New Webhook to Workspace* sul canale
+   scelto. Slack dà un URL `https://hooks.slack.com/services/…`.
+2. L'URL è un segreto, e va in un file fuori dai repository, letto da tutti i progetti della
+   macchina:
+
+   ```bash
+   mkdir -p ~/.config/asdlc
+   printf '%s\n' 'https://hooks.slack.com/services/…' > ~/.config/asdlc/slack-webhook
+   chmod 600 ~/.config/asdlc/slack-webhook
+   ```
+
+   Non sta in `asdlc.toml`, che è versionato e non porta percorsi di macchina.
+
+**In ogni progetto,** in `asdlc.toml`:
+
+```toml
+[notifiche]
+attive = true
+eventi = ["fermo", "non-lanciato", "pronto", "rilascio", "barriera", "finita", "guasto",
+          "non-allineato", "reinstallazione", "pausa"]
+```
+
+`eventi` sceglie quali mandare; senza la chiave, tutti. Senza la sezione, o con
+`attive = false`, il tick non manda niente e non lo dice. Il template la porta spenta.
+Una chiave diversa da `attive` ed `eventi` (un `attiva = true`, per dire) è un errore
+che la nomina, come in ogni altra sezione: un refuso non spegne le notifiche in silenzio.
+Lo stesso vale per un nome in `eventi` che non è uno dei dieci qui sopra (`"non_lanciato"`,
+`"fermi"`): l'errore lo nomina invece di lasciare che quell'evento non parta mai.
+Un `asdlc-tick --dry-run` non manda niente nemmeno con le notifiche accese, e lascia
+`runs/notifiche.json` com'era: il tick vero dopo trova ciò che avrebbe trovato senza.
+
+Una notifica che fallisce non ferma niente: una `POST` sola per evento, con un tetto di
+10 secondi, poi una riga `notifica non inviata: <esito>` in `runs/coda.log` («HTTP 500»,
+«scaduto dopo 10 s») e il tick prosegue; il tick dopo ci riprova. Con il file del webhook
+assente la riga dice `file del webhook assente`, una volta per evento. L'indirizzo del
+webhook non compare mai, né nel log né a schermo. `runs/notifiche.json` è una cache: se non
+ha la sua forma vale come vuoto, e se non si scrive (disco pieno, permessi) la riga dice
+`notifica non inviata: <funzione> ha alzato <errore>` e il tick decide e lancia come sempre.
+
 ### Lo stato a comando
 
 `asdlc-stato` dice, senza cercarlo nei log, ciò che il tick vede adesso (`PBI-534`). È di

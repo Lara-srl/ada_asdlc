@@ -50,6 +50,8 @@ from asdlc import config as asdlc_config  # noqa: E402
 # La ricerca degli eseguibili e delle versioni è la stessa del runner: il tick la
 # fa prima di lanciare, sullo stesso `asdlc.toml` (PBI-384).
 from asdlc import runner as asdlc_runner  # noqa: E402
+# Le notifiche su Slack dei cambi di decisione (PBI-533).
+from asdlc import notifiche as asdlc_notifiche  # noqa: E402
 
 # Le costanti che seguono nascono da `asdlc.toml`, in `configura()`: è lo stesso
 # file che legge il runner, quindi il tick e il runner non possono più dire due
@@ -108,9 +110,14 @@ class Finita:
 
 @dataclass(frozen=True)
 class Barriera:
-    """La coda si ferma qui, e questo è ciò che aspetta."""
+    """La coda si ferma qui, e questo è ciò che aspetta.
+
+    `guasto` dice se la barriera non è scritta in `CODA.md` ma nasce in `decidi()`
+    da un `Guasto` o da una coda che non si legge: è la sorgente dell'evento
+    `guasto` delle notifiche, e non il testo (PBI-533, decisione 3)."""
 
     testo: str
+    guasto: bool = False
 
 
 @dataclass(frozen=True)
@@ -499,9 +506,9 @@ def decidi(repo: Path, worktree: Path) -> Decisione:
         voci = leggi_voci(file_coda.read_text(encoding="utf-8"))
         mergiati, rami = pbi_mergiati(repo), pbi_con_ramo(repo)
     except OSError as illeggibile:
-        return Barriera(f"la coda non si legge — {file_coda.name}: {illeggibile}")
+        return Barriera(f"la coda non si legge — {file_coda.name}: {illeggibile}", guasto=True)
     except Guasto as guasto:
-        return Barriera(str(guasto))
+        return Barriera(str(guasto), guasto=True)
     decisione = prossimo(voci, mergiati, rami, occupato=False)
     # Solo sull'attesa: la riga dice cosa c'è sul ramo, e la PR nata senza URL
     # si ritrova qui senza riscrivere il registro del giro (PBI-381).
@@ -912,6 +919,26 @@ def avvisa_il_fermo(repo: Path, worktree: Path, pbi: str, riga: str) -> str | No
     return f"avviso: issue «{titolo}» — gh issue create (uscita {codice}): {in_una_riga(uscita)}"
 
 
+def notifica(repo: Path, evento: asdlc_notifiche.Evento | None) -> None:
+    """Manda `evento` su Slack (PBI-533); se l'invio non riesce, la riga che lo dice
+    va a schermo e in `coda.log`, e il tick prosegue (`ADR-0008`)."""
+    di_la_non_inviata(repo, asdlc_notifiche.manda(repo, CFG, evento))
+
+
+def di_la_non_inviata(repo: Path, non_inviata: str | None) -> None:
+    """La riga «notifica non inviata» che una funzione di `asdlc.notifiche` rende,
+    a schermo e in `coda.log`; `None` non scrive niente (PBI-533)."""
+    if non_inviata is not None:
+        print(non_inviata)
+        scrivi_nel_log(repo, non_inviata)
+
+
+def rompi_ogni_fila(repo: Path) -> None:
+    """Il tick che esce senza continuare la fila del `guasto` o del `non lanciato`
+    la rompe: «di fila» vuol dire tick consecutivi (PBI-533, decisione 2)."""
+    di_la_non_inviata(repo, asdlc_notifiche.rompi_le_file(repo, CFG, None, None))
+
+
 def scrivi_nel_log(repo: Path, riga: str) -> None:
     """Una riga in coda a `runs/coda.log`, con l'ora davanti.
 
@@ -1064,7 +1091,12 @@ def passo_del_merge(repo: Path, worktree: Path) -> list[str]:
 def _mergia_una(repo: Path, worktree: Path, pr: dict) -> list[str]:
     numero = pr["number"]
     if (manca := condizione_mancante(repo, worktree, pr)) is not None:
-        return [f"merge: #{numero} attende una persona — {manca}"]
+        # La PR che aspetta una persona va su Slack, una volta per PR (PBI-533).
+        righe = [f"merge: #{numero} attende una persona — {manca}"]
+        if non_inviata := asdlc_notifiche.manda(
+                repo, CFG, asdlc_notifiche.pronto(repo.resolve().name, numero, manca)):
+            righe.append(non_inviata)
+        return righe
     # Il PBI che le condizioni hanno verificato: quello del ramo, non del titolo.
     pbi = CFG.backlog.id_di(RE_RAMO_PR.match(pr["headRefName"]).group(1))
     codice, uscita = esegui(["gh", "pr", "merge", str(numero), "--merge"], repo)
@@ -1140,6 +1172,9 @@ def passo_di_rilascio(repo: Path) -> list[str]:
                              f"arrivato su {REMOTO} (uscita {codice}): {in_una_riga(uscita)}")
                 continue
             righe.append(f"rilascio: {pbi} → {tag}")
+            if non_inviata := asdlc_notifiche.manda(
+                    repo, CFG, asdlc_notifiche.rilascio(repo.resolve().name, pbi, tag)):
+                righe.append(non_inviata)
     return righe
 
 
@@ -1328,13 +1363,21 @@ def pausa() -> str | None:
 def fermo_in_pausa(repo: Path) -> bool:
     """Il tick è in pausa? Se sì lo dice a schermo e in `coda.log`, con la riga
     del file: chi legge il log deve vedere perché non è successo niente.
-    `smista()` lo chiede due volte, prima di `decidi()` e prima di `lancia()`."""
+    `smista()` lo chiede due volte, prima di `decidi()` e prima di `lancia()`.
+    Su Slack la manda il chiamante con `notifica_la_pausa()`, che un `--dry-run`
+    non chiama (PBI-533)."""
     if (motivo := pausa()) is None:
         return False
     riga = f"in pausa: {motivo}"
     print(riga)
     scrivi_nel_log(repo, riga)
     return True
+
+
+def notifica_la_pausa(repo: Path) -> None:
+    """La pausa su Slack, con la riga del file di pausa (PBI-533, decisione 3)."""
+    if (motivo := pausa()) is not None:
+        notifica(repo, asdlc_notifiche.pausa(repo.resolve().name, motivo))
 
 
 def adesso() -> datetime:
@@ -1425,7 +1468,11 @@ def smista(argv: list[str] | None = None) -> int:
 
 
 def passaggio(a: argparse.Namespace) -> int:
-    """Il tick col suo lucchetto in mano: il battito, la pausa, la decisione, il lancio."""
+    """Il tick col suo lucchetto in mano: il battito, la pausa, la decisione, il lancio.
+
+    Ogni riga che chiede una persona va anche su Slack, dal sito che la scrive
+    (PBI-533, decisione 10); il nome del progetto è la cartella del checkout."""
+    progetto = a.repo.resolve().name
     # Il battito per primo, prima del pin e della pausa: l'avviso va nel log prima di
     # fare altro, e un tick in pausa batte lo stesso, perché la pausa è un gesto e non
     # un guasto (PBI-510, decisioni 3 e 4).
@@ -1437,6 +1484,10 @@ def passaggio(a: argparse.Namespace) -> int:
     # La pausa prima di ogni domanda al mondo, e prima anche del `--dry-run`, che
     # deve dire ciò che un tick vero farebbe: niente (PBI-385, decisione 5).
     if fermo_in_pausa(a.repo):
+        # Un `--dry-run` non manda niente su Slack (PBI-533).
+        if not a.dry_run:
+            rompi_ogni_fila(a.repo)
+            notifica_la_pausa(a.repo)
         return 0
     # Dopo la pausa — chi l'ha messa sta lavorando a mano sul checkout — e prima
     # di decidere, col lucchetto del tick già preso.
@@ -1444,6 +1495,8 @@ def passaggio(a: argparse.Namespace) -> int:
         riga = f"non allineato: {ragione}"
         print(riga)
         scrivi_nel_log(a.repo, riga)
+        rompi_ogni_fila(a.repo)
+        notifica(a.repo, asdlc_notifiche.non_allineato(progetto, ragione))
         return 0
     # Il merge prima del rilascio: il tag segue il merge nello stesso passaggio (`ADR-0033`).
     for riga in () if a.dry_run else mergia(a.repo, a.worktree) + rilascia(a.repo):
@@ -1452,6 +1505,8 @@ def passaggio(a: argparse.Namespace) -> int:
     if not a.dry_run and (riga := reinstalla(a.repo, a.worktree)) is not None:
         print(riga)
         scrivi_nel_log(a.repo, riga)
+        rompi_ogni_fila(a.repo)
+        notifica(a.repo, asdlc_notifiche.reinstallazione(progetto, riga))
         return 0
     if a.dry_run and (riga := indietro(a.repo)) is not None:
         print(riga)
@@ -1467,6 +1522,19 @@ def passaggio(a: argparse.Namespace) -> int:
         riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
     print(riga)
     scrivi_nel_log(a.repo, riga)
+    # La decisione che chiede una persona va su Slack, una volta per cambio (PBI-533).
+    # Non da un `--dry-run`: niente `POST`, e la memoria delle notifiche resta com'è,
+    # perché il tick vero dopo deve trovare ciò che avrebbe trovato senza.
+    if not a.dry_run:
+        esito = (ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende)
+                 else None)
+        evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
+        # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
+        di_la_non_inviata(a.repo, asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento))
+        notifica(a.repo, evento)
+        # Un giro in corso azzera l'ultimo evento: il fermo dopo è di un giro nuovo.
+        if isinstance(decisione, Occupato):
+            di_la_non_inviata(a.repo, asdlc_notifiche.azzera(a.repo, CFG))
     # Il fermo `non convergente` si fa sapere fuori dal log (PBI-525, decisione 6).
     if (isinstance(decisione, Attende) and not a.dry_run
             and (avviso := avvisa_il_fermo(a.repo, a.worktree, decisione.pbi, riga))):
@@ -1485,10 +1553,13 @@ def passaggio(a: argparse.Namespace) -> int:
             riga = prefisso + "; ".join(m.removeprefix(prefisso) for m in mancanze)
             print(riga)
             scrivi_nel_log(a.repo, riga)
+            rompi_ogni_fila(a.repo)
             return 1
         # La seconda lettura, subito prima del lancio: la pausa può essere nata
         # mentre questo tick decideva, e chi l'ha creata sta chiudendo un giro.
         if fermo_in_pausa(a.repo):
+            rompi_ogni_fila(a.repo)
+            notifica_la_pausa(a.repo)
             return 0
         try:
             # Il lancio di sempre resta la chiamata di sempre; la ripresa lo dice.
@@ -1499,7 +1570,14 @@ def passaggio(a: argparse.Namespace) -> int:
             # riga che dice «lancia», cioè il contrario di quel che è successo.
             print(guasto)
             scrivi_nel_log(a.repo, f"non lanciato: {guasto}")
+            notifica(a.repo, asdlc_notifiche.non_lanciato(
+                progetto, decisione.pbi, in_una_riga(str(guasto))))
             return 1
+        # Solo il lancio riuscito azzera: il `non lanciato` dello stesso tick no
+        # (PBI-533, decisione 2). E rompe la fila del `non lanciato`, che questo
+        # tick non continua.
+        di_la_non_inviata(a.repo, asdlc_notifiche.azzera(a.repo, CFG))
+        rompi_ogni_fila(a.repo)
     return 0
 
 
