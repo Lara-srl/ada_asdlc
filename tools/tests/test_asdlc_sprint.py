@@ -71,6 +71,15 @@ def test_un_intestazione_di_sprint_scritta_male_chiude_lo_sprint_prima():
     assert coda.leggi_sprint(testo) == [coda.Sprint(1, "uno", ("PBI-1",), None)]
 
 
+def test_una_barriera_dello_sprint_che_non_e_la_sua_revisione_non_e_la_revisione():
+    """Decisione 2: la revisione è la barriera che comincia con `revisione dello
+    sprint <numero>`, non la prima barriera dello sprint. Un `‖ pin` dentro lo
+    sprint 1 resta una barriera qualunque."""
+    testo = "### Sprint 1 — il PDF\n- PBI-1\n- ‖ pin\n"
+
+    assert coda.leggi_sprint(testo) == [coda.Sprint(1, "il PDF", ("PBI-1",), None)]
+
+
 # --- Criterio 2: gli avvisi al lancio del primo PBI dello sprint --------------
 
 
