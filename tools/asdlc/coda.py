@@ -186,6 +186,57 @@ def leggi_voci(testo: str) -> list[Voce]:
     return voci
 
 
+@dataclass(frozen=True)
+class Sprint:
+    """Uno sprint di `CODA.md` (`ADR-0034`, PBI-539): il numero, il risultato da
+    mostrare (`""` se l'intestazione non lo dice), i PBI in ordine di file, e il
+    testo della barriera che comincia con `revisione dello sprint <numero>`, o
+    `None`. È una lettura e non cambia la coda: `prossimo()` non la guarda."""
+
+    numero: int
+    risultato: str
+    pbi: tuple[str, ...]
+    revisione: str | None
+
+
+# L'intestazione di uno sprint, `### Sprint N — <risultato da mostrare>`.
+RE_SPRINT = re.compile(r"^###\s+Sprint\s+(\d+)\s*—\s*(.*?)\s*$")
+# Ogni intestazione `###` o `##` chiude lo sprint aperto, anche quella di uno
+# sprint scritto male (PBI-539, decisione 1).
+RE_INTESTAZIONE = re.compile(r"^#{2,3}\s")
+
+
+def leggi_sprint(testo: str) -> list[Sprint]:
+    """Gli sprint di `CODA.md`, nell'ordine del file; `[]` senza intestazioni.
+    Le voci prima del primo sprint, o dopo un'intestazione che chiude l'ultimo,
+    non sono di nessuno sprint. Usa `RE_PBI`: richiede `configura()`."""
+    sprint: list[Sprint] = []
+    aperto: tuple[int, str, list[str], list[str]] | None = None
+
+    def chiudi() -> None:
+        if aperto is not None:
+            numero, risultato, pbi, revisioni = aperto
+            sprint.append(Sprint(numero, risultato, tuple(pbi),
+                                 revisioni[0] if revisioni else None))
+
+    for riga in testo.splitlines():
+        if (intestazione := RE_SPRINT.match(riga)) is not None:
+            chiudi()
+            aperto = (int(intestazione.group(1)), intestazione.group(2), [], [])
+        elif RE_INTESTAZIONE.match(riga):
+            chiudi()
+            aperto = None
+        elif aperto is None:
+            continue
+        elif (pbi := RE_PBI.match(riga)) is not None:
+            aperto[2].append(pbi.group(1))
+        elif ((barriera := RE_BARRIERA.match(riga)) is not None
+              and re.match(rf"revisione dello sprint {aperto[0]}(?!\d)", barriera.group(1))):
+            aperto[3].append(barriera.group(1))
+    chiudi()
+    return sprint
+
+
 def prossimo(
     voci: list[Voce], mergiati: set[str], rami: set[str], occupato: bool
 ) -> Decisione:
@@ -425,6 +476,57 @@ def avviso_domande(repo: Path, pbi: str) -> str:
         if trovato is not None:
             return trovato.group(0).strip()
     return ""
+
+
+# Quanti PBI può avere uno sprint (`ADR-0034`): oltre, è un avviso e non un blocco.
+PBI_PER_SPRINT = 5
+
+
+def avvisi_dello_sprint(repo: Path, pbi: str) -> list[str]:
+    """Gli avvisi dello sprint di cui `pbi` è il primo PBI (PBI-539, decisione 3):
+    troppi PBI, nessun risultato da mostrare, nessuna revisione. Il lancio degli
+    altri PBI dello sprint non li ripete, e non trattengono il lancio
+    (`ADR-0008`). Una `CODA.md` che manca o non si legge non ne dà."""
+    try:
+        sprint = leggi_sprint((repo / CODA).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return []
+    avvisi: list[str] = []
+    for s in sprint:
+        if s.pbi[:1] != (pbi,):
+            continue
+        if len(s.pbi) > PBI_PER_SPRINT:
+            avvisi.append(f"avviso, lo sprint {s.numero} ha {len(s.pbi)} PBI "
+                          f"(al più {PBI_PER_SPRINT})")
+        if not s.risultato:
+            avvisi.append(f"avviso, lo sprint {s.numero} non dice il risultato da mostrare")
+        if s.revisione is None:
+            avvisi.append(f"avviso, lo sprint {s.numero} non finisce con la sua revisione")
+    return avvisi
+
+
+def revisione_della_barriera(repo: Path, barriera: Barriera) -> asdlc_notifiche.Evento | None:
+    """L'evento della revisione dello sprint se `barriera` è la sua (PBI-539,
+    decisione 4), altrimenti `None` e resta l'evento della barriera di sempre: una
+    barriera di guasto, una che non è una revisione, una `CODA.md` che non si
+    legge. I fatti sono i PBI dello sprint in `pbi_mergiati()`, chiesto di nuovo
+    perché `decidi()` non lo rende; `None` con un `Guasto`."""
+    if barriera.guasto:
+        return None
+    try:
+        sprint = leggi_sprint((repo / CODA).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+    for s in sprint:
+        if s.revisione == barriera.testo:
+            try:
+                mergiati = pbi_mergiati(repo)
+            except Guasto:
+                fatti = None
+            else:
+                fatti = [p for p in s.pbi if p in mergiati]
+            return asdlc_notifiche.revisione(repo.resolve().name, s, fatti)
+    return None
 
 
 def giro_in_corso(worktree: Path) -> bool:
@@ -1596,6 +1698,10 @@ def passaggio(a: argparse.Namespace) -> int:
     # e si segnala (`ADR-0008`).
     if isinstance(decisione, Lancia) and (avviso := avviso_domande(a.repo, decisione.pbi)):
         riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
+    # Gli avvisi dello sprint, al lancio del suo primo PBI, come quello delle domande:
+    # si segnala e si lancia (PBI-539).
+    if isinstance(decisione, Lancia):
+        riga += "".join(f" — {avviso}" for avviso in avvisi_dello_sprint(a.repo, decisione.pbi))
     print(riga)
     scrivi_nel_log(a.repo, riga)
     # La decisione che chiede una persona va su Slack, una volta per cambio (PBI-533).
@@ -1605,6 +1711,10 @@ def passaggio(a: argparse.Namespace) -> int:
         esito = (ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende)
                  else None)
         evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
+        # La barriera della revisione di uno sprint porta il risultato e i fatti (PBI-539).
+        if isinstance(decisione, Barriera) and (
+                sprint := revisione_della_barriera(a.repo, decisione)) is not None:
+            evento = sprint
         # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
         di_la_non_inviata(a.repo, asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento))
         notifica(a.repo, evento)

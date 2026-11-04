@@ -305,6 +305,16 @@ fuori dal conto, e il rapporto si scrive lo stesso.
   è più vecchio di una soglia (`[tick].soglia_battito_minuti`, default 30), l'avviso parte: al passaggio dopo, il tick legge il
   battito precedente e, se il distacco supera la soglia, scrive l'avviso a schermo e in
   `coda.log` prima di fare altro. Il passaggio prosegue (`ADR-0008`).
+- **Gli sprint (`PBI-539`, `ADR-0034`):** un'intestazione `### Sprint N — <risultato>` di
+  `CODA.md` raccoglie le voci che la seguono fino alla prossima intestazione `###` o `##`;
+  la revisione dello sprint è la sua barriera che comincia con `revisione dello sprint N`.
+  `leggi_sprint()` li legge accanto a `leggi_voci()`, che non cambia: l'ordine e le fermate
+  della coda restano quelli delle voci. Al lancio del primo PBI di uno sprint la riga del log
+  porta gli avvisi dello sprint (più di `PBI_PER_SPRINT = 5` PBI, nessun risultato, nessuna
+  revisione), accanto a quello delle domande, e il lancio avviene; gli altri PBI dello sprint
+  non li ripetono. La barriera della revisione di uno sprint manda su Slack l'evento
+  `barriera` di `notifiche.revisione()`, col risultato e i PBI dello sprint in
+  `pbi_mergiati()` (`fatti: ?` se `gh` non risponde); ogni altra barriera manda la riga di sempre.
 - **Limite dichiarato:** se il PC è spento o in sospensione, la coda si ferma e riprende da
   sola alla ripartenza. Un server sempre acceso è un'alternativa da rivalutare se i progetti
   crescono.

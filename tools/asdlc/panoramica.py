@@ -1,8 +1,9 @@
 """`asdlc-panoramica`: i PBI di ogni progetto in markdown, in sola lettura (PBI-538).
 
-Per ogni progetto i PBI divisi in in corso, in coda, fatti e fuori coda, col titolo
-e i criteri spuntati. Non è una seconda verità: i dati vengono dalle funzioni del
-tick (`coda.leggi_voci()`, `coda.pbi_mergiati()`, `coda.pbi_con_ramo()`,
+Per ogni progetto la tabella degli sprint (PBI-539) e i PBI divisi in in corso, in
+coda, fatti e fuori coda, col titolo e i criteri spuntati. Non è una seconda verità:
+i dati vengono dalle funzioni del tick (`coda.leggi_voci()`, `coda.leggi_sprint()`,
+`coda.pbi_mergiati()`, `coda.pbi_con_ramo()`,
 `coda.pr_sul_ramo()`), e gli argomenti, l'elenco dei progetti e la riga di stato
 da `asdlc-stato`. Non prende il lucchetto del tick, non fa `fetch` e non scrive
 né il log né il registro.
@@ -91,13 +92,43 @@ def guasto_in_riga(guasto: coda.Guasto) -> str:
     return f"- ? {' '.join(str(guasto).split())}"
 
 
+def stato_dello_sprint(sprint: coda.Sprint, mergiati: set[str], rami: set[str]) -> str:
+    """Lo stato di uno sprint (PBI-539, decisione 5): chiuso, in revisione, in corso
+    o da fare."""
+    if all(p in mergiati for p in sprint.pbi):
+        return "chiuso" if sprint.revisione is None else "in revisione"
+    if any(p in mergiati or p in rami for p in sprint.pbi):
+        return "in corso"
+    return "da fare"
+
+
+def tabella_degli_sprint(testo: str, mergiati: set[str], rami: set[str],
+                         guasto: bool) -> list[str]:
+    """La sezione `## Sprint`, una riga per sprint di `CODA.md` (PBI-539, decisione
+    5). Con `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`. Senza
+    sprint la sezione non c'è: `[]`."""
+    tutti = coda.leggi_sprint(testo)
+    if not tutti:
+        return []
+    righe = ["## Sprint", "| Sprint | Risultato | Fatti | Stato |", "|---|---|---|---|"]
+    for sprint in tutti:
+        if guasto:
+            fatti, stato_ = "?", "?"
+        else:
+            fatti = f"{sum(p in mergiati for p in sprint.pbi)}/{len(sprint.pbi)}"
+            stato_ = stato_dello_sprint(sprint, mergiati, rami)
+        righe.append(f"| {sprint.numero} | {sprint.risultato} | {fatti} | {stato_} |")
+    return righe
+
+
 def sezioni(checkout: Path) -> list[str]:
-    """Le quattro sezioni di un progetto (decisione 4). `gh` o `origin` che non
-    rispondono lasciano la loro sezione con un `- ?` (`gh` muto sulle PR mergiate
-    anche Fuori coda), e le voci si trattano come non fatte e senza ramo
-    (decisione 6)."""
+    """La tabella degli sprint (PBI-539) e le quattro sezioni di un progetto
+    (decisione 4). `gh` o `origin` che non rispondono lasciano la loro sezione con
+    un `- ?` (`gh` muto sulle PR mergiate anche Fuori coda), e le voci si trattano
+    come non fatte e senza ramo (decisione 6)."""
     coda.configura(coda.asdlc_config.carica(checkout))
-    voci = coda.leggi_voci((checkout / coda.CODA).read_text(encoding="utf-8"))
+    testo_coda = (checkout / coda.CODA).read_text(encoding="utf-8")
+    voci = coda.leggi_voci(testo_coda)
     file = file_dei_pbi(checkout)
     guasto_fatti = guasto_rami = None
     try:
@@ -141,7 +172,8 @@ def sezioni(checkout: Path) -> list[str]:
         fuori = [f"- {riga_del_pbi(p, file[p])}"
                  for p in in_ordine_di_numero(set(file) - in_coda_o_fatti)]
 
-    righe: list[str] = []
+    righe = tabella_degli_sprint(testo_coda, mergiati, rami,
+                                 guasto_fatti is not None or guasto_rami is not None)
     for titolo, contenuto in (("In corso", in_corso), ("In coda", in_coda),
                               ("Fatti", fatti), ("Fuori coda", fuori)):
         righe += [f"## {titolo}", *(contenuto or [NESSUNO])]

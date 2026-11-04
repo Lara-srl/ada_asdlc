@@ -87,6 +87,20 @@ repository, perché l'installazione usa `git+ssh`.
 6. La voce in coda si spegne quando una PR mergiata nomina il PBI e tocca file fuori da
    `backlog/`.
 
+### Gli sprint nella coda
+
+Si lavora a sprint (`ADR-0034`): da 1 a 5 PBI sotto un'intestazione `### Sprint N —
+<risultato da mostrare>` di `CODA.md`, chiusi da una barriera `- ‖ revisione dello sprint N …`.
+Uno sprint contiene le voci `- PBI` e `- ‖` che seguono la sua intestazione, fino alla
+prossima intestazione `###` o `##` di qualunque testo; le voci fuori da ogni sprint non sono
+di nessuno. Gli sprint non cambiano l'ordine né le fermate della coda: il tick li legge
+(`leggi_sprint()`) e osserva, senza bloccare niente (`PBI-539`): al lancio del primo PBI di
+uno sprint la riga del log aggiunge, ognuno preceduto da ` — `, `avviso, lo sprint N ha K PBI
+(al più 5)`, `avviso, lo sprint N non dice il risultato da mostrare` e `avviso, lo sprint N
+non finisce con la sua revisione`, quando valgono. Quando la coda arriva alla revisione di uno
+sprint, su Slack va il risultato con i PBI dello sprint già mergiati, al posto della riga della
+barriera. Una `CODA.md` che non si legge non dà avvisi, e la barriera manda la riga di sempre.
+
 Se una domanda si apre a giro iniziato, il Builder chiama `fermati` e la coda si blocca da
 sé. Un giro fermato si chiude con `asdlc-chiudi-giro`, che mette il tag `giro-fermato/…` e
 toglie il ramo. Il rapporto e i log dei giri stanno in `runs/`.
@@ -318,7 +332,7 @@ il nome del progetto, cioè la cartella del checkout (`ada_nlt`, `ada_asdlc`, �
 | `non-lanciato` | il lancio dello stesso PBI non parte per due tick di fila |
 | `pronto` | una PR che il tick non mergia e aspetta una persona, con la condizione che manca |
 | `rilascio` | il tick taglia un tag |
-| `barriera` | una barriera scritta in `CODA.md` |
+| `barriera` | una barriera scritta in `CODA.md`; quella della revisione di uno sprint dice `🎯 <progetto>: sprint N pronto per la revisione — <risultato> · fatti: PBI-a, PBI-b` (`?` se `gh` non risponde) |
 | `finita` | la coda è finita |
 | `guasto` | il tick non riesce a decidere (`gh` che non risponde, la coda che non si legge) per tre tick di fila |
 | `non-allineato` | il checkout del tick non è su `main` o non si allinea |
@@ -420,10 +434,14 @@ asdlc-panoramica --repo /percorso/del/progetto  # uno, senza passare dall'elenco
 asdlc-panoramica > panoramica.md                # in un file
 ```
 
-Per ogni progetto, una sezione `# <nome>` con sotto la riga di `asdlc-stato` e quattro
-sezioni:
+Per ogni progetto, una sezione `# <nome>` con sotto la riga di `asdlc-stato`, la tabella
+degli sprint e quattro sezioni:
 
 ```markdown
+## Sprint
+| Sprint | Risultato | Fatti | Stato |
+|---|---|---|---|
+| N | <risultato> | <fatti>/<totale> | chiuso, in revisione, in corso o da fare |
 ## In corso
 - **PBI-XXX** — <titolo> · criteri <x>/<y> · PR <url>, <url> (o -)
 ## In coda
@@ -435,6 +453,10 @@ sezioni:
 - **PBI-XXX** — <titolo> · criteri <x>/<y>
 ```
 
+- **Sprint:** una riga per sprint di `CODA.md` (`PBI-539`); lo stato è **chiuso** se tutti i
+  PBI sono fatti e la barriera di revisione non c'è più, **in revisione** se sono tutti fatti e
+  la barriera c'è, **in corso** se almeno uno è fatto o ha un ramo, **da fare** altrimenti; con
+  `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`; senza sprint la sezione non c'è;
 - **In corso:** le voci di `CODA.md` non fatte che hanno un ramo su `origin`, con le PR
   aperte sul ramo (`-` se non ce ne sono, `?` se `gh` non risponde);
 - **In coda:** le altre voci non fatte, nell'ordine del file, numerate, con le barriere al

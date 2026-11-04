@@ -425,3 +425,107 @@ def test_guardia_un_titolo_senza_prefisso_si_mostra_per_intero(tmp_path, capsys)
     testo = capsys.readouterr().out
 
     assert sezione(testo, "In coda") == ["1. **PBI-1** — Il primo, a mano · criteri 0/0"]
+
+
+# --- PBI-539, criterio 4: la tabella degli sprint -----------------------------------
+
+
+# La coda del criterio 1 di PBI-539: `PBI-0` fuori da ogni sprint, lo sprint 1 con la
+# sua revisione, lo sprint 2 senza risultato, e `PBI-9` dopo un'intestazione che lo chiude.
+CODA_DEGLI_SPRINT = [
+    "- PBI-0", "", "### Sprint 1 — il PDF", "", "- PBI-1", "- PBI-2",
+    "- ‖ revisione dello sprint 1 con Jona: il PDF", "", "### Sprint 2 —", "", "- PBI-3",
+    "", "## Note", "", "- PBI-9",
+]
+
+
+def pr_mergiate(*pbi):
+    return json.dumps([{"title": f"{p}: fatto", "headRefName": f"pbi/{p.lower()}",
+                        "files": [{"path": "tools/asdlc/x.py"}]} for p in pbi])
+
+
+def test_la_panoramica_ha_la_tabella_degli_sprint_dopo_la_riga_di_stato(
+    tmp_path, capsys, gh_finto
+):
+    checkout = progetto(tmp_path, CODA_DEGLI_SPRINT, {})
+    gh_finto["merged"] = (0, pr_mergiate("PBI-1", "PBI-2"))
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    righe = testo.splitlines()
+    assert righe.index("## Sprint") < righe.index("## In corso"), testo
+    assert sezione(testo, "Sprint") == [
+        "| Sprint | Risultato | Fatti | Stato |",
+        "|---|---|---|---|",
+        "| 1 | il PDF | 2/2 | in revisione |",
+        "| 2 |  | 0/1 | da fare |",
+    ]
+
+
+@pytest.mark.parametrize("mergiati, rami, attese", [
+    # Tutti fatti e la revisione tolta dalla coda: chiuso.
+    (("PBI-1", "PBI-2"), (), "| 1 | il PDF | 2/2 | chiuso |"),
+    # Uno fatto: in corso.
+    (("PBI-1",), (), "| 1 | il PDF | 1/2 | in corso |"),
+    # Nessuno fatto e uno col ramo: in corso.
+    ((), ("pbi/pbi-1",), "| 1 | il PDF | 0/2 | in corso |"),
+], ids=["chiuso", "in-corso-con-un-fatto", "in-corso-con-un-ramo"])
+def test_lo_stato_dello_sprint_viene_dai_fatti_dai_rami_e_dalla_revisione(
+    tmp_path, capsys, gh_finto, mergiati, rami, attese
+):
+    coda_md = CODA_DEGLI_SPRINT
+    if attese.endswith("chiuso |"):
+        coda_md = [r for r in coda_md if not r.startswith("- ‖")]
+    checkout = progetto(tmp_path, coda_md, {}, rami=rami)
+    gh_finto["merged"] = (0, pr_mergiate(*mergiati))
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+
+    assert attese in sezione(capsys.readouterr().out, "Sprint")
+
+
+def test_con_gh_muto_fatti_e_stato_dello_sprint_sono_un_punto_di_domanda(
+    tmp_path, capsys, gh_finto
+):
+    checkout = progetto(tmp_path, CODA_DEGLI_SPRINT, {})
+    gh_finto["merged"] = (1, "gh: rete assente")
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+
+    assert sezione(capsys.readouterr().out, "Sprint")[2:] == [
+        "| 1 | il PDF | ? | ? |",
+        "| 2 |  | ? | ? |",
+    ]
+
+
+def test_una_coda_senza_sprint_non_ha_la_sezione_sprint(tmp_path, capsys):
+    checkout = progetto(tmp_path, CODA_DI_PROVA, FILE_DI_PROVA)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+
+    assert "## Sprint" not in capsys.readouterr().out.splitlines()
+
+
+def test_con_origin_muto_fatti_e_stato_dello_sprint_sono_un_punto_di_domanda(
+    tmp_path, capsys, gh_finto, monkeypatch
+):
+    """Decisione 5: non solo `gh`, anche `origin` che non risponde lascia `?` in
+    `Fatti` e `Stato`, e non uno stato calcolato su rami che non si conoscono."""
+    checkout = progetto(tmp_path, CODA_DEGLI_SPRINT, {})
+    gh_finto["merged"] = (0, pr_mergiate("PBI-1"))
+    finta = coda.esegui
+
+    def esegui(cmd, cwd):
+        if "ls-remote" in cmd:
+            return 1, "fatal: impossibile raggiungere origin"
+        return finta(cmd, cwd)
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+
+    assert sezione(capsys.readouterr().out, "Sprint")[2:] == [
+        "| 1 | il PDF | ? | ? |",
+        "| 2 |  | ? | ? |",
+    ]

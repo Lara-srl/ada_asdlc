@@ -154,6 +154,7 @@ def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
     coda.configura(asdlc_config.carica(nata))
     try:
         voci = coda.leggi_voci(testo)
+        sprint = coda.leggi_sprint(testo)
     finally:
         coda.configura(di_prima)
     prosa = testo.split("## La coda", 1)[0]
@@ -162,6 +163,31 @@ def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
     assert "## La coda" in intestazioni(testo)
     assert "- PBI-" in prosa
     assert "- ‖" in prosa
+    # La grammatica degli sprint, nella prosa e fra apici inversi: non è uno sprint
+    # (PBI-539, decisione 6).
+    assert "### Sprint N — " in prosa
+    assert "ADR-0034" in prosa
+    assert sprint == []
+
+
+@pytest.mark.progetto_ospite
+def test_la_riga_dello_sprint_del_template_e_una_riga_di_prosa_con_la_sua_regola(tmp_path):
+    """PBI-539, decisione 6: la riga ``- `### Sprint N — <risultato da mostrare>` ``
+    sta nella prosa, fra apici inversi come le righe delle voci, con il rimando a
+    `ADR-0034`; letta col modello dell'id del progetto nato, non è uno sprint."""
+    testo = (template() / "backlog" / "CODA.md").read_text(encoding="utf-8")
+    prosa = testo.split("## La coda", 1)[0]
+    righe = [r for r in prosa.splitlines()
+             if r.startswith("- `### Sprint N — <risultato da mostrare>`")]
+
+    assert len(righe) == 1, prosa
+    assert "ADR-0034" in prosa.split(righe[0], 1)[1].split("\n\n", 1)[0] or "ADR-0034" in righe[0]
+    di_prima = coda.CFG
+    coda.configura(asdlc_config.carica(nasci(tmp_path)))
+    try:
+        assert coda.leggi_sprint(testo) == []
+    finally:
+        coda.configura(di_prima)
 
 
 @pytest.mark.progetto_ospite
