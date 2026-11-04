@@ -309,9 +309,10 @@ fuori dal conto, e il rapporto si scrive lo stesso.
   `CODA.md` raccoglie le voci che la seguono fino alla prossima intestazione `###` o `##`;
   la revisione dello sprint è la sua barriera che comincia con `revisione dello sprint N`.
   `leggi_sprint()` li legge accanto a `leggi_voci()`, che non cambia: l'ordine e le fermate
-  della coda restano quelli delle voci. Al lancio di un PBI di uno sprint la riga del log
+  della coda restano quelli delle voci. Al lancio del primo PBI di uno sprint la riga del log
   porta gli avvisi dello sprint (più di `PBI_PER_SPRINT = 5` PBI, nessun risultato, nessuna
-  revisione), accanto a quello delle domande, e il lancio avviene.
+  revisione), accanto a quello delle domande, e il lancio avviene; gli altri PBI dello sprint
+  non li ripetono.
 - **Limite dichiarato:** se il PC è spento o in sospensione, la coda si ferma e riprende da
   sola alla ripartenza. Un server sempre acceso è un'alternativa da rivalutare se i progetti
   crescono.

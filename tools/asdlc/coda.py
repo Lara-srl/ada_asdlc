@@ -483,8 +483,9 @@ PBI_PER_SPRINT = 5
 
 
 def avvisi_dello_sprint(repo: Path, pbi: str) -> list[str]:
-    """Gli avvisi dello sprint di `pbi` (PBI-539, decisione 3): troppi PBI, nessun
-    risultato da mostrare, nessuna revisione. Non trattengono il lancio
+    """Gli avvisi dello sprint di cui `pbi` è il primo PBI (PBI-539, decisione 3):
+    troppi PBI, nessun risultato da mostrare, nessuna revisione. Il lancio degli
+    altri PBI dello sprint non li ripete, e non trattengono il lancio
     (`ADR-0008`). Una `CODA.md` che manca o non si legge non ne dà."""
     try:
         sprint = leggi_sprint((repo / CODA).read_text(encoding="utf-8"))
@@ -492,7 +493,7 @@ def avvisi_dello_sprint(repo: Path, pbi: str) -> list[str]:
         return []
     avvisi: list[str] = []
     for s in sprint:
-        if pbi not in s.pbi:
+        if s.pbi[:1] != (pbi,):
             continue
         if len(s.pbi) > PBI_PER_SPRINT:
             avvisi.append(f"avviso, lo sprint {s.numero} ha {len(s.pbi)} PBI "
@@ -1673,7 +1674,8 @@ def passaggio(a: argparse.Namespace) -> int:
     # e si segnala (`ADR-0008`).
     if isinstance(decisione, Lancia) and (avviso := avviso_domande(a.repo, decisione.pbi)):
         riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
-    # Gli avvisi dello sprint, come quello delle domande: si segnala e si lancia (PBI-539).
+    # Gli avvisi dello sprint, al lancio del suo primo PBI, come quello delle domande:
+    # si segnala e si lancia (PBI-539).
     if isinstance(decisione, Lancia):
         riga += "".join(f" — {avviso}" for avviso in avvisi_dello_sprint(a.repo, decisione.pbi))
     print(riga)

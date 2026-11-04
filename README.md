@@ -94,8 +94,8 @@ Si lavora a sprint (`ADR-0034`): da 1 a 5 PBI sotto un'intestazione `### Sprint 
 Uno sprint contiene le voci `- PBI` e `- ‖` che seguono la sua intestazione, fino alla
 prossima intestazione `###` o `##` di qualunque testo; le voci fuori da ogni sprint non sono
 di nessuno. Gli sprint non cambiano l'ordine né le fermate della coda: il tick li legge
-(`leggi_sprint()`) e osserva, senza bloccare niente (`PBI-539`): al lancio di un PBI di uno
-sprint la riga del log aggiunge, ognuno preceduto da ` — `, `avviso, lo sprint N ha K PBI
+(`leggi_sprint()`) e osserva, senza bloccare niente (`PBI-539`): al lancio del primo PBI di
+uno sprint la riga del log aggiunge, ognuno preceduto da ` — `, `avviso, lo sprint N ha K PBI
 (al più 5)`, `avviso, lo sprint N non dice il risultato da mostrare` e `avviso, lo sprint N
 non finisce con la sua revisione`, quando valgono. Una `CODA.md` che non si legge non dà avvisi.
 
