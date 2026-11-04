@@ -8,6 +8,7 @@ webhook il server di `test_asdlc_notifiche.py`.
 """
 
 import importlib
+import json
 from pathlib import Path
 
 import pytest
@@ -120,3 +121,31 @@ def test_il_lancio_di_un_altro_pbi_dello_sprint_non_ripete_gli_avvisi(
 
     assert not [r for r in righe_del_log(repo) if "sprint" in r], righe_del_log(repo)
     assert lanciati == ["PBI-2"]
+
+
+# --- Criterio 3: la revisione va su Slack col risultato e i fatti -------------
+
+
+PBI_1_MERGIATO = json.dumps([{"title": "PBI-1: il primo", "headRefName": "pbi/pbi-1",
+                              "files": [{"path": "uno.py"}]}])
+
+
+def test_la_revisione_dello_sprint_va_su_slack_col_risultato_e_i_fatti(
+        tmp_path, monkeypatch, webhook, tick_configurato):
+    """Una barriera qualunque manda il messaggio di sempre; quella della revisione
+    dello sprint 1 dice lo sprint, il risultato e i PBI fatti, cioè mergiati."""
+    repo, albero = progetto_finto(tmp_path, CODA_DEGLI_SPRINT)
+    mondo_finto(monkeypatch, merged=(0, PBI_1_MERGIATO))
+    decisioni = iter([coda.Barriera("pin"),
+                      coda.Barriera("revisione dello sprint 1 con Jona: il PDF")])
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: next(decisioni))
+
+    un_tick(repo, albero)
+    un_tick(repo, albero)
+
+    assert len(webhook.testi()) == 2, webhook.testi()
+    di_sempre, revisione = webhook.testi()
+    assert "barriera — pin" in di_sempre, di_sempre
+    assert "sprint 1 pronto per la revisione" in revisione, revisione
+    assert "il PDF" in revisione and "PBI-1" in revisione, revisione
+    assert "PBI-2" not in revisione, revisione
