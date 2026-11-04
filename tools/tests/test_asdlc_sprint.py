@@ -112,3 +112,11 @@ def test_il_lancio_del_primo_pbi_dello_sprint_porta_gli_avvisi_e_parte(
         assert avviso in righe[0], righe[0]
     assert lanciati == ["PBI-1"]
 
+
+
+def test_il_lancio_di_un_altro_pbi_dello_sprint_non_ripete_gli_avvisi(
+        tmp_path, monkeypatch, home_in_tmp, tick_configurato):
+    repo, lanciati = tick_che_lancia(tmp_path, monkeypatch, "PBI-2")
+
+    assert not [r for r in righe_del_log(repo) if "sprint" in r], righe_del_log(repo)
+    assert lanciati == ["PBI-2"]
