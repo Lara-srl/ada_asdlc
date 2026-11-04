@@ -180,3 +180,21 @@ def test_la_revisione_dello_sprint_va_su_slack_col_risultato_e_i_fatti(
     assert "sprint 1 pronto per la revisione" in revisione, revisione
     assert "il PDF" in revisione and "PBI-1" in revisione, revisione
     assert "PBI-2" not in revisione, revisione
+
+
+def test_con_gh_muto_la_revisione_dice_fatti_col_punto_di_domanda(
+        tmp_path, monkeypatch, webhook, tick_configurato):
+    """Decisione 4: se `gh` non risponde alla chiamata di `pbi_mergiati()` che la
+    revisione fa dopo `decidi()`, il messaggio parte lo stesso con `fatti: ?`, e il
+    tick finisce come sempre."""
+    repo, albero = progetto_finto(tmp_path, CODA_DEGLI_SPRINT)
+    mondo_finto(monkeypatch, merged=(1, "gh: rete assente"))
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Barriera(
+        "revisione dello sprint 1 con Jona: il PDF"))
+
+    assert un_tick(repo, albero) == 0
+
+    assert len(webhook.testi()) == 1, webhook.testi()
+    revisione = webhook.testi()[0]
+    assert "sprint 1 pronto per la revisione" in revisione, revisione
+    assert "fatti: ?" in revisione, revisione
