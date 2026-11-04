@@ -35,7 +35,7 @@ rilegge.
 - `tools/asdlc/coda.py`: `condizione_mancante()` e `CONDIZIONI_DEL_MERGE`, la seconda condizione
   (decisione 7).
 - `tools/tests/test_asdlc_ripresa_solver.py`: i test dei criteri 1-6 e il parametro `domanda-del-critic`
-  che esce (criterio 6, nel commit GREEN del criterio 1). `tools/tests/test_asdlc_rilascio.py`, dove stanno i test del merge del tick (`PBI-530`): il
+  che esce (criterio 6, nel commit RED del criterio 1). `tools/tests/test_asdlc_rilascio.py`, dove stanno i test del merge del tick (`PBI-530`): il
   criterio 7. `tools/tests/test_asdlc_runner.py`: il criterio 8, accanto al
   test del corpo della PR.
 - `README.md`, `specs/solver-e-rilascio/spec.md` (la sezione «La ripresa dopo `risolto`», la frase «Gli
@@ -167,7 +167,10 @@ rilegge.
       **Test che cambia:** in `test_gli_altri_esiti_e_gli_altri_blocchi_non_riprendono_il_builder`
       (`tools/tests/test_asdlc_ripresa_solver.py`) il parametro `id="domanda-del-critic"` (Critic
       `sospeso` e Solver `RISOLTO`) **esce**. Questo PBI rovescia proprio quel comportamento, e il suo caso
-      è il criterio 1: esce **nel commit GREEN del criterio 1**, che è quello che lo fa diventare rosso.
+      è il criterio 1: esce **nel commit RED del criterio 1**, accanto al test nuovo. Non nel GREEN: in
+      `IMPL` la guardia di fase e il `pre-commit` rifiutano ogni file di test cambiato (`PBI-525`), e in
+      `TEST_ONLY` togliere un parametro non cambia il permesso di `--chiedi-impl`, che gira i test nuovi
+      (rilievo F della preverifica del 04/11).
       Gli altri tre parametri restano com'erano.
 - [ ] **Il tick non mergia un giro ripreso dopo la domanda del Critic.** Una PR che passa ogni altra
       condizione e un ultimo rapporto `fatto` con `riprese_critic: 1`: `condizione_mancante()` rende «il
