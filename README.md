@@ -97,7 +97,9 @@ di nessuno. Gli sprint non cambiano l'ordine né le fermate della coda: il tick 
 (`leggi_sprint()`) e osserva, senza bloccare niente (`PBI-539`): al lancio del primo PBI di
 uno sprint la riga del log aggiunge, ognuno preceduto da ` — `, `avviso, lo sprint N ha K PBI
 (al più 5)`, `avviso, lo sprint N non dice il risultato da mostrare` e `avviso, lo sprint N
-non finisce con la sua revisione`, quando valgono. Una `CODA.md` che non si legge non dà avvisi.
+non finisce con la sua revisione`, quando valgono. Quando la coda arriva alla revisione di uno
+sprint, su Slack va il risultato con i PBI dello sprint già mergiati, al posto della riga della
+barriera. Una `CODA.md` che non si legge non dà avvisi, e la barriera manda la riga di sempre.
 
 Se una domanda si apre a giro iniziato, il Builder chiama `fermati` e la coda si blocca da
 sé. Un giro fermato si chiude con `asdlc-chiudi-giro`, che mette il tag `giro-fermato/…` e
@@ -330,7 +332,7 @@ il nome del progetto, cioè la cartella del checkout (`ada_nlt`, `ada_asdlc`, �
 | `non-lanciato` | il lancio dello stesso PBI non parte per due tick di fila |
 | `pronto` | una PR che il tick non mergia e aspetta una persona, con la condizione che manca |
 | `rilascio` | il tick taglia un tag |
-| `barriera` | una barriera scritta in `CODA.md` |
+| `barriera` | una barriera scritta in `CODA.md`; quella della revisione di uno sprint dice `🎯 <progetto>: sprint N pronto per la revisione — <risultato> · fatti: PBI-a, PBI-b` (`?` se `gh` non risponde) |
 | `finita` | la coda è finita |
 | `guasto` | il tick non riesce a decidere (`gh` che non risponde, la coda che non si legge) per tre tick di fila |
 | `non-allineato` | il checkout del tick non è su `main` o non si allinea |

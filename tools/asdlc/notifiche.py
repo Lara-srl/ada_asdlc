@@ -119,6 +119,19 @@ def della_decisione(decisione, progetto: str, esito: dict | None, riga: str) -> 
     return None
 
 
+def revisione(progetto: str, sprint, fatti: list[str] | None) -> Evento:
+    """La barriera della revisione di `sprint` (PBI-539, decisione 4): un evento
+    `barriera`, con lo stesso filtro di `[notifiche].eventi` e la stessa chiave
+    della barriera di sempre, il suo testo. `sprint` è uno `Sprint` del tick, letto
+    per attributi (`numero`, `risultato`, `revisione`) e non importato, come le
+    decisioni di `della_decisione()`. `fatti` sono i PBI dello sprint mergiati,
+    `None` se `gh` non ha risposto: il testo dice `fatti: ?`."""
+    elenco = "?" if fatti is None else ", ".join(fatti)
+    return Evento("barriera", "", sprint.revisione,
+                  f"🎯 {progetto}: sprint {sprint.numero} pronto per la revisione — "
+                  f"{sprint.risultato} · fatti: {elenco}")
+
+
 def non_lanciato(progetto: str, pbi: str, motivo: str) -> Evento:
     """Il `non lanciato` di `pbi`: si manda al secondo tick di fila sullo stesso PBI.
     Il motivo porta l'uscita di un comando e cambia da un tick all'altro, quindi

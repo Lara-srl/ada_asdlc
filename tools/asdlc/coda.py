@@ -505,6 +505,30 @@ def avvisi_dello_sprint(repo: Path, pbi: str) -> list[str]:
     return avvisi
 
 
+def revisione_della_barriera(repo: Path, barriera: Barriera) -> asdlc_notifiche.Evento | None:
+    """L'evento della revisione dello sprint se `barriera` è la sua (PBI-539,
+    decisione 4), altrimenti `None` e resta l'evento della barriera di sempre: una
+    barriera di guasto, una che non è una revisione, una `CODA.md` che non si
+    legge. I fatti sono i PBI dello sprint in `pbi_mergiati()`, chiesto di nuovo
+    perché `decidi()` non lo rende; `None` con un `Guasto`."""
+    if barriera.guasto:
+        return None
+    try:
+        sprint = leggi_sprint((repo / CODA).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+    for s in sprint:
+        if s.revisione == barriera.testo:
+            try:
+                mergiati = pbi_mergiati(repo)
+            except Guasto:
+                fatti = None
+            else:
+                fatti = [p for p in s.pbi if p in mergiati]
+            return asdlc_notifiche.revisione(repo.resolve().name, s, fatti)
+    return None
+
+
 def giro_in_corso(worktree: Path) -> bool:
     """C'è già un runner al lavoro in quell'albero?
 
@@ -1687,6 +1711,10 @@ def passaggio(a: argparse.Namespace) -> int:
         esito = (ultimo_esito(a.worktree, decisione.pbi) if isinstance(decisione, Attende)
                  else None)
         evento = asdlc_notifiche.della_decisione(decisione, progetto, esito, riga)
+        # La barriera della revisione di uno sprint porta il risultato e i fatti (PBI-539).
+        if isinstance(decisione, Barriera) and (
+                sprint := revisione_della_barriera(a.repo, decisione)) is not None:
+            evento = sprint
         # Una decisione diversa rompe la fila dei guasti e dei lanci falliti (decisione 2).
         di_la_non_inviata(a.repo, asdlc_notifiche.rompi_le_file(a.repo, CFG, decisione, evento))
         notifica(a.repo, evento)
