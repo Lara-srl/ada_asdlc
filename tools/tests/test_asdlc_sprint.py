@@ -198,3 +198,22 @@ def test_con_gh_muto_la_revisione_dice_fatti_col_punto_di_domanda(
     revisione = webhook.testi()[0]
     assert "sprint 1 pronto per la revisione" in revisione, revisione
     assert "fatti: ?" in revisione, revisione
+
+
+def test_una_barriera_di_guasto_col_testo_della_revisione_manda_il_guasto(
+        tmp_path, monkeypatch, webhook, tick_configurato):
+    """Decisione 4: una barriera di guasto è il guasto di sempre anche se il suo
+    testo è quello della revisione di uno sprint. Il guasto aspetta tre tick di
+    fila, e la sola `POST` è la sua: nessuna revisione."""
+    repo, albero = progetto_finto(tmp_path, CODA_DEGLI_SPRINT)
+    mondo_finto(monkeypatch, merged=(0, PBI_1_MERGIATO))
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Barriera(
+        "revisione dello sprint 1 con Jona: il PDF", guasto=True))
+
+    for _ in range(3):
+        un_tick(repo, albero)
+
+    assert len(webhook.testi()) == 1, webhook.testi()
+    guasto = webhook.testi()[0]
+    assert "il tick non riesce" in guasto, guasto
+    assert "pronto per la revisione" not in guasto, guasto
