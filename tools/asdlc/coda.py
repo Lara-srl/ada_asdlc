@@ -186,6 +186,57 @@ def leggi_voci(testo: str) -> list[Voce]:
     return voci
 
 
+@dataclass(frozen=True)
+class Sprint:
+    """Uno sprint di `CODA.md` (`ADR-0034`, PBI-539): il numero, il risultato da
+    mostrare (`""` se l'intestazione non lo dice), i PBI in ordine di file, e il
+    testo della barriera che comincia con `revisione dello sprint <numero>`, o
+    `None`. È una lettura e non cambia la coda: `prossimo()` non la guarda."""
+
+    numero: int
+    risultato: str
+    pbi: tuple[str, ...]
+    revisione: str | None
+
+
+# L'intestazione di uno sprint, `### Sprint N — <risultato da mostrare>`.
+RE_SPRINT = re.compile(r"^###\s+Sprint\s+(\d+)\s*—\s*(.*?)\s*$")
+# Ogni intestazione `###` o `##` chiude lo sprint aperto, anche quella di uno
+# sprint scritto male (PBI-539, decisione 1).
+RE_INTESTAZIONE = re.compile(r"^#{2,3}\s")
+
+
+def leggi_sprint(testo: str) -> list[Sprint]:
+    """Gli sprint di `CODA.md`, nell'ordine del file; `[]` senza intestazioni.
+    Le voci prima del primo sprint, o dopo un'intestazione che chiude l'ultimo,
+    non sono di nessuno sprint. Usa `RE_PBI`: richiede `configura()`."""
+    sprint: list[Sprint] = []
+    aperto: tuple[int, str, list[str], list[str]] | None = None
+
+    def chiudi() -> None:
+        if aperto is not None:
+            numero, risultato, pbi, revisioni = aperto
+            sprint.append(Sprint(numero, risultato, tuple(pbi),
+                                 revisioni[0] if revisioni else None))
+
+    for riga in testo.splitlines():
+        if (intestazione := RE_SPRINT.match(riga)) is not None:
+            chiudi()
+            aperto = (int(intestazione.group(1)), intestazione.group(2), [], [])
+        elif RE_INTESTAZIONE.match(riga):
+            chiudi()
+            aperto = None
+        elif aperto is None:
+            continue
+        elif (pbi := RE_PBI.match(riga)) is not None:
+            aperto[2].append(pbi.group(1))
+        elif ((barriera := RE_BARRIERA.match(riga)) is not None
+              and re.match(rf"revisione dello sprint {aperto[0]}(?!\d)", barriera.group(1))):
+            aperto[3].append(barriera.group(1))
+    chiudi()
+    return sprint
+
+
 def prossimo(
     voci: list[Voce], mergiati: set[str], rami: set[str], occupato: bool
 ) -> Decisione:

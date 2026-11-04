@@ -87,6 +87,15 @@ repository, perché l'installazione usa `git+ssh`.
 6. La voce in coda si spegne quando una PR mergiata nomina il PBI e tocca file fuori da
    `backlog/`.
 
+### Gli sprint nella coda
+
+Si lavora a sprint (`ADR-0034`): da 1 a 5 PBI sotto un'intestazione `### Sprint N —
+<risultato da mostrare>` di `CODA.md`, chiusi da una barriera `- ‖ revisione dello sprint N …`.
+Uno sprint contiene le voci `- PBI` e `- ‖` che seguono la sua intestazione, fino alla
+prossima intestazione `###` o `##` di qualunque testo; le voci fuori da ogni sprint non sono
+di nessuno. Gli sprint non cambiano l'ordine né le fermate della coda: il tick li legge
+(`leggi_sprint()`) e osserva, senza bloccare niente (`PBI-539`).
+
 Se una domanda si apre a giro iniziato, il Builder chiama `fermati` e la coda si blocca da
 sé. Un giro fermato si chiude con `asdlc-chiudi-giro`, che mette il tag `giro-fermato/…` e
 toglie il ramo. Il rapporto e i log dei giri stanno in `runs/`.
