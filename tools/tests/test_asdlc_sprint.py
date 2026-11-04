@@ -80,6 +80,14 @@ def test_una_barriera_dello_sprint_che_non_e_la_sua_revisione_non_e_la_revisione
     assert coda.leggi_sprint(testo) == [coda.Sprint(1, "il PDF", ("PBI-1",), None)]
 
 
+def test_la_revisione_dello_sprint_10_non_e_quella_dello_sprint_1():
+    """Decisione 2: il numero della revisione è quello dello sprint, per intero.
+    `revisione dello sprint 10` dentro lo sprint 1 non è la sua revisione."""
+    testo = "### Sprint 1 — il PDF\n- PBI-1\n- ‖ revisione dello sprint 10 con Jona\n"
+
+    assert coda.leggi_sprint(testo) == [coda.Sprint(1, "il PDF", ("PBI-1",), None)]
+
+
 # --- Criterio 2: gli avvisi al lancio del primo PBI dello sprint --------------
 
 
