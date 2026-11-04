@@ -171,6 +171,26 @@ def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
 
 
 @pytest.mark.progetto_ospite
+def test_la_riga_dello_sprint_del_template_e_una_riga_di_prosa_con_la_sua_regola(tmp_path):
+    """PBI-539, decisione 6: la riga ``- `### Sprint N — <risultato da mostrare>` ``
+    sta nella prosa, fra apici inversi come le righe delle voci, con il rimando a
+    `ADR-0034`; letta col modello dell'id del progetto nato, non è uno sprint."""
+    testo = (template() / "backlog" / "CODA.md").read_text(encoding="utf-8")
+    prosa = testo.split("## La coda", 1)[0]
+    righe = [r for r in prosa.splitlines()
+             if r.startswith("- `### Sprint N — <risultato da mostrare>`")]
+
+    assert len(righe) == 1, prosa
+    assert "ADR-0034" in prosa.split(righe[0], 1)[1].split("\n\n", 1)[0] or "ADR-0034" in righe[0]
+    di_prima = coda.CFG
+    coda.configura(asdlc_config.carica(nasci(tmp_path)))
+    try:
+        assert coda.leggi_sprint(testo) == []
+    finally:
+        coda.configura(di_prima)
+
+
+@pytest.mark.progetto_ospite
 def test_la_riga_di_cron_del_template_lancia_il_tick_del_pacchetto_del_template():
     """`<checkout>` resta un segnaposto: lo sostituisce chi installa. Il
     `pacchetto` invece è quello di `template/asdlc.toml` (PBI-502, decisione 9)."""
