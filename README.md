@@ -434,10 +434,14 @@ asdlc-panoramica --repo /percorso/del/progetto  # uno, senza passare dall'elenco
 asdlc-panoramica > panoramica.md                # in un file
 ```
 
-Per ogni progetto, una sezione `# <nome>` con sotto la riga di `asdlc-stato` e quattro
-sezioni:
+Per ogni progetto, una sezione `# <nome>` con sotto la riga di `asdlc-stato`, la tabella
+degli sprint e quattro sezioni:
 
 ```markdown
+## Sprint
+| Sprint | Risultato | Fatti | Stato |
+|---|---|---|---|
+| N | <risultato> | <fatti>/<totale> | chiuso, in revisione, in corso o da fare |
 ## In corso
 - **PBI-XXX** — <titolo> · criteri <x>/<y> · PR <url>, <url> (o -)
 ## In coda
@@ -449,6 +453,10 @@ sezioni:
 - **PBI-XXX** — <titolo> · criteri <x>/<y>
 ```
 
+- **Sprint:** una riga per sprint di `CODA.md` (`PBI-539`); lo stato è **chiuso** se tutti i
+  PBI sono fatti e la barriera di revisione non c'è più, **in revisione** se sono tutti fatti e
+  la barriera c'è, **in corso** se almeno uno è fatto o ha un ramo, **da fare** altrimenti; con
+  `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`;
 - **In corso:** le voci di `CODA.md` non fatte che hanno un ramo su `origin`, con le PR
   aperte sul ramo (`-` se non ce ne sono, `?` se `gh` non risponde);
 - **In coda:** le altre voci non fatte, nell'ordine del file, numerate, con le barriere al
