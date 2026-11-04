@@ -108,10 +108,10 @@ def home_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(casa))
 
 
-def tick_che_lancia(tmp_path, monkeypatch, pbi):
-    """Un tick su `CODA_SPRINT_STORTO` con `decidi` che dà `Lancia(pbi)`: rende il
-    checkout e i PBI che il tick ha lanciato."""
-    repo, albero = progetto_finto(tmp_path, CODA_SPRINT_STORTO)
+def tick_che_lancia(tmp_path, monkeypatch, pbi, coda_md=CODA_SPRINT_STORTO):
+    """Un tick su `coda_md` con `decidi` che dà `Lancia(pbi)`: rende il checkout e
+    i PBI che il tick ha lanciato."""
+    repo, albero = progetto_finto(tmp_path, coda_md)
     lanciati = []
     passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Lancia(pbi),
                      lancia=lambda p, w, **k: lanciati.append(p))
@@ -131,13 +131,27 @@ def test_il_lancio_del_primo_pbi_dello_sprint_porta_gli_avvisi_e_parte(
     assert lanciati == ["PBI-1"]
 
 
-
 def test_il_lancio_di_un_altro_pbi_dello_sprint_non_ripete_gli_avvisi(
         tmp_path, monkeypatch, home_in_tmp, tick_configurato):
     repo, lanciati = tick_che_lancia(tmp_path, monkeypatch, "PBI-2")
 
     assert not [r for r in righe_del_log(repo) if "sprint" in r], righe_del_log(repo)
     assert lanciati == ["PBI-2"]
+
+
+# Lo sprint 1 sano, al confine: cinque PBI, il risultato e la sua revisione.
+CODA_SPRINT_SANO = ("### Sprint 1 — il PDF\n\n" + "".join(f"- PBI-{n}\n" for n in range(1, 6))
+                    + "- ‖ revisione dello sprint 1 con Jona: il PDF\n")
+
+
+def test_il_lancio_del_primo_pbi_di_uno_sprint_sano_non_porta_avvisi(
+        tmp_path, monkeypatch, home_in_tmp, tick_configurato):
+    repo, lanciati = tick_che_lancia(tmp_path, monkeypatch, "PBI-1", CODA_SPRINT_SANO)
+
+    righe = [r for r in righe_del_log(repo) if "PBI-1" in r]
+    assert len(righe) == 1, righe_del_log(repo)
+    assert "avviso" not in righe[0], righe[0]
+    assert lanciati == ["PBI-1"]
 
 
 # --- Criterio 3: la revisione va su Slack col risultato e i fatti -------------
