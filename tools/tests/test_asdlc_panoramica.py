@@ -497,3 +497,11 @@ def test_con_gh_muto_fatti_e_stato_dello_sprint_sono_un_punto_di_domanda(
         "| 1 | il PDF | ? | ? |",
         "| 2 |  | ? | ? |",
     ]
+
+
+def test_una_coda_senza_sprint_non_ha_la_sezione_sprint(tmp_path, capsys):
+    checkout = progetto(tmp_path, CODA_DI_PROVA, FILE_DI_PROVA)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+
+    assert "## Sprint" not in capsys.readouterr().out.splitlines()
