@@ -115,7 +115,7 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
       con il `gh` finto che esce 1 su `pr list --state merged`, `## Fatti` ha `- ? gh non risponde` e
       `PBI-1` è in `## In coda`; con `git ls-remote` che esce 1, `## In corso` ha `- ? git non parla con`;
       uscita 0 in tutti e due. `Guardia-su: tools/asdlc/panoramica.py::main`.
-- [ ] **Con `gh` muto sulle PR mergiate, Fuori coda non elenca i file** (decisione 6, aggiunta il 04/11).
+- [x] **Con `gh` muto sulle PR mergiate, Fuori coda non elenca i file** (decisione 6, aggiunta il 04/11).
       Lo stesso repository del criterio 3 (`PBI-4` ha un file e non è in `CODA.md`), col `gh` finto che
       esce 1 su `pr list --state merged`: `## Fuori coda` ha la sola riga `- ? gh non risponde`, senza
       `PBI-4`; uscita 0. Rosso sul codice del giro 1: Fuori coda elenca `PBI-4`.

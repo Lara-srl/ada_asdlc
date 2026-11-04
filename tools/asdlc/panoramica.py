@@ -93,8 +93,9 @@ def guasto_in_riga(guasto: coda.Guasto) -> str:
 
 def sezioni(checkout: Path) -> list[str]:
     """Le quattro sezioni di un progetto (decisione 4). `gh` o `origin` che non
-    rispondono lasciano la loro sezione con un `- ?`, e le voci si trattano come
-    non fatte e senza ramo (decisione 6)."""
+    rispondono lasciano la loro sezione con un `- ?` (`gh` muto sulle PR mergiate
+    anche Fuori coda), e le voci si trattano come non fatte e senza ramo
+    (decisione 6)."""
     coda.configura(coda.asdlc_config.carica(checkout))
     voci = coda.leggi_voci((checkout / coda.CODA).read_text(encoding="utf-8"))
     file = file_dei_pbi(checkout)
@@ -131,9 +132,14 @@ def sezioni(checkout: Path) -> list[str]:
         fatti = [f"- {riga_del_pbi(p, file[p])}"
                  for p in in_ordine_di_numero(mergiati & set(file))]
 
-    in_coda_o_fatti = {v.pbi for v in voci if isinstance(v, coda.VocePbi)} | mergiati
-    fuori = [f"- {riga_del_pbi(p, file[p])}"
-             for p in in_ordine_di_numero(set(file) - in_coda_o_fatti)]
+    # Senza `gh` il «non fatto» non si sa: i file elencati mostrerebbero lavoro
+    # fatto come lavoro da fare, e Fuori coda ha la riga del guasto (decisione 6).
+    if guasto_fatti is not None:
+        fuori = [guasto_in_riga(guasto_fatti)]
+    else:
+        in_coda_o_fatti = {v.pbi for v in voci if isinstance(v, coda.VocePbi)} | mergiati
+        fuori = [f"- {riga_del_pbi(p, file[p])}"
+                 for p in in_ordine_di_numero(set(file) - in_coda_o_fatti)]
 
     righe: list[str] = []
     for titolo, contenuto in (("In corso", in_corso), ("In coda", in_coda),
