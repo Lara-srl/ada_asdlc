@@ -67,13 +67,16 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
    - **Fuori coda:** i file di `backlog/` col nome del modello `[backlog].file` (`CFG.backlog`, come per
      `avviso_domande()`) il cui PBI non è in `CODA.md` e non è fatto, in ordine di numero.
 5. **Il titolo e i criteri vengono dal file del PBI**: il titolo è la prima riga `# PBI-XXX: <titolo>`
-   senza il prefisso (una prima `# ` senza il prefisso si mostra per intera: il titolo resta leggibile); i criteri sono le righe `- [x]` e `- [ ]` **della sola sezione `## Verifica`**,
+   senza il prefisso (una prima `# ` senza il prefisso si mostra per intero: il titolo resta leggibile); i criteri sono le righe `- [x]` e `- [ ]` **della sola sezione `## Verifica`**,
    fino alla `##` seguente. Una voce di coda senza file ha il titolo `(file mancante)` e `criteri 0/0`.
 6. **Un progetto che non si legge non ferma gli altri** (`ADR-0008`): la sua sezione è `# <nome>` e,
    sotto, la riga di `stato.riga()` (`<nome> · non raggiungibile — <motivo>`), senza le quattro sezioni;
    si va avanti. **`gh` o `origin` che non rispondono** non rendono il progetto non raggiungibile:
    - un `Guasto` di `pbi_mergiati()`: **Fatti** è la riga `- ? <messaggio del Guasto>` (comincia già con
-     `gh non risponde`), e le voci di `CODA.md` si trattano come non fatte;
+     `gh non risponde`), e le voci di `CODA.md` si trattano come non fatte; anche **Fuori coda** è la
+     sola riga `- ? <messaggio del Guasto>`, perché senza `gh` il «non fatto» della decisione 4 non si
+     sa, e i file elencati mostrerebbero lavoro fatto come lavoro da fare (Francesco, 04/11, la strada
+     (a) della domanda del Critic nel giro 1);
    - un `Guasto` di `pbi_con_ramo()`: **In corso** è la riga `- ? <messaggio del Guasto>`, e le voci
      vanno in **In coda**;
    - `None` da `pr_sul_ramo()`: la PR è `?`.
@@ -112,6 +115,12 @@ uno script a mano, e il conto dei criteri non spuntati sbagliava i PBI fatti con
       con il `gh` finto che esce 1 su `pr list --state merged`, `## Fatti` ha `- ? gh non risponde` e
       `PBI-1` è in `## In coda`; con `git ls-remote` che esce 1, `## In corso` ha `- ? git non parla con`;
       uscita 0 in tutti e due. `Guardia-su: tools/asdlc/panoramica.py::main`.
+- [ ] **Con `gh` muto sulle PR mergiate, Fuori coda non elenca i file** (decisione 6, aggiunta il 04/11).
+      Lo stesso repository del criterio 3 (`PBI-4` ha un file e non è in `CODA.md`), col `gh` finto che
+      esce 1 su `pr list --state merged`: `## Fuori coda` ha la sola riga `- ? gh non risponde`, senza
+      `PBI-4`; uscita 0. Rosso sul codice del giro 1: Fuori coda elenca `PBI-4`.
+      Nello stesso commit del GREEN, la riga di **Fuori coda** in `README.md` (*La panoramica dei PBI*)
+      dice che con `gh` muto la sezione è `- ? …`.
 
 **Non regressione:**
 - Dopo `asdlc-panoramica` `git status --porcelain`, `runs/coda.log` e il registro del progetto sono
@@ -131,3 +140,32 @@ criterio 1 li comprende e i due casi di guasto sono guardie — e quattro minori
 raggiungibile (decisioni 3 e 6), il `gh non risponde` ripetuto (decisione 6), il `gh` finto che non arriva
 a un sottoprocesso (*Contesto*), il separatore delle PR, la `❓` in ogni sezione e il modello del nome
 del file (decisioni 3 e 4).
+
+## Il giro 2, e cosa si riprende
+
+Il giro 1 (31/10, run `20261031-233511`, 23:35-23:57, runner `v1.1.0`) ha fatto i **tre criteri** e la
+non regressione con quindici commit, RED del criterio 1 (`be73ebe`) prima del GREEN (`b3fc0a0`), e li
+ha spuntati. Il Critic (revisione 1) ha chiamato `fermati` con una domanda sulla spec: con un `Guasto` di
+`pbi_mergiati()` il codice mette in **Fuori coda** ogni PBI fatto e non più in `CODA.md`, senza segni, e
+la decisione 6 non diceva cosa mostrare. Il Solver ha risposto `risolto` con la strada (a), ma il runner
+riprende il Builder dopo un `risolto` solo sulle sue domande (`PBI-517`), non sul `sospeso` del Critic:
+il giro è rimasto `sospeso domanda-del-critic`, senza PR. Il 04/11 Francesco ha scelto la (a), scritta
+ora nella decisione 6 e nel criterio 4. Il tag è `giro-fermato/pbi-538-giro1-20261031` (`e0b48cf`).
+
+**I quindici commit sono già in `main`**: li porta la PR di ripresa (`cherry-pick -x` dal tag, tutti,
+da `chore(runner): aggiungi lo scheletro vuoto` a `e0b48cf`). Verifica: `git log --oneline` su `main`
+li mostra; non si riportano di nuovo, e i criteri 1, 2 e 3 restano spuntati.
+
+**Da fare, in quest'ordine:**
+
+1. **Criterio 4, RED.** Il test nuovo in `tools/tests/test_asdlc_panoramica.py`: contro il codice in
+   `main` fallisce, perché Fuori coda elenca i file. Un commit `test(runner): …` da solo.
+2. **GREEN.** In `panoramica.py`, col `Guasto` di `pbi_mergiati()`, Fuori coda diventa la riga
+   `- ? <messaggio del Guasto>`; la riga di README nello stesso commit. Spunta del criterio 4.
+
+**Residui del Critic, per chi mergia** (non sono criteri):
+- `e0b48cf` ha aggiunto alla **decisione 5** la frase sul titolo senza prefisso, un commit dopo il codice
+  (`b3fc0a0`) e con un soggetto che non lo dice. Il refuso «per intera» è corretto in questa ripresa;
+  la frase resta, ed è da ratificare al merge di questa PR.
+- `panoramica.py:157-158`, il ripiego di `markdown_di`, scrive a mano la riga «non raggiungibile» invece
+  di passare da `stato.riga()`. Oggi l'uscita è identica; si riprende se `stato.riga()` cambia formato.
