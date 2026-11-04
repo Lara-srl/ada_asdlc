@@ -211,6 +211,24 @@ def test_guardia_gh_muto_sulle_pr_mergiate_lascia_fatti_col_punto_di_domanda(
         f"- **PBI-5** — il quinto · criteri 0/0 · PR {URL_PR_5}"]
 
 
+# --- Criterio 4: con `gh` muto sulle PR mergiate, Fuori coda non elenca i file -------
+
+
+def test_gh_muto_sulle_pr_mergiate_lascia_fuori_coda_col_punto_di_domanda(
+    tmp_path, capsys, gh_finto
+):
+    checkout = progetto(tmp_path, CODA_DI_PROVA, FILE_DI_PROVA, rami=("pbi/pbi-5",))
+    gh_finto["merged"] = (1, "gh: non autenticato")
+    gh_finto["open"] = (0, PR_APERTA)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+    testo = capsys.readouterr().out
+
+    [fuori] = sezione(testo, "Fuori coda")
+    assert fuori.startswith("- ? gh non risponde")
+    assert "PBI-4" not in fuori
+
+
 def test_guardia_origin_muto_lascia_in_corso_col_punto_di_domanda(
     tmp_path, capsys, gh_finto, monkeypatch
 ):

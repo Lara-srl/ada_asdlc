@@ -442,15 +442,16 @@ sezioni:
 - **Fatti:** i PBI che una PR mergiata nomina e ha implementato, se hanno un file in
   `backlog/`, in ordine di numero;
 - **Fuori coda:** i file di `backlog/` col nome del modello `[backlog].file` il cui PBI non
-  è in `CODA.md` e non è fatto, in ordine di numero.
+  è in `CODA.md` e non è fatto, in ordine di numero; con `gh` che non risponde sulle PR
+  mergiate il «non fatto» non si sa, e la sezione è la sola riga `- ? gh non risponde …`.
 
 Il titolo è la prima riga `# PBI-XXX: <titolo>` del file, senza il prefisso; i criteri sono
 le caselle `- [x]` e `- [ ]` della sola sezione `## Verifica`. Una voce di coda senza file è
 `(file mancante)` con `criteri 0/0`; un PBI con una sezione `❓` ha la riga che finisce in
 `· ❓`; una sezione vuota è `- nessuno`. Un progetto che non si legge ha la sola riga
 `<nome> · non raggiungibile — <motivo>` e non ferma gli altri; `gh` che non risponde sulle
-PR mergiate fa di **Fatti** la riga `- ? gh non risponde …`, con le voci trattate come non
-fatte, e `origin` che non risponde fa di **In corso** la riga `- ? git non parla con …`, con
+PR mergiate fa di **Fatti** e di **Fuori coda** la riga `- ? gh non risponde …`, con le voci
+trattate come non fatte, e `origin` che non risponde fa di **In corso** la riga `- ? git non parla con …`, con
 le voci in **In coda**. L'uscita resta 0.
 
 ## Linguaggi e stack
