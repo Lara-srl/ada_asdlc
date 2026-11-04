@@ -77,6 +77,11 @@ della Fase 5 di aDa), e si accodano dopo la `v0.1.0`.
 - PBI-539
 - ‖ revisione dello sprint 1 con Francesco: `asdlc-panoramica` sui cinque progetti, con la tabella degli sprint; poi tag `v1.2.0` e pin nei cinque repository
 
+### Sprint 2 — il giro sospeso da una domanda del Critic riprende da solo
+
+- PBI-540
+- ‖ revisione dello sprint 2 con Francesco: un giro con il Critic `sospeso` e il Solver `risolto` che riprende e chiude, con la PR in `attende` e le domande nel corpo; poi tag `v1.3.0` e pin nei cinque repository
+
 **`PBI-506`–`PBI-510`, il Solver e il rilascio a catena** (`ADR-0030`, 16/10). Il 507 legge i file del 506,
 il 508 i rapporti del 507 e il 509 gli strumenti del 507: per questo vanno in fila. Il 510
 tocca `coda.py` come il 509 e viene dopo. **`PBI-512`** (la PR a monte del Solver, R5 e R6) esce dal 509 per decisione di Francesco del 16/10 e va subito dopo, perché legge `attende:` e il pin. **`PBI-509`** è stato accodato da Francesco il 16/10
@@ -160,4 +165,12 @@ risultato da mostrare è `asdlc-panoramica` che stampa in markdown i PBI di ogni
 corso, in coda, fatti e fuori coda, e la tabella degli sprint. Fino al `PBI-539` l'intestazione dello
 sprint è prosa per il tick, e la revisione è una barriera come le altre. La sua PR la mergia il tick se
 passa le condizioni di `ADR-0033`; il tag `v1.2.0` e il bump di `tools/pyproject.toml` restano a mano,
+dopo la revisione.
+
+**Sprint 2, `PBI-540`** (Francesco, 04/11: «quello più importante per me»): il difetto del giro 1 di
+`PBI-538`, il `risolto` del Solver sulla domanda del Critic che non riprende il Builder. Dopo la revisione
+dello sprint 1, perché `ADR-0034` scrive lo sprint dopo la revisione di quello prima. Letto il 04/11
+(lettura avversariale, due fermi e nove rilievi minori recepiti) e pre-verificato su `main` (un rilievo F,
+corretto con la #130; le sonde «guasto» sono il difetto di `PBI-529`). Il giro lo fa il runner installato,
+`v1.2.0` dopo il pin dello sprint 1; il tag `v1.3.0` e il bump di `tools/pyproject.toml` restano a mano,
 dopo la revisione.

@@ -1,7 +1,8 @@
 # PBI-540: dopo `risolto` sulla domanda del Critic il Builder riprende
 
 **Stato:** proposto il 04/11 (Francesco: «quello più importante per me»); **letto il 04/11** (Lettore separato, sola lettura: due fermi e nove rilievi minori,
-recepiti nel testo); **non in coda**.
+recepiti nel testo); pre-verificato su `main` il 04/11 (un rilievo F, corretto con la #130). **In coda**,
+sprint 2, dopo la revisione dello sprint 1 (Francesco, 04/11).
 Le due scelte di Francesco del 04/11 sono le decisioni 5 e 7; la riga di `ADR-0033` che la decisione 7
 chiede sta nella PR che porta questo PBI, e il suo merge la ratifica (`ADR-0012`).
 
