@@ -505,3 +505,27 @@ def test_una_coda_senza_sprint_non_ha_la_sezione_sprint(tmp_path, capsys):
     assert panoramica.main(["--repo", str(checkout)]) == 0
 
     assert "## Sprint" not in capsys.readouterr().out.splitlines()
+
+
+def test_con_origin_muto_fatti_e_stato_dello_sprint_sono_un_punto_di_domanda(
+    tmp_path, capsys, gh_finto, monkeypatch
+):
+    """Decisione 5: non solo `gh`, anche `origin` che non risponde lascia `?` in
+    `Fatti` e `Stato`, e non uno stato calcolato su rami che non si conoscono."""
+    checkout = progetto(tmp_path, CODA_DEGLI_SPRINT, {})
+    gh_finto["merged"] = (0, pr_mergiate("PBI-1"))
+    finta = coda.esegui
+
+    def esegui(cmd, cwd):
+        if "ls-remote" in cmd:
+            return 1, "fatal: impossibile raggiungere origin"
+        return finta(cmd, cwd)
+
+    monkeypatch.setattr(coda, "esegui", esegui)
+
+    assert panoramica.main(["--repo", str(checkout)]) == 0
+
+    assert sezione(capsys.readouterr().out, "Sprint")[2:] == [
+        "| 1 | il PDF | ? | ? |",
+        "| 2 |  | ? | ? |",
+    ]
