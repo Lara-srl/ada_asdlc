@@ -105,9 +105,13 @@ def stato_dello_sprint(sprint: coda.Sprint, mergiati: set[str], rami: set[str]) 
 def tabella_degli_sprint(testo: str, mergiati: set[str], rami: set[str],
                          guasto: bool) -> list[str]:
     """La sezione `## Sprint`, una riga per sprint di `CODA.md` (PBI-539, decisione
-    5). Con `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`."""
+    5). Con `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`. Senza
+    sprint la sezione non c'è: `[]`."""
+    tutti = coda.leggi_sprint(testo)
+    if not tutti:
+        return []
     righe = ["## Sprint", "| Sprint | Risultato | Fatti | Stato |", "|---|---|---|---|"]
-    for sprint in coda.leggi_sprint(testo):
+    for sprint in tutti:
         if guasto:
             fatti, stato_ = "?", "?"
         else:

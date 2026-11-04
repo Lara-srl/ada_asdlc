@@ -456,7 +456,7 @@ degli sprint e quattro sezioni:
 - **Sprint:** una riga per sprint di `CODA.md` (`PBI-539`); lo stato è **chiuso** se tutti i
   PBI sono fatti e la barriera di revisione non c'è più, **in revisione** se sono tutti fatti e
   la barriera c'è, **in corso** se almeno uno è fatto o ha un ramo, **da fare** altrimenti; con
-  `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`;
+  `gh` o `origin` che non rispondono `Fatti` e `Stato` sono `?`; senza sprint la sezione non c'è;
 - **In corso:** le voci di `CODA.md` non fatte che hanno un ramo su `origin`, con le PR
   aperte sul ramo (`-` se non ce ne sono, `?` se `gh` non risponde);
 - **In coda:** le altre voci non fatte, nell'ordine del file, numerate, con le barriere al
