@@ -10,6 +10,13 @@ webhook il server di `test_asdlc_notifiche.py`.
 import importlib
 from pathlib import Path
 
+import pytest
+
+from test_asdlc_notifiche import (  # noqa: F401 — `tick_configurato` e `webhook` sono fixture
+    mondo_finto, passi_sostituiti, progetto_finto, righe_del_log, tick_configurato, un_tick,
+    webhook,
+)
+
 coda = importlib.import_module("asdlc.coda")
 
 PROGETTO = Path(__file__).resolve().parent / "dati" / "progetto"
@@ -61,3 +68,47 @@ def test_un_intestazione_di_sprint_scritta_male_chiude_lo_sprint_prima():
     testo = "### Sprint 1 — uno\n- PBI-1\n### Sprint tre\n- PBI-2\n"
 
     assert coda.leggi_sprint(testo) == [coda.Sprint(1, "uno", ("PBI-1",), None)]
+
+
+# --- Criterio 2: gli avvisi al lancio del primo PBI dello sprint --------------
+
+
+# Lo sprint 1 di sei PBI, senza risultato e senza la barriera della sua revisione.
+CODA_SPRINT_STORTO = "### Sprint 1 —\n\n" + "".join(f"- PBI-{n}\n" for n in range(1, 7))
+
+AVVISI_DELLO_SPRINT_STORTO = (
+    " — avviso, lo sprint 1 ha 6 PBI (al più 5)",
+    " — avviso, lo sprint 1 non dice il risultato da mostrare",
+    " — avviso, lo sprint 1 non finisce con la sua revisione",
+)
+
+
+@pytest.fixture
+def home_in_tmp(tmp_path, monkeypatch):
+    casa = tmp_path / "casa"
+    casa.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(casa))
+
+
+def tick_che_lancia(tmp_path, monkeypatch, pbi):
+    """Un tick su `CODA_SPRINT_STORTO` con `decidi` che dà `Lancia(pbi)`: rende il
+    checkout e i PBI che il tick ha lanciato."""
+    repo, albero = progetto_finto(tmp_path, CODA_SPRINT_STORTO)
+    lanciati = []
+    passi_sostituiti(monkeypatch, decidi=lambda r, w: coda.Lancia(pbi),
+                     lancia=lambda p, w, **k: lanciati.append(p))
+    mondo_finto(monkeypatch)
+    assert un_tick(repo, albero) == 0
+    return repo, lanciati
+
+
+def test_il_lancio_del_primo_pbi_dello_sprint_porta_gli_avvisi_e_parte(
+        tmp_path, monkeypatch, home_in_tmp, tick_configurato):
+    repo, lanciati = tick_che_lancia(tmp_path, monkeypatch, "PBI-1")
+
+    righe = [r for r in righe_del_log(repo) if "PBI-1" in r]
+    assert len(righe) == 1, righe_del_log(repo)
+    for avviso in AVVISI_DELLO_SPRINT_STORTO:
+        assert avviso in righe[0], righe[0]
+    assert lanciati == ["PBI-1"]
+
