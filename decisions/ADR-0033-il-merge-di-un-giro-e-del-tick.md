@@ -26,7 +26,8 @@ esattamente cosa.
    codice, senza modello:
    - la PR l'ha aperta il runner: ramo `pbi/pbi-XXX…`, e il PBI è in `CODA.md`;
    - l'ultimo rapporto del giro di quel PBI chiude `fatto`, con il Critic che ha girato
-     (`critic_saltato` falso) e nessun esito `intento`;
+     (`critic_saltato` falso), nessun esito `intento` e nessuna ripresa dopo una domanda del Critic
+     (`riprese_critic` zero o assente, `PBI-540`);
    - la CI sulla testa della PR è verde, e la PR è mergeabile;
    - il file del PBI alla testa della PR ha ogni criterio spuntato, e **nessun** criterio `(a vista)`
      (`ADR-0032`);
@@ -42,7 +43,9 @@ esattamente cosa.
    manca: è un `attende`, non un fermo.
 4. **Restano di Francesco:** le PR con un criterio `(a vista)`; le PR che toccano la costituzione
    o `asdlc.toml`; le PR con una deroga allo Scope; le PR che non ha aperto il runner (accoda,
-   riprese, documenti); ogni esito `intento`. Sono i casi in cui il merge è una decisione.
+   riprese, documenti); ogni esito `intento`; i giri in cui il Solver ha risposto a una domanda del
+   Critic e il giro ha ripreso (`PBI-540`, Francesco 04/11: il Solver ha deciso un punto della spec, e
+   la decisione la ratifica una persona). Sono i casi in cui il merge è una decisione.
 
 **Le quattro domande** (`decisions/README.md`):
 
