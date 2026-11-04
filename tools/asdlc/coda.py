@@ -478,6 +478,32 @@ def avviso_domande(repo: Path, pbi: str) -> str:
     return ""
 
 
+# Quanti PBI può avere uno sprint (`ADR-0034`): oltre, è un avviso e non un blocco.
+PBI_PER_SPRINT = 5
+
+
+def avvisi_dello_sprint(repo: Path, pbi: str) -> list[str]:
+    """Gli avvisi dello sprint di `pbi` (PBI-539, decisione 3): troppi PBI, nessun
+    risultato da mostrare, nessuna revisione. Non trattengono il lancio
+    (`ADR-0008`). Una `CODA.md` che manca o non si legge non ne dà."""
+    try:
+        sprint = leggi_sprint((repo / CODA).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return []
+    avvisi: list[str] = []
+    for s in sprint:
+        if pbi not in s.pbi:
+            continue
+        if len(s.pbi) > PBI_PER_SPRINT:
+            avvisi.append(f"avviso, lo sprint {s.numero} ha {len(s.pbi)} PBI "
+                          f"(al più {PBI_PER_SPRINT})")
+        if not s.risultato:
+            avvisi.append(f"avviso, lo sprint {s.numero} non dice il risultato da mostrare")
+        if s.revisione is None:
+            avvisi.append(f"avviso, lo sprint {s.numero} non finisce con la sua revisione")
+    return avvisi
+
+
 def giro_in_corso(worktree: Path) -> bool:
     """C'è già un runner al lavoro in quell'albero?
 
@@ -1647,6 +1673,9 @@ def passaggio(a: argparse.Namespace) -> int:
     # e si segnala (`ADR-0008`).
     if isinstance(decisione, Lancia) and (avviso := avviso_domande(a.repo, decisione.pbi)):
         riga += f" — avviso, il PBI ha una sezione di domande: «{avviso}»"
+    # Gli avvisi dello sprint, come quello delle domande: si segnala e si lancia (PBI-539).
+    if isinstance(decisione, Lancia):
+        riga += "".join(f" — {avviso}" for avviso in avvisi_dello_sprint(a.repo, decisione.pbi))
     print(riga)
     scrivi_nel_log(a.repo, riga)
     # La decisione che chiede una persona va su Slack, una volta per cambio (PBI-533).
