@@ -95,24 +95,24 @@ sprint nella panoramica di `PBI-538`. Mostra anche la grammatica degli sprint ne
 
 ## Verifica
 
-- [ ] **`leggi_sprint` legge gli sprint.** Un testo con `PBI-0` prima di ogni sprint, `### Sprint 1 — il
+- [x] **`leggi_sprint` legge gli sprint.** Un testo con `PBI-0` prima di ogni sprint, `### Sprint 1 — il
       PDF` con `PBI-1`, `PBI-2` e `‖ revisione dello sprint 1 con Jona: il PDF`, poi `### Sprint 2 —` (senza
       risultato) con `PBI-3`, poi `## Note` e `PBI-9`: due `Sprint` con numeri, risultati (`"il PDF"`, `""`),
       PBI e revisione (`None` per il 2); `PBI-0` e `PBI-9` non sono in nessuno; `leggi_voci()` dà sullo
       stesso testo le voci di prima. Rosso su `main`: `leggi_sprint` non c'è.
-- [ ] **Gli avvisi al lancio del primo PBI dello sprint.** Un tick con `decidi` che dà `Lancia(PBI-1)` e una
+- [x] **Gli avvisi al lancio del primo PBI dello sprint.** Un tick con `decidi` che dà `Lancia(PBI-1)` e una
       `CODA.md` con lo sprint 1 di sei PBI, senza risultato e senza barriera: la riga del log ha i tre avvisi
       della decisione 3 e il lancio avviene; con `Lancia(PBI-2)` nessun avviso. Rosso dopo il criterio 1:
       il tick non legge gli sprint.
-- [ ] **La revisione va su Slack col risultato e i fatti.** Notifiche accese con un webhook finto, `decidi`
+- [x] **La revisione va su Slack col risultato e i fatti.** Notifiche accese con un webhook finto, `decidi`
       che dà `Barriera("revisione dello sprint 1 con Jona: il PDF")`, la coda del criterio 1 in `CODA.md` e
       `PBI-1` mergiato: una `POST` il cui testo contiene `sprint 1 pronto per la revisione`, `il PDF` e
       `PBI-1`, e non `PBI-2`. Con `Barriera("pin")` il testo è quello di sempre (`barriera — pin`). Rosso dopo
       i criteri 1-2.
-- [ ] **La panoramica ha la tabella degli sprint.** La coda del criterio 1 con `PBI-1` e `PBI-2` mergiati e
+- [x] **La panoramica ha la tabella degli sprint.** La coda del criterio 1 con `PBI-1` e `PBI-2` mergiati e
       la barriera ancora lì: la riga dello sprint 1 è `| 1 | il PDF | 2/2 | in revisione |`, quella del 2 è
       `| 2 |  | 0/1 | da fare |`; una coda senza sprint non ha `## Sprint`. Rosso dopo i criteri 1-3.
-- [ ] **Il `CODA.md` del template mostra la grammatica dello sprint.** Nel RED,
+- [x] **Il `CODA.md` del template mostra la grammatica dello sprint.** Nel RED,
       `test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica` aggiunge che la prosa contiene
       ``### Sprint N — `` e `ADR-0034`, e che `leggi_sprint(testo) == []`. Rosso su `main`: la prosa non ne
       parla.

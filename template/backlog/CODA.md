@@ -9,6 +9,10 @@ una voce è qui perché qualcuno ce l'ha messa, ed è quello il cancello.
 - `- PBI-12` — un PBI da lanciare. Il tick lo lancia quando il precedente è in `main`.
 - `- ‖ testo` — una **barriera**: un gesto umano. Il tick ci arriva, lo scrive e si ferma.
   Si toglie la riga quando il gesto è fatto.
+- `### Sprint N — <risultato da mostrare>` — uno **sprint**: da 1 a 5 PBI con un risultato da
+  far vedere, chiusi da una barriera `- ‖ revisione dello sprint N …`; il tick avvisa nel log
+  se lo sprint è troppo lungo, non dice il risultato o non finisce con la sua revisione, e non
+  ferma niente (`ADR-0034` del pacchetto `asdlc`).
 
 Tutto il resto è prosa e il tick non la guarda. La forma dell'id è il modello `[backlog].id`
 di `asdlc.toml`.
