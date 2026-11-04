@@ -154,6 +154,7 @@ def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
     coda.configura(asdlc_config.carica(nata))
     try:
         voci = coda.leggi_voci(testo)
+        sprint = coda.leggi_sprint(testo)
     finally:
         coda.configura(di_prima)
     prosa = testo.split("## La coda", 1)[0]
@@ -162,6 +163,11 @@ def test_la_coda_del_template_e_vuota_e_ne_porta_la_grammatica(tmp_path):
     assert "## La coda" in intestazioni(testo)
     assert "- PBI-" in prosa
     assert "- ‖" in prosa
+    # La grammatica degli sprint, nella prosa e fra apici inversi: non è uno sprint
+    # (PBI-539, decisione 6).
+    assert "### Sprint N — " in prosa
+    assert "ADR-0034" in prosa
+    assert sprint == []
 
 
 @pytest.mark.progetto_ospite
