@@ -1,6 +1,7 @@
 # PBI-540: dopo `risolto` sulla domanda del Critic il Builder riprende
 
-**Stato:** proposto il 04/11 (Francesco: «quello più importante per me»); **non letto**, **non in coda**.
+**Stato:** proposto il 04/11 (Francesco: «quello più importante per me»); **letto il 04/11** (Lettore separato, sola lettura: due fermi e nove rilievi minori,
+recepiti nel testo); **non in coda**.
 Le due scelte di Francesco del 04/11 sono le decisioni 5 e 7; la riga di `ADR-0033` che la decisione 7
 chiede sta nella PR che porta questo PBI, e il suo merge la ratifica (`ADR-0012`).
 
@@ -27,19 +28,26 @@ rilegge.
 - `tools/asdlc/prompt/ripresa-dopo-il-critic.md`, **nuovo**: il prompt del Builder dopo un `risolto` sulla
   domanda del Critic. Si carica con `prompt_del_pacchetto()`; domanda, risposta ed evidenza entrano come
   valori di `.format()`.
-- `tools/asdlc/prompt/critic.md`: solo se serve dire come si legge il blocco «da valutare».
+- `tools/asdlc/prompt/critic.md` **non si tocca**: il suo golden `tools/tests/dati/prompt/critic.txt` lo
+  confronta byte per byte (`test_asdlc_prompt.py`). Il blocco «da valutare» dice da sé come si legge, ed
+  entra in coda a `gate` come il testo di `gate_per_il_critic()`: la firma di `revisione_critica()` non
+  cambia.
 - `tools/asdlc/coda.py`: `condizione_mancante()` e `CONDIZIONI_DEL_MERGE`, la seconda condizione
   (decisione 7).
 - `tools/tests/test_asdlc_ripresa_solver.py`: i test dei criteri 1-6 e il parametro `domanda-del-critic`
-  che esce (criterio 6). `tools/tests/test_asdlc_rilascio.py`, dove stanno i test del merge del tick (`PBI-530`): il
+  che esce (criterio 6, nel commit GREEN del criterio 1). `tools/tests/test_asdlc_rilascio.py`, dove stanno i test del merge del tick (`PBI-530`): il
   criterio 7. `tools/tests/test_asdlc_runner.py`: il criterio 8, accanto al
   test del corpo della PR.
 - `README.md`, `specs/solver-e-rilascio/spec.md` (la sezione «La ripresa dopo `risolto`», la frase «Gli
   altri blocchi … non riprendono») e `backlog/AUTOMAZIONE.md`, se nomina il caso, vanno nello stesso
   commit del codice.
-- `backlog/PBI-517-dopo-risolto-il-runner-rilancia-il-builder.md`: nel *Fuori scope*, la riga di
-  `domanda-del-critic` e «Il Critic non si rilancia con la risposta del Solver» si **barrano** con
-  «*superata da `PBI-540`*». Non si cancellano.
+- `backlog/PBI-517-dopo-risolto-il-runner-rilancia-il-builder.md`: nel *Fuori scope*, dentro la riga
+  «`builder-senza-esito`, `domanda-del-critic` e `critic-senza-esito`…» si barra **solo**
+  `domanda-del-critic`, e la riga «Il Critic non si rilancia con la risposta del Solver» si barra intera;
+  nella decisione 2 si barra `domanda-del-critic` nell'elenco degli altri motivi. Ogni barrato porta
+  «*superata da `PBI-540`*». Non si cancella niente.
+- `tools/plancia/README.md`: solo se elenca i campi del rapporto, per `riprese_critic` e
+  `domande_del_critic`.
 - `backlog/PBI-540-dopo-risolto-sulla-domanda-del-critic-il-builder-riprende.md`: questo file, per la
   spunta.
 
@@ -60,9 +68,16 @@ rilegge.
    chiama `smista("domanda-del-critic", …)`, come `PBI-517` fa col `fermati` del Builder. Il blocco esterno
    `if motivo in BLOCCHI` esclude anche `domanda-del-critic`: altrimenti il Solver girerebbe due volte.
 3. **La ripresa è la revisione successiva.** Consuma una revisione del Critic (`MAX_REVISIONI`), come un
-   `non pronto`, ma con un altro prompt e un'altra sessione (decisione 4). Non incrementa `e.tentativi`.
+   `non pronto`, ma con un altro prompt e un'altra sessione (decisione 4). La ripresa non aggiunge un
+   contatore oltre a `riprese_critic`: `e.tentativi` conta i gate come oggi. `ripresa` e `primo_del_giro`
+   si azzerano in testa a ogni revisione: il comando della ripresa va impostato **dopo** quell'azzeramento
+   (o portato fuori dal `for`), perché un `ripresa = …` scritto nel ramo `sospeso` verrebbe perso. Il
+   commento del ramo `sospeso` («Non si consuma una revisione e non si richiama il Critic») si riscrive:
+   vale per il `sospeso` senza `risolto`.
    Se il `sospeso` arriva all'ultima revisione (`revisione == MAX_REVISIONI`) non si riprende: il giro
    chiude `sospeso` come oggi, con l'avviso «la ripresa dopo la domanda del Critic non ha più revisioni».
+   Il Solver lì parte lo stesso, una volta, perché smista il blocco come oggi; l'avviso si scrive solo dopo
+   il suo `risolto`.
    Il rapporto del Critic della revisione dopo ha il suo numero (`critic-N+1.md`), e `critic-N.md` resta
    quello del `sospeso`.
 4. **Il Builder riprende dalla sua sessione**, come in `PBI-517` (decisioni 6 e 7). Il comando è
@@ -89,7 +104,10 @@ rilegge.
 7. **Il tick non mergia un giro ripreso dopo una domanda del Critic** (Francesco, 04/11). Il Solver ha
    deciso un punto della spec, e quella decisione la ratifica una persona. Il rapporto del giro porta
    `riprese_critic` (il numero delle riprese dopo un `risolto` sulla domanda del Critic) e
-   `domande_del_critic` (domanda, risposta ed evidenza di ognuna). `condizione_mancante()` rende «il
+   `domande_del_critic` (domanda, risposta ed evidenza di ognuna). Un giro `--riprendi` dopo il limite
+   d'uso apre un `Esito` nuovo: i due campi si **portano** dai rapporti precedenti dello stesso PBI, come
+   `riprese_limite` (`riprese_limite_fatte()`), perché `ultimo_esito()` legge solo l'ultimo rapporto e
+   altrimenti la condizione cadrebbe. `condizione_mancante()` rende «il
    Solver ha risposto a una domanda del Critic» quando l'ultimo rapporto ha `riprese_critic > 0`, e la PR
    resta aperta in `attende`, come dice `ADR-0033` (punto 3). La condizione entra nella seconda di
    `CONDIZIONI_DEL_MERGE`. Nel corpo della PR c'è una sezione «Domande del Critic risposte dal Solver», con
@@ -124,40 +142,55 @@ rilegge.
       criterio 1, il prompt della seconda invocazione `critic` contiene la sua domanda e la risposta nel
       blocco «da valutare». Il giro chiude `fatto` con una sola chiusura, `riprese_critic == 1`, e
       `domande_del_critic` ha domanda, risposta ed evidenza nel JSON del giro (pytest). Rosso su `main`:
-      stato `sospeso`.
+      stato `sospeso`. **Come si legge il prompt del Critic:** la fixture `giro` sostituisce
+      `revisione_critica` con un finto che dà `pass`, e così il prompt non nasce. Il test rimette la funzione
+      vera (salvata all'import, `VERA = runner.revisione_critica`, poi `monkeypatch.setattr`) e dà
+      `"critic": [fermati("…"), verdetto("pass")]` ad `agente_con_stato`; `verdetto()` viene da
+      `test_asdlc_runner.py`, come `agente_finto` (la vera `revisione_critica` gira già così in quel file).
 - [ ] **Senza traccia si riparte pulito e si avvisa.** Con `traccia` `None` nell'invocazione `builder`,
       la seconda invocazione non ha `--resume`, il suo prompt ha il PBI, e l'avviso è nella nota (pytest).
       Rosso su `main`: la seconda invocazione non c'è.
 - [ ] **Il tetto e l'ultima revisione fermano la ripresa.** Primo caso: `giri_massimi = 2`, il Critic
       sempre `sospeso`, il Solver sempre `risolto`. Il Solver è chiamato due volte, ci sono tre invocazioni
       `builder`, e il giro chiude `sospeso` con l'avviso del tetto. Secondo caso: `MAX_REVISIONI = 0`, il
-      Critic `sospeso`, il Solver `risolto`. C'è un'invocazione `builder`, lo stato è `sospeso` e la nota
-      ha l'avviso della decisione 3 (pytest). Rosso su `main`: nel primo caso il Solver è chiamato una
+      Critic `sospeso`, il Solver `risolto`. C'è un'invocazione `builder`, il Solver è chiamato **una**
+      volta, lo stato è `sospeso` e la nota ha l'avviso della decisione 3 (pytest). Rosso su `main`: nel primo caso il Solver è chiamato una
       volta; nel secondo l'avviso non c'è.
 - [ ] **Gli altri esiti del Solver sulla domanda del Critic non riprendono.** Con `limite-del-runner`,
       `intento` e un Solver che non chiama niente, dopo il `sospeso` del Critic c'è una sola invocazione
       `builder`, lo stato è `sospeso` e `riprese_critic == 0` (pytest, parametrizzato). È una guardia
-      **nata verde su `main`, per costruzione**: si committa da sola, senza `--chiedi-impl`, con
-      `Guardia-su: tools/asdlc/runner.py::esegui_pbi`, e deve mordere. Per `limite-del-runner` vale il
+      **nata verde dopo il GREEN del criterio 3**, quando `riprese_critic` esiste (su `main` il campo non
+      c'è, e il test sarebbe rosso per `AttributeError`, non per il comportamento): si committa da sola,
+      dopo quel GREEN, senza `--chiedi-impl`, con `Guardia-su: tools/asdlc/runner.py::esegui_pbi`, e deve
+      mordere. Per `limite-del-runner` vale il
       finto di `metti_in_attesa_del_pbi_a_monte` e `HOME` in `tmp_path`, come nel test di `PBI-517`.
       **Test che cambia:** in `test_gli_altri_esiti_e_gli_altri_blocchi_non_riprendono_il_builder`
       (`tools/tests/test_asdlc_ripresa_solver.py`) il parametro `id="domanda-del-critic"` (Critic
       `sospeso` e Solver `RISOLTO`) **esce**. Questo PBI rovescia proprio quel comportamento, e il suo caso
-      è il criterio 1. Gli altri tre parametri restano com'erano.
+      è il criterio 1: esce **nel commit GREEN del criterio 1**, che è quello che lo fa diventare rosso.
+      Gli altri tre parametri restano com'erano.
 - [ ] **Il tick non mergia un giro ripreso dopo la domanda del Critic.** Una PR che passa ogni altra
       condizione e un ultimo rapporto `fatto` con `riprese_critic: 1`: `condizione_mancante()` rende «il
-      Solver ha risposto a una domanda del Critic». Con `riprese_critic: 0`, o senza il campo (i rapporti
-      di prima), rende `None` (pytest). Rosso su `main`: rende `None` anche con `riprese_critic: 1`.
+      Solver ha risposto a una domanda del Critic» (pytest: un parametro nuovo `riprese-critic` in
+      `SCENARI_CHE_ATTENDONO` di `test_asdlc_rilascio.py`, `({"esito": {"riprese_critic": 1}}, "Solver")`).
+      Rosso su `main`: la PR si mergia. Il rapporto senza il campo è già il caso di
+      `test_una_pr_che_passa_tutte_le_condizioni_si_mergia_e_il_tick_lo_dice`, che resta verde; un test
+      a parte per `riprese_critic: 0` nascerebbe verde e non si scrive.
 - [ ] **La PR porta le domande del Critic e le risposte.** `apri_pr()` con un `Esito` che ha
       `riprese_critic == 1` e una voce in `domande_del_critic`: il corpo passato a `gh pr create` ha la
-      sezione «Domande del Critic risposte dal Solver», con domanda, risposta ed evidenza. Senza riprese la
-      sezione non c'è e il corpo è quello di oggi (pytest). Rosso su `main`: la sezione non c'è.
+      sezione «Domande del Critic risposte dal Solver», con domanda, risposta ed evidenza; nella **stessa**
+      funzione di test, un `Esito` senza riprese dà un corpo che non contiene la sezione (pytest). Rosso
+      su `main`: la sezione non c'è.
 
 **Non regressione:**
 - Un giro senza `sospeso` del Critic, e la ripresa dopo il `fermati` del Builder (`PBI-517`), si comportano
   come oggi: i test di `test_asdlc_ripresa_solver.py` (tranne il parametro che esce), di
   `test_asdlc_solver.py` e di `TestOgniUscitaHaIlSuoMotivo` restano verdi. Il caso `domanda-del-critic`
   della tabella `USCITE` ha il Solver muto, e resta `sospeso`.
+- `TestIlSospesoChiudeAlPrimoGiro::test_non_consuma_le_revisioni` (`test_asdlc_runner.py`) resta com'è e
+  verde: il Solver è muto (`agente_finto({"builder": FATTO})`), non c'è `risolto` e quindi non c'è ripresa,
+  e `esito.revisioni == 0` e un Critic solo restano veri. La decisione 3 vale solo dopo un `risolto`. Così
+  gli altri test con un Critic sospeso e il Solver muto (`test_asdlc_runner.py`, `test_asdlc_traccia.py`).
 - `python3 -m pytest -q tools/tests` resta verde.
 
 ## Protocollo di rifinitura
@@ -165,7 +198,6 @@ rilegge.
 Si può scegliere senza chiedere: i nomi delle funzioni private; come `giro()` porta la ripresa alla
 revisione dopo (una variabile accanto a `ripresa`, o un'altra forma); il testo esatto degli avvisi, purché
 contenga le parole che i criteri cercano. Si chiama `fermati`: se un test esistente oltre al parametro del
-criterio 6 fissa che dopo un `sospeso` del Critic il Builder non riparte; se per passare la risposta al
-Critic servisse cambiare la firma di `revisione_critica()` in un modo che rompe i suoi test; se la
-decisione 3 (la ripresa consuma una revisione) si scontrasse con un test che conta le revisioni di un
-giro `sospeso`.
+criterio 6 fissa che dopo un `sospeso` del Critic **con un Solver che risponde `risolto`** il Builder non
+riparte, o conta le sue revisioni; se per passare la risposta al Critic servisse cambiare la firma di
+`revisione_critica()` o toccare `critic.md`.
