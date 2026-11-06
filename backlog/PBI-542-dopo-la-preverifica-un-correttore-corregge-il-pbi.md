@@ -1,4 +1,4 @@
-# PBI-541: dopo una preverifica con rilievi un Correttore corregge il PBI e apre la PR
+# PBI-542: dopo una preverifica con rilievi un Correttore corregge il PBI e apre la PR
 
 **Stato:** proposto il 06/11 da Francesco («le proposte della revisione [vengano] approvate e il
 builder rilanciato e a me il merge»); **non letto**, **non in coda**. La regola che cambia è in
@@ -43,7 +43,7 @@ proprietario non lo corregge: lo chiede.
 - `backlog/AUTOMAZIONE.md`: il fermo in preverifica, nello stesso commit del codice.
 - `template/asdlc.toml`: `correzione = true` commentato sotto `[preverifica]`, con il rimando a
   `ADR-0036`.
-- `backlog/PBI-541-dopo-la-preverifica-un-correttore-corregge-il-pbi.md`: questo file, per la
+- `backlog/PBI-542-dopo-la-preverifica-un-correttore-corregge-il-pbi.md`: questo file, per la
   spunta.
 
 **Fuori scope**
